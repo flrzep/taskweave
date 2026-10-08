@@ -144,12 +144,13 @@ class ConfigStore:
     def base_target(self, reference: str, robot: str) -> Pose2D:
         """Resolve a base target: ``stance:<name>`` (robot-specific), ``location:<name>`` or a bare location name."""
         if reference.startswith(STANCE_PREFIX):
-            name, table, what = reference[len(STANCE_PREFIX):], self.stances(robot), f'stance for robot {robot!r}'
+            name = reference[len(STANCE_PREFIX):]
+            table, missing = self.stances(robot), f'unknown stance {name!r} for robot {robot!r}'
         else:
             name = reference[len(LOCATION_PREFIX):] if reference.startswith(LOCATION_PREFIX) else reference
-            table, what = self.locations(), 'location'
+            table, missing = self.locations(), f'unknown location {name!r}'
         if name not in table:
-            raise KeyError(f'unknown {what} {name!r}')
+            raise KeyError(missing)
         return table[name]
 
     # ---- teaching -------------------------------------------------------------

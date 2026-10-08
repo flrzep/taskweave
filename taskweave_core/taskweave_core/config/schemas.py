@@ -38,6 +38,8 @@ STEP = {
         'timeout_s': {'type': 'number', 'exclusiveMinimum': 0},
         'retries': {'type': 'integer', 'minimum': 0},
         'on_failure': ON_FAILURE,
+        'replan_from': NAME,
+        'max_replans': {'type': 'integer', 'minimum': 0},
     },
     'additionalProperties': False,
 }
@@ -57,6 +59,7 @@ MISSION = {
                 'timeout_s': {'type': 'number', 'exclusiveMinimum': 0},
                 'retries': {'type': 'integer', 'minimum': 0},
                 'on_failure': ON_FAILURE,
+                'max_replans': {'type': 'integer', 'minimum': 0},
             },
             'additionalProperties': False,
         },

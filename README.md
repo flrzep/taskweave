@@ -57,14 +57,16 @@ flowchart TD
     policy -- abort --> abort([Abort · safe stop])
 ```
 
-Every decision reads its rule from the mission file (`retries`, `on_failure`, `timeout_s`, `loop`).
+Every decision reads its rule from the mission file (`timeout_s`, `retries`, `on_failure`, `replan_from`,
+`max_replans`, `loop`, `stop_when`).
 
 ## A mission
 
 ```yaml
 goal: Move frames from the bays to the Karakuri rack
 robot: a2d                    # selects config/robots/a2d/
-loop: until_empty             # once | forever | until_empty
+loop: forever                 # once | forever
+stop_when: bays_empty         # world-state flag that ends the mission
 defaults: {timeout_s: 120, retries: 1, on_failure: abort}
 steps:
   - instruction: Drive to the fullest stack

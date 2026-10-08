@@ -29,13 +29,16 @@ poses. `frame` is `cell` or a named object or fixture frame.
 ```yaml
 goal: Move frames from the bays to the Karakuri rack
 robot: a2d                    # config/robots/a2d/
-loop: until_empty             # once | forever | until_empty
+loop: forever                 # once | forever
+max_cycles: 72                # optional, with loop: forever
+stop_when: bays_empty         # optional world-state flag that ends the mission
 defaults:
   timeout_s: 120
-  retries: 1
-  on_failure: abort           # retry | replan | skip | abort
+  retries: 1                  # extra attempts after a failure
+  on_failure: abort           # what to do when retries are used up: retry | replan | skip | abort
+  max_replans: 1              # how often one step may trigger a replan per cycle
 steps:
-  - id: drive_to_stack        # optional; generated if missing
+  - id: drive_to_stack        # optional; s1, s2, ... if missing
     instruction: Drive to the fullest stack
     skill: navigate_to
     args: {target: "stance:{fullest_stack}"}
@@ -44,10 +47,25 @@ steps:
     args: {object: frame_type2, at: "{fullest_stack}", grasp: side_rails}
     retries: 2
     on_failure: replan
+    replan_from: drive_to_stack   # on replan, continue from this step with fresh retries
 ```
 
-`{name}` placeholders are resolved from the world state when the step starts. Point references use a prefix:
-`stance:<name>` (robot stances), `location:<name>` or a bare name (cell locations), `<object>.<point>` (object points).
+Decision rules per step (falling back to `defaults`):
+
+| Key | Meaning |
+|---|---|
+| `timeout_s` | The step fails with `TIMEOUT` after this time (sim time when `use_sim_time` is set) |
+| `retries` | Extra attempts of the same step after `FAILED` or `TIMEOUT` |
+| `on_failure` | When retries are used up: `retry` (start again with fresh retries), `replan` (ask the planner), `skip` (log and continue), `abort` (stop the mission) |
+| `replan_from` | Step to continue from when the planner replans; default is the failed step |
+| `max_replans` | Replans one step may trigger per cycle; after that the mission aborts |
+
+`{name}` placeholders are resolved from the world state when the step starts; arguments that contain placeholders
+are validated at that point instead of before the mission starts.
+
+Point references: `stance:<name>` (robot-specific stance), `location:<name>` or a bare name (cell location),
+`<object>.<point>` (object point). A skill declares which arguments are points in its argument schema with
+`"x-taskweave-point": "base_target"` or `"object_point"`, so missing points are reported before anything moves.
 
 ## Robot profile
 
