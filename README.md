@@ -87,7 +87,8 @@ Placeholders such as `{fullest_stack}` are resolved from the world state when th
 |---|---|
 | [`taskweave_interfaces/`](taskweave_interfaces) | ROS 2 interfaces: `RunSkill` action, `Plan`, `PlanStep`, `TaskStatus`, `SkillInfo`, `ListSkills`, `StartMission` |
 | [`taskweave_core/`](taskweave_core) | Config loader and schemas, planners, task handler, skill server base class, CLI |
-| [`taskweave_skills/`](taskweave_skills) | Generic, robot-agnostic skills: `wait`, `navigate_to`, `go_to_point` |
+| [`taskweave_skills/`](taskweave_skills) | Generic, robot-agnostic skills: `wait`, `navigate_to`, `move_to_pose`, `gripper` |
+| [`taskweave_hmi/`](taskweave_hmi) | Web HMI: live mission status and control, validated mission editor |
 | [`docs/architecture.md`](docs/architecture.md) | Layers, interfaces, decision rules, design rules |
 | [`docs/configuration.md`](docs/configuration.md) | Config tree and file formats |
 
@@ -103,6 +104,9 @@ Early development. The interfaces are defined; the core packages are being built
 - [x] Mission-file planner, executive (decision rules) and task handler
 - [x] Skill server with implementation selection, `wait`, `navigate_to`
 - [x] Teaching named base poses; `describe_robot` for planners
+- [x] Joint skills `move_to_pose` (named poses) and `gripper` (open/close, holding detection)
+- [x] Joystick buttons for pause/abort and manual skill calls (`operator.yaml`)
+- [x] Web HMI: live status, start/pause/resume/abort, mission editor with validation
 - [ ] Teaching tool poses, `go_to_point`, Nav2 and MoveIt adapters
 - [ ] VLM planner
 
@@ -116,7 +120,10 @@ ros2 run taskweave_core taskweave run frame_cycle           # start a mission
 ros2 run taskweave_core taskweave status --follow
 ros2 run taskweave_core taskweave pause | resume | abort
 ros2 run taskweave_core taskweave teach location bay_2      # save the current base pose
+ros2 run taskweave_hmi hmi_server --ros-args -p config_dir:=/path/to/config -p robot:=a2d -p host:=<address>
 ```
+
+The HMI (default port 8090) has no login: bind it to a trusted network only (for example a Tailscale address).
 
 ## Build
 
