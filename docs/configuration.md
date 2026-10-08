@@ -56,7 +56,7 @@ Decision rules per step (falling back to `defaults`):
 |---|---|
 | `timeout_s` | The step fails with `TIMEOUT` after this time (sim time when `use_sim_time` is set) |
 | `retries` | Extra attempts of the same step after `FAILED` or `TIMEOUT` |
-| `on_failure` | When retries are used up: `retry` (start again with fresh retries), `replan` (ask the planner), `skip` (log and continue), `abort` (stop the mission) |
+| `on_failure` | When retries are used up: `retry` (start the step again with fresh retries), `replan` (ask the planner), `skip` (log and continue), `abort` (end the mission as failed). `retry` and `replan` count toward `max_replans` |
 | `replan_from` | Step to continue from when the planner replans; default is the failed step |
 | `max_replans` | Replans one step may trigger per cycle; after that the mission aborts |
 
