@@ -236,5 +236,16 @@ def main(argv=None) -> int:
     return _ros(lambda node: trigger(node, options.command))
 
 
+def entry() -> int:
+    """Console entry point: config problems are reported as one line, not a traceback."""
+    from .config import ConfigError
+
+    try:
+        return main()
+    except ConfigError as error:
+        print(f'config error: {error}', file=sys.stderr)
+        return 2
+
+
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(entry())

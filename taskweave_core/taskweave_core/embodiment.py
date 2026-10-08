@@ -127,7 +127,7 @@ def robot_card(embodiment: Mapping[str, Any], skills: Iterable[Mapping[str, Any]
                      f'finger length {_number(tool.get("finger_length_m"), " m", 3)}')
     for role, camera in e.get('cameras', {}).items():
         span = camera.get('range_m')
-        where = f', on {camera["on"]}' if camera.get('on') else ''
+        where = f', on {camera["mounted_on"]}' if camera.get('mounted_on') else ''
         lines.append(f'Camera {role}: {camera.get("type")}, {camera.get("hfov_deg", "?")} deg horizontal'
                      + (f', {span[0]:g}-{span[1]:g} m' if span else '') + where)
     for name, space in e.get('action_spaces', {}).items():

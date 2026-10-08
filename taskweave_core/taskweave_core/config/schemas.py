@@ -231,7 +231,7 @@ EMBODIMENT = {
                 'type': 'object',
                 'required': ['type'],
                 'properties': {'type': {'enum': ['rgb', 'rgbd', 'depth']}, 'hfov_deg': UNKNOWN_OR_NUMBER,
-                               'range_m': RANGE, 'on': {'type': 'string'}},
+                               'range_m': RANGE, 'mounted_on': {'type': 'string'}},
                 'additionalProperties': False,
             },
         },

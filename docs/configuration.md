@@ -116,7 +116,7 @@ tools:
   right: {type: parallel_gripper, stroke_m: ~, finger_length_m: ~}
 cameras:
   head:       {type: rgbd, hfov_deg: 69, range_m: [0.1, 10]}
-  left_wrist: {type: rgbd, hfov_deg: 87, range_m: [0.07, 1.0], on: tools.left}
+  left_wrist: {type: rgbd, hfov_deg: 87, range_m: [0.07, 1.0], mounted_on: tools.left}
 action_spaces:
   joint_pos_bimanual: {dims: 17, rate_hz: 30}
 ```
