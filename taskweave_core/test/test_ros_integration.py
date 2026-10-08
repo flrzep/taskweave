@@ -137,3 +137,34 @@ def test_describe_robot_returns_card_and_served_skills(system):
     assert response.card.startswith('Robot: demo_bot')
     assert '- navigate_to(target' in response.card and 'stance:shelf_a' in response.card
     assert sorted(s.name for s in response.skills) == ['navigate_to', 'wait']
+
+
+def test_operator_buttons_pause_resume_and_abort(system, config_dir):
+    from sensor_msgs.msg import Joy
+
+    from taskweave_core.operator_joy import OperatorJoy
+
+    handler, client, _, _ = system
+    operator = OperatorJoy(parameter_overrides=[Parameter('config_dir', value=str(config_dir))])
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(operator)
+    threading.Thread(target=executor.spin, daemon=True).start()
+    joy = client.create_publisher(Joy, '/joy', 10)
+
+    def press(button):  # operator.yaml: pause_resume_button 7, abort_button 6
+        for pressed in (1, 0):
+            joy.publish(Joy(buttons=[pressed if i == button else 0 for i in range(15)]))
+            time.sleep(0.2)
+
+    (config_dir / 'missions' / 'long.yaml').write_text(
+        'goal: g\nrobot: demo_bot\nsteps:\n  - {instruction: wait, skill: wait, args: {seconds: 30}}\n')
+    assert call(client, StartMission, names.START_MISSION, StartMission.Request(mission='long')).accepted
+    time.sleep(0.5)
+    press(7)
+    wait_for(handler, {'PAUSED'})
+    press(7)
+    wait_for(handler, {'RUNNING'})
+    press(6)
+    assert wait_for(handler, {'ABORTED'}).state.name == 'ABORTED'
+    executor.shutdown()
+    operator.destroy_node()

@@ -30,7 +30,7 @@ class OperatorJoy(Node):
             self.get_logger().info('no joy section in operator.yaml; operator buttons disabled')
             return
         self.buttons = {'toggle': config.get('pause_resume_button'), 'abort': config.get('abort_button')}
-        self.clients = {name: self.create_client(Trigger, service)
+        self.triggers = {name: self.create_client(Trigger, service)
                         for name, service in (('pause', names.PAUSE), ('resume', names.RESUME), ('abort', names.ABORT))}
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(TaskStatus, names.STATUS, lambda msg: setattr(self, 'state', msg.state), latched)
@@ -52,7 +52,7 @@ class OperatorJoy(Node):
         self.previous = buttons
 
     def _call(self, command: str) -> None:
-        client = self.clients[command]
+        client = self.triggers[command]
         if not client.service_is_ready():
             self.get_logger().warning(f'{command}: task handler not available')
             return
