@@ -13,7 +13,7 @@ def test_invalid_mission_names_file_and_key(config_dir):
     with pytest.raises(ConfigError) as error:
         ConfigStore(config_dir).mission('broken')
     assert 'broken.yaml' in str(error.value)
-    assert "'robot' is a required property" in str(error.value)
+    assert "'explode' is not one of" in str(error.value) and 'steps.0.on_failure' in str(error.value)
 
 
 def test_missing_file_is_reported(config_dir):

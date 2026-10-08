@@ -111,3 +111,11 @@ def test_mission_planner_replans_from_named_step(config_dir):
     assert planner.replan(plan, 2, 'stuck', {}) == (plan, 2)
     plan.steps[2].replan_from = 'to_shelf'
     assert planner.replan(plan, 2, 'stuck', {}) == (plan, 0)
+
+
+def test_mission_without_robot_runs_on_the_system_robot(config_dir):
+    store = ConfigStore(config_dir)
+    mission = {k: v for k, v in store.mission('patrol').items() if k != 'robot'}
+    plan = Plan.from_mission(mission, 'p', robot='demo_bot')
+    assert plan.robot == 'demo_bot'
+    assert validate_plan(plan, CATALOG, store) == []

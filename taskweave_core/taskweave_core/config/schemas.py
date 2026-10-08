@@ -48,7 +48,7 @@ STEP = {
 
 MISSION = {
     'type': 'object',
-    'required': ['goal', 'robot', 'steps'],
+    'required': ['goal', 'steps'],
     'properties': {
         'goal': {'type': 'string', 'minLength': 1},
         'robot': NAME,

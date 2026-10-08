@@ -29,7 +29,7 @@ poses. `frame` is `cell` or a named object or fixture frame.
 
 ```yaml
 goal: Move frames from the bays to the Karakuri rack
-robot: a2d                    # config/robots/a2d/
+robot: a2d                    # optional: only for robot-specific missions; omitted = any robot
 loop: forever                 # once | forever
 max_cycles: 72                # optional, with loop: forever
 stop_when: bays_empty         # optional world-state flag that ends the mission

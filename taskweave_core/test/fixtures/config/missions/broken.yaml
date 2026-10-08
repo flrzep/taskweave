@@ -1,4 +1,4 @@
-goal: Missing robot and a bad on_failure
+goal: A bad on_failure value
 steps:
   - instruction: x
     skill: wait

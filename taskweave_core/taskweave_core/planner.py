@@ -28,8 +28,8 @@ class Planner(ABC):
 class MissionFilePlanner(Planner):
     """Plans from a mission file. Loop and stop rules come from the mission itself."""
 
-    def __init__(self, store: ConfigStore, mission: str, goal: str | None = None):
-        self.store, self.mission_name, self.goal = store, mission, goal
+    def __init__(self, store: ConfigStore, mission: str, goal: str | None = None, robot: str = ''):
+        self.store, self.mission_name, self.goal, self.robot = store, mission, goal, robot
         self.mission = store.mission(mission)  # validates now, so errors surface before anything starts
         self._ids = itertools.count(1)
 
@@ -42,7 +42,7 @@ class MissionFilePlanner(Planner):
         stop_when = self.mission.get('stop_when')
         if stop_when and world.get(stop_when):
             return None
-        return Plan.from_mission(self.mission, f'{self.mission_name}-{next(self._ids):04d}', self.goal)
+        return Plan.from_mission(self.mission, f'{self.mission_name}-{next(self._ids):04d}', self.goal, self.robot)
 
     def replan(self, plan: Plan, failed_index: int, reason: str, world: Mapping[str, Any]) -> tuple[Plan, int] | None:
         """Continue from the failed step's ``replan_from`` step (or the failed step itself) with fresh retries."""

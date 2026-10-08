@@ -43,8 +43,11 @@ class Plan:
         raise KeyError(f'plan {self.plan_id} has no step {step_id!r}')
 
     @classmethod
-    def from_mission(cls, mission: dict, plan_id: str, goal: str | None = None) -> Plan:
-        """Build a plan from a validated mission dict, applying the mission's defaults to every step."""
+    def from_mission(cls, mission: dict, plan_id: str, goal: str | None = None, robot: str = '') -> Plan:
+        """Build a plan from a validated mission dict, applying the mission's defaults to every step.
+
+        Missions may name a robot; without one they run on ``robot`` (the robot the system drives).
+        """
         defaults = mission.get('defaults', {})
         steps = []
         for number, raw in enumerate(mission['steps'], start=1):
@@ -59,6 +62,6 @@ class Plan:
                 replan_from=raw.get('replan_from'),
                 max_replans=int(raw.get('max_replans', defaults.get('max_replans', DEFAULT_MAX_REPLANS))),
             ))
-        return cls(plan_id=plan_id, goal=goal or mission['goal'], robot=mission['robot'], steps=steps,
+        return cls(plan_id=plan_id, goal=goal or mission['goal'], robot=mission.get('robot') or robot, steps=steps,
                    loop=mission.get('loop', 'once'), max_cycles=mission.get('max_cycles'),
                    stop_when=mission.get('stop_when'))

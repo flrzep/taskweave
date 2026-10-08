@@ -42,7 +42,7 @@ def list_missions(store: ConfigStore) -> list[dict]:
     for name in store.mission_names():
         try:
             mission = store.mission(name)
-            result.append({'name': name, 'goal': mission['goal'], 'robot': mission['robot'],
+            result.append({'name': name, 'goal': mission['goal'], 'robot': mission.get('robot', ''),
                            'steps': len(mission['steps']), 'valid': True})
         except ConfigError as error:
             result.append({'name': name, 'goal': '', 'robot': '', 'steps': 0, 'valid': False, 'error': str(error)})
@@ -55,9 +55,9 @@ def validate(mission: Mapping, store: ConfigStore, catalog: Mapping[str, dict], 
     if errors:
         return [f'{".".join(str(p) for p in e.absolute_path) or "mission"}: {e.message}' for e in errors]
     problems = []
-    if mission['robot'] != robot:
+    if mission.get('robot') and mission['robot'] != robot:
         problems.append(f'mission is for robot {mission["robot"]!r}, this system drives {robot!r}')
-    plan = Plan.from_mission(dict(mission), 'hmi-check')
+    plan = Plan.from_mission(dict(mission), 'hmi-check', robot=robot)
     return problems + validate_plan(plan, catalog, store)
 
 
@@ -106,6 +106,6 @@ def save(name: str, mission: Mapping, store: ConfigStore, catalog: Mapping[str, 
 
 
 def template(robot: str) -> dict:
-    return {'goal': 'Describe what this mission achieves', 'robot': robot, 'loop': 'once',
+    return {'goal': 'Describe what this mission achieves', 'loop': 'once',
             'defaults': {'timeout_s': 120, 'retries': 1, 'on_failure': 'abort'},
             'steps': [{'instruction': 'Wait one second', 'skill': 'wait', 'args': {'seconds': 1.0}}]}

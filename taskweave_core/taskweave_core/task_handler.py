@@ -200,7 +200,7 @@ class TaskHandler(Node):
             return response
         try:
             self.config.reload()  # pick up config edits between missions
-            planner = MissionFilePlanner(self.config, request.mission, request.goal or None)
+            planner = MissionFilePlanner(self.config, request.mission, request.goal or None, self.robot)
         except ConfigError as error:
             response.accepted, response.message = False, str(error)
             return response

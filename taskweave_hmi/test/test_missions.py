@@ -23,7 +23,7 @@ def store(tmp_path):
 def test_list_marks_invalid_files(store):
     missions = {m['name']: m for m in list_missions(store)}
     assert missions['patrol']['valid'] and missions['patrol']['steps'] == 3
-    assert not missions['broken']['valid'] and 'robot' in missions['broken']['error']
+    assert not missions['broken']['valid'] and 'on_failure' in missions['broken']['error']
 
 
 def test_save_validates_before_writing(store):
@@ -48,7 +48,7 @@ def test_save_keeps_top_level_comments_and_round_trips(store):
 
 
 def test_schema_and_robot_problems_are_reported(store):
-    mission = template('other_bot')
+    mission = {**template('demo_bot'), 'robot': 'other_bot'}
     mission['steps'][0]['on_failure'] = 'explode'
     problems = validate(mission, store, CATALOG, 'demo_bot')
     assert any('on_failure' in p for p in problems)
