@@ -71,6 +71,7 @@ details[open] summary { margin-bottom: 8px; }
 .steps, .list, .log, .edit-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .steps li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
 .steps li:first-child { border-top: 0; }
+.steps li.muted { display: block; }
 .dot { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font: 700 12px var(--mono);
        border: 2px solid var(--line); color: var(--muted); }
 .dot.running { border-color: var(--accent); color: var(--accent); }
