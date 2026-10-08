@@ -70,11 +70,17 @@ class ConfigStore:
 
     # ---- generic loading -------------------------------------------------
     def _load(self, relative: str, schema: dict, required: bool = True, default: Any = None) -> Any:
+        """Load and validate a file. Cached per modification time, so edits by other processes are picked up."""
         path = self.root / relative
+        try:
+            stamp = path.stat().st_mtime_ns
+        except OSError:
+            stamp = None
         with self._lock:
-            if path in self._cache:
-                return self._cache[path]
-        if not path.is_file():
+            cached = self._cache.get(path)
+            if cached is not None and cached[0] == stamp:
+                return cached[1]
+        if stamp is None:
             if required:
                 raise ConfigError(path, 'file not found')
             return default
@@ -91,7 +97,7 @@ class ConfigStore:
             more = f' (and {len(errors) - 1} more)' if len(errors) > 1 else ''
             raise ConfigError(path, first.message + more, key)
         with self._lock:
-            self._cache[path] = data
+            self._cache[path] = (stamp, data)
         return data
 
     def reload(self) -> None:

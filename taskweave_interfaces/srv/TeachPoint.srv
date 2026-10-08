@@ -1,0 +1,8 @@
+# Save the robot's current base pose as a named point in config.
+
+string name             # point name, e.g. "bay_2_stack_1"
+string kind             # "location" (cell/locations.yaml) or "stance" (robots/<robot>/stances.yaml)
+---
+bool success
+string message
+string file             # config file that was written

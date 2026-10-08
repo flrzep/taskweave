@@ -9,6 +9,7 @@ LIST_SKILLS = f'{NAMESPACE}/list_skills'
 STATUS = f'{NAMESPACE}/status'
 PLAN = f'{NAMESPACE}/plan'
 EPISODES = f'{NAMESPACE}/episodes'
+TEACH_POINT = f'{NAMESPACE}/teach_point'
 SKILL_ACTION_PREFIX = f'{NAMESPACE}/skills/'
 SKILL_SERVER_CATALOG_SUFFIX = '/list_skills'  # each skill server serves <node>/list_skills
 

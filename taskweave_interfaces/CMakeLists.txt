@@ -12,6 +12,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/SkillInfo.msg"
   "srv/ListSkills.srv"
   "srv/StartMission.srv"
+  "srv/TeachPoint.srv"
   "action/RunSkill.action"
   DEPENDENCIES builtin_interfaces
 )

@@ -74,3 +74,10 @@ def test_teach_stance_needs_robot_and_valid_name(config_dir):
 def test_wrap_angle():
     assert wrap_angle(3.5) == pytest.approx(3.5 - 2 * 3.141592653589793)
     assert wrap_angle(-0.1) == pytest.approx(-0.1)
+
+
+def test_edits_by_other_processes_are_picked_up(config_dir):
+    reader, writer = ConfigStore(config_dir), ConfigStore(config_dir)
+    assert 'charger' not in reader.locations()
+    writer.save_base_pose('charger', Pose2D(2.0, 1.0, 0.5))
+    assert reader.base_target('charger', 'demo_bot') == Pose2D(2.0, 1.0, 0.5)

@@ -5,6 +5,7 @@
     taskweave run MISSION [--goal TEXT]   start a mission
     taskweave status [--follow]           show the task status
     taskweave pause | resume | abort
+    taskweave teach location|stance NAME  save the current base pose as a named point
 """
 
 from __future__ import annotations
@@ -104,6 +105,16 @@ def trigger(node, command: str) -> int:
     return 0 if response.success else 1
 
 
+def teach(node, kind: str, name: str) -> int:
+    from taskweave_interfaces.srv import TeachPoint
+
+    from . import names
+
+    response = _call(node, TeachPoint, names.TEACH_POINT, TeachPoint.Request(name=name, kind=kind))
+    print(('saved ' + response.message + ' -> ' + response.file) if response.success else 'failed: ' + response.message)
+    return 0 if response.success else 1
+
+
 def status(node, follow: bool) -> int:
     import rclpy
     from rclpy.qos import DurabilityPolicy, QoSProfile
@@ -144,6 +155,9 @@ def main(argv=None) -> int:
     sub.add_parser('status').add_argument('--follow', '-f', action='store_true')
     for command in ('pause', 'resume', 'abort'):
         sub.add_parser(command)
+    teach_parser = sub.add_parser('teach')
+    teach_parser.add_argument('kind', choices=['location', 'stance'])
+    teach_parser.add_argument('name')
     options = parser.parse_args(argv)
     if options.command == 'check':
         return check(options.config_dir)
@@ -151,6 +165,8 @@ def main(argv=None) -> int:
         return _ros(skills)
     if options.command == 'run':
         return _ros(lambda node: run(node, options.mission, options.goal))
+    if options.command == 'teach':
+        return _ros(lambda node: teach(node, options.kind, options.name))
     if options.command == 'status':
         return _ros(lambda node: status(node, options.follow))
     return _ros(lambda node: trigger(node, options.command))
