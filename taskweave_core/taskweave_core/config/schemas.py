@@ -166,6 +166,16 @@ OPERATOR = {
                 'topic': {'type': 'string'},
                 'pause_resume_button': {'type': 'integer', 'minimum': 0},
                 'abort_button': {'type': 'integer', 'minimum': 0},
+                'actions': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'required': ['button', 'skill'],
+                        'properties': {'button': {'type': 'integer', 'minimum': 0}, 'skill': NAME,
+                                       'args': {'type': 'object'}},
+                        'additionalProperties': False,
+                    },
+                },
             },
             'additionalProperties': False,
         },

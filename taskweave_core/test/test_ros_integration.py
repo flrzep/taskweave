@@ -168,3 +168,42 @@ def test_operator_buttons_pause_resume_and_abort(system, config_dir):
     assert wait_for(handler, {'ABORTED'}).state.name == 'ABORTED'
     executor.shutdown()
     operator.destroy_node()
+
+
+def test_operator_button_runs_a_skill_only_when_no_mission_is_active(system, config_dir):
+    from sensor_msgs.msg import Joy
+
+    from taskweave_core.operator_joy import OperatorJoy
+
+    handler, client, _, _ = system
+    operator = OperatorJoy(parameter_overrides=[Parameter('config_dir', value=str(config_dir))])
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(operator)
+    threading.Thread(target=executor.spin, daemon=True).start()
+    joy = client.create_publisher(Joy, '/joy', 10)
+    time.sleep(1.0)
+
+    def press(button):
+        for pressed in (1, 0):
+            joy.publish(Joy(buttons=[pressed if i == button else 0 for i in range(15)]))
+            time.sleep(0.2)
+
+    press(0)  # operator.yaml: button 0 -> wait 1.5 s
+    deadline = time.time() + 5
+    while time.time() < deadline and not operator.running:
+        time.sleep(0.05)
+    started = bool(operator.running)
+    while time.time() < deadline and operator.running:
+        time.sleep(0.05)
+    assert started and not operator.running
+
+    (config_dir / 'missions' / 'long.yaml').write_text(
+        'goal: g\nrobot: demo_bot\nsteps:\n  - {instruction: wait, skill: wait, args: {seconds: 30}}\n')
+    assert call(client, StartMission, names.START_MISSION, StartMission.Request(mission='long')).accepted
+    time.sleep(1.0)
+    press(0)
+    time.sleep(0.5)
+    assert not operator.running  # ignored while the mission runs
+    call(client, Trigger, names.ABORT, Trigger.Request())
+    executor.shutdown()
+    operator.destroy_node()

@@ -1,1 +1,6 @@
-joy: {topic: /joy, pause_resume_button: 7, abort_button: 6}
+joy:
+  topic: /joy
+  pause_resume_button: 7
+  abort_button: 6
+  actions:
+    - {button: 0, skill: wait, args: {seconds: 1.5}}
