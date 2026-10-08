@@ -95,7 +95,8 @@ ROBOT_PROFILE = {
         'joints': {
             'type': 'object',
             'required': ['command', 'state'],
-            'properties': {'command': {'type': 'string'}, 'state': {'type': 'string'}},
+            'properties': {'command': {'type': 'string'}, 'state': {'type': 'string'},
+                           'linear': {'type': 'array', 'items': {'type': 'string'}}},  # prismatic joints (m)
         },
         'grippers': {
             'type': 'object',

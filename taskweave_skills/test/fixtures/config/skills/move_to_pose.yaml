@@ -2,5 +2,4 @@ implementations:
   - {name: joint_targets, type: script, class: "taskweave_skills.joints:MoveToPose"}
 max_joint_speed: 2.0
 max_linear_speed: 0.4
-linear_joints: [lift]
 stall_timeout_s: 1.0

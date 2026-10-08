@@ -1,7 +1,7 @@
 """Joint-space skills for robots that take joint position targets on a topic (sensor_msgs/JointState).
 
 Robot roles used (robots/<robot>/profile.yaml):
-    joints:   {command: /joint_command, state: /joint_states}
+    joints:   {command: /joint_command, state: /joint_states, linear: [<prismatic joint>, ...]}
     grippers: {<side>: {joint: <name>, open: <value>, closed: <value>}}
 Named poses: robots/<robot>/poses.yaml, ``<pose>: {<joint>: <value>, ...}`` (rad or m).
 
@@ -25,7 +25,7 @@ from taskweave_core.skill import Skill, SkillResult
 class Params:
     max_joint_speed: float = 0.6       # rad/s (revolute) used to time a move
     max_linear_speed: float = 0.1      # m/s (prismatic, e.g. a lift)
-    linear_joints: tuple = ()          # joint names that are prismatic (metres)
+    linear_joints: tuple = ()          # prismatic joints (metres), from the profile's joints.linear
     position_tolerance: float = 0.02   # rad or m
     settle_s: float = 0.3              # within tolerance this long before success
     stall_timeout_s: float = 3.0       # after the planned move: no progress this long -> fail / holding
@@ -35,12 +35,11 @@ class Params:
 
     @classmethod
     def from_config(cls, params: dict) -> Params:
-        known = {f.name for f in fields(cls)}
+        known = {f.name for f in fields(cls)} - {'linear_joints'}  # robot-specific: profile joints.linear
         unknown = set(params) - known
         if unknown:
             raise ValueError(f'unknown joint skill parameters: {", ".join(sorted(unknown))}')
-        values = {k: (tuple(v) if k == 'linear_joints' else float(v)) for k, v in params.items()}
-        return cls(**values)
+        return cls(**{k: float(v) for k, v in params.items()})
 
 
 def smoothstep(fraction: float) -> float:
@@ -104,6 +103,7 @@ class _JointSkill(Skill):
     def setup(self, node, config, robot, params):
         super().setup(node, config, robot, params)
         self.p = Params.from_config(params)
+        self.p.linear_joints = tuple(robot.role('joints').get('linear', ()))
         self.joints = JointInterface.for_node(node, robot)
         self._held: dict = {}
 
