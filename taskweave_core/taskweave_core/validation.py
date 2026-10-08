@@ -4,7 +4,7 @@ Checks: the robot profile and embodiment exist, every skill has an implementatio
 the catalog, every argument object matches the skill's JSON Schema, every point a skill argument refers to exists
 in config (object points also fit the robot's tools), and ``replan_from`` targets exist.
 
-Skills mark point arguments in their schema with ``"x-taskweave-point": "base_target" | "object_point"``.
+Skills mark point arguments in their schema with ``"x-taskweave-point": "base_target" | "joint_pose" | "object_point"``.
 Arguments that contain placeholders are only checked once their values are known (at step start).
 """
 
@@ -79,6 +79,8 @@ def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
     try:
         if kind == 'base_target':
             store.base_target(str(value), robot)
+        elif kind == 'joint_pose':
+            store.joint_pose(robot, str(value))
         elif kind == 'object_point':
             obj, _, point = str(value).partition('.')
             store.object_point(obj, point)

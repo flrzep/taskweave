@@ -1,0 +1,7 @@
+name: arm_bot
+summary: Fixed test arm with a lift and a parallel gripper.
+capabilities: [base.fixed, torso.lift, arms.single, gripper.parallel]
+arms:
+  left: {dof: 2, reach_m: 0.5, payload_kg: 1.0, tool: left}
+tools:
+  left: {type: parallel_gripper, stroke_m: 0.08, finger_length_m: 0.04}

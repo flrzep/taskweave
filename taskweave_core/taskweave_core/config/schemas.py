@@ -92,12 +92,44 @@ ROBOT_PROFILE = {
                 },
             },
         },
+        'joints': {
+            'type': 'object',
+            'required': ['command', 'state'],
+            'properties': {'command': {'type': 'string'}, 'state': {'type': 'string'}},
+        },
+        'grippers': {
+            'type': 'object',
+            'propertyNames': NAME,
+            'additionalProperties': {
+                'type': 'object',
+                'properties': {'joint': {'type': 'string'}, 'open': FINITE, 'closed': FINITE,
+                               'action': {'type': 'string'}},
+            },
+        },
+        'tool_frames': {
+            'type': 'object',
+            'propertyNames': NAME,
+            'additionalProperties': {
+                'type': 'object',
+                'required': ['link', 'xyz', 'rpy'],
+                'properties': {'link': {'type': 'string'},
+                               'xyz': {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3},
+                               'rpy': {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3}},
+                'additionalProperties': False,
+            },
+        },
         'arms': {'type': 'object'},
         'torso': {'type': 'object'},
-        'grippers': {'type': 'object'},
         'cameras': {'type': 'object'},
         'teleop': {'type': 'object'},
     },
+}
+
+# robots/<model>/poses.yaml: named joint-space poses, joint name -> value (rad or m)
+JOINT_POSES = {
+    'type': 'object',
+    'propertyNames': NAME,
+    'additionalProperties': {'type': 'object', 'minProperties': 1, 'additionalProperties': FINITE},
 }
 
 POINTS2D = {'type': 'object', 'additionalProperties': POSE2D, 'propertyNames': NAME}

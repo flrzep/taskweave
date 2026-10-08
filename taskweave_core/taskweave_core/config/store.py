@@ -6,7 +6,7 @@ Layout (all files YAML; files marked optional may be absent):
     robots/<model>/profile.yaml    required per robot: how the hardware is reached (topics, names)
     robots/<model>/embodiment.yaml required per robot: what the robot is and can do
     robots/<model>/stances.yaml    optional, robot-specific base poses
-    robots/<model>/poses.yaml      optional, named joint-space poses (interpreted by robot-specific skills)
+    robots/<model>/poses.yaml      optional, named joint-space poses (used by move_to_pose)
     cell/locations.yaml            optional, named base poses in the cell frame
     objects/<name>.yaml            optional per object, taught tool poses
     skills/<skill>.yaml            per served skill: implementations and parameters
@@ -170,6 +170,16 @@ class ConfigStore:
         data = self._load(f'robots/{robot}/stances.yaml', schemas.POINTS2D, required=False, default={})
         return {name: Pose2D.from_dict(pose) for name, pose in data.items()}
 
+    def joint_poses(self, robot: str) -> dict[str, dict[str, float]]:
+        """robots/<robot>/poses.yaml: named joint-space poses (robot-specific by nature)."""
+        return self._load(f'robots/{robot}/poses.yaml', schemas.JOINT_POSES, required=False, default={})
+
+    def joint_pose(self, robot: str, name: str) -> dict[str, float]:
+        poses = self.joint_poses(robot)
+        if name not in poses:
+            raise KeyError(f'unknown pose {name!r} for robot {robot!r}')
+        return {joint: float(value) for joint, value in poses[name].items()}
+
     def object(self, name: str) -> dict:
         return self._load(f'objects/{name}.yaml', schemas.OBJECT)
 
@@ -179,7 +189,7 @@ class ConfigStore:
         for path in sorted((self.root / 'objects').glob('*.yaml')):
             objects += [f'{path.stem}.{name}' for name in self.object(path.stem).get('points', {})]
         return {'locations': sorted(self.locations()), 'stances': [f'stance:{n}' for n in sorted(self.stances(robot))],
-                'object points': objects}
+                'joint poses': sorted(self.joint_poses(robot)), 'object points': objects}
 
     def object_point(self, obj: str, point: str) -> dict:
         """A named point on an object: tool poses (canonical TCP, object-relative) plus its metadata.
