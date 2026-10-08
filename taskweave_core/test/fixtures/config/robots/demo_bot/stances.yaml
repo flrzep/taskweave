@@ -1,0 +1,2 @@
+# Robot-specific base poses.
+shelf_a: {frame: cell, x: 3.0, y: 0.25, yaw: 1.5708}

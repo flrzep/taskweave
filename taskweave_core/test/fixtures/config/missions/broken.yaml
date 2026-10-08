@@ -1,0 +1,5 @@
+goal: Missing robot and a bad on_failure
+steps:
+  - instruction: x
+    skill: wait
+    on_failure: explode

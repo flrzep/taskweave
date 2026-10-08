@@ -4,5 +4,8 @@ target-version = "py312"
 [lint]
 select = ["E", "F", "W", "I", "B", "UP"]
 
+[lint.isort]
+known-first-party = ["taskweave_core", "taskweave_skills", "taskweave_interfaces"]
+
 [format]
 quote-style = "single"

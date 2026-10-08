@@ -1,0 +1,5 @@
+name: box
+points:
+  top_grasp:
+    left_tool: {xyz: [0.0, 0.1, 0.2], rpy: [0.0, 1.5708, 0.0]}
+    approach: {axis: z, distance: 0.1}

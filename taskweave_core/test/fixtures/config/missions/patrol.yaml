@@ -1,0 +1,16 @@
+goal: Drive to the shelf, wait, and return home
+robot: demo_bot
+loop: once
+defaults: {timeout_s: 60, retries: 1, on_failure: abort}
+steps:
+  - id: to_shelf
+    instruction: Drive to the stance in front of shelf A
+    skill: navigate_to
+    args: {target: "stance:shelf_a"}
+  - instruction: Wait for the operator
+    skill: wait
+    args: {seconds: 1.0}
+    on_failure: skip
+  - instruction: Return home
+    skill: navigate_to
+    args: {target: home}
