@@ -197,7 +197,7 @@ def test_loops_for_planner_cycles_then_succeeds():
     ex.start()
     for _ in range(3):
         finish(ex, d)
-    assert ex.status.cycle == 4 and ex.status.state == State.SUCCEEDED
+    assert ex.status.cycle == 3 and ex.status.state == State.SUCCEEDED
     assert len(d.started) == 3
 
 

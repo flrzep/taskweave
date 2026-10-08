@@ -170,11 +170,11 @@ class Executive:
 
     # ---- internals --------------------------------------------------------------
     def _begin_cycle(self, cycle: int) -> None:
-        self.status.cycle, self._replans = cycle, {}
         plan = self.planner.make_plan(self.world.snapshot(), cycle)
-        if plan is None:
+        if plan is None:  # the status keeps showing the last cycle that ran
             self._finish(State.SUCCEEDED, 'mission complete' if cycle > 1 else 'nothing to do')
             return
+        self.status.cycle, self._replans = cycle, {}
         problems = self.validate(plan)
         if problems:
             self._finish(State.FAILED, 'plan rejected: ' + '; '.join(problems))
