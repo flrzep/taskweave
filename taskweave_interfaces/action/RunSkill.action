@@ -1,0 +1,23 @@
+# Execute one plan step. Every skill implementation (script, VLA policy, RL policy) serves this action.
+# The task handler sends one goal per step; the skill reports progress and a single outcome.
+
+# --- Goal ---
+string step_id          # unique within the plan, e.g. "s3"
+string skill            # skill name from the catalog, e.g. "navigate_to"
+string instruction      # natural-language description of the step; used by language-conditioned policies
+string args_json        # skill arguments as a JSON object, already resolved (no placeholders left)
+float32 timeout_s       # 0 = use the skill's configured default
+---
+# --- Result ---
+uint8 SUCCEEDED = 0
+uint8 FAILED = 1        # the skill ran but could not reach its goal
+uint8 TIMEOUT = 2       # the skill exceeded its timeout
+uint8 CANCELED = 3      # canceled by the task handler (pause/abort)
+uint8 REJECTED = 4      # arguments invalid or preconditions not met; nothing was executed
+uint8 outcome
+string message          # human-readable reason, shown in the task status
+string data_json        # optional skill output as JSON (e.g. picked object id, final pose)
+---
+# --- Feedback ---
+float32 progress        # 0..1, or -1 if unknown
+string status           # short human-readable state, e.g. "approaching", "aligning"

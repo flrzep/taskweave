@@ -1,0 +1,79 @@
+# Architecture
+
+taskweave separates *what* a robot should do (plans), *when and in which order* (task handler) and *how* (skills).
+Each layer talks to the next through one fixed interface, so any layer can be replaced without touching the others.
+
+## Layers
+
+### Planner
+Turns a goal into a `Plan`: an ordered list of `PlanStep`s. Each step has
+
+- `instruction`: natural language, always set. Language-conditioned policies (VLAs) read this.
+- `skill` + `args`: structured call into the skill catalog. Scripted skills read this.
+- optional decision rules: `timeout_s`, `retries`, `on_failure`.
+
+Planner interface (Python, in `taskweave_core`):
+
+```python
+class Planner:
+    def make_plan(self, goal: str, world_state: dict, skills: list[SkillInfo]) -> Plan: ...
+    def replan(self, plan: Plan, failed_step: int, reason: str, world_state: dict) -> Plan | None: ...
+```
+
+| Implementation | Status |
+|---|---|
+| `MissionFilePlanner`: loads `config/missions/<name>.yaml`; `replan` restarts the mission from the world state | first |
+| VLM planner: prompts a model with goal, world state, skill catalog, named points and optionally a camera image; output must be a valid `Plan` | later |
+
+### Task handler
+A ROS 2 node that
+
+1. validates a plan before anything moves: every skill exists in the catalog, every `args` object matches the skill's
+   JSON schema, every referenced point exists in config;
+2. resolves placeholders (`{fullest_stack}`) from the world state when a step starts;
+3. sends the step to the skill through `RunSkill` and forwards feedback to `TaskStatus`;
+4. applies the decision rules on failure or timeout: `retry` → `replan` / `skip` / `abort`;
+5. loops the mission according to `loop`;
+6. handles operator commands (`~/pause`, `~/resume`, `~/abort`) at any time by canceling the active skill;
+7. publishes episode markers (step start / end with instruction and outcome) so runs can be recorded as training data.
+
+It knows nothing about how a skill works.
+
+### Skills
+A skill executes one step. Every implementation serves the same action, `taskweave_interfaces/action/RunSkill`, and
+registers a `SkillInfo` (name, description, JSON schema of its arguments, needs, achieves) that ends up in the catalog
+(`ListSkills`).
+
+- Skills address the robot through **roles** from the robot profile (`base`, `arms.left`, `tool: right`, `grippers.both`),
+  never joint names or topic names.
+- Skills read their parameters from `config/skills/<skill>.yaml`.
+- Swapping a scripted skill for a VLA or RL policy means serving the same skill name with the same arguments.
+
+### Configuration
+All application knowledge is data: cell layout, named locations, objects with taught points, robot profile, skill
+parameters, missions. See [configuration.md](configuration.md).
+
+## Interfaces
+
+| Interface | Type | Used by |
+|---|---|---|
+| `RunSkill` | action | task handler → skill |
+| `Plan`, `PlanStep` | msg | planner → task handler; published on `~/plan` |
+| `TaskStatus` | msg | task handler → operator UIs, recorders; `~/status` |
+| `SkillInfo`, `ListSkills` | msg, srv | skill catalog → task handler, planners |
+| `StartMission` | srv | operator / MES → task handler |
+| `~/pause`, `~/resume`, `~/abort` | `std_srvs/Trigger` | operator → task handler |
+
+`RunSkill` outcomes: `SUCCEEDED`, `FAILED` (ran but missed the goal), `TIMEOUT`, `CANCELED` (by the task handler),
+`REJECTED` (invalid arguments or unmet preconditions; nothing moved).
+
+## Design rules
+
+1. **Nothing hard-coded.** Numbers, names, points and rules live in config. Code only holds behaviour.
+2. **Task-space targets.** Locations are poses in the cell frame; grasp and hang points are tool poses relative to an
+   object or fixture. Joint angles are never stored as targets.
+3. **One robot profile per robot.** Everything hardware-specific is in `robots/<model>/`. A new robot needs a new
+   profile and its robot-specific hints; missions, cell config and object points stay unchanged.
+4. **Fail before moving.** Anything that can be checked statically (skills, arguments, points) is checked when the plan
+   is validated.
+5. **Every step is observable.** Status and episode markers are published for every step and attempt.

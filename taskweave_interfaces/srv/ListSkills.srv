@@ -1,0 +1,3 @@
+# Return the skill catalog.
+---
+SkillInfo[] skills

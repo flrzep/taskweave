@@ -1,0 +1,9 @@
+# Ask the planner for a plan and start executing it.
+# Pause, resume and abort use std_srvs/Trigger on ~/pause, ~/resume, ~/abort.
+
+string mission          # mission name in config/missions/ (without .yaml)
+string goal             # optional goal text; overrides the mission's goal (used by goal-driven planners)
+---
+bool accepted
+string message          # reason if rejected (e.g. validation errors)
+string plan_id
