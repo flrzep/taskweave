@@ -5,7 +5,10 @@
     taskweave run MISSION [--goal TEXT]   start a mission
     taskweave status [--follow]           show the task status
     taskweave pause | resume | abort
-    taskweave teach location|stance NAME  save the current base pose as a named point
+    taskweave teach location NAME         save the current base pose as a cell location
+    taskweave teach stance OBJ[/VARIANT] [--instance]
+                                          save it as the robot's stance at an object (for the object type,
+                                          or for this instance only)
     taskweave describe [CONFIG_DIR ROBOT]  robot card + skills (running system, or offline from config)
 """
 
@@ -73,6 +76,7 @@ def check(config_dir: str) -> int:
         attempt(f'robots/{robot}', lambda r=robot: (store.robot(r), store.stances(r)))
         attempt(f'robots/{robot}/embodiment.yaml', lambda r=robot: _consistent(store, r))
     attempt('cell/locations.yaml', store.locations)
+    attempt('cell/objects.yaml', store.object_instances)
     attempt('operator.yaml', store.operator)
     for path in sorted((store.root / 'objects').glob('*.yaml')):
         attempt(f'objects/{path.name}', lambda n=path.stem: store.object(n))
@@ -214,7 +218,9 @@ def main(argv=None) -> int:
         sub.add_parser(command)
     teach_parser = sub.add_parser('teach')
     teach_parser.add_argument('kind', choices=['location', 'stance'])
-    teach_parser.add_argument('name')
+    teach_parser.add_argument('name', help='location name, or OBJECT_INSTANCE[/VARIANT] for a stance')
+    teach_parser.add_argument('--instance', action='store_true',
+                              help='stance: store for this object instance only, not for its object type')
     describe_parser = sub.add_parser('describe')
     describe_parser.add_argument('config_dir', nargs='?')
     describe_parser.add_argument('robot', nargs='?')
@@ -230,7 +236,8 @@ def main(argv=None) -> int:
             return describe_offline(options.config_dir, options.robot)
         return _ros(describe)
     if options.command == 'teach':
-        return _ros(lambda node: teach(node, options.kind, options.name))
+        kind = 'stance_instance' if options.kind == 'stance' and options.instance else options.kind
+        return _ros(lambda node: teach(node, kind, options.name))
     if options.command == 'status':
         return _ros(lambda node: status(node, options.follow))
     return _ros(lambda node: trigger(node, options.command))

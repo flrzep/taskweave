@@ -1,4 +1,7 @@
-"""Teach node: saves the robot's current base pose as a named location or stance.
+"""Teach node: saves the robot's current base pose as a named location or as a stance at an object.
+
+Stances are stored relative to the object instance (robots/<robot>/stances.yaml), so one teach covers every
+instance of that object type; kind ``stance_instance`` stores an override for that instance only.
 
 The pose comes from the robot profile's ``base.odom`` topic, which must report the pose in the cell frame
 (ground truth in simulation, the localisation output on a real robot).
@@ -52,13 +55,19 @@ class Teach(Node):
         if self.pose is None or self._now() - self.stamp > MAX_POSE_AGE_S:
             response.success, response.message = False, f'no current pose on {self.robot.base["odom"]}'
             return response
+        kind = request.kind or 'location'
         try:
-            path = self.config.save_base_pose(request.name, self.pose, request.kind or 'location', self.robot.name)
+            if kind in ('stance', 'stance_instance'):
+                path, offset = self.config.save_stance(request.name, self.pose, self.robot.name,
+                                                       per_instance=kind == 'stance_instance')
+                stored = f'offset {offset.to_dict()} (base at {self.pose.to_dict()})'
+            else:
+                path, stored = self.config.save_base_pose(request.name, self.pose, kind), self.pose.to_dict()
         except (ValueError, OSError) as error:
             response.success, response.message = False, str(error)
             return response
         response.success, response.file = True, str(path)
-        response.message = f'{request.kind or "location"} {request.name!r} = {self.pose.to_dict()}'
+        response.message = f'{kind} {request.name!r} = {stored}'
         self.get_logger().info(f'taught {response.message} -> {path}')
         return response
 

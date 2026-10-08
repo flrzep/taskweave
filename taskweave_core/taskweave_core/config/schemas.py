@@ -135,6 +135,31 @@ JOINT_POSES = {
 
 POINTS2D = {'type': 'object', 'additionalProperties': POSE2D, 'propertyNames': NAME}
 
+# cell/objects.yaml: placed object instances, name -> object type and pose in the cell frame
+OBJECT_INSTANCES = {
+    'type': 'object',
+    'propertyNames': NAME,
+    'additionalProperties': {
+        'type': 'object',
+        'required': ['object', 'x', 'y', 'yaw'],
+        'properties': {'object': NAME, 'frame': {'type': 'string'}, 'x': FINITE, 'y': FINITE, 'z': FINITE,
+                       'yaw': FINITE},
+        'additionalProperties': False,
+    },
+}
+
+# robots/<model>/stances.yaml: base poses relative to objects. Named variants (e.g. pick, place) per object type,
+# optionally overridden per object instance. The first variant of a type is its default.
+STANCE_VARIANTS = {'type': 'object', 'propertyNames': NAME, 'additionalProperties': POSE2D, 'minProperties': 1}
+STANCES = {
+    'type': 'object',
+    'properties': {
+        'objects': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': STANCE_VARIANTS},
+        'instances': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': STANCE_VARIANTS},
+    },
+    'additionalProperties': False,
+}
+
 OBJECT = {
     'type': 'object',
     'required': ['name'],

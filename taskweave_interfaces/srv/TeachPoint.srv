@@ -1,7 +1,8 @@
 # Save the robot's current base pose as a named point in config.
 
-string name             # point name, e.g. "bay_2_stack_1"
-string kind             # "location" (cell/locations.yaml) or "stance" (robots/<robot>/stances.yaml)
+string name             # location name, or for stances "<object instance>[/<variant>]", e.g. "bay_2_stack_1/pick"
+string kind             # "location" (cell/locations.yaml), "stance" (robots/<robot>/stances.yaml, per object
+                        # type) or "stance_instance" (same file, override for this object instance only)
 ---
 bool success
 string message

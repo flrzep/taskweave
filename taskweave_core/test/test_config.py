@@ -64,11 +64,51 @@ def test_teach_location_keeps_comments(config_dir):
 def test_teach_stance_needs_robot_and_valid_name(config_dir):
     store = ConfigStore(config_dir)
     with pytest.raises(ValueError):
-        store.save_base_pose('x', Pose2D(0, 0, 0), kind='stance')
+        store.save_base_pose('shelf_a', Pose2D(0, 0, 0), kind='stance')
     with pytest.raises(ValueError, match='invalid point name'):
         store.save_base_pose('bad name!', Pose2D(0, 0, 0))
-    store.save_base_pose('shelf_b', Pose2D(4.0, 0.25, 1.57), kind='stance', robot='demo_bot')
-    assert store.base_target('stance:shelf_b', 'demo_bot').x == 4.0
+    with pytest.raises(ValueError, match="no object 'ghost'"):
+        store.save_base_pose('ghost', Pose2D(0, 0, 0), kind='stance', robot='demo_bot')
+
+
+def test_stance_is_object_pose_times_robot_offset(config_dir):
+    store = ConfigStore(config_dir)
+    front = store.base_target('stance:shelf_a', 'demo_bot')                                # default = first variant
+    assert (front.x, front.y, front.yaw, front.frame) == pytest.approx((3.0, 0.25, 1.5708, 'cell'))
+    side = store.base_target('stance:shelf_a/side', 'demo_bot')
+    assert (side.x, side.y, side.yaw) == pytest.approx((2.2, 1.0, 0.0))
+    assert store.base_target('stance:shelf_b', 'demo_bot').y == pytest.approx(0.1)        # instance override
+    assert store.base_target('stance:shelf_b/side', 'demo_bot').x == pytest.approx(4.2)   # type variant still there
+    with pytest.raises(KeyError, match="no 'top' stance for 'shelf'"):
+        store.base_target('stance:shelf_a/top', 'demo_bot')
+    with pytest.raises(KeyError, match="no stance for 'crate'"):
+        store.base_target('stance:crate_1', 'demo_bot')
+    assert store.stance_names('demo_bot') == ['stance:shelf_a', 'stance:shelf_a/side', 'stance:shelf_b',
+                                              'stance:shelf_b/side']
+
+
+def test_rotated_object_turns_the_stance_with_it(config_dir):
+    store = ConfigStore(config_dir)
+    crate = store.object_instances()['crate_1']
+    assert crate.object == 'crate' and crate.z == pytest.approx(0.4)
+    offset = Pose2D(-0.5, 0.0, 0.0, 'crate')                       # 0.5 m behind the crate along its x axis
+    pose = crate.pose.compose(offset)
+    assert (pose.x, pose.y, pose.yaw) == pytest.approx((1.0, -2.5, 1.5708), abs=1e-4)
+    back = pose.relative_to(crate.pose)
+    assert (back.x, back.y, back.yaw) == pytest.approx((-0.5, 0.0, 0.0), abs=1e-9)
+
+
+def test_teach_stance_stores_the_offset_for_the_type_or_the_instance(config_dir):
+    store = ConfigStore(config_dir)
+    path, offset = store.save_stance('shelf_a/side', Pose2D(2.0, 1.1, 0.1), 'demo_bot')
+    assert (offset.x, offset.y, offset.yaw, offset.frame) == pytest.approx((-1.0, 0.1, 0.1, 'shelf'))
+    assert '# 0.75 m in front, facing the shelf' in path.read_text()            # comments kept
+    assert store.base_target('stance:shelf_b/side', 'demo_bot').x == pytest.approx(4.0)   # all shelves follow
+    store.save_base_pose('shelf_a', Pose2D(3.1, 0.3, 1.6), kind='stance_instance', robot='demo_bot')
+    assert store.base_target('stance:shelf_a', 'demo_bot').x == pytest.approx(3.1)     # only shelf_a changed
+    assert store.base_target('stance:shelf_b', 'demo_bot').y == pytest.approx(0.1)
+    store.save_stance('crate_1', Pose2D(1.0, -2.5, 1.5708), 'demo_bot')               # first stance of a type
+    assert store.stance_names('demo_bot')[-1] == 'stance:crate_1'
 
 
 def test_wrap_angle():

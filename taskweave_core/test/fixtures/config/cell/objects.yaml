@@ -1,0 +1,4 @@
+# Placed objects in the cell frame (object type and pose).
+shelf_a: {object: shelf, frame: cell, x: 3.0, y: 1.0, yaw: 0.0}
+shelf_b: {object: shelf, frame: cell, x: 5.0, y: 1.0, yaw: 0.0}
+crate_1: {object: crate, frame: cell, x: 1.0, y: -2.0, z: 0.4, yaw: 1.5708}

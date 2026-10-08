@@ -8,6 +8,7 @@ config/
   cell/
     layout.yaml          fixtures and zones of the work cell (application-specific content)
     locations.yaml       named poses in the cell frame
+    objects.yaml         placed object instances: object type and pose in the cell frame
   objects/
     <object>.yaml        object frame, mesh reference, taught tool poses (grasp, place, hang ...)
   robots/
@@ -15,7 +16,7 @@ config/
       profile.yaml       how the hardware is reached: roles -> topics, joints, frames, controllers
       embodiment.yaml    what the robot is and can do: capabilities, tools, reach, cameras, action spaces
       poses.yaml         named joint-space poses (home, carry); robot-specific by nature
-      stances.yaml       robot-specific base poses (e.g. where to stand in front of a fixture)
+      stances.yaml       where this robot stands relative to an object (per object type, per instance)
   skills/
     <skill>.yaml         implementations of one skill (first match is served) and its parameters
   missions/
@@ -64,7 +65,8 @@ Decision rules per step (falling back to `defaults`):
 `{name}` placeholders are resolved from the world state when the step starts; arguments that contain placeholders
 are validated at that point instead of before the mission starts.
 
-Point references: `stance:<name>` (robot-specific stance), `location:<name>` or a bare name (cell location),
+Point references: `stance:<instance>[/<variant>]` (where this robot stands at a placed object), `location:<name>`
+or a bare name (cell location),
 `<object>.<point>` (object point). A skill declares which arguments are points in its argument schema with
 `"x-taskweave-point": "base_target"` or `"object_point"`, so missing points are reported before anything moves.
 
@@ -166,6 +168,31 @@ dropoff: {frame: cell, x: 0.75, y: 0.0, yaw: 3.1416}
 ```
 
 Written by hand or by the teach tool (`taskweave teach location <name>`), which stores the current base pose.
+
+## Object instances and stances
+
+Where the robot stands to work on an object is robot-specific; where the object is, is not. So the cell lists the
+placed objects, and each robot stores its stances *relative to the object*:
+
+```yaml
+# cell/objects.yaml (robot-independent; from config now, from perception later)
+bay_2_stack_2: {object: frame_type2, frame: cell, x: 9.425, y: 1.10, z: 0.10, yaw: 1.5708}
+
+# robots/<model>/stances.yaml (base pose in the object's frame: x, y, yaw)
+objects:                      # per object type: every instance of the type uses these
+  frame_type2:
+    pick:  {x: -0.85, y: 0.0, yaw: 0.0}     # first variant = default
+    place: {x: -0.70, y: 0.0, yaw: 0.0}
+instances:                    # optional overrides for single instances
+  bay_3_stack_3:
+    pick:  {x: -0.85, y: 0.10, yaw: 0.0}
+```
+
+`stance:bay_2_stack_2` is the object's pose composed with the robot's default offset (`pick` above);
+`stance:bay_2_stack_2/place` names a variant. Moving an object moves its stances; a second robot only needs its own
+offsets. `taskweave teach stance bay_2_stack_2[/variant]` stores the current base pose as the offset for the object
+type (all instances follow); add `--instance` to store it for that instance only. Tool poses on objects (below) use the
+same object frames, so base, approach and grasp all follow one object pose.
 
 ## Objects
 

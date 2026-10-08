@@ -22,6 +22,28 @@ class Pose2D:
     def to_dict(self) -> dict:
         return {'frame': self.frame, 'x': round(self.x, 4), 'y': round(self.y, 4), 'yaw': round(self.yaw, 4)}
 
+    def compose(self, offset: Pose2D) -> Pose2D:
+        """``offset`` (given in this pose's frame) expressed in this pose's parent frame: self * offset."""
+        c, s = math.cos(self.yaw), math.sin(self.yaw)
+        return Pose2D(self.x + c * offset.x - s * offset.y, self.y + s * offset.x + c * offset.y,
+                      wrap_angle(self.yaw + offset.yaw), self.frame)
+
+    def relative_to(self, reference: Pose2D, frame: str | None = None) -> Pose2D:
+        """This pose expressed in ``reference``'s frame (the inverse of ``compose``): reference^-1 * self."""
+        dx, dy = self.x - reference.x, self.y - reference.y
+        c, s = math.cos(reference.yaw), math.sin(reference.yaw)
+        return Pose2D(c * dx + s * dy, -s * dx + c * dy, wrap_angle(self.yaw - reference.yaw), frame or reference.frame)
+
+
+@dataclass(frozen=True)
+class ObjectInstance:
+    """A placed object in the cell: its type (``objects/<object>.yaml``), planar pose and height."""
+
+    name: str
+    object: str
+    pose: Pose2D
+    z: float = 0.0
+
 
 @dataclass(frozen=True)
 class Pose3D:

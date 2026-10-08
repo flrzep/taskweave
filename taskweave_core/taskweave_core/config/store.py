@@ -5,9 +5,10 @@ Layout (all files YAML; files marked optional may be absent):
     missions/<name>.yaml           required per mission
     robots/<model>/profile.yaml    required per robot: how the hardware is reached (topics, names)
     robots/<model>/embodiment.yaml required per robot: what the robot is and can do
-    robots/<model>/stances.yaml    optional, robot-specific base poses
+    robots/<model>/stances.yaml    optional, robot-specific base poses relative to objects (per type, per instance)
     robots/<model>/poses.yaml      optional, named joint-space poses (used by move_to_pose)
     cell/locations.yaml            optional, named base poses in the cell frame
+    cell/objects.yaml              optional, placed object instances: object type and pose in the cell frame
     objects/<name>.yaml            optional per object, taught tool poses
     skills/<skill>.yaml            per served skill: implementations and parameters
     operator.yaml                  optional, operator inputs (e.g. joystick buttons)
@@ -24,10 +25,11 @@ import yaml
 from jsonschema import Draft202012Validator
 
 from . import schemas
-from .poses import Pose2D, Pose3D
+from .poses import ObjectInstance, Pose2D, Pose3D
 
 STANCE_PREFIX = 'stance:'
 LOCATION_PREFIX = 'location:'
+VARIANT_SEPARATOR = '/'     # stance:<instance>/<variant>
 POINT_METADATA = ('approach', 'tool_type', 'grip_width_m')  # keys of an object point that are not tool poses
 
 
@@ -166,9 +168,57 @@ class ConfigStore:
         data = self._load('cell/locations.yaml', schemas.POINTS2D, required=False, default={})
         return {name: Pose2D.from_dict(pose) for name, pose in data.items()}
 
+    def object_instances(self) -> dict[str, ObjectInstance]:
+        """cell/objects.yaml: placed objects. From config for now; a perception system can provide the same."""
+        data = self._load('cell/objects.yaml', schemas.OBJECT_INSTANCES, required=False, default={})
+        return {name: ObjectInstance(name, entry['object'], Pose2D.from_dict(entry), float(entry.get('z', 0.0)))
+                for name, entry in data.items()}
+
+    def stance_variants(self, robot: str, instance: ObjectInstance) -> dict[str, Pose2D]:
+        """The robot's stance offsets for one object instance, in the object's frame, by variant name: the object
+        type's variants, overridden by the instance's own. The first one is the default."""
+        data = self._load(f'robots/{robot}/stances.yaml', schemas.STANCES, required=False, default={})
+        variants = dict(data.get('objects', {}).get(instance.object, {}))
+        variants.update(data.get('instances', {}).get(instance.name, {}))
+        return {name: Pose2D(float(v['x']), float(v['y']), float(v['yaw']), instance.object)
+                for name, v in variants.items()}
+
     def stances(self, robot: str) -> dict[str, Pose2D]:
-        data = self._load(f'robots/{robot}/stances.yaml', schemas.POINTS2D, required=False, default={})
-        return {name: Pose2D.from_dict(pose) for name, pose in data.items()}
+        """Every stance of the robot in the cell frame: ``<instance>`` (default variant), ``<instance>/<variant>``."""
+        result = {}
+        for instance in self.object_instances().values():
+            for index, (variant, offset) in enumerate(self.stance_variants(robot, instance).items()):
+                pose = instance.pose.compose(offset)
+                if index == 0:
+                    result[instance.name] = pose
+                result[f'{instance.name}{VARIANT_SEPARATOR}{variant}'] = pose
+        return result
+
+    def stance_names(self, robot: str) -> list[str]:
+        """Stance references for planners and pickers: the default variant without suffix, the others with."""
+        names = []
+        for instance in self.object_instances().values():
+            for index, variant in enumerate(self.stance_variants(robot, instance)):
+                names.append(STANCE_PREFIX + (instance.name if index == 0 else
+                                              f'{instance.name}{VARIANT_SEPARATOR}{variant}'))
+        return names
+
+    def stance(self, reference: str, robot: str) -> Pose2D:
+        """Resolve ``<instance>[/<variant>]`` to a base pose in the cell frame: object pose * robot offset."""
+        name, _, variant = reference.partition(VARIANT_SEPARATOR)
+        instances = self.object_instances()
+        if name not in instances:
+            raise KeyError(f'unknown stance {reference!r}: no object {name!r} in cell/objects.yaml')
+        instance = instances[name]
+        variants = self.stance_variants(robot, instance)
+        if not variants:
+            raise KeyError(f'unknown stance {reference!r}: robot {robot!r} has no stance for {instance.object!r} '
+                           f'objects (robots/{robot}/stances.yaml)')
+        variant = variant or next(iter(variants))
+        if variant not in variants:
+            raise KeyError(f'unknown stance {reference!r}: robot {robot!r} has no {variant!r} stance for '
+                           f'{instance.object!r} (has {", ".join(variants)})')
+        return instance.pose.compose(variants[variant])
 
     def joint_poses(self, robot: str) -> dict[str, dict[str, float]]:
         """robots/<robot>/poses.yaml: named joint-space poses (robot-specific by nature)."""
@@ -188,7 +238,7 @@ class ConfigStore:
         objects = []
         for path in sorted((self.root / 'objects').glob('*.yaml')):
             objects += [f'{path.stem}.{name}' for name in self.object(path.stem).get('points', {})]
-        return {'locations': sorted(self.locations()), 'stances': [f'stance:{n}' for n in sorted(self.stances(robot))],
+        return {'locations': sorted(self.locations()), 'stances': self.stance_names(robot),
                 'joint poses': sorted(self.joint_poses(robot)), 'object points': objects}
 
     def object_point(self, obj: str, point: str) -> dict:
@@ -205,44 +255,67 @@ class ConfigStore:
         return result
 
     def base_target(self, reference: str, robot: str) -> Pose2D:
-        """Resolve a base target: ``stance:<name>`` (robot-specific), ``location:<name>`` or a bare location name."""
+        """Resolve a base target: ``stance:<instance>[/<variant>]`` (robot-specific, relative to an object),
+        ``location:<name>`` or a bare location name."""
         if reference.startswith(STANCE_PREFIX):
-            name = reference[len(STANCE_PREFIX):]
-            table, missing = self.stances(robot), f'unknown stance {name!r} for robot {robot!r}'
-        else:
-            name = reference[len(LOCATION_PREFIX):] if reference.startswith(LOCATION_PREFIX) else reference
-            table, missing = self.locations(), f'unknown location {name!r}'
-        if name not in table:
-            raise KeyError(missing)
-        return table[name]
+            return self.stance(reference[len(STANCE_PREFIX):], robot)
+        name = reference[len(LOCATION_PREFIX):] if reference.startswith(LOCATION_PREFIX) else reference
+        locations = self.locations()
+        if name not in locations:
+            raise KeyError(f'unknown location {name!r}')
+        return locations[name]
 
     # ---- teaching -------------------------------------------------------------
     def save_base_pose(self, name: str, pose: Pose2D, kind: str = 'location', robot: str | None = None) -> Path:
-        """Write a taught base pose into ``cell/locations.yaml`` or ``robots/<robot>/stances.yaml``.
+        """Write a taught base pose. Returns the file written; existing comments and ordering are kept.
 
-        Existing comments and ordering are kept. Returns the file written.
+        ``location``: ``name`` -> ``cell/locations.yaml``. ``stance``: ``name`` = ``<instance>[/<variant>]``; the
+        pose is stored relative to that object, for its object type (all instances of the type follow).
+        ``stance_instance``: the same, as an override for this instance only.
         """
+        if kind in ('stance', 'stance_instance'):
+            if not robot:
+                raise ValueError('a stance needs a robot')
+            return self.save_stance(name, pose, robot, per_instance=kind == 'stance_instance')[0]
+        if kind != 'location':
+            raise ValueError(f'unknown kind {kind!r}')
+        self._check_name(name)
+        return self._write_point(self.root / 'cell/locations.yaml', [name], pose)
+
+    def save_stance(self, reference: str, pose: Pose2D, robot: str, per_instance: bool = False) -> tuple[Path, Pose2D]:
+        """Store ``pose`` (cell frame) as the robot's stance at ``<instance>[/<variant>]``; returns file and offset."""
+        name, _, variant = reference.partition(VARIANT_SEPARATOR)
+        instances = self.object_instances()
+        if name not in instances:
+            raise ValueError(f'no object {name!r} in cell/objects.yaml')
+        instance = instances[name]
+        variant = variant or next(iter(self.stance_variants(robot, instance)), 'default')
+        self._check_name(variant)
+        offset = pose.relative_to(instance.pose, instance.object)
+        keys = ['instances', instance.name, variant] if per_instance else ['objects', instance.object, variant]
+        return self._write_point(self.root / f'robots/{robot}/stances.yaml', keys, offset), offset
+
+    @staticmethod
+    def _check_name(name: str) -> None:
+        if not Draft202012Validator(schemas.NAME).is_valid(name):
+            raise ValueError(f'invalid point name {name!r}: use letters, digits, "_" and "-", starting with a letter')
+
+    def _write_point(self, path: Path, keys: list[str], pose: Pose2D) -> Path:
+        """Set ``data[keys...] = pose`` in a YAML file, keeping comments and order."""
         from ruamel.yaml import YAML  # only needed for teaching
         from ruamel.yaml.comments import CommentedMap
 
-        if kind == 'stance':
-            if not robot:
-                raise ValueError('a stance needs a robot')
-            path = self.root / f'robots/{robot}/stances.yaml'
-        elif kind == 'location':
-            path = self.root / 'cell/locations.yaml'
-        else:
-            raise ValueError(f'unknown kind {kind!r}')
-        if not Draft202012Validator(schemas.NAME).is_valid(name):
-            raise ValueError(f'invalid point name {name!r}: use letters, digits, "_" and "-", starting with a letter')
         handler = YAML()
         handler.preserve_quotes = True
         data = handler.load(path.read_text(encoding='utf-8')) if path.is_file() else None
-        if data is None:
-            data = {}
+        node = data = data if data is not None else CommentedMap()
+        for key in keys[:-1]:
+            if not isinstance(node.get(key), dict):
+                node[key] = CommentedMap()
+            node = node[key]
         entry = CommentedMap(pose.to_dict())
         entry.fa.set_flow_style()  # one line per point, like hand-written entries
-        data[name] = entry
+        node[keys[-1]] = entry
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open('w', encoding='utf-8') as stream:
             handler.dump(data, stream)
