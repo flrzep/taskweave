@@ -69,12 +69,16 @@ def command(pose: Pose2D, target: Pose2D, base_type: str, p: Params, previous: t
         vx, vy = (ex / distance * speed, ey / distance * speed) if distance > 1e-6 else (0.0, 0.0)
         wz = p.k_angular * yaw_error
     else:  # differential: face the target, drive, then turn to the final heading
-        if distance > p.position_tolerance:
-            heading_error = wrap_angle(math.atan2(dy, dx) - pose.yaw)
-            if abs(heading_error) > p.turn_in_place:
-                vx, wz = 0.0, p.k_angular * heading_error
-            else:
-                vx, wz = min(p.k_linear * distance, p.max_linear) * math.cos(heading_error), p.k_angular * heading_error
+        heading_error = wrap_angle(math.atan2(dy, dx) - pose.yaw) if distance > 1e-6 else 0.0
+        far = distance > p.position_tolerance
+        # Dead band: between half and full tolerance only creep on if already facing the point. Turning towards a
+        # point a few millimetres away would fight the final-heading turn and never settle.
+        near_but_facing = distance > 0.5 * p.position_tolerance and abs(heading_error) < p.turn_in_place / 4
+        if far and abs(heading_error) > p.turn_in_place:
+            vx, wz = 0.0, p.k_angular * heading_error
+        elif far or near_but_facing:
+            speed = min(p.k_linear * distance, p.max_linear) * math.cos(heading_error)
+            vx, wz = speed, (p.k_angular * heading_error if far else p.k_angular * yaw_error)
         else:
             vx, wz = 0.0, p.k_angular * yaw_error
         vy = 0.0

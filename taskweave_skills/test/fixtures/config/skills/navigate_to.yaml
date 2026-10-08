@@ -1,4 +1,4 @@
 implementations:
   - {name: navigate_direct, type: script, class: "taskweave_skills.navigate:NavigateTo"}
 max_linear: 0.6
-stuck_timeout_s: 1.0
+stuck_timeout_s: 2.0

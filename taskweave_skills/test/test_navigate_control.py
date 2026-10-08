@@ -43,3 +43,13 @@ def test_params_capped_by_robot_limits_and_unknown_keys_rejected():
     assert p.max_linear == 0.8 and p.max_angular == 0.5
     with pytest.raises(ValueError, match='max_speed'):
         Params.from_config({'max_speed': 1.0}, {})
+
+
+@pytest.mark.parametrize('offset', [0.02, 0.025, 0.029])
+def test_differential_settles_from_inside_the_tolerance_band(offset):
+    """Regression: starting just inside the position tolerance, the base must turn to the heading and stop."""
+    p = Params()
+    target = Pose2D(1.0, 0.0, 1.57)
+    pose = simulate(Pose2D(1.0 - offset, 0.0, 0.0), target, 'differential', p, steps=400)
+    assert math.hypot(pose.x - target.x, pose.y - target.y) <= p.position_tolerance
+    assert abs(wrap_angle(pose.yaw - target.yaw)) < p.yaw_tolerance
