@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>taskweave HMI</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand"><span class="logo">tw</span><div><b>taskweave</b><small id="robot">connecting…</small></div></div>
+  <span id="conn" class="conn" title="live connection"></span>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button role="tab" data-view="run" aria-selected="true">Run</button>
+  <button role="tab" data-view="missions" aria-selected="false">Missions</button>
+  <button role="tab" data-view="log" aria-selected="false">Log</button>
+</nav>
+
+<main>
+  <!-- RUN -->
+  <section id="view-run" class="view">
+    <div class="card status">
+      <div class="row between"><span id="state" class="chip">idle</span><span id="cycle" class="muted mono"></span></div>
+      <h2 id="goal">No mission running</h2>
+      <div id="current" class="current" hidden>
+        <div class="muted mono" id="step-meta"></div>
+        <div id="step-instruction" class="instruction"></div>
+        <div class="progress"><div id="progress-bar"></div></div>
+        <div class="muted mono" id="step-detail"></div>
+      </div>
+      <div id="last-error" class="error" hidden></div>
+      <div class="row gap">
+        <button id="btn-pause" class="btn" disabled>Pause</button>
+        <button id="btn-abort" class="btn danger" disabled>Abort</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <label for="mission-select" class="label">Start a mission</label>
+      <div class="row gap">
+        <select id="mission-select"></select>
+        <button id="btn-start" class="btn primary">Start</button>
+      </div>
+      <div id="start-msg" class="msg" hidden></div>
+    </div>
+
+    <div class="card">
+      <div class="label">Plan</div>
+      <ol id="plan" class="steps"><li class="muted">No plan yet</li></ol>
+    </div>
+  </section>
+
+  <!-- MISSIONS -->
+  <section id="view-missions" class="view" hidden>
+    <div id="mission-list-card" class="card">
+      <div class="row between"><div class="label">Missions</div><button id="btn-new" class="btn small">New mission</button></div>
+      <ul id="mission-list" class="list"></ul>
+    </div>
+
+    <div id="editor" class="card" hidden>
+      <div class="row between">
+        <button id="btn-back" class="btn small ghost">← Missions</button>
+        <span id="editor-dirty" class="muted" hidden>unsaved changes</span>
+      </div>
+      <div class="field"><label for="m-name">Name</label><input id="m-name" autocomplete="off" spellcheck="false"></div>
+      <div class="field"><label for="m-goal">Goal</label><textarea id="m-goal" rows="2"></textarea></div>
+      <div class="grid2">
+        <div class="field"><label for="m-loop">Loop</label><select id="m-loop"><option>once</option><option>forever</option></select></div>
+        <div class="field"><label for="m-max">Max cycles</label><input id="m-max" type="number" min="1" placeholder="none"></div>
+        <div class="field span2"><label for="m-stop">Stop when (world-state flag)</label><input id="m-stop" placeholder="none" spellcheck="false"></div>
+      </div>
+      <details class="defaults">
+        <summary>Defaults for every step</summary>
+        <div class="grid2">
+          <div class="field"><label for="d-timeout">Timeout (s)</label><input id="d-timeout" type="number" min="0" step="any"></div>
+          <div class="field"><label for="d-retries">Retries</label><input id="d-retries" type="number" min="0"></div>
+          <div class="field"><label for="d-fail">On failure</label><select id="d-fail"></select></div>
+          <div class="field"><label for="d-replans">Max replans</label><input id="d-replans" type="number" min="0"></div>
+        </div>
+      </details>
+      <div class="label">Steps</div>
+      <ol id="step-editor" class="edit-steps"></ol>
+      <button id="btn-add-step" class="btn small">+ Add step</button>
+      <div id="problems" class="error" hidden></div>
+      <div id="save-msg" class="msg" hidden></div>
+      <div class="row gap sticky-actions">
+        <button id="btn-validate" class="btn">Check</button>
+        <button id="btn-save" class="btn primary">Save</button>
+      </div>
+      <p class="muted small-text">Saved missions are used at their next start. A running mission keeps its plan.</p>
+    </div>
+  </section>
+
+  <!-- LOG -->
+  <section id="view-log" class="view" hidden>
+    <div class="card"><div class="label">Events</div><ol id="log" class="log"></ol></div>
+  </section>
+</main>
+
+<template id="step-template">
+  <li class="edit-step">
+    <div class="row between step-head">
+      <span class="mono step-no"></span>
+      <div class="row gap-s">
+        <button class="icon" data-act="up" aria-label="Move up">↑</button>
+        <button class="icon" data-act="down" aria-label="Move down">↓</button>
+        <button class="icon" data-act="remove" aria-label="Remove step">✕</button>
+      </div>
+    </div>
+    <div class="field"><label>Instruction</label><textarea data-k="instruction" rows="2"></textarea></div>
+    <div class="field"><label>Skill</label><select data-k="skill"></select></div>
+    <div class="args"></div>
+    <details class="rules">
+      <summary>Rules for this step</summary>
+      <div class="grid2">
+        <div class="field"><label>Step id</label><input data-k="id" placeholder="auto" spellcheck="false"></div>
+        <div class="field"><label>Timeout (s)</label><input data-k="timeout_s" type="number" min="0" step="any" placeholder="default"></div>
+        <div class="field"><label>Retries</label><input data-k="retries" type="number" min="0" placeholder="default"></div>
+        <div class="field"><label>On failure</label><select data-k="on_failure"></select></div>
+        <div class="field span2"><label>Replan from step</label><select data-k="replan_from"></select></div>
+      </div>
+    </details>
+  </li>
+</template>
+
+<script src="app.js"></script>
+</body>
+</html>
