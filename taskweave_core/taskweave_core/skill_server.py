@@ -2,8 +2,12 @@
 
 Parameters:
   config_dir (string)    taskweave config directory
-  robot (string)         robot profile name (config/robots/<robot>/profile.yaml)
-  skills (string[])      skills to load as "package.module:ClassName"
+  robot (string)         robot name (config/robots/<robot>/profile.yaml and embodiment.yaml)
+  skills (string[])      skill names to serve
+
+For every skill name the server reads skills/<name>.yaml and serves the first implementation whose ``requires``
+fits the robot's embodiment; it logs why the others do not fit. A skill without a fitting implementation is not
+served (missions using it are then rejected by validation with the same reasons).
 
 Run: ros2 run taskweave_core skill_server --ros-args -p config_dir:=... -p robot:=... -p skills:="['...']"
 """
@@ -53,16 +57,30 @@ class SkillServer(Node):
             raise ValueError('parameters config_dir and robot are required')
         self.config = ConfigStore(config_dir)
         self.robot = self.config.robot(robot_name)
+        implementations: dict[str, dict] = {}
         if skills is None:
-            paths = [p for p in self.get_parameter('skills').value if p]
-            skills = [load_skill_class(path)() for path in paths]
+            skills = []
+            for skill_name in (n for n in self.get_parameter('skills').value if n):
+                implementation, reasons = self.config.select_implementation(skill_name, robot_name)
+                for reason in reasons:
+                    self.get_logger().info(f'{skill_name}: not using {reason}')
+                if implementation is None:
+                    self.get_logger().error(f'{skill_name}: no implementation fits robot {robot_name!r}; not served')
+                    continue
+                skill = load_skill_class(implementation['class'])()
+                if skill.name != skill_name:
+                    raise ValueError(f'{implementation["class"]} implements {skill.name!r}, not {skill_name!r}')
+                skill.implementation = f'{implementation["type"]}:{implementation["name"]}'
+                implementations[skill_name] = implementation
+                skills.append(skill)
         self.group = ReentrantCallbackGroup()
         self.skills: dict[str, Skill] = {}
         self._servers = []
         for skill in skills:
             if not skill.name or skill.name in self.skills:
                 raise ValueError(f'skill name {skill.name!r} is empty or duplicated')
-            skill.setup(self, self.config, self.robot, self.config.skill_params(skill.name))
+            skill.setup(self, self.config, self.robot,
+                        self.config.skill_params(skill.name, implementations.get(skill.name)))
             self.skills[skill.name] = skill
             self._servers.append(ActionServer(
                 self, RunSkill, names.skill_action(skill.name),
@@ -72,7 +90,8 @@ class SkillServer(Node):
                 callback_group=self.group))
         self.create_service(ListSkills, f'{self.get_name()}{names.SKILL_SERVER_CATALOG_SUFFIX}', self._list,
                             callback_group=self.group)
-        self.get_logger().info(f'skills for robot {robot_name!r}: {", ".join(self.skills) or "none"}')
+        served = ', '.join(f'{name} ({skill.implementation})' for name, skill in self.skills.items())
+        self.get_logger().info(f'skills for robot {robot_name!r}: {served or "none"}')
 
     def now(self) -> float:
         return self.get_clock().now().nanoseconds * 1e-9

@@ -25,11 +25,12 @@ from std_srvs.srv import Trigger
 from taskweave_interfaces.action import RunSkill
 from taskweave_interfaces.msg import Plan as PlanMsg
 from taskweave_interfaces.msg import TaskStatus
-from taskweave_interfaces.srv import ListSkills, StartMission
+from taskweave_interfaces.srv import DescribeRobot, ListSkills, StartMission
 
 from . import names
 from .config import ConfigError, ConfigStore
-from .conversions import plan_to_msg, status_to_msg
+from .conversions import plan_to_msg, skill_info_to_dict, status_to_msg
+from .embodiment import robot_card
 from .executive import ACTIVE, Executive, Outcome, Status
 from .plan import Plan, Step
 from .planner import MissionFilePlanner
@@ -117,7 +118,8 @@ class TaskHandler(Node):
         if not config_dir or not self.robot:
             raise ValueError('parameters config_dir and robot are required')
         self.config = ConfigStore(config_dir)
-        self.config.robot(self.robot)  # fail at startup if the profile is missing or invalid
+        self.config.robot(self.robot)  # fail at startup if the profile or embodiment is missing or invalid
+        self.config.embodiment(self.robot)
         self.group = ReentrantCallbackGroup()
         self.world = WorldState()
         self.catalog: dict[str, object] = {}
@@ -133,6 +135,7 @@ class TaskHandler(Node):
         self.create_service(Trigger, names.RESUME, self._trigger('resume'), callback_group=self.group)
         self.create_service(Trigger, names.ABORT, self._trigger('abort'), callback_group=self.group)
         self.create_service(ListSkills, names.LIST_SKILLS, self._list_skills, callback_group=self.group)
+        self.create_service(DescribeRobot, names.DESCRIBE_ROBOT, self._describe, callback_group=self.group)
         self.create_timer(0.1, self._tick, callback_group=self.group)
         self.create_timer(1.0 / self.get_parameter('status_rate_hz').value, self._publish_status,
                           callback_group=self.group)
@@ -224,6 +227,14 @@ class TaskHandler(Node):
 
     def _list_skills(self, request, response):
         response.skills = list(self.refresh_catalog().values())
+        return response
+
+    def _describe(self, request, response):
+        embodiment = self.config.embodiment(self.robot)
+        response.skills = list(self.refresh_catalog().values())
+        response.card = robot_card(embodiment, [skill_info_to_dict(s) for s in response.skills],
+                                   self.config.point_names(self.robot))
+        response.embodiment_json = json.dumps(embodiment)
         return response
 
 

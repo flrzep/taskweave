@@ -4,6 +4,8 @@ Kept as Python data so they are versioned with the code that reads them. Applica
 (e.g. a cell layout) is not described here; taskweave only validates the files it interprets itself.
 """
 
+from ..embodiment import CAPABILITIES, TOOL_TYPES
+
 FINITE = {'type': 'number'}
 NAME = {'type': 'string', 'pattern': r'^[A-Za-z_][A-Za-z0-9_\-]*$'}
 
@@ -111,7 +113,11 @@ OBJECT = {
             'propertyNames': NAME,
             'additionalProperties': {
                 'type': 'object',
-                'properties': {'approach': {'type': 'object'}},
+                'properties': {
+                    'approach': {'type': 'object'},
+                    'tool_type': {'enum': sorted(TOOL_TYPES)},
+                    'grip_width_m': {'type': 'number', 'exclusiveMinimum': 0},
+                },
                 'additionalProperties': POSE3D,
             },
         },
@@ -135,4 +141,112 @@ OPERATOR = {
     'additionalProperties': False,
 }
 
-SKILL_PARAMS = {'type': 'object'}
+REQUIRES = {
+    'type': 'object',
+    'properties': {
+        'capabilities': {'type': 'array', 'items': {'enum': sorted(CAPABILITIES)}},
+        'action_space': {'type': 'string'},
+        'cameras': {'type': 'array', 'items': {'type': 'string'}},
+        'embodiments': {'type': 'array', 'items': NAME},
+    },
+    'additionalProperties': False,
+}
+
+# skills/<skill>.yaml: implementations (first match is served) plus parameters shared by all of them
+SKILL_PARAMS = {
+    'type': 'object',
+    'properties': {
+        'implementations': {
+            'type': 'array',
+            'minItems': 1,
+            'items': {
+                'type': 'object',
+                'required': ['name', 'type', 'class'],
+                'properties': {
+                    'name': NAME,
+                    'type': {'enum': ['script', 'vla', 'rl', 'other']},
+                    'class': {'type': 'string', 'pattern': r'^[A-Za-z_][\w.]*:[A-Za-z_]\w*$'},
+                    'requires': REQUIRES,
+                    'params': {'type': 'object'},
+                },
+                'additionalProperties': False,
+            },
+        },
+    },
+}
+
+UNKNOWN_OR_NUMBER = {'type': ['number', 'null'], 'minimum': 0}
+RANGE = {'oneOf': [{'type': 'null'},
+                   {'type': 'array', 'items': FINITE, 'minItems': 2, 'maxItems': 2}]}
+
+# robots/<model>/embodiment.yaml: what the robot is and can do. No topics or joint names.
+EMBODIMENT = {
+    'type': 'object',
+    'required': ['name', 'summary', 'capabilities'],
+    'properties': {
+        'name': NAME,
+        'summary': {'type': 'string', 'minLength': 1},
+        'capabilities': {'type': 'array', 'items': {'enum': sorted(CAPABILITIES)}, 'uniqueItems': True},
+        'base': {
+            'type': 'object',
+            'properties': {
+                'footprint': {'oneOf': [{'type': 'null'},
+                                        {'type': 'array', 'items': FINITE, 'minItems': 2, 'maxItems': 2}]},
+                'max_speed': {'type': 'object',
+                              'properties': {'linear': UNKNOWN_OR_NUMBER, 'angular': UNKNOWN_OR_NUMBER},
+                              'additionalProperties': False},
+            },
+            'additionalProperties': False,
+        },
+        'torso': {
+            'type': 'object',
+            'properties': {'lift_range_m': RANGE, 'pitch_range_rad': RANGE},
+            'additionalProperties': False,
+        },
+        'arms': {
+            'type': 'object',
+            'propertyNames': NAME,
+            'additionalProperties': {
+                'type': 'object',
+                'properties': {'dof': {'type': 'integer', 'minimum': 1}, 'reach_m': UNKNOWN_OR_NUMBER,
+                               'payload_kg': UNKNOWN_OR_NUMBER, 'tool': NAME},
+                'additionalProperties': False,
+            },
+        },
+        'tools': {
+            'type': 'object',
+            'propertyNames': NAME,
+            'additionalProperties': {
+                'type': 'object',
+                'required': ['type'],
+                'properties': {'type': {'enum': sorted(TOOL_TYPES)}, 'stroke_m': UNKNOWN_OR_NUMBER,
+                               'finger_length_m': UNKNOWN_OR_NUMBER},
+                'additionalProperties': False,
+            },
+        },
+        'cameras': {
+            'type': 'object',
+            'propertyNames': NAME,
+            'additionalProperties': {
+                'type': 'object',
+                'required': ['type'],
+                'properties': {'type': {'enum': ['rgb', 'rgbd', 'depth']}, 'hfov_deg': UNKNOWN_OR_NUMBER,
+                               'range_m': RANGE, 'on': {'type': 'string'}},
+                'additionalProperties': False,
+            },
+        },
+        'action_spaces': {
+            'type': 'object',
+            'propertyNames': NAME,
+            'additionalProperties': {
+                'type': 'object',
+                'required': ['dims', 'rate_hz'],
+                'properties': {'dims': {'type': 'integer', 'minimum': 1},
+                               'rate_hz': {'type': 'number', 'exclusiveMinimum': 0},
+                               'description': {'type': 'string'}},
+                'additionalProperties': False,
+            },
+        },
+    },
+    'additionalProperties': False,
+}

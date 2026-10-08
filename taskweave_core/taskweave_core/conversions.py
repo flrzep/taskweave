@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from taskweave_interfaces.msg import Plan as PlanMsg
-from taskweave_interfaces.msg import PlanStep, TaskStatus
+from taskweave_interfaces.msg import PlanStep, SkillInfo, TaskStatus
 
 from .executive import Status
 from .plan import Plan, Step
@@ -40,3 +40,9 @@ def status_to_msg(status: Status, stamp, now: float) -> TaskStatus:
     msg.step_elapsed_s = float(now - status.step_started) if status.step else 0.0
     msg.last_error = status.last_error
     return msg
+
+
+def skill_info_to_dict(info: SkillInfo) -> dict:
+    return {'name': info.name, 'description': info.description,
+            'args_schema': json.loads(info.args_schema_json or '{}'), 'needs': list(info.needs),
+            'achieves': list(info.achieves), 'implementation': info.implementation}

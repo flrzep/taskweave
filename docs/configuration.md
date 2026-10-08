@@ -12,11 +12,12 @@ config/
     <object>.yaml        object frame, mesh reference, taught tool poses (grasp, place, hang ...)
   robots/
     <model>/
-      profile.yaml       roles -> hardware (joints, frames, controllers, topics, limits)
+      profile.yaml       how the hardware is reached: roles -> topics, joints, frames, controllers
+      embodiment.yaml    what the robot is and can do: capabilities, tools, reach, cameras, action spaces
       poses.yaml         named joint-space poses (home, carry); robot-specific by nature
       stances.yaml       robot-specific base poses (e.g. where to stand in front of a fixture)
   skills/
-    <skill>.yaml         parameters of one skill (speeds, tolerances, approach distances)
+    <skill>.yaml         implementations of one skill (first match is served) and its parameters
   missions/
     <mission>.yaml       goal, robot, loop mode, defaults, steps
 ```
@@ -93,6 +94,70 @@ teleop:
 
 Skills ask for roles (`base`, `arms.both`, `grippers.left`, `cameras.head`); only this file knows the hardware names.
 
+## Robot description (embodiment)
+
+`robots/<model>/embodiment.yaml` says what the robot *is* and *can do*. It holds no topics or joint names (the schema
+rejects unknown keys), so a simulated and a real robot of the same model share it while their profiles differ.
+Unknown values are written as `~` and reported as unknown; they are measured, not guessed.
+
+```yaml
+name: a2d
+summary: >-
+  Wheeled bimanual humanoid: holonomic base, lift torso, two 7-DoF arms with parallel grippers,
+  RGB-D head camera and one RGB-D camera per wrist.
+capabilities: [base.holonomic, torso.lift, arms.bimanual, gripper.parallel, camera.head.rgbd, camera.wrist.rgbd]
+base:  {footprint: [0.60, 0.45], max_speed: {linear: 1.0, angular: 1.5}}
+torso: {lift_range_m: ~}
+arms:
+  left:  {dof: 7, reach_m: ~, payload_kg: ~, tool: left}
+  right: {dof: 7, reach_m: ~, payload_kg: ~, tool: right}
+tools:
+  left:  {type: parallel_gripper, stroke_m: ~, finger_length_m: ~}
+  right: {type: parallel_gripper, stroke_m: ~, finger_length_m: ~}
+cameras:
+  head:       {type: rgbd, hfov_deg: 69, range_m: [0.1, 10]}
+  left_wrist: {type: rgbd, hfov_deg: 87, range_m: [0.07, 1.0], on: tools.left}
+action_spaces:
+  joint_pos_bimanual: {dims: 17, rate_hz: 30}
+```
+
+**Capability vocabulary** (owned by taskweave, `taskweave_core.embodiment.CAPABILITIES`): `base.holonomic`,
+`base.differential`, `base.fixed`, `torso.lift`, `torso.pitch`, `head.pan_tilt`, `arms.single`, `arms.bimanual`,
+`gripper.parallel`, `gripper.suction`, `hand.dexterous`, `camera.head.rgb`, `camera.head.rgbd`, `camera.wrist.rgb`,
+`camera.wrist.rgbd`, `lidar.2d`, `lidar.3d`. Tool types: `parallel_gripper`, `suction`, `dexterous_hand`.
+
+**Canonical TCP:** every tool's tool-centre point is the grasp centre between the fingertips (or the suction-cup
+centre), with **z = approach direction** and **y = closing direction**. The profile maps each robot's flange to this
+frame; taught tool poses use it, so they transfer between robots.
+
+`taskweave check` reports contradictions between embodiment and profile (for example `base.holonomic` with a
+differential base, or a tool without a gripper mapping) and implementation classes that cannot be loaded.
+
+## Skill implementations
+
+```yaml
+# skills/pick_frame.yaml
+implementations:                    # the skill server serves the first one that fits the robot
+  - name: pick_frame_vla_v1
+    type: vla                       # script | vla | rl | other
+    class: frame_policies.vla:PickFrame
+    requires:
+      capabilities: [arms.bimanual, camera.wrist.rgbd]
+      action_space: joint_pos_bimanual
+      cameras: [left_wrist, right_wrist]
+      embodiments: [a2d]            # trained on A2D data
+    params: {checkpoint: /models/pick_frame_v1}
+  - name: pick_frame_scripted
+    type: script
+    class: frame_skills.pick:PickFrame
+    requires: {capabilities: [arms.bimanual, gripper.parallel]}
+approach_distance: 0.10             # shared by all implementations; `params` override per implementation
+```
+
+The skill server is started with skill *names*. It serves the first implementation whose `requires` fit the
+robot's embodiment and logs why the others don't. A mission that uses a skill without a fitting implementation is
+rejected with those reasons before anything moves.
+
 ## Locations
 
 ```yaml
@@ -109,12 +174,16 @@ name: frame_type2
 mesh: assets/frame_type2.usd
 points:
   side_rails:                 # taught with the teach tool
+    tool_type: parallel_gripper
+    grip_width_m: 0.03        # checked against the tool's stroke
     left_tool:  {frame: frame_type2, xyz: [-0.18,  0.235, 0.065], rpy: [0, 1.5708, 0]}
     right_tool: {frame: frame_type2, xyz: [-0.18, -0.235, 0.065], rpy: [0, 1.5708, 0]}
     approach: {axis: z, distance: 0.10}
 ```
 
-Tool poses are relative to the object, so they hold for any robot that can reach them.
+Tool poses are canonical-TCP poses relative to the object, so they hold for any robot that can reach them.
+`<role>_tool` names the robot tool (`left_tool` is `tools.left`). Validation checks tool type and grip width against
+the robot's tools.
 
 ## Skill parameters
 

@@ -1,5 +1,14 @@
 name: box
 points:
   top_grasp:
+    tool_type: parallel_gripper
+    grip_width_m: 0.05
     left_tool: {xyz: [0.0, 0.1, 0.2], rpy: [0.0, 1.5708, 0.0]}
     approach: {axis: z, distance: 0.1}
+  wide_grasp:
+    tool_type: parallel_gripper
+    grip_width_m: 0.20
+    left_tool: {xyz: [0.0, 0.0, 0.2], rpy: [0.0, 1.5708, 0.0]}
+  suction_top:
+    tool_type: suction
+    left_tool: {xyz: [0.0, 0.0, 0.3], rpy: [0.0, 1.5708, 0.0]}

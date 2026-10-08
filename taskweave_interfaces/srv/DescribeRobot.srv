@@ -1,0 +1,5 @@
+# Describe the robot for a planner: robot card text plus the skill catalog filtered to this robot.
+---
+string card             # human/VLM-readable text: summary, capabilities, limits, cameras, points, skills
+string embodiment_json  # robots/<robot>/embodiment.yaml as JSON
+SkillInfo[] skills      # skills this robot can run (a fitting implementation is being served)

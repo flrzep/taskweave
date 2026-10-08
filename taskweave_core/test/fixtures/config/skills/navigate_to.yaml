@@ -1,2 +1,5 @@
+implementations:
+  - {name: navigate_direct, type: script, class: "taskweave_skills.navigate:NavigateTo",
+     requires: {capabilities: [base.holonomic]}}
 max_linear: 0.5
 position_tolerance: 0.03

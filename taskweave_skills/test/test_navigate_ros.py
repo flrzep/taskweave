@@ -22,8 +22,6 @@ from taskweave_core.skill_server import SkillServer  # noqa: E402
 from taskweave_core.teach import Teach  # noqa: E402
 from taskweave_interfaces.action import RunSkill  # noqa: E402
 from taskweave_interfaces.srv import TeachPoint  # noqa: E402
-from taskweave_skills.basic import Wait  # noqa: E402
-from taskweave_skills.navigate import NavigateTo  # noqa: E402
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'config'
 WALL_X = 2.0  # the simulator blocks motion beyond this x
@@ -64,7 +62,8 @@ def system(request, tmp_path):
     rclpy.init()
     params = [Parameter('config_dir', value=str(config)), Parameter('robot', value=robot)]
     sim = BaseSim(prefix, holonomic)
-    server = SkillServer(skills=[NavigateTo(), Wait()], parameter_overrides=params)
+    # production path: skill names resolved through config/skills/<name>.yaml implementations
+    server = SkillServer(parameter_overrides=params + [Parameter('skills', value=['navigate_to', 'wait'])])
     teach = Teach(parameter_overrides=params)
     client = rclpy.create_node('test_client')
     executor = MultiThreadedExecutor(num_threads=8)

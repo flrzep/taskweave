@@ -3,12 +3,13 @@
 Layout (all files YAML; files marked optional may be absent):
 
     missions/<name>.yaml           required per mission
-    robots/<model>/profile.yaml    required per robot
+    robots/<model>/profile.yaml    required per robot: how the hardware is reached (topics, names)
+    robots/<model>/embodiment.yaml required per robot: what the robot is and can do
     robots/<model>/stances.yaml    optional, robot-specific base poses
     robots/<model>/poses.yaml      optional, named joint-space poses (interpreted by robot-specific skills)
     cell/locations.yaml            optional, named base poses in the cell frame
     objects/<name>.yaml            optional per object, taught tool poses
-    skills/<skill>.yaml            optional per skill, parameters
+    skills/<skill>.yaml            per served skill: implementations and parameters
     operator.yaml                  optional, operator inputs (e.g. joystick buttons)
 """
 
@@ -27,6 +28,7 @@ from .poses import Pose2D, Pose3D
 
 STANCE_PREFIX = 'stance:'
 LOCATION_PREFIX = 'location:'
+POINT_METADATA = ('approach', 'tool_type', 'grip_width_m')  # keys of an object point that are not tool poses
 
 
 class ConfigError(Exception):
@@ -119,8 +121,42 @@ class ConfigStore:
                               'name')
         return RobotProfile(name, data)
 
-    def skill_params(self, skill: str) -> dict:
+    def skill_config(self, skill: str) -> dict:
+        """The whole skills/<skill>.yaml (implementations and shared parameters); {} if absent."""
         return dict(self._load(f'skills/{skill}.yaml', schemas.SKILL_PARAMS, required=False, default={}))
+
+    def skill_params(self, skill: str, implementation: dict | None = None) -> dict:
+        """Parameters for a skill: shared keys of skills/<skill>.yaml, overridden by the implementation's params."""
+        params = {k: v for k, v in self.skill_config(skill).items() if k != 'implementations'}
+        params.update((implementation or {}).get('params', {}))
+        return params
+
+    def embodiment(self, robot: str) -> dict:
+        """robots/<robot>/embodiment.yaml: what the robot is and can do."""
+        data = self._load(f'robots/{robot}/embodiment.yaml', schemas.EMBODIMENT)
+        if data['name'] != robot:
+            raise ConfigError(self.root / f'robots/{robot}/embodiment.yaml',
+                              f'name is {data["name"]!r}, expected {robot!r}', 'name')
+        return data
+
+    def select_implementation(self, skill: str, robot: str) -> tuple[dict | None, list[str]]:
+        """First implementation of ``skill`` whose ``requires`` fits ``robot``, and why the others don't.
+
+        Returns (implementation or None, reasons). With no implementations configured, returns (None, [reason]).
+        """
+        from ..embodiment import match
+
+        implementations = self.skill_config(skill).get('implementations', [])
+        if not implementations:
+            return None, [f'no implementations configured in skills/{skill}.yaml']
+        embodiment = self.embodiment(robot)
+        reasons = []
+        for implementation in implementations:
+            mismatch = match(implementation.get('requires'), embodiment)
+            if not mismatch:
+                return implementation, reasons
+            reasons.append(f'{implementation["name"]}: {"; ".join(mismatch)}')
+        return None, reasons
 
     def operator(self) -> dict:
         return self._load('operator.yaml', schemas.OPERATOR, required=False, default={})
@@ -137,13 +173,24 @@ class ConfigStore:
     def object(self, name: str) -> dict:
         return self._load(f'objects/{name}.yaml', schemas.OBJECT)
 
+    def point_names(self, robot: str) -> dict[str, list[str]]:
+        """Names a plan can refer to, by kind (for planners and the robot card)."""
+        objects = []
+        for path in sorted((self.root / 'objects').glob('*.yaml')):
+            objects += [f'{path.stem}.{name}' for name in self.object(path.stem).get('points', {})]
+        return {'locations': sorted(self.locations()), 'stances': [f'stance:{n}' for n in sorted(self.stances(robot))],
+                'object points': objects}
+
     def object_point(self, obj: str, point: str) -> dict:
-        """Tool poses of a named point on an object: ``{'left_tool': Pose3D, ..., 'approach': {...}}``."""
+        """A named point on an object: tool poses (canonical TCP, object-relative) plus its metadata.
+
+        ``{'left_tool': Pose3D, ..., 'approach': {...} | None, 'tool_type': str | None, 'grip_width_m': float | None}``
+        """
         points = self.object(obj).get('points', {})
         if point not in points:
             raise KeyError(f'object {obj!r} has no point {point!r}')
         entry = dict(points[point])
-        result: dict[str, Any] = {'approach': entry.pop('approach', None)}
+        result: dict[str, Any] = {key: entry.pop(key, None) for key in POINT_METADATA}
         result.update({tool: Pose3D.from_dict(pose, obj) for tool, pose in entry.items()})
         return result
 

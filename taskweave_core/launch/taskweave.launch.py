@@ -11,7 +11,7 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-DEFAULT_SKILLS = 'taskweave_skills.basic:Wait,taskweave_skills.navigate:NavigateTo'
+DEFAULT_SKILLS = 'wait,navigate_to'
 
 
 def nodes(context):
@@ -38,6 +38,6 @@ def generate_launch_description():
         DeclareLaunchArgument('robot', description='robot profile name'),
         DeclareLaunchArgument('use_sim_time', default_value='true'),
         DeclareLaunchArgument('skills', default_value=DEFAULT_SKILLS,
-                              description='comma-separated "package.module:Class" skill paths'),
+                              description='comma-separated skill names (see config/skills/)'),
         OpaqueFunction(function=nodes),
     ])

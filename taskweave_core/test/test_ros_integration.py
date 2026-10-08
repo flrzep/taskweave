@@ -16,7 +16,7 @@ from taskweave_core.skill import Skill, SkillResult  # noqa: E402
 from taskweave_core.skill_server import SkillServer  # noqa: E402
 from taskweave_core.task_handler import TaskHandler  # noqa: E402
 from taskweave_interfaces.msg import TaskStatus  # noqa: E402
-from taskweave_interfaces.srv import ListSkills, StartMission  # noqa: E402
+from taskweave_interfaces.srv import DescribeRobot, ListSkills, StartMission  # noqa: E402
 
 
 class NavigateTo(Skill):
@@ -129,3 +129,11 @@ def test_pause_resume_from_operator_services(system, config_dir):
     wait_for(handler, {'PAUSED'})
     assert call(client, Trigger, names.RESUME, Trigger.Request()).success
     assert wait_for(handler, {'SUCCEEDED', 'FAILED'}).state.name == 'SUCCEEDED'
+
+
+def test_describe_robot_returns_card_and_served_skills(system):
+    _, client, _, _ = system
+    response = call(client, DescribeRobot, names.DESCRIBE_ROBOT, DescribeRobot.Request())
+    assert response.card.startswith('Robot: demo_bot')
+    assert '- navigate_to(target' in response.card and 'stance:shelf_a' in response.card
+    assert sorted(s.name for s in response.skills) == ['navigate_to', 'wait']

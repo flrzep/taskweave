@@ -6,6 +6,7 @@
     taskweave status [--follow]           show the task status
     taskweave pause | resume | abort
     taskweave teach location|stance NAME  save the current base pose as a named point
+    taskweave describe [CONFIG_DIR ROBOT]  robot card + skills (running system, or offline from config)
 """
 
 from __future__ import annotations
@@ -15,6 +16,40 @@ import json
 import sys
 
 STATE_NAMES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
+
+
+def describe_offline(config_dir: str, robot: str) -> int:
+    """Robot card from config alone: skills = those with an implementation that fits the robot."""
+    from .config import ConfigStore
+    from .embodiment import robot_card
+    from .skill_server import load_skill_class
+
+    store = ConfigStore(config_dir)
+    skills = []
+    for path in sorted((store.root / 'skills').glob('*.yaml')):
+        implementation, reasons = store.select_implementation(path.stem, robot)
+        if implementation is None:
+            print(f'# {path.stem}: not available ({"; ".join(reasons)})', file=sys.stderr)
+            continue
+        try:
+            cls = load_skill_class(implementation['class'])
+        except (ImportError, AttributeError, TypeError, ValueError) as error:
+            print(f'# {path.stem}: implementation {implementation["name"]} cannot be loaded ({error})', file=sys.stderr)
+            continue
+        skills.append({'name': cls.name, 'description': cls.description, 'args_schema': cls.args_schema,
+                       'needs': cls.needs, 'achieves': cls.achieves,
+                       'implementation': f'{implementation["type"]}:{implementation["name"]}'})
+    print(robot_card(store.embodiment(robot), skills, store.point_names(robot)))
+    return 0
+
+
+def describe(node) -> int:
+    from taskweave_interfaces.srv import DescribeRobot
+
+    from . import names
+
+    print(_call(node, DescribeRobot, names.DESCRIBE_ROBOT, DescribeRobot.Request()).card)
+    return 0
 
 
 def check(config_dir: str) -> int:
@@ -36,16 +71,38 @@ def check(config_dir: str) -> int:
     robots = sorted(p.name for p in (store.root / 'robots').glob('*') if p.is_dir())
     for robot in robots:
         attempt(f'robots/{robot}', lambda r=robot: (store.robot(r), store.stances(r)))
+        attempt(f'robots/{robot}/embodiment.yaml', lambda r=robot: _consistent(store, r))
     attempt('cell/locations.yaml', store.locations)
     attempt('operator.yaml', store.operator)
     for path in sorted((store.root / 'objects').glob('*.yaml')):
         attempt(f'objects/{path.name}', lambda n=path.stem: store.object(n))
     for path in sorted((store.root / 'skills').glob('*.yaml')):
-        attempt(f'skills/{path.name}', lambda n=path.stem: store.skill_params(n))
+        attempt(f'skills/{path.name}', lambda n=path.stem: _importable(store.skill_config(n)))
     for name in store.mission_names():
         attempt(f'missions/{name}.yaml', lambda n=name: Plan.from_mission(store.mission(n), 'check'))
     print(f'{problems} problem(s)' if problems else 'config ok (skill arguments are checked against a running catalog)')
     return 1 if problems else 0
+
+
+def _consistent(store, robot: str) -> None:
+    from .embodiment import check_profile
+
+    problems = check_profile(store.embodiment(robot), store.robot(robot).data)
+    if problems:
+        raise ValueError('; '.join(problems))
+
+
+def _importable(skill_config: dict) -> None:
+    from .skill_server import load_skill_class
+
+    broken = []
+    for implementation in skill_config.get('implementations', []):
+        try:
+            load_skill_class(implementation['class'])
+        except (ImportError, AttributeError, TypeError, ValueError) as error:
+            broken.append(f'{implementation["name"]}: {error}')
+    if broken:
+        raise ValueError('cannot load ' + '; '.join(broken))
 
 
 def _ros(function):
@@ -158,6 +215,9 @@ def main(argv=None) -> int:
     teach_parser = sub.add_parser('teach')
     teach_parser.add_argument('kind', choices=['location', 'stance'])
     teach_parser.add_argument('name')
+    describe_parser = sub.add_parser('describe')
+    describe_parser.add_argument('config_dir', nargs='?')
+    describe_parser.add_argument('robot', nargs='?')
     options = parser.parse_args(argv)
     if options.command == 'check':
         return check(options.config_dir)
@@ -165,6 +225,10 @@ def main(argv=None) -> int:
         return _ros(skills)
     if options.command == 'run':
         return _ros(lambda node: run(node, options.mission, options.goal))
+    if options.command == 'describe':
+        if options.config_dir and options.robot:
+            return describe_offline(options.config_dir, options.robot)
+        return _ros(describe)
     if options.command == 'teach':
         return _ros(lambda node: teach(node, options.kind, options.name))
     if options.command == 'status':

@@ -49,9 +49,21 @@ registers a `SkillInfo` (name, description, JSON schema of its arguments, needs,
 - Skills read their parameters from `config/skills/<skill>.yaml`.
 - Swapping a scripted skill for a VLA or RL policy means serving the same skill name with the same arguments.
 
+### Robot description
+Each robot has two files: the **profile** (how its hardware is reached: topics, joints, controllers) and the
+**embodiment** (what it is and can do: capabilities from a fixed vocabulary, tools with the canonical TCP, reach,
+cameras, action spaces). The embodiment drives three decisions:
+
+1. **Which skills a robot can run.** Each skill lists implementations with `requires`; the skill server serves the
+   first that fits, and plans using a skill with no fitting implementation are rejected.
+2. **What a planner may ask for.** `describe_robot` (service `/taskweave/describe_robot`, CLI `taskweave describe`)
+   returns a robot card (summary, capabilities, limits, cameras, known points) plus the skill catalog filtered to this
+   robot. This is the input for a VLM planner.
+3. **Whether a grasp fits.** Object points carry `tool_type` and `grip_width_m`, checked against the robot's tools.
+
 ### Configuration
-All application knowledge is data: cell layout, named locations, objects with taught points, robot profile, skill
-parameters, missions. See [configuration.md](configuration.md).
+All application knowledge is data: cell layout, named locations, objects with taught points, robot profile and
+embodiment, skill implementations and parameters, missions. See [configuration.md](configuration.md).
 
 ## Interfaces
 
@@ -62,6 +74,8 @@ parameters, missions. See [configuration.md](configuration.md).
 | `TaskStatus` | msg | task handler → operator UIs, recorders; `~/status` |
 | `SkillInfo`, `ListSkills` | msg, srv | skill catalog → task handler, planners |
 | `StartMission` | srv | operator / MES → task handler |
+| `DescribeRobot` | srv | planners → task handler (robot card + filtered catalog) |
+| `TeachPoint` | srv | operator → teach node (save the current base pose by name) |
 | `~/pause`, `~/resume`, `~/abort` | `std_srvs/Trigger` | operator → task handler |
 
 `RunSkill` outcomes: `SUCCEEDED`, `FAILED` (ran but missed the goal), `TIMEOUT`, `CANCELED` (by the task handler),
@@ -72,8 +86,9 @@ parameters, missions. See [configuration.md](configuration.md).
 1. **Nothing hard-coded.** Numbers, names, points and rules live in config. Code only holds behaviour.
 2. **Task-space targets.** Locations are poses in the cell frame; grasp and hang points are tool poses relative to an
    object or fixture. Joint angles are never stored as targets.
-3. **One robot profile per robot.** Everything hardware-specific is in `robots/<model>/`. A new robot needs a new
-   profile and its robot-specific hints; missions, cell config and object points stay unchanged.
+3. **Two files per robot.** How the hardware is reached (profile) is separate from what the robot can do
+   (embodiment). A new robot needs both plus its robot-specific hints; missions, cell config and object points stay
+   unchanged. Skills it cannot run are filtered out and reported, not attempted.
 4. **Fail before moving.** Anything that can be checked statically (skills, arguments, points) is checked when the plan
    is validated.
 5. **Every step is observable.** Status and episode markers are published for every step and attempt.

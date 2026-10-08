@@ -99,11 +99,24 @@ the application repository and are passed to taskweave as a config directory.
 Early development. The interfaces are defined; the core packages are being built step by step:
 
 - [x] Interfaces (`taskweave_interfaces`)
-- [ ] Config loader and schemas
-- [ ] Mission-file planner and task handler
-- [ ] Skill server base class, `wait`, `navigate_to`
-- [ ] Teach tooling (save named locations and tool poses)
-- [ ] `go_to_point`, Nav2 and MoveIt adapters
+- [x] Config loader and schemas, robot profile and embodiment, capability vocabulary
+- [x] Mission-file planner, executive (decision rules) and task handler
+- [x] Skill server with implementation selection, `wait`, `navigate_to`
+- [x] Teaching named base poses; `describe_robot` for planners
+- [ ] Teaching tool poses, `go_to_point`, Nav2 and MoveIt adapters
+- [ ] VLM planner
+
+## Usage
+
+```bash
+ros2 launch taskweave_core taskweave.launch.py config_dir:=/path/to/config robot:=a2d skills:=wait,navigate_to
+ros2 run taskweave_core taskweave check /path/to/config     # validate all config files offline
+ros2 run taskweave_core taskweave describe                  # robot card + skills of the running system
+ros2 run taskweave_core taskweave run frame_cycle           # start a mission
+ros2 run taskweave_core taskweave status --follow
+ros2 run taskweave_core taskweave pause | resume | abort
+ros2 run taskweave_core taskweave teach location bay_2      # save the current base pose
+```
 
 ## Build
 

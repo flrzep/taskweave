@@ -1,7 +1,8 @@
 """Plan validation: everything that can be checked before the robot moves.
 
-Checks: the robot profile exists, every skill is in the catalog, every argument object matches the skill's
-JSON Schema, every point a skill argument refers to exists in config, and ``replan_from`` targets exist.
+Checks: the robot profile and embodiment exist, every skill has an implementation that fits the robot and is in
+the catalog, every argument object matches the skill's JSON Schema, every point a skill argument refers to exists
+in config (object points also fit the robot's tools), and ``replan_from`` targets exist.
 
 Skills mark point arguments in their schema with ``"x-taskweave-point": "base_target" | "object_point"``.
 Arguments that contain placeholders are only checked once their values are known (at step start).
@@ -16,6 +17,7 @@ from jsonschema import Draft202012Validator
 
 from . import placeholders
 from .config import ConfigError, ConfigStore
+from .embodiment import check_grasp
 from .plan import Plan
 
 POINT_KEYWORD = 'x-taskweave-point'
@@ -27,10 +29,11 @@ def validate_plan(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) -
     ``catalog`` maps skill name -> JSON Schema of its arguments.
     """
     problems: list[str] = []
-    try:
-        store.robot(plan.robot)
-    except ConfigError as error:
-        problems.append(f'robot {plan.robot!r}: {error}')
+    for load in (store.robot, store.embodiment):
+        try:
+            load(plan.robot)
+        except ConfigError as error:
+            problems.append(f'robot {plan.robot!r}: {error}')
     ids = [step.id for step in plan.steps]
     for duplicate in sorted({i for i in ids if ids.count(i) > 1}):
         problems.append(f'step id {duplicate!r} is used more than once')
@@ -38,8 +41,14 @@ def validate_plan(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) -
         where = f'step {step.id!r} ({step.skill})'
         if step.replan_from and step.replan_from not in ids:
             problems.append(f'{where}: replan_from {step.replan_from!r} is not a step of this plan')
+        configured = bool(_implementations(store, step.skill))
+        if configured:
+            implementation, reasons = _select(store, step.skill, plan.robot)
+            if implementation is None:
+                problems.append(f'{where}: no implementation fits robot {plan.robot!r} ({"; ".join(reasons)})')
+                continue
         if step.skill not in catalog:
-            problems.append(f'{where}: unknown skill; available: {", ".join(sorted(catalog)) or "none"}')
+            problems.append(f'{where}: no skill server offers it; available: {", ".join(sorted(catalog)) or "none"}')
             continue
         problems.extend(f'{where}: {p}' for p in validate_args(step.args, catalog[step.skill], store, plan.robot))
     return problems
@@ -73,6 +82,9 @@ def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
         elif kind == 'object_point':
             obj, _, point = str(value).partition('.')
             store.object_point(obj, point)
+            problems = check_grasp(store.object(obj)['points'][point], store.embodiment(robot))
+            if problems:
+                return f'{value} does not fit robot {robot!r}: ' + '; '.join(problems)
         else:
             return f'unknown point kind {kind!r} in skill schema'
     except KeyError as error:
@@ -80,3 +92,17 @@ def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
     except ConfigError as error:
         return str(error)
     return None
+
+
+def _implementations(store: ConfigStore, skill: str) -> list:
+    try:
+        return store.skill_config(skill).get('implementations', [])
+    except ConfigError:
+        return []
+
+
+def _select(store: ConfigStore, skill: str, robot: str):
+    try:
+        return store.select_implementation(skill, robot)
+    except ConfigError as error:
+        return None, [str(error)]

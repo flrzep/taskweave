@@ -1,0 +1,13 @@
+# What demo_bot is and can do. No topics or joint names here (see profile.yaml).
+name: demo_bot
+summary: Generic test robot with a holonomic base and one parallel gripper.
+capabilities: [base.holonomic, arms.single, gripper.parallel, camera.head.rgbd]
+base: {footprint: [0.6, 0.45], max_speed: {linear: 1.0, angular: 1.5}}
+arms:
+  left: {dof: 6, reach_m: 0.8, payload_kg: ~, tool: left}
+tools:
+  left: {type: parallel_gripper, stroke_m: 0.08, finger_length_m: ~}
+cameras:
+  head: {type: rgbd, hfov_deg: 69, range_m: [0.1, 10.0]}
+action_spaces:
+  joint_pos_arm: {dims: 7, rate_hz: 30}

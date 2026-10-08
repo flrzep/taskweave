@@ -64,7 +64,7 @@ def test_validation_reports_every_problem_before_start(config_dir):
     problems = validate_plan(plan, CATALOG, store)
     assert any("unknown stance 'nowhere'" in p for p in problems)
     assert any('args.seconds' in p and 'minimum' in p for p in problems)
-    assert any('unknown skill' in p for p in problems)
+    assert any('no skill server offers it' in p for p in problems)
     assert any("replan_from 'ghost'" in p for p in problems)
 
 
