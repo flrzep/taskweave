@@ -149,7 +149,7 @@ class NavigateTo(Skill):
         if pose is None:
             return SkillResult.failed(f'no odometry on {self.base["odom"]}')
         start_distance = max(math.hypot(target.x - pose.x, target.y - pose.y), 1e-6)
-        best, best_time, settled_since = math.inf, ctx.now(), None
+        best, best_time, settled_since, phase_travelling = math.inf, ctx.now(), None, None
         previous, last = (0.0, 0.0, 0.0), ctx.now()
         period = 1.0 / self.p.rate_hz
         while True:
@@ -173,7 +173,14 @@ class NavigateTo(Skill):
                         world_state={'robot_location': label})
             else:
                 settled_since = None
-            remaining = distance + self.p.yaw_weight * yaw_error
+            # A differential base first turns towards the target: while travelling, progress counts its heading to the
+            # target, not the final heading (which may get worse during that turn). A new phase restarts the check.
+            travelling = self.base['type'] != 'holonomic' and distance > self.p.position_tolerance
+            if travelling != phase_travelling:
+                phase_travelling, best, best_time = travelling, math.inf, now
+            turn = abs(wrap_angle(math.atan2(target.y - pose.y, target.x - pose.x) - pose.yaw)) if travelling \
+                else yaw_error
+            remaining = distance + self.p.yaw_weight * turn
             if remaining < best - self.p.stuck_progress_m:
                 best, best_time = remaining, now
             elif now - best_time > self.p.stuck_timeout_s:
