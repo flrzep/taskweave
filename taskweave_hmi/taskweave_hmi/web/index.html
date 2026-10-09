@@ -16,6 +16,7 @@
 <nav class="tabs" role="tablist">
   <button role="tab" data-view="run" aria-selected="true">Run</button>
   <button role="tab" data-view="missions" aria-selected="false">Missions</button>
+  <button role="tab" data-view="points" aria-selected="false">Points</button>
   <button role="tab" data-view="log" aria-selected="false">Log</button>
 </nav>
 
@@ -92,6 +93,23 @@
       </div>
       <p class="muted small-text">Saved missions are used at their next start. A running mission keeps its plan.</p>
     </div>
+  </section>
+
+  <!-- POINTS -->
+  <section id="view-points" class="view" hidden>
+    <div id="points-busy" class="error" hidden></div>
+    <div class="card">
+      <div class="row between"><div class="label">Robot pose</div><span id="pose-age" class="muted mono"></span></div>
+      <div id="robot-pose" class="mono">–</div>
+    </div>
+    <div class="card">
+      <div class="row between"><div class="label">Locations</div><button id="btn-add-location" class="btn small">+ Location</button></div>
+      <p class="muted small-text">Base poses in the cell frame · <span id="locations-file" class="mono"></span></p>
+      <ul id="location-list" class="points"></ul>
+    </div>
+    <div id="stance-cards" class="view"></div>
+    <p class="muted small-text">Saved points are used at the next mission start. A point a mission refers to cannot be
+      renamed or deleted. Placed objects come from the cell layout and are read-only here.</p>
   </section>
 
   <!-- LOG -->

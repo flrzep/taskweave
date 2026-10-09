@@ -15,7 +15,12 @@ HTTP API (JSON):
   POST /api/missions/<name>/validate
   POST /api/start {mission}        start a mission; POST /api/pause | /api/resume | /api/abort
   GET  /api/skills                 skill catalog;  GET /api/points  named points for argument pickers
-Missions are edited between runs: a saved mission is used at its next start.
+  GET  /api/points/all             locations, stance offsets and placed objects, with the missions using each point
+  PUT  /api/points/location/<name>                          {x, y, yaw[, rename]}  create, update or rename
+  PUT  /api/points/stance/<objects|instances>/<owner>/<variant>  {x, y, yaw[, rename]}  (offset in the object frame)
+  DELETE the same addresses;  422 with {problems} if refused, nothing written
+  GET  /api/robot_pose             current base pose in the cell and relative to every placed object
+Missions and points are edited between runs (409 while a mission runs) and are used at the next start.
 """
 
 from __future__ import annotations
@@ -23,12 +28,15 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import time
 from collections import deque
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import unquote
 
 import rclpy
+from nav_msgs.msg import Odometry
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
@@ -37,12 +45,13 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
 from taskweave_core import names
-from taskweave_core.config import ConfigError, ConfigStore
+from taskweave_core.config import ConfigError, ConfigStore, Pose2D
+from taskweave_core.teach import MAX_POSE_AGE_S, yaw_from_quaternion
 from taskweave_interfaces.msg import Plan as PlanMsg
 from taskweave_interfaces.msg import TaskStatus
 from taskweave_interfaces.srv import ListSkills, StartMission
 
-from . import missions
+from . import missions, points
 
 WEB = Path(__file__).parent / 'web'
 STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
@@ -63,6 +72,10 @@ def status_dict(msg: TaskStatus) -> dict:
             'step': step_dict(msg.step) if msg.step_index >= 0 else None, 'attempt': msg.attempt,
             'step_status': msg.step_status, 'step_progress': msg.step_progress,
             'step_elapsed_s': msg.step_elapsed_s, 'last_error': msg.last_error}
+
+
+class Busy(Exception):
+    """The request would change config while a mission runs."""
 
 
 class Bridge(Node):
@@ -89,6 +102,10 @@ class Bridge(Node):
         self.skills_client = self.create_client(ListSkills, names.LIST_SKILLS, callback_group=self.group)
         self.triggers = {cmd: self.create_client(Trigger, getattr(names, cmd.upper()), callback_group=self.group)
                          for cmd in ('pause', 'resume', 'abort')}
+        self.pose: Pose2D | None = None
+        self.pose_stamp = 0.0
+        self.odom_topic = self.config.robot(self.robot).base['odom']
+        self.create_subscription(Odometry, self.odom_topic, self._odom, 10, callback_group=self.group)
 
     # ---- ROS -> state ------------------------------------------------------------
     def _broadcast(self, kind: str, data) -> None:
@@ -111,6 +128,22 @@ class Bridge(Node):
                 self.outcomes = {}
             self.plan = plan
         self._broadcast('plan', plan)
+
+    def _odom(self, msg: Odometry) -> None:
+        p = msg.pose.pose
+        self.pose = Pose2D(p.position.x, p.position.y, yaw_from_quaternion(p.orientation))
+        self.pose_stamp = time.monotonic()
+
+    def robot_pose(self) -> Pose2D:
+        if self.pose is None or time.monotonic() - self.pose_stamp > MAX_POSE_AGE_S:
+            raise TimeoutError(f'no current robot pose on {self.odom_topic}')
+        return self.pose
+
+    def check_idle(self) -> None:
+        with self.lock:
+            state = self.status['state']
+        if state in ('running', 'paused'):
+            raise Busy(f'a mission is {state}; edit points when it has finished or was aborted')
 
     def _episode(self, msg: String) -> None:
         event = json.loads(msg.data)
@@ -214,9 +247,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(bridge.catalog())
             if method == 'GET' and route == ['points']:
                 return self._json(bridge.config.point_names(bridge.robot))
+            if method == 'GET' and route == ['points', 'all']:
+                return self._json(points.overview(bridge.config, bridge.robot))
+            if method in ('PUT', 'DELETE') and len(route) >= 3 and route[0] == 'points':
+                bridge.check_idle()
+                kind, address = route[1], [unquote(p) for p in route[2:]]
+                if method == 'PUT':
+                    file = points.save(bridge.config, bridge.robot, kind, address, self._body())
+                else:
+                    file = points.delete(bridge.config, bridge.robot, kind, address)
+                bridge.get_logger().info(f'HMI {"saved" if method == "PUT" else "deleted"} {kind} '
+                                         f'{"/".join(address)} -> {file}')
+                return self._json({'saved' if method == 'PUT' else 'deleted': '/'.join(address), 'file': file})
+            if method == 'GET' and route == ['robot_pose']:
+                return self._json(points.relative_poses(bridge.config, bridge.robot_pose()))
             return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
         except missions.MissionError as error:
             return self._json({'problems': error.problems}, HTTPStatus.UNPROCESSABLE_ENTITY)
+        except points.PointError as error:
+            return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)
+        except Busy as error:
+            return self._json({'problems': [str(error)]}, HTTPStatus.CONFLICT)
         except ConfigError as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)
         except (TimeoutError, KeyError, json.JSONDecodeError) as error:
@@ -255,6 +306,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         self._route('POST')
+
+    def do_DELETE(self):  # noqa: N802
+        self._route('DELETE')
 
 
 def serve(bridge: Bridge) -> ThreadingHTTPServer:

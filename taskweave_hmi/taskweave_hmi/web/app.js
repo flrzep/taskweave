@@ -32,6 +32,8 @@ document.querySelectorAll('.tabs button').forEach((button) => button.addEventLis
   document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-selected', String(b === button)));
   document.querySelectorAll('.view').forEach((view) => show(view, view.id === `view-${button.dataset.view}`));
   if (button.dataset.view === 'missions' && !state.editing) loadMissions();
+  pointsVisible = button.dataset.view === 'points';
+  if (pointsVisible) { loadPoints(); refreshPose(); }
 }));
 
 // ---------- live state ----------
@@ -76,6 +78,7 @@ function renderRun() {
   $('btn-pause').textContent = s.state === 'paused' ? 'Resume' : 'Pause';
   $('btn-abort').disabled = !active;
   $('btn-start').disabled = active;
+  setPointsBusy(active ? `A mission is ${s.state}. Points can be edited when it has finished or was aborted.` : '');
 
   const plan = snap.plan;
   const list = $('plan');
@@ -327,6 +330,157 @@ $('btn-back').addEventListener('click', () => {
   loadMissions();
 });
 ['m-goal', 'm-loop', 'm-max', 'm-stop', 'd-timeout', 'd-retries', 'd-fail', 'd-replans'].forEach((id) => $(id).addEventListener('input', markDirty));
+
+// ---------- points ----------
+// Locations (cell frame) and stance offsets (object frame) from config; yaw is shown in degrees, stored in radians.
+let pointsVisible = false;
+let pointsBusy = '';
+const DEG = 180 / Math.PI;
+const fmt = (p) => `x ${p.x.toFixed(3)}  y ${p.y.toFixed(3)}  yaw ${(p.yaw * DEG).toFixed(1)}°`;
+const NAME_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+
+function setPointsBusy(text) {
+  pointsBusy = text;
+  message($('points-busy'), text, true);
+  document.querySelectorAll('#view-points [data-edit]').forEach((button) => { button.disabled = !!text; });
+}
+
+async function refreshPose() {
+  const { ok, data } = await api('GET', '/api/robot_pose');
+  $('robot-pose').textContent = ok
+    ? `${fmt(data.pose)}  ·  nearest ${data.relative[0]?.instance ?? '–'} (${data.relative[0]?.distance ?? '–'} m)`
+    : (data.error || 'no robot pose');
+  $('robot-pose').classList.toggle('muted', !ok);
+  return ok ? data : null;
+}
+setInterval(() => { if (pointsVisible && !document.hidden) refreshPose(); }, 2000);
+
+async function loadPoints() {
+  const { ok, data } = await api('GET', '/api/points/all');
+  if (!ok) { $('location-list').replaceChildren(el('li', { class: 'error', text: data.error || (data.problems || []).join('\n') })); return; }
+  state.pointsData = data;
+  $('locations-file').textContent = data.files.locations;
+  $('location-list').replaceChildren(...data.locations.map((loc) => pointItem({
+    title: loc.name, pose: loc.pose, usedBy: loc.used_by, name: loc.name, address: ['location', loc.name],
+    fromRobot: (robot) => robot.pose,
+  })));
+  $('stance-cards').replaceChildren(...data.objects.map((obj) => stanceCard(obj, data)));
+  setPointsBusy(pointsBusy);
+}
+
+function stanceCard(obj, data) {
+  const instances = obj.instances.map((i) => i.name);
+  const fromInstance = (pick) => (robot) => robot.relative.find((r) => r.instance === pick())?.offset;
+  const variantItem = (v, isNew = false) => {
+    const picker = el('select', { 'aria-label': 'Measure at object' });
+    fillSelect(picker, instances, instances[0]);
+    return pointItem({
+      title: v.variant, pose: v.offset, usedBy: v.used_by, name: v.variant, isNew, nameLabel: 'Variant',
+      address: ['stance', 'objects', obj.object, v.variant], instancePicker: instances.length ? picker : null,
+      fromRobot: fromInstance(() => picker.value),
+    });
+  };
+  const overrideItem = (instance, o, isNew = false) => pointItem({
+    title: `${instance} / ${o.variant}`, pose: o.offset, usedBy: o.used_by, name: o.variant, isNew, nameLabel: 'Variant',
+    address: ['stance', 'instances', instance, o.variant], fromRobot: fromInstance(() => instance),
+    note: o.fallback ? `Without the override, ${instance} uses the ${obj.object} ${o.variant} stance.` : '',
+  });
+  const variants = el('ul', { class: 'points' }, obj.variants.map((v) => variantItem(v)));
+  const overrides = el('ul', { class: 'points' }, obj.instances.flatMap((i) => i.overrides.map((o) => overrideItem(i.name, o))));
+  const addVariant = el('button', { class: 'btn small', text: '+ Variant' });
+  addVariant.addEventListener('click', () => variants.append(variantItem(
+    { variant: '', offset: obj.variants[0]?.offset || { x: -1, y: 0, yaw: 0 }, used_by: [] }, true)));
+  const overrideInstance = el('select', { 'aria-label': 'Object for a new override' });
+  fillSelect(overrideInstance, instances, instances[0]);
+  const addOverride = el('button', { class: 'btn small', text: '+ Override' });
+  addOverride.addEventListener('click', () => {
+    const base = obj.variants[0] || { variant: 'default', offset: { x: -1, y: 0, yaw: 0 } };
+    overrides.append(overrideItem(overrideInstance.value, { variant: base.variant, offset: base.offset, used_by: [], fallback: !!obj.variants[0] }, true));
+  });
+  const placed = el('ul', { class: 'placed' }, obj.instances.map((i) => el('li', {
+    text: `${i.name}  ${fmt(i.pose)}${Object.entries(i.stances).map(([n, p]) => `\n  stance ${n.split('/')[1]}: ${fmt(p)}`).join('')}`,
+  })));
+  placed.style.whiteSpace = 'pre-wrap';
+  return el('div', { class: 'card' },
+    el('div', { class: 'row between' }, el('div', { class: 'label', text: `Stances at ${obj.object}` }), addVariant),
+    el('p', { class: 'muted small-text', text: `Robot ${data.robot}: base pose in the object's frame, so every ${obj.object} follows · ${data.files.stances}` }),
+    variants,
+    el('div', { class: 'sub', text: 'Per-object overrides' }),
+    overrides,
+    el('div', { class: 'row gap' }, overrideInstance, addOverride),
+    el('details', {}, el('summary', { text: `Placed ${obj.object} objects and resulting stances (read-only)` }), placed));
+}
+
+// One editable point. address = ['location', name] or ['stance', scope, owner, variant]; the last element is the name.
+function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabel = 'Name', instancePicker = null, fromRobot, note = '' }) {
+  const head = el('button', { class: 'point-head', 'aria-expanded': String(isNew) },
+    el('b', { text: title || 'new' }), el('span', { class: 'mono', text: fmt(pose) }),
+    usedBy.length ? el('span', { class: 'used', text: `used by ${usedBy.join(', ')}` }) : '');
+  const input = (label, value, attrs = {}) => {
+    const field = el('input', { autocomplete: 'off', spellcheck: 'false', ...attrs });
+    field.value = value;
+    return [el('div', { class: 'field' }, el('label', { text: label }), field), field];
+  };
+  const [nameField, nameInput] = input(nameLabel, name);
+  const [xField, xInput] = input('x (m)', String(pose.x), { type: 'number', step: 'any', inputmode: 'decimal' });
+  const [yField, yInput] = input('y (m)', String(pose.y), { type: 'number', step: 'any', inputmode: 'decimal' });
+  const [yawField, yawInput] = input('yaw (°)', String(+(pose.yaw * DEG).toFixed(2)), { type: 'number', step: 'any', inputmode: 'decimal' });
+  const msg = el('div', { class: 'msg', hidden: '' });
+  const robotButton = el('button', { class: 'btn small', text: 'Set from robot' });
+  const saveButton = el('button', { class: 'btn primary', text: 'Save', 'data-edit': '' });
+  const deleteButton = el('button', { class: 'btn danger', text: isNew ? 'Cancel' : 'Delete', 'data-edit': '' });
+  const edit = el('div', { class: 'point-edit' }, nameField, el('div', { class: 'grid3' }, xField, yField, yawField),
+    el('div', { class: 'row gap' }, instancePicker || '', robotButton),
+    note ? el('p', { class: 'muted small-text', text: note }) : '',
+    msg, el('div', { class: 'row gap' }, deleteButton, saveButton));
+  edit.hidden = !isNew;
+  const item = el('li', { class: 'point' }, head, edit);
+  head.addEventListener('click', () => { edit.hidden = !edit.hidden; head.setAttribute('aria-expanded', String(!edit.hidden)); });
+  if (isNew) setTimeout(() => nameInput.focus(), 0);
+
+  robotButton.addEventListener('click', async () => {
+    const robot = await refreshPose();
+    const value = robot && fromRobot(robot);
+    if (!value) { message(msg, 'No current robot pose.', true); return; }
+    xInput.value = value.x; yInput.value = value.y; yawInput.value = +(value.yaw * DEG).toFixed(2);
+    message(msg, 'Filled in from the robot. Check, then save.');
+  });
+  saveButton.addEventListener('click', async () => {
+    const newName = nameInput.value.trim();
+    if (!NAME_RE.test(newName)) { message(msg, 'Names use letters, digits, "_" and "-", starting with a letter.', true); return; }
+    const values = [xInput.value, yInput.value, yawInput.value].map(Number);
+    if ([xInput.value, yInput.value, yawInput.value].some((v) => v.trim() === '') || values.some((v) => !Number.isFinite(v))) {
+      message(msg, 'x, y and yaw must be numbers.', true); return;
+    }
+    const target = isNew ? [...address.slice(0, -1), newName] : address;
+    const body = { x: values[0], y: values[1], yaw: values[2] / DEG };
+    if (!isNew && newName !== name) body.rename = newName;
+    if (isNew) body.create = true;
+    const { ok, data } = await api('PUT', `/api/points/${target.map(encodeURIComponent).join('/')}`, body);
+    if (!ok) { message(msg, (data.problems || [data.error || 'not saved']).join('\n'), true); return; }
+    await loadPoints();
+  });
+  let armed = null;
+  deleteButton.addEventListener('click', async () => {
+    if (isNew) { item.remove(); return; }
+    if (!armed) {  // two taps: no browser dialogs
+      deleteButton.classList.add('confirm'); deleteButton.textContent = 'Tap again to delete';
+      armed = setTimeout(() => { deleteButton.classList.remove('confirm'); deleteButton.textContent = 'Delete'; armed = null; }, 3000);
+      return;
+    }
+    clearTimeout(armed); armed = null;
+    const { ok, data } = await api('DELETE', `/api/points/${address.map(encodeURIComponent).join('/')}`);
+    if (!ok) { deleteButton.classList.remove('confirm'); deleteButton.textContent = 'Delete'; message(msg, (data.problems || [data.error || 'not deleted']).join('\n'), true); return; }
+    await loadPoints();
+  });
+  return item;
+}
+$('btn-add-location').addEventListener('click', () => {
+  $('location-list').append(pointItem({
+    title: '', pose: { x: 0, y: 0, yaw: 0 }, usedBy: [], name: '', address: ['location', ''], isNew: true,
+    fromRobot: (robot) => robot.pose,
+  }));
+});
 
 connect();
 loadMissions();

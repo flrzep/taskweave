@@ -111,6 +111,37 @@ def test_teach_stance_stores_the_offset_for_the_type_or_the_instance(config_dir)
     assert store.stance_names('demo_bot')[-1] == 'stance:crate_1'
 
 
+def test_update_rename_and_delete_points_keep_comments_and_order(config_dir):
+    store = ConfigStore(config_dir)
+    path = store.update_point('cell/locations.yaml', ['home'], Pose2D(0.5, 0.0, 0.0), rename='start')
+    text = path.read_text()
+    start = next(line for line in text.splitlines() if line.startswith('start:'))
+    assert start.startswith('start: {frame: cell, x: 0.5, y: 0.0, yaw: 0.0}') and '# start position' in start
+    assert text.index('start:') < text.index('dock:')                                  # place kept
+    store.delete_point('cell/locations.yaml', ['dock'])
+    assert list(store.locations()) == ['start']
+    with pytest.raises(ValueError, match="no point 'dock'"):
+        store.update_point('cell/locations.yaml', ['dock'], rename='docking')
+    store.update_point('cell/locations.yaml', ['dock'], Pose2D(1.0, 1.0, 0.0))
+    with pytest.raises(ValueError, match="'start' already exists"):
+        store.update_point('cell/locations.yaml', ['dock'], rename='start')
+    with pytest.raises(ValueError, match='invalid point name'):
+        store.update_point('cell/locations.yaml', ['dock'], rename='2nd dock')
+
+
+def test_deleting_the_last_override_removes_the_instance_entry(config_dir):
+    store = ConfigStore(config_dir)
+    path = store.delete_point('robots/demo_bot/stances.yaml', ['instances', 'shelf_b', 'front'])
+    assert store.stance_offsets('demo_bot')['instances'] == {}
+    assert 'instances: {}' in path.read_text() and '# 0.75 m in front' in path.read_text()
+    assert store.base_target('stance:shelf_b', 'demo_bot').y == pytest.approx(0.25)    # falls back to the type
+    store.update_point('robots/demo_bot/stances.yaml', ['instances', 'shelf_b', 'front'],
+                       Pose2D(0, -1, 1.5708, 'shelf'))
+    assert store.base_target('stance:shelf_b', 'demo_bot').y == pytest.approx(0.0)
+    with pytest.raises(ValueError, match='not a point file'):
+        store.update_point('missions/patrol.yaml', ['steps'], Pose2D(0, 0, 0))
+
+
 def test_wrap_angle():
     assert wrap_angle(3.5) == pytest.approx(3.5 - 2 * 3.141592653589793)
     assert wrap_angle(-0.1) == pytest.approx(-0.1)

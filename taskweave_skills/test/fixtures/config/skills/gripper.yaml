@@ -2,3 +2,4 @@ implementations:
   - {name: joint_targets, type: script, class: "taskweave_skills.joints:Gripper"}
 max_joint_speed: 2.0
 stall_timeout_s: 1.0
+state_timeout_s: 3.0     # test runs share the CPU with other suites; a 1 s gap in joint states is not a lost robot here

@@ -16,6 +16,7 @@ Layout (all files YAML; files marked optional may be absent):
 
 from __future__ import annotations
 
+import json
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,7 @@ STANCE_PREFIX = 'stance:'
 LOCATION_PREFIX = 'location:'
 VARIANT_SEPARATOR = '/'     # stance:<instance>/<variant>
 POINT_METADATA = ('approach', 'tool_type', 'grip_width_m')  # keys of an object point that are not tool poses
+POINT_FILE_SCHEMAS = {'cell/locations.yaml': schemas.POINTS2D, 'stances.yaml': schemas.STANCES}  # files with 2D points
 
 
 class ConfigError(Exception):
@@ -174,10 +176,14 @@ class ConfigStore:
         return {name: ObjectInstance(name, entry['object'], Pose2D.from_dict(entry), float(entry.get('z', 0.0)))
                 for name, entry in data.items()}
 
+    def stance_offsets(self, robot: str) -> dict:
+        """robots/<robot>/stances.yaml as stored: ``{'objects': {type: {variant: pose}}, 'instances': {...}}``."""
+        return self._load(f'robots/{robot}/stances.yaml', schemas.STANCES, required=False, default={})
+
     def stance_variants(self, robot: str, instance: ObjectInstance) -> dict[str, Pose2D]:
         """The robot's stance offsets for one object instance, in the object's frame, by variant name: the object
         type's variants, overridden by the instance's own. The first one is the default."""
-        data = self._load(f'robots/{robot}/stances.yaml', schemas.STANCES, required=False, default={})
+        data = self.stance_offsets(robot)
         variants = dict(data.get('objects', {}).get(instance.object, {}))
         variants.update(data.get('instances', {}).get(instance.name, {}))
         return {name: Pose2D(float(v['x']), float(v['y']), float(v['yaw']), instance.object)
@@ -279,8 +285,7 @@ class ConfigStore:
             return self.save_stance(name, pose, robot, per_instance=kind == 'stance_instance')[0]
         if kind != 'location':
             raise ValueError(f'unknown kind {kind!r}')
-        self._check_name(name)
-        return self._write_point(self.root / 'cell/locations.yaml', [name], pose)
+        return self.update_point('cell/locations.yaml', [name], pose)
 
     def save_stance(self, reference: str, pose: Pose2D, robot: str, per_instance: bool = False) -> tuple[Path, Pose2D]:
         """Store ``pose`` (cell frame) as the robot's stance at ``<instance>[/<variant>]``; returns file and offset."""
@@ -293,32 +298,101 @@ class ConfigStore:
         self._check_name(variant)
         offset = pose.relative_to(instance.pose, instance.object)
         keys = ['instances', instance.name, variant] if per_instance else ['objects', instance.object, variant]
-        return self._write_point(self.root / f'robots/{robot}/stances.yaml', keys, offset), offset
+        return self.update_point(f'robots/{robot}/stances.yaml', keys, offset), offset
+
+    # ---- editing points (teach mode, HMI) ---------------------------------------
+    def update_point(self, relative: str, keys: list[str], pose: Pose2D | None = None,
+                     rename: str | None = None) -> Path:
+        """Set and/or rename the planar point at ``keys`` in a point file (``cell/locations.yaml`` or
+        ``robots/<robot>/stances.yaml``). An existing entry keeps its place, its comment and its frame key; a new
+        one is appended on one line. The result is checked against the file's schema before anything is written."""
+        from ruamel.yaml.comments import CommentedMap
+
+        if pose is None and rename is None:
+            raise ValueError('nothing to change')
+        self._check_name(keys[-1])
+        if rename is not None:
+            self._check_name(rename)
+
+        def edit(document):
+            node = document
+            for key in keys[:-1]:
+                if not isinstance(node.get(key), dict):
+                    node[key] = CommentedMap()
+                node.fa.set_block_style()
+                node = node[key]
+            node.fa.set_block_style()
+            name = keys[-1]
+            if pose is None and name not in node:
+                raise ValueError(f'no point {"/".join(keys)!r} in {relative}')
+            if pose is not None:
+                values = pose.to_dict()
+                if isinstance(node.get(name), dict):
+                    node[name].update({key: values[key] for key in ('x', 'y', 'yaw')})
+                else:
+                    entry = CommentedMap(values)
+                    entry.fa.set_flow_style()  # one line per point, like hand-written entries
+                    node[name] = entry
+            if rename is not None and rename != name:
+                if rename in node:
+                    raise ValueError(f'{"/".join(keys[:-1] + [rename])!r} already exists in {relative}')
+                position, value, comment = list(node).index(name), node[name], node.ca.items.pop(name, None)
+                del node[name]
+                node.insert(position, rename, value)
+                if comment is not None:
+                    node.ca.items[rename] = comment
+
+        return self._edit_yaml(relative, edit)
+
+    def delete_point(self, relative: str, keys: list[str]) -> Path:
+        """Remove the point at ``keys``; containers below the top level that become empty are removed too."""
+
+        def edit(document):
+            path = [document]
+            for key in keys[:-1]:
+                if not isinstance(path[-1].get(key), dict):
+                    raise ValueError(f'no point {"/".join(keys)!r} in {relative}')
+                path.append(path[-1][key])
+            if keys[-1] not in path[-1]:
+                raise ValueError(f'no point {"/".join(keys)!r} in {relative}')
+            del path[-1][keys[-1]]
+            for depth in range(len(keys) - 1, 1, -1):  # e.g. instances.<name> once its last variant is gone
+                if not path[depth]:
+                    del path[depth - 1][keys[depth - 1]]
+            for container in path[1:]:
+                if not container:
+                    container.fa.set_flow_style()  # an emptied top-level key reads `{}`
+
+        return self._edit_yaml(relative, edit)
+
+    def _edit_yaml(self, relative: str, edit) -> Path:
+        """Apply ``edit(document)`` to a point file with comments and order kept; write only if the result is valid."""
+        from ruamel.yaml import YAML  # only needed for writing
+        from ruamel.yaml.comments import CommentedMap
+
+        schema = POINT_FILE_SCHEMAS.get(relative) or POINT_FILE_SCHEMAS.get(Path(relative).name)
+        if schema is None:
+            raise ValueError(f'{relative} is not a point file')
+        path = self.root / relative
+        handler = YAML()
+        handler.preserve_quotes = True
+        document = handler.load(path.read_text(encoding='utf-8')) if path.is_file() else None
+        if document is None:
+            document = CommentedMap()
+        edit(document)
+        errors = sorted(Draft202012Validator(schema).iter_errors(json.loads(json.dumps(document))),
+                        key=lambda e: list(e.absolute_path))
+        if errors:
+            key = '.'.join(str(p) for p in errors[0].absolute_path)
+            raise ValueError(f'{relative}{f" [{key}]" if key else ""}: {errors[0].message}; nothing written')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('w', encoding='utf-8') as stream:
+            handler.dump(document, stream)
+        with self._lock:
+            self._cache.pop(path, None)
+        return path
 
     @staticmethod
     def _check_name(name: str) -> None:
         if not Draft202012Validator(schemas.NAME).is_valid(name):
             raise ValueError(f'invalid point name {name!r}: use letters, digits, "_" and "-", starting with a letter')
-
-    def _write_point(self, path: Path, keys: list[str], pose: Pose2D) -> Path:
-        """Set ``data[keys...] = pose`` in a YAML file, keeping comments and order."""
-        from ruamel.yaml import YAML  # only needed for teaching
-        from ruamel.yaml.comments import CommentedMap
-
-        handler = YAML()
-        handler.preserve_quotes = True
-        data = handler.load(path.read_text(encoding='utf-8')) if path.is_file() else None
-        node = data = data if data is not None else CommentedMap()
-        for key in keys[:-1]:
-            if not isinstance(node.get(key), dict):
-                node[key] = CommentedMap()
-            node = node[key]
-        entry = CommentedMap(pose.to_dict())
-        entry.fa.set_flow_style()  # one line per point, like hand-written entries
-        node[keys[-1]] = entry
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open('w', encoding='utf-8') as stream:
-            handler.dump(data, stream)
-        with self._lock:
-            self._cache.pop(path, None)
-        return path
