@@ -388,15 +388,18 @@ class ConfigStore:
         """Write the navigation settings, keeping the file's comments; checked against the schema first."""
         from ruamel.yaml.comments import CommentedMap
 
+        def clean(value):
+            return value if isinstance(value, bool) else round(float(value), 4)
+
         def edit(document):
             for key, value in settings.items():
                 if isinstance(value, dict):
                     entry = document.get(key) if isinstance(document.get(key), dict) else CommentedMap()
-                    entry.update({k: round(float(v), 4) for k, v in value.items()})
+                    entry.update({k: clean(v) for k, v in value.items()})
                     entry.fa.set_flow_style()
                     document[key] = entry
                 else:
-                    document[key] = round(float(value), 4)
+                    document[key] = clean(value)
 
         return self._edit_yaml(f'robots/{robot}/navigation.yaml', edit)
 

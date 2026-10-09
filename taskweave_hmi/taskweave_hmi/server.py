@@ -23,8 +23,9 @@ HTTP API (JSON):
   GET  /api/robot                  joint poses (with the missions using each), navigation clearance, footprint
   GET  /api/robot/joints           current joint positions
   PUT  /api/robot/poses/<name>     {joints[, rename, create]};  DELETE the same
-  PUT  /api/robot/navigation       {envelope: {front, back, left, right}, padding, inflation_radius}: saved and
-                                   applied to the running costmaps (parameter nav_costmaps)
+  PUT  /api/robot/navigation       {envelope: {front, back, left, right}, padding, inflation_radius, driving}: checked
+                                   against the robot's base, saved and applied to the running costmaps
+                                   (parameter nav_costmaps) and controller (nav_controller)
   POST /api/robot/move {pose}      run move_to_pose now (no mission running); returns the outcome when it ends
 Missions and points are edited between runs (409 while a mission runs) and are used at the next start.
 """
@@ -61,6 +62,7 @@ from taskweave_interfaces.action import RunSkill
 from taskweave_interfaces.msg import Plan as PlanMsg
 from taskweave_interfaces.msg import TaskStatus
 from taskweave_interfaces.srv import ListSkills, StartMission
+from taskweave_skills.nav2 import nav2_parameters
 
 from . import missions, points, robot
 
@@ -70,6 +72,7 @@ CALL_TIMEOUT_S = 5.0
 STATIC_FILES = ('app.js', 'robot.js', 'style.css')
 MANUAL_SKILL_TIMEOUT_S = 120.0
 NAV_COSTMAPS = ['/local_costmap/local_costmap', '/global_costmap/global_costmap']  # Nav2 defaults
+NAV_CONTROLLER = '/controller_server'
 OUTCOMES = ['succeeded', 'failed', 'timeout', 'canceled', 'rejected']
 CONTENT_TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
                  '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml'}
@@ -89,6 +92,16 @@ def status_dict(msg: TaskStatus) -> dict:
             'step_elapsed_s': msg.step_elapsed_s, 'last_error': msg.last_error}
 
 
+def ros_parameter(name: str, value) -> Parameter:
+    if isinstance(value, bool):
+        return Parameter(name=name, value=ParameterValue(type=ParameterType.PARAMETER_BOOL, bool_value=value))
+    if isinstance(value, int):
+        return Parameter(name=name, value=ParameterValue(type=ParameterType.PARAMETER_INTEGER, integer_value=value))
+    if isinstance(value, float):
+        return Parameter(name=name, value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=value))
+    return Parameter(name=name, value=ParameterValue(type=ParameterType.PARAMETER_STRING, string_value=str(value)))
+
+
 class Busy(Exception):
     """The request would change config while a mission runs."""
 
@@ -97,7 +110,7 @@ class Bridge(Node):
     def __init__(self, **kwargs):
         super().__init__(kwargs.pop('node_name', 'hmi_server'), **kwargs)
         for name, default in (('config_dir', ''), ('robot', ''), ('host', ''), ('port', 8090),
-                              ('nav_costmaps', NAV_COSTMAPS)):
+                              ('nav_costmaps', NAV_COSTMAPS), ('nav_controller', NAV_CONTROLLER)):
             self.declare_parameter(name, default)
         self.config = ConfigStore(self.get_parameter('config_dir').value)
         self.robot = self.get_parameter('robot').value
@@ -129,7 +142,7 @@ class Bridge(Node):
             self.create_subscription(JointState, joints['state'], self._joint_states, 10, callback_group=self.group)
         self.param_clients = {
             node: self.create_client(SetParameters, f'{node}/set_parameters', callback_group=self.group)
-            for node in self.get_parameter('nav_costmaps').value}
+            for node in [*self.get_parameter('nav_costmaps').value, self.get_parameter('nav_controller').value]}
         self.skill_lock = threading.Lock()  # one manual skill at a time
         self.skill_clients: dict[str, ActionClient] = {}
 
@@ -187,20 +200,16 @@ class Bridge(Node):
             return robot.DEFAULT_POSE_ARGS
 
     def apply_navigation(self, settings: dict) -> dict[str, str]:
-        """Set the clearance on the running costmaps; node -> 'applied' or the reason it was not."""
-        values = [Parameter(name='footprint', value=ParameterValue(
-                      type=ParameterType.PARAMETER_STRING, string_value=json.dumps(robot.footprint(settings))))]
-        if 'padding' in settings:
-            values.append(Parameter(name='footprint_padding', value=ParameterValue(
-                type=ParameterType.PARAMETER_DOUBLE, double_value=float(settings['padding']))))
-        if 'inflation_radius' in settings:
-            values.append(Parameter(name='inflation_layer.inflation_radius', value=ParameterValue(
-                type=ParameterType.PARAMETER_DOUBLE, double_value=float(settings['inflation_radius']))))
+        """Set clearance and driving on the running path planner; node -> 'applied' or the reason it was not."""
+        values = nav2_parameters(settings, self.config.robot(self.robot).base)
         result = {}
         for node, client in self.param_clients.items():
+            params = values['controller'] if node == self.get_parameter('nav_controller').value else values['costmap']
+            if not params:
+                continue
             try:
-                response = self.call(client, SetParameters.Request(parameters=values))
-                failed = [r.reason for r in response.results if not r.successful]
+                request = SetParameters.Request(parameters=[ros_parameter(k, v) for k, v in params.items()])
+                failed = [r.reason for r in self.call(client, request).results if not r.successful]
                 result[node] = 'applied' if not failed else '; '.join(failed)
             except TimeoutError as error:
                 result[node] = str(error)

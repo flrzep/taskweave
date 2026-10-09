@@ -26,6 +26,44 @@ from .navigate import NavigateTo
 
 NAV2_DEFAULTS = {'action': 'navigate_to_pose', 'frame': 'map', 'server_timeout_s': 10.0, 'handover_distance': 0.3}
 POLL_S = 0.05
+NEUTRAL_PATH_ANGLE_WEIGHT = 2.0  # PathAngleCritic without a forward preference (follows the path, any heading)
+
+
+def nav2_parameters(navigation: dict, base: dict, controller: str = 'FollowPath') -> dict:
+    """Nav2 parameters for robots/<robot>/navigation.yaml and the robot profile's base (no ROS needed).
+
+    Returns {'costmap': {...}, 'controller': {...}, 'motion_model': str}: costmap values for both costmaps, MPPI values
+    for the controller plugin ``controller`` (prefixed), and the MPPI motion model (set at start-up only). A base that
+    is not holonomic never drives sideways, whatever the settings say."""
+    if navigation.get('envelope'):
+        e = navigation['envelope']
+        front, back, left, right = e['front'], e['back'], e['left'], e['right']
+    else:  # the chassis footprint, centred on the base frame
+        length, width = base['footprint']
+        front, back, left, right = length / 2, length / 2, width / 2, width / 2
+    polygon = [[front, left], [front, -right], [-back, -right], [-back, left]]
+    costmap = {'footprint': str(polygon), 'footprint_padding': float(navigation.get('padding', 0.01))}
+    if 'inflation_radius' in navigation:
+        costmap['inflation_layer.inflation_radius'] = float(navigation['inflation_radius'])
+    holonomic = base.get('type') == 'holonomic'
+    driving = navigation.get('driving', {})
+    values = {}
+    if 'max_forward' in driving:
+        values['vx_max'] = float(driving['max_forward'])
+    if 'max_reverse' in driving:
+        values['vx_min'] = -float(driving['max_reverse'])
+    if 'max_turn' in driving:
+        values['wz_max'] = float(driving['max_turn'])
+    if 'sideways' in driving or not holonomic:
+        sideways = holonomic and driving.get('sideways', True)
+        values['vy_max'] = float(driving.get('max_sideways', 0.5)) if sideways else 0.0
+    if 'prefer_forward' in driving:
+        weight = float(driving['prefer_forward'])
+        values['PathAngleCritic.mode'] = 0 if weight > 0 else 2           # 0: face along the path, 2: any heading
+        values['PathAngleCritic.cost_weight'] = weight if weight > 0 else NEUTRAL_PATH_ANGLE_WEIGHT
+        values['PreferForwardCritic.cost_weight'] = weight                 # penalises reversing
+    return {'costmap': costmap, 'controller': {f'{controller}.{k}': v for k, v in values.items()},
+            'motion_model': 'Omni' if holonomic else 'DiffDrive'}
 
 
 class Nav2NavigateTo(NavigateTo):

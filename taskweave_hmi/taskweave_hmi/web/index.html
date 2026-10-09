@@ -117,7 +117,8 @@
   <section id="view-robot" class="view" hidden>
     <div id="robot-busy" class="error" hidden></div>
     <div class="card">
-      <div class="label">Navigation clearance</div>
+      <div class="label">Navigation</div>
+      <div class="sub">Clearance</div>
       <p class="muted small-text">Room the path planner keeps around the robot while driving: the envelope covers the robot in
         its driving pose (arms included), measured from the base frame. Saved to <span id="nav-file" class="mono"></span>
         and applied to the running planner at once.</p>
@@ -129,6 +130,18 @@
         <div class="field"><label for="nav-right">Right (m)</label><input id="nav-right" type="number" step="0.01" min="0.01" inputmode="decimal"></div>
         <div class="field"><label for="nav-padding">Padding (m)</label><input id="nav-padding" type="number" step="0.01" min="0" inputmode="decimal"></div>
         <div class="field"><label for="nav-inflation">Inflation radius (m)</label><input id="nav-inflation" type="number" step="0.05" min="0.05" inputmode="decimal"></div>
+      </div>
+      <div class="sub">Driving</div>
+      <p class="muted small-text">Speed limits for the path planner (capped by the robot profile) and how it drives. A stronger
+        forward preference makes the robot turn to face along its path instead of moving sideways or backwards.</p>
+      <div class="grid2">
+        <div class="field"><label for="drv-forward">Forward max (m/s)</label><input id="drv-forward" type="number" step="0.05" min="0.05" inputmode="decimal"></div>
+        <div class="field"><label for="drv-reverse">Reverse max (m/s, 0 = never)</label><input id="drv-reverse" type="number" step="0.05" min="0" inputmode="decimal"></div>
+        <div class="field"><label for="drv-turn">Turn max (°/s)</label><input id="drv-turn" type="number" step="5" min="5" inputmode="decimal"></div>
+        <div class="field"><label for="drv-prefer">Forward preference (0 = none, 5 = strong)</label><input id="drv-prefer" type="number" step="0.5" min="0" inputmode="decimal"></div>
+        <div class="field"><label class="check"><input id="drv-sideways" type="checkbox"> Allow sideways</label>
+          <small id="drv-sideways-note" class="muted"></small></div>
+        <div class="field"><label for="drv-sideways-max">Sideways max (m/s)</label><input id="drv-sideways-max" type="number" step="0.05" min="0" inputmode="decimal"></div>
       </div>
       <div id="nav-msg" class="msg" hidden></div>
       <div class="row gap"><button id="btn-nav-save" class="btn primary" data-edit>Save and apply</button></div>

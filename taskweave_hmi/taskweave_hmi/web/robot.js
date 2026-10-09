@@ -18,6 +18,18 @@ async function loadRobot() {
   $('nav-padding').value = nav.padding ?? 0;
   $('nav-inflation').value = nav.inflation_radius ?? 0.65;
   message($('nav-msg'), nav.envelope ? '' : 'No navigation.yaml yet: the values shown are the chassis footprint.');
+  // driving: defaults are the planner's start-up tuning (ros/nav2_params.yaml)
+  const driving = { max_forward: 0.6, max_reverse: 0.4, max_turn: 1.0, max_sideways: 0.5, prefer_forward: 0, ...nav.driving };
+  const holonomic = data.base_type === 'holonomic';
+  $('drv-forward').value = driving.max_forward;
+  $('drv-reverse').value = driving.max_reverse;
+  $('drv-turn').value = +(driving.max_turn * DEG).toFixed(1);
+  $('drv-prefer').value = driving.prefer_forward;
+  $('drv-sideways').checked = holonomic && (driving.sideways ?? true);
+  $('drv-sideways').disabled = !holonomic;
+  $('drv-sideways-max').value = driving.max_sideways;
+  $('drv-sideways-note').textContent = holonomic ? '' : `This robot's base is ${data.base_type}: it cannot drive sideways.`;
+  updateSideways();
   drawSketch();
   $('pose-list').replaceChildren(...data.poses.map((pose) => poseItem(pose)));
   setPointsBusy(pointsBusy);
@@ -28,8 +40,18 @@ function navSettings() {
   NAV_FIELDS.forEach((side) => { settings.envelope[side] = Number($(`nav-${side}`).value); });
   settings.padding = Number($('nav-padding').value);
   settings.inflation_radius = Number($('nav-inflation').value);
+  settings.driving = {
+    max_forward: Number($('drv-forward').value), max_reverse: Number($('drv-reverse').value),
+    max_turn: Number($('drv-turn').value) / DEG, prefer_forward: Number($('drv-prefer').value),
+    sideways: $('drv-sideways').checked, max_sideways: Number($('drv-sideways-max').value),
+  };
   return settings;
 }
+
+function updateSideways() {
+  $('drv-sideways-max').disabled = !$('drv-sideways').checked;
+}
+$('drv-sideways').addEventListener('change', updateSideways);
 
 // Top view, robot x (forward) up and y (left) to the left, 1 unit = 1 m: inflation zone, chassis, padding, envelope.
 function drawSketch() {

@@ -58,6 +58,8 @@ def overview(store: ConfigStore, robot: str, args: set[tuple[str, str]]) -> dict
                   for name, values in store.joint_poses(robot).items()],
         'navigation': store.navigation(robot),
         'footprint': profile.base.get('footprint'),
+        'base_type': profile.base.get('type'),          # sideways driving only for 'holonomic'
+        'limits': profile.base.get('limits', {}),       # linear (m/s), angular (rad/s): caps for the driving speeds
     }
 
 
@@ -105,23 +107,27 @@ def delete_pose(store: ConfigStore, robot: str, name: str, args: set[tuple[str, 
     return str(path.relative_to(store.root))
 
 
-def check_navigation(settings: Mapping) -> dict:
+def check_navigation(settings: Mapping, base: Mapping) -> dict:
+    """Schema, then what the robot's base allows: sideways only when holonomic, speeds within base.limits."""
     errors = sorted(Draft202012Validator(schemas.NAVIGATION).iter_errors(settings), key=lambda e: list(e.absolute_path))
-    if errors:
-        raise RobotSettingsError('; '.join(f'{".".join(map(str, e.absolute_path)) or "settings"}: {e.message}'
-                                           for e in errors))
+    problems = [f'{".".join(map(str, e.absolute_path)) or "settings"}: {e.message}' for e in errors]
+    driving = settings.get('driving', {}) if not errors else {}
+    if driving.get('sideways') and base.get('type') != 'holonomic':
+        problems.append(f'driving.sideways: the robot base is {base.get("type")!r} and cannot drive sideways')
+    limits = base.get('limits', {})
+    for key, limit in (('max_forward', 'linear'), ('max_reverse', 'linear'), ('max_sideways', 'linear'),
+                       ('max_turn', 'angular')):
+        if key in driving and limit in limits and driving[key] > limits[limit]:
+            problems.append(f'driving.{key}: {driving[key]} is above the base limit {limits[limit]}')
+    if problems:
+        raise RobotSettingsError('; '.join(problems))
     return dict(settings)
 
 
 def save_navigation(store: ConfigStore, robot: str, settings: Mapping) -> str:
     try:
-        path = store.save_navigation(robot, check_navigation(settings))
+        path = store.save_navigation(robot, check_navigation(settings, store.robot(robot).base))
     except ValueError as error:
         raise RobotSettingsError(str(error)) from error
     return str(path.relative_to(store.root))
 
-
-def footprint(settings: Mapping) -> list[list[float]]:
-    """Envelope (front/back/left/right from the base frame) as a polygon in the base frame (x forward, y left)."""
-    e = settings['envelope']
-    return [[e['front'], e['left']], [e['front'], -e['right']], [-e['back'], -e['right']], [-e['back'], e['left']]]

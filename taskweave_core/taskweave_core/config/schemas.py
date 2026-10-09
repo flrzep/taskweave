@@ -151,6 +151,20 @@ NAVIGATION = {
         },
         'padding': {'type': 'number', 'minimum': 0},
         'inflation_radius': POSITIVE,
+        # how the planner may drive: speed limits (m/s, rad/s), sideways only for a holonomic base (checked against
+        # the robot profile), prefer_forward = weight for facing along the path and not reversing (0 = no preference)
+        'driving': {
+            'type': 'object',
+            'properties': {
+                'max_forward': POSITIVE,
+                'max_reverse': {'type': 'number', 'minimum': 0},
+                'max_turn': POSITIVE,
+                'sideways': {'type': 'boolean'},
+                'max_sideways': {'type': 'number', 'minimum': 0},
+                'prefer_forward': {'type': 'number', 'minimum': 0},
+            },
+            'additionalProperties': False,
+        },
     },
     'additionalProperties': False,
 }

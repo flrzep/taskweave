@@ -63,15 +63,26 @@ def test_used_poses_cannot_be_renamed_or_deleted(store):
     assert list(store.joint_poses(ROBOT)) == ['carry']
 
 
-def test_navigation_is_checked_saved_and_turned_into_a_footprint(store):
+def test_navigation_is_checked_and_saved(store):
     settings = {'envelope': {'front': 0.95, 'back': 0.3, 'left': 0.45, 'right': 0.4}, 'padding': 0.05,
-                'inflation_radius': 0.65}
-    robot.save_navigation(store, ROBOT, settings)
+                'inflation_radius': 0.65,
+                'driving': {'max_forward': 0.5, 'max_reverse': 0.0, 'max_turn': 1.0, 'sideways': True,
+                            'max_sideways': 0.2, 'prefer_forward': 5.0}}
+    robot.save_navigation(store, ROBOT, settings)                                     # demo_bot is holonomic
     assert store.navigation(ROBOT) == settings
-    assert robot.footprint(settings) == [[0.95, 0.45], [0.95, -0.4], [-0.3, -0.4], [-0.3, 0.45]]
+    assert 'sideways: true' in (store.root / 'robots' / ROBOT / 'navigation.yaml').read_text()   # stays a boolean
     with pytest.raises(robot.RobotSettingsError, match='envelope.front'):
         robot.save_navigation(store, ROBOT, {'envelope': {**settings['envelope'], 'front': 0}})
+    with pytest.raises(robot.RobotSettingsError, match='above the base limit'):
+        robot.save_navigation(store, ROBOT, {**settings, 'driving': {'max_forward': 9.0}})
     assert store.navigation(ROBOT) == settings                                       # nothing written
+
+
+def test_a_base_that_is_not_holonomic_cannot_drive_sideways():
+    settings = {'envelope': {'front': 0.5, 'back': 0.5, 'left': 0.3, 'right': 0.3}, 'driving': {'sideways': True}}
+    with pytest.raises(robot.RobotSettingsError, match="'differential' and cannot drive sideways"):
+        robot.check_navigation(settings, {'type': 'differential'})
+    assert robot.check_navigation({**settings, 'driving': {'sideways': False}}, {'type': 'differential'})
 
 
 def test_pose_args_fall_back_when_the_catalog_names_none():
