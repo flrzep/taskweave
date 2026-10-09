@@ -32,7 +32,10 @@ STANCE_PREFIX = 'stance:'
 LOCATION_PREFIX = 'location:'
 VARIANT_SEPARATOR = '/'     # stance:<instance>/<variant>
 POINT_METADATA = ('approach', 'tool_type', 'grip_width_m')  # keys of an object point that are not tool poses
-POINT_FILE_SCHEMAS = {'cell/locations.yaml': schemas.POINTS2D, 'stances.yaml': schemas.STANCES}  # files with 2D points
+POINT_FILE_SCHEMAS = {  # files that teaching and the HMI may edit (a file name matches any robot folder)
+    'cell/locations.yaml': schemas.POINTS2D, 'stances.yaml': schemas.STANCES, 'poses.yaml': schemas.JOINT_POSES,
+    'navigation.yaml': schemas.NAVIGATION,
+}
 
 
 class ConfigError(Exception):
@@ -334,15 +337,68 @@ class ConfigStore:
                     entry.fa.set_flow_style()  # one line per point, like hand-written entries
                     node[name] = entry
             if rename is not None and rename != name:
-                if rename in node:
-                    raise ValueError(f'{"/".join(keys[:-1] + [rename])!r} already exists in {relative}')
-                position, value, comment = list(node).index(name), node[name], node.ca.items.pop(name, None)
-                del node[name]
-                node.insert(position, rename, value)
-                if comment is not None:
-                    node.ca.items[rename] = comment
+                self._rename_key(node, name, rename, '/'.join(keys[:-1] + [rename]), relative)
 
         return self._edit_yaml(relative, edit)
+
+    @staticmethod
+    def _rename_key(node, name: str, rename: str, label: str, relative: str) -> None:
+        """Rename a mapping key in place, keeping its position and its end-of-line comment."""
+        if rename in node:
+            raise ValueError(f'{label!r} already exists in {relative}')
+        position, value, comment = list(node).index(name), node[name], node.ca.items.pop(name, None)
+        del node[name]
+        node.insert(position, rename, value)
+        if comment is not None:
+            node.ca.items[rename] = comment
+
+    def set_joint_pose(self, robot: str, name: str, values: dict[str, float] | None = None,
+                       rename: str | None = None, note: str | None = None) -> Path:
+        """Set and/or rename a named joint pose in robots/<robot>/poses.yaml (joint -> rad or m). New poses are
+        appended on one line; ``note`` replaces the entry's end-of-line comment (e.g. an outdated IK error)."""
+        from ruamel.yaml.comments import CommentedMap
+
+        relative = f'robots/{robot}/poses.yaml'
+        if values is None and rename is None:
+            raise ValueError('nothing to change')
+        self._check_name(name)
+        if rename is not None:
+            self._check_name(rename)
+
+        def edit(document):
+            if values is None and name not in document:
+                raise ValueError(f'no pose {name!r} in {relative}')
+            if values is not None:
+                entry = CommentedMap((joint, round(float(value), 4)) for joint, value in values.items())
+                entry.fa.set_flow_style()
+                document[name] = entry
+                if note:
+                    document.ca.items.pop(name, None)
+                    document.yaml_add_eol_comment(note, name, column=2)  # right after the entry
+            if rename is not None and rename != name:
+                self._rename_key(document, name, rename, rename, relative)
+
+        return self._edit_yaml(relative, edit)
+
+    def navigation(self, robot: str) -> dict:
+        """robots/<robot>/navigation.yaml: room kept around the robot while driving; {} if absent."""
+        return self._load(f'robots/{robot}/navigation.yaml', schemas.NAVIGATION, required=False, default={})
+
+    def save_navigation(self, robot: str, settings: dict) -> Path:
+        """Write the navigation settings, keeping the file's comments; checked against the schema first."""
+        from ruamel.yaml.comments import CommentedMap
+
+        def edit(document):
+            for key, value in settings.items():
+                if isinstance(value, dict):
+                    entry = document.get(key) if isinstance(document.get(key), dict) else CommentedMap()
+                    entry.update({k: round(float(v), 4) for k, v in value.items()})
+                    entry.fa.set_flow_style()
+                    document[key] = entry
+                else:
+                    document[key] = round(float(value), 4)
+
+        return self._edit_yaml(f'robots/{robot}/navigation.yaml', edit)
 
     def delete_point(self, relative: str, keys: list[str]) -> Path:
         """Remove the point at ``keys``; containers below the top level that become empty are removed too."""
@@ -376,6 +432,7 @@ class ConfigStore:
         path = self.root / relative
         handler = YAML()
         handler.preserve_quotes = True
+        handler.width = 4096  # one line per entry, as written by hand and by tools (joint poses are long)
         document = handler.load(path.read_text(encoding='utf-8')) if path.is_file() else None
         if document is None:
             document = CommentedMap()

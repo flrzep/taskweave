@@ -34,6 +34,7 @@ document.querySelectorAll('.tabs button').forEach((button) => button.addEventLis
   if (button.dataset.view === 'missions' && !state.editing) loadMissions();
   pointsVisible = button.dataset.view === 'points';
   if (pointsVisible) { loadPoints(); refreshPose(); }
+  if (button.dataset.view === 'robot') loadRobot();  // robot.js
 }));
 
 // ---------- live state ----------
@@ -342,7 +343,8 @@ const NAME_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 function setPointsBusy(text) {
   pointsBusy = text;
   message($('points-busy'), text, true);
-  document.querySelectorAll('#view-points [data-edit]').forEach((button) => { button.disabled = !!text; });
+  message($('robot-busy'), text, true);
+  document.querySelectorAll('#view-points [data-edit], #view-robot [data-edit]').forEach((button) => { button.disabled = !!text; });
 }
 
 async function refreshPose() {

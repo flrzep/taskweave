@@ -24,7 +24,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--
         font: 700 13px var(--mono); }
 .conn { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); }
 .conn.on { background: var(--ok); }
-.tabs { position: sticky; top: calc(53px + env(safe-area-inset-top, 0px)); z-index: 2; display: grid; grid-template-columns: repeat(4, 1fr);
+.tabs { position: sticky; top: calc(53px + env(safe-area-inset-top, 0px)); z-index: 2; display: grid; grid-template-columns: repeat(5, 1fr);
         background: var(--card); border-bottom: 1px solid var(--line); }
 .tabs button { border: 0; background: none; color: var(--muted); font: 600 14px var(--sans); padding: 12px 0; border-bottom: 2px solid transparent; }
 .tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
@@ -102,3 +102,15 @@ details[open] summary { margin-bottom: 8px; }
 .placed li { font: 12.5px/1.5 var(--mono); border-bottom: 1px solid var(--line); padding: 4px 0; overflow-wrap: anywhere; }
 .placed { list-style: none; margin: 0; padding: 0; }
 .stack { display: grid; gap: 14px; min-width: 0; }
+
+/* robot tab */
+.sketch { width: 100%; max-height: 220px; background: var(--field); border-radius: 8px; }
+.sketch .chassis { fill: color-mix(in srgb, var(--muted) 25%, transparent); stroke: var(--muted); stroke-width: 0.01; }
+.sketch .envelope { fill: none; stroke: var(--accent); stroke-width: 0.02; }
+.sketch .padding { fill: none; stroke: var(--accent); stroke-width: 0.01; stroke-dasharray: 0.04 0.03; }
+.sketch .inflation { fill: color-mix(in srgb, var(--warn) 12%, transparent); stroke: none; }
+.sketch .heading { fill: var(--fg); }
+.joint-group { border-top: 1px solid var(--line); padding-top: 6px; display: grid; gap: 6px; }
+.joint-group > label { display: flex; gap: 8px; align-items: center; font: 600 13px var(--sans); color: var(--muted); }
+.joint-group > label input { width: auto; min-height: 0; }
+.joint-group .grid3 .field label { font-family: var(--mono); font-size: 11.5px; }

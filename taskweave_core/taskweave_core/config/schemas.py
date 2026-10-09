@@ -135,6 +135,26 @@ JOINT_POSES = {
 
 POINTS2D = {'type': 'object', 'additionalProperties': POSE2D, 'propertyNames': NAME}
 
+# robots/<model>/navigation.yaml: how much room a path planner keeps around the robot while it drives. The envelope
+# covers the robot in its driving pose (arms included), as distances from the base frame; padding and inflation as
+# in Nav2 (padding grows the envelope, inflation adds a cost gradient beyond it).
+POSITIVE = {'type': 'number', 'exclusiveMinimum': 0}
+NAVIGATION = {
+    'type': 'object',
+    'required': ['envelope'],
+    'properties': {
+        'envelope': {
+            'type': 'object',
+            'required': ['front', 'back', 'left', 'right'],
+            'properties': {side: POSITIVE for side in ('front', 'back', 'left', 'right')},
+            'additionalProperties': False,
+        },
+        'padding': {'type': 'number', 'minimum': 0},
+        'inflation_radius': POSITIVE,
+    },
+    'additionalProperties': False,
+}
+
 # cell/objects.yaml: placed object instances, name -> object type and pose in the cell frame
 OBJECT_INSTANCES = {
     'type': 'object',

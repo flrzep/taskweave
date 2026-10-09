@@ -20,6 +20,12 @@ HTTP API (JSON):
   PUT  /api/points/stance/<objects|instances>/<owner>/<variant>  {x, y, yaw[, rename]}  (offset in the object frame)
   DELETE the same addresses;  422 with {problems} if refused, nothing written
   GET  /api/robot_pose             current base pose in the cell and relative to every placed object
+  GET  /api/robot                  joint poses (with the missions using each), navigation clearance, footprint
+  GET  /api/robot/joints           current joint positions
+  PUT  /api/robot/poses/<name>     {joints[, rename, create]};  DELETE the same
+  PUT  /api/robot/navigation       {envelope: {front, back, left, right}, padding, inflation_radius}: saved and
+                                   applied to the running costmaps (parameter nav_costmaps)
+  POST /api/robot/move {pose}      run move_to_pose now (no mission running); returns the outcome when it ends
 Missions and points are edited between runs (409 while a mission runs) and are used at the next start.
 """
 
@@ -37,25 +43,34 @@ from urllib.parse import unquote
 
 import rclpy
 from nav_msgs.msg import Odometry
+from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+from rcl_interfaces.srv import SetParameters
+from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
+from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
 from taskweave_core import names
 from taskweave_core.config import ConfigError, ConfigStore, Pose2D
 from taskweave_core.teach import MAX_POSE_AGE_S, yaw_from_quaternion
+from taskweave_interfaces.action import RunSkill
 from taskweave_interfaces.msg import Plan as PlanMsg
 from taskweave_interfaces.msg import TaskStatus
 from taskweave_interfaces.srv import ListSkills, StartMission
 
-from . import missions, points
+from . import missions, points, robot
 
 WEB = Path(__file__).parent / 'web'
 STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
 CALL_TIMEOUT_S = 5.0
+STATIC_FILES = ('app.js', 'robot.js', 'style.css')
+MANUAL_SKILL_TIMEOUT_S = 120.0
+NAV_COSTMAPS = ['/local_costmap/local_costmap', '/global_costmap/global_costmap']  # Nav2 defaults
+OUTCOMES = ['succeeded', 'failed', 'timeout', 'canceled', 'rejected']
 CONTENT_TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
                  '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml'}
 
@@ -81,7 +96,8 @@ class Busy(Exception):
 class Bridge(Node):
     def __init__(self, **kwargs):
         super().__init__(kwargs.pop('node_name', 'hmi_server'), **kwargs)
-        for name, default in (('config_dir', ''), ('robot', ''), ('host', ''), ('port', 8090)):
+        for name, default in (('config_dir', ''), ('robot', ''), ('host', ''), ('port', 8090),
+                              ('nav_costmaps', NAV_COSTMAPS)):
             self.declare_parameter(name, default)
         self.config = ConfigStore(self.get_parameter('config_dir').value)
         self.robot = self.get_parameter('robot').value
@@ -106,6 +122,16 @@ class Bridge(Node):
         self.pose_stamp = 0.0
         self.odom_topic = self.config.robot(self.robot).base['odom']
         self.create_subscription(Odometry, self.odom_topic, self._odom, 10, callback_group=self.group)
+        self.joints: dict[str, float] = {}
+        self.joints_stamp = 0.0
+        joints = self.config.robot(self.robot).data.get('joints', {})
+        if joints.get('state'):
+            self.create_subscription(JointState, joints['state'], self._joint_states, 10, callback_group=self.group)
+        self.param_clients = {
+            node: self.create_client(SetParameters, f'{node}/set_parameters', callback_group=self.group)
+            for node in self.get_parameter('nav_costmaps').value}
+        self.skill_lock = threading.Lock()  # one manual skill at a time
+        self.skill_clients: dict[str, ActionClient] = {}
 
     # ---- ROS -> state ------------------------------------------------------------
     def _broadcast(self, kind: str, data) -> None:
@@ -139,11 +165,77 @@ class Bridge(Node):
             raise TimeoutError(f'no current robot pose on {self.odom_topic}')
         return self.pose
 
+    def _joint_states(self, msg: JointState) -> None:
+        self.joints = {**self.joints, **dict(zip(msg.name, msg.position, strict=False))}
+        self.joints_stamp = time.monotonic()
+
+    def joint_positions(self) -> dict[str, float]:
+        if not self.joints or time.monotonic() - self.joints_stamp > MAX_POSE_AGE_S:
+            raise TimeoutError('no current joint states')
+        return dict(self.joints)
+
     def check_idle(self) -> None:
         with self.lock:
             state = self.status['state']
         if state in ('running', 'paused'):
-            raise Busy(f'a mission is {state}; edit points when it has finished or was aborted')
+            raise Busy(f'a mission is {state}; change settings when it has finished or was aborted')
+
+    def pose_args(self) -> set:
+        try:
+            return robot.pose_args(self.catalog())
+        except TimeoutError:
+            return robot.DEFAULT_POSE_ARGS
+
+    def apply_navigation(self, settings: dict) -> dict[str, str]:
+        """Set the clearance on the running costmaps; node -> 'applied' or the reason it was not."""
+        values = [Parameter(name='footprint', value=ParameterValue(
+                      type=ParameterType.PARAMETER_STRING, string_value=json.dumps(robot.footprint(settings))))]
+        if 'padding' in settings:
+            values.append(Parameter(name='footprint_padding', value=ParameterValue(
+                type=ParameterType.PARAMETER_DOUBLE, double_value=float(settings['padding']))))
+        if 'inflation_radius' in settings:
+            values.append(Parameter(name='inflation_layer.inflation_radius', value=ParameterValue(
+                type=ParameterType.PARAMETER_DOUBLE, double_value=float(settings['inflation_radius']))))
+        result = {}
+        for node, client in self.param_clients.items():
+            try:
+                response = self.call(client, SetParameters.Request(parameters=values))
+                failed = [r.reason for r in response.results if not r.successful]
+                result[node] = 'applied' if not failed else '; '.join(failed)
+            except TimeoutError as error:
+                result[node] = str(error)
+        return result
+
+    def run_skill(self, skill: str, args: dict, timeout_s: float = MANUAL_SKILL_TIMEOUT_S) -> dict:
+        """Run one skill directly (no mission), e.g. move to a joint pose to check it. Blocks until it ends."""
+        self.check_idle()
+        if not self.skill_lock.acquire(blocking=False):
+            raise Busy('another manual skill is running')
+        try:
+            action = self.skill_clients.get(skill)
+            if action is None:
+                action = self.skill_clients[skill] = ActionClient(self, RunSkill, names.skill_action(skill),
+                                                                  callback_group=self.group)
+            if not action.wait_for_server(timeout_sec=CALL_TIMEOUT_S):
+                raise TimeoutError(f'skill {skill} is not served')
+            goal = RunSkill.Goal(step_id='hmi', skill=skill, args_json=json.dumps(args), timeout_s=timeout_s,
+                                 instruction=f'{skill} from the HMI')
+            sent = action.send_goal_async(goal)
+            deadline = time.monotonic() + CALL_TIMEOUT_S
+            while not sent.done() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if not sent.done() or not sent.result().accepted:
+                raise TimeoutError(f'{skill} did not accept the goal')
+            result = sent.result().get_result_async()
+            deadline = time.monotonic() + timeout_s + CALL_TIMEOUT_S
+            while not result.done() and time.monotonic() < deadline:
+                time.sleep(0.1)
+            if not result.done():
+                raise TimeoutError(f'{skill} did not finish in {timeout_s:g} s')
+            outcome = result.result().result
+            return {'outcome': OUTCOMES[outcome.outcome], 'message': outcome.message}
+        finally:
+            self.skill_lock.release()
 
     def _episode(self, msg: String) -> None:
         event = json.loads(msg.data)
@@ -208,7 +300,7 @@ class Handler(BaseHTTPRequestHandler):
         bridge, path = self.bridge, self.path.split('?', 1)[0].rstrip('/') or '/'
         parts = [p for p in path.split('/') if p]
         try:
-            if method == 'GET' and (path == '/' or (len(parts) == 1 and parts[0] in ('app.js', 'style.css'))):
+            if method == 'GET' and (path == '/' or (len(parts) == 1 and parts[0] in STATIC_FILES)):
                 file = WEB / ('index.html' if path == '/' else parts[0])
                 return self._send(HTTPStatus.OK, file.read_bytes(), CONTENT_TYPES[file.suffix])
             if parts[:1] != ['api']:
@@ -261,10 +353,32 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({'saved' if method == 'PUT' else 'deleted': '/'.join(address), 'file': file})
             if method == 'GET' and route == ['robot_pose']:
                 return self._json(points.relative_poses(bridge.config, bridge.robot_pose()))
+            if method == 'GET' and route == ['robot']:
+                return self._json(robot.overview(bridge.config, bridge.robot, bridge.pose_args()))
+            if method == 'GET' and route == ['robot', 'joints']:
+                return self._json(bridge.joint_positions())
+            if method in ('PUT', 'DELETE') and len(route) == 3 and route[:2] == ['robot', 'poses']:
+                bridge.check_idle()
+                name = unquote(route[2])
+                if method == 'PUT':
+                    file = robot.save_pose(bridge.config, bridge.robot, name, self._body(), bridge.pose_args())
+                else:
+                    file = robot.delete_pose(bridge.config, bridge.robot, name, bridge.pose_args())
+                bridge.get_logger().info(f'HMI {"saved" if method == "PUT" else "deleted"} pose {name} -> {file}')
+                return self._json({'pose': name, 'file': file})
+            if method == 'PUT' and route == ['robot', 'navigation']:
+                bridge.check_idle()
+                settings = self._body()
+                file = robot.save_navigation(bridge.config, bridge.robot, settings)
+                applied = bridge.apply_navigation(settings)
+                bridge.get_logger().info(f'HMI saved navigation clearance -> {file}; {applied}')
+                return self._json({'file': file, 'applied': applied})
+            if method == 'POST' and route == ['robot', 'move']:
+                return self._json(bridge.run_skill('move_to_pose', {'pose': self._body()['pose']}))
             return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
         except missions.MissionError as error:
             return self._json({'problems': error.problems}, HTTPStatus.UNPROCESSABLE_ENTITY)
-        except points.PointError as error:
+        except (points.PointError, robot.RobotSettingsError) as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)
         except Busy as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.CONFLICT)
