@@ -12,6 +12,7 @@
   <exec_depend>taskweave_interfaces</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>nav2_msgs</exec_depend>   <!-- navigate_to through Nav2 (taskweave_skills.nav2) -->
   <test_depend>rclpy</test_depend>
   <test_depend>python3-pytest</test_depend>
 

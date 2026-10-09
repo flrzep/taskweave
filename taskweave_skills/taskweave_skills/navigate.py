@@ -1,6 +1,7 @@
 """navigate_to: drive the base to a named location or stance with a simple pose controller.
 
-A direct controller without obstacle avoidance; a Nav2-based implementation can later serve the same skill name.
+A direct controller without obstacle avoidance; taskweave_skills.nav2 serves the same skill through Nav2 and uses
+this controller for the final approach.
 Robot roles used: ``base.type``, ``base.cmd_vel``, ``base.odom`` (pose in the cell frame), ``base.limits``.
 Parameters (``skills/navigate_to.yaml``; values below are defaults, each capped by the robot's base limits):
 """
@@ -138,6 +139,12 @@ class NavigateTo(Skill):
         if self.base['type'] == 'fixed':
             return SkillResult.rejected('robot base is fixed')
         target = self.config.base_target(args['target'], self.robot.name)
+        if self._current() is None:
+            return SkillResult.failed(f'no odometry on {self.base["odom"]}')
+        return self._drive(ctx, target, args['target'])
+
+    def _drive(self, ctx, target: Pose2D, label: str) -> SkillResult:
+        """Direct controller loop to ``target`` (cell frame) until settled, stuck, lost or interrupted."""
         pose = self._current()
         if pose is None:
             return SkillResult.failed(f'no odometry on {self.base["odom"]}')
@@ -162,8 +169,8 @@ class NavigateTo(Skill):
                 if now - settled_since >= self.p.settle_s:
                     self.stop()
                     return SkillResult.succeeded(
-                        f'at {args["target"]} ({distance * 1000:.0f} mm, {math.degrees(yaw_error):.1f} deg)',
-                        world_state={'robot_location': args['target']})
+                        f'at {label} ({distance * 1000:.0f} mm, {math.degrees(yaw_error):.1f} deg)',
+                        world_state={'robot_location': label})
             else:
                 settled_since = None
             remaining = distance + self.p.yaw_weight * yaw_error
