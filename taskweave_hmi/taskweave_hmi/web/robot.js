@@ -79,7 +79,9 @@ function poseItem(pose, isNew = false) {
   const joints = isNew ? [...new Set(state.robotData.poses.flatMap((p) => Object.keys(p.joints)))] : Object.keys(pose.joints);
   const inputs = {};
   const groups = {};
-  joints.forEach((joint) => { (groups[jointGroup(joint)] ||= []).push(joint); });
+  // lift (linear joints) first: it sets the robot's height, the arms follow it
+  [...joints.filter((j) => linear.has(j)), ...joints.filter((j) => !linear.has(j))]
+    .forEach((joint) => { (groups[jointGroup(joint)] ||= []).push(joint); });
   const included = {};
   const groupNodes = Object.entries(groups).map(([group, members]) => {
     const box = el('input', { type: 'checkbox' });
@@ -95,9 +97,11 @@ function poseItem(pose, isNew = false) {
     box.addEventListener('change', () => fields.forEach((field) => { field.hidden = !box.checked; }));
     return el('div', { class: 'joint-group' }, el('label', {}, box, group), el('div', { class: 'grid3' }, fields));
   });
+  const lifts = Object.keys(pose.joints).filter((joint) => linear.has(joint));
+  const liftText = lifts.map((joint) => `${lifts.length > 1 ? joint : 'lift'} ${pose.joints[joint].toFixed(2)} m`);
   const head = el('button', { class: 'point-head', 'aria-expanded': String(isNew) },
     el('b', { text: pose.name || 'new pose' }),
-    el('span', { class: 'mono', text: `${Object.keys(pose.joints).length} joints · ${Object.keys(groups).join(', ')}` }),
+    el('span', { class: 'mono', text: [...liftText, `${Object.keys(pose.joints).length} joints`, Object.keys(groups).join(', ')].join(' · ') }),
     pose.used_by.length ? el('span', { class: 'used', text: `used by ${pose.used_by.join(', ')}` }) : '');
   const nameInput = el('input', { autocomplete: 'off', spellcheck: 'false' });
   nameInput.value = pose.name || '';
