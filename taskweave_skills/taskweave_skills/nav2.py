@@ -1,9 +1,10 @@
 """navigate_to with Nav2: a collision-free path to the target, then the direct controller for the last centimetres.
 
 Sends nav2_msgs/NavigateToPose to ``action`` with the target pose in ``frame``. That frame must be the frame the robot's
-``base.odom`` pose is reported in (the cell frame; in Nav2 terms the map frame). Nav2's goal checker is coarse, so when
-Nav2 finishes, or gives up, within ``handover_distance`` of the target, the direct controller of ``navigate.py``
-drives the rest with its tolerances. Further away a Nav2 failure fails the skill with Nav2's reason.
+``base.odom`` pose is reported in (the cell frame; in Nav2 terms the map frame). Nav2 is good at getting there and
+slow at settling, so as soon as the robot is within ``handover_distance`` of the target the Nav2 goal is canceled and
+the direct controller of ``navigate.py`` drives the rest with its tolerances. If Nav2 gives up further away, the skill
+fails with Nav2's reason.
 
 Parameters (``skills/navigate_to.yaml``): the direct controller's (see ``navigate.py``), plus
   action: navigate_to_pose      Nav2 NavigateToPose action
@@ -97,6 +98,10 @@ class Nav2NavigateTo(NavigateTo):
             if not math.isnan(self.remaining):
                 start = start or max(self.remaining, 1e-6)
                 ctx.feedback(0.9 * (1.0 - min(self.remaining / start, 1.0)), f'Nav2: {self.remaining:.2f} m to go')
+            pose = self._current()
+            if pose and math.hypot(target.x - pose.x, target.y - pose.y) <= self.nav['handover_distance']:
+                self.stop()  # close enough: the direct controller is faster and more precise than Nav2 here
+                return self._drive(ctx, target, args['target'])
             time.sleep(POLL_S)
         with self.goal_lock:
             self.goal_handle = None
