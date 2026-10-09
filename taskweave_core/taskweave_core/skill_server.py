@@ -122,8 +122,11 @@ class SkillServer(Node):
             handle.canceled()
         else:
             handle.abort()
-        level = self.get_logger().info if result.outcome == Outcome.SUCCEEDED else self.get_logger().warning
-        level(f'{skill.name} [{goal.step_id}] {result.outcome.name}{": " + result.message if result.message else ""}')
+        text = f'{skill.name} [{goal.step_id}] {result.outcome.name}{": " + result.message if result.message else ""}'
+        if result.outcome == Outcome.SUCCEEDED:  # one call site per severity: rclpy refuses to mix them
+            self.get_logger().info(text)
+        else:
+            self.get_logger().warning(text)
         return message
 
     def _run(self, skill: Skill, goal, handle) -> SkillResult:

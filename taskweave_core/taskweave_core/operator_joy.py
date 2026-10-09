@@ -112,8 +112,11 @@ class OperatorJoy(Node):
         self.running.pop(index, None)
         result = future.result().result
         outcome = ['succeeded', 'failed', 'timeout', 'canceled', 'rejected'][result.outcome]
-        log = self.get_logger().info if outcome == 'succeeded' else self.get_logger().warning
-        log(f'manual {label}: {outcome}{": " + result.message if result.message else ""}')
+        text = f'manual {label}: {outcome}{": " + result.message if result.message else ""}'
+        if outcome == 'succeeded':  # one call site per severity: rclpy refuses to mix them
+            self.get_logger().info(text)
+        else:
+            self.get_logger().warning(text)
 
 
 def main(args=None):
