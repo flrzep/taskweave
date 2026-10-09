@@ -79,7 +79,7 @@ function renderRun() {
   $('btn-pause').textContent = s.state === 'paused' ? 'Resume' : 'Pause';
   $('btn-abort').disabled = !active;
   $('btn-start').disabled = active;
-  setPointsBusy(active ? `A mission is ${s.state}. Points can be edited when it has finished or was aborted.` : '');
+  setPointsBusy(active ? `A mission is ${s.state}. Points and robot settings can be changed when it has finished or was aborted.` : '');
 
   const plan = snap.plan;
   const list = $('plan');
