@@ -229,15 +229,28 @@ class ConfigStore:
                            f'{instance.object!r} (has {", ".join(variants)})')
         return instance.pose.compose(variants[variant])
 
-    def joint_poses(self, robot: str) -> dict[str, dict[str, float]]:
-        """robots/<robot>/poses.yaml: named joint-space poses (robot-specific by nature)."""
+    def joint_poses(self, robot: str) -> dict[str, dict]:
+        """robots/<robot>/poses.yaml as stored: name -> joint map or tool pose (robot-specific by nature)."""
         return self._load(f'robots/{robot}/poses.yaml', schemas.JOINT_POSES, required=False, default={})
 
-    def joint_pose(self, robot: str, name: str) -> dict[str, float]:
+    def named_pose(self, robot: str, name: str) -> dict:
+        """A named pose as ``{'joints': {joint: value}, 'tools': {tool: {tcp, approach, closing}}}``. Joints are set
+        directly; tool targets (TCP in the base frame) are solved by IK when the pose is used. A joint-space pose
+        has no tools."""
         poses = self.joint_poses(robot)
         if name not in poses:
             raise KeyError(f'unknown pose {name!r} for robot {robot!r}')
-        return {joint: float(value) for joint, value in poses[name].items()}
+        entry = poses[name]
+        if 'tools' in entry:
+            return {'joints': {j: float(v) for j, v in entry.get('joints', {}).items()}, 'tools': dict(entry['tools'])}
+        return {'joints': {j: float(v) for j, v in entry.items()}, 'tools': {}}
+
+    def joint_pose(self, robot: str, name: str) -> dict[str, float]:
+        """A joint-space pose; a pose given as tool targets has no fixed joint values (use named_pose)."""
+        pose = self.named_pose(robot, name)
+        if pose['tools']:
+            raise KeyError(f'pose {name!r} of robot {robot!r} is given as tool targets; it needs IK (named_pose)')
+        return pose['joints']
 
     def object(self, name: str) -> dict:
         return self._load(f'objects/{name}.yaml', schemas.OBJECT)
@@ -354,26 +367,48 @@ class ConfigStore:
 
     def set_joint_pose(self, robot: str, name: str, values: dict[str, float] | None = None,
                        rename: str | None = None, note: str | None = None) -> Path:
-        """Set and/or rename a named joint pose in robots/<robot>/poses.yaml (joint -> rad or m). New poses are
-        appended on one line; ``note`` replaces the entry's end-of-line comment (e.g. an outdated IK error)."""
-        from ruamel.yaml.comments import CommentedMap
+        """A joint-space pose; see set_named_pose."""
+        return self.set_named_pose(robot, name, values, rename=rename, note=note)
+
+    def set_named_pose(self, robot: str, name: str, joints: dict[str, float] | None = None, tools: dict | None = None,
+                       rename: str | None = None, note: str | None = None) -> Path:
+        """Set and/or rename a named pose in robots/<robot>/poses.yaml. Without ``tools`` it is a joint map on one line;
+        with ``tools`` ({tool: {tcp, approach, closing}}) it is written as joints + tool targets, one line each.
+        ``note`` replaces the entry's end-of-line comment (e.g. an outdated IK error)."""
+        from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
         relative = f'robots/{robot}/poses.yaml'
-        if values is None and rename is None:
+        if joints is None and tools is None and rename is None:
             raise ValueError('nothing to change')
         self._check_name(name)
         if rename is not None:
             self._check_name(rename)
 
+        def flow(mapping: dict) -> CommentedMap:
+            entry = CommentedMap()
+            for key, value in mapping.items():
+                if isinstance(value, (list, tuple)):
+                    value = CommentedSeq(round(float(v), 4) for v in value)
+                    value.fa.set_flow_style()
+                else:
+                    value = round(float(value), 4)
+                entry[key] = value
+            entry.fa.set_flow_style()
+            return entry
+
         def edit(document):
-            if values is None and name not in document:
+            if joints is None and tools is None and name not in document:
                 raise ValueError(f'no pose {name!r} in {relative}')
-            if values is not None:
-                entry = CommentedMap((joint, round(float(value), 4)) for joint, value in values.items())
-                entry.fa.set_flow_style()
+            if tools:
+                entry = CommentedMap(joints=flow(joints or {}), tools=CommentedMap(
+                    (tool, flow({key: target[key] for key in ('tcp', 'approach', 'closing')}))
+                    for tool, target in tools.items()))
                 document[name] = entry
-                if note:
-                    document.ca.items.pop(name, None)
+            elif joints is not None:
+                document[name] = flow(joints)
+            if note and (joints is not None or tools):
+                document.ca.items.pop(name, None)
+                if not tools:  # a block entry has no end-of-line comment
                     document.yaml_add_eol_comment(note, name, column=2)  # right after the entry
             if rename is not None and rename != name:
                 self._rename_key(document, name, rename, rename, relative)

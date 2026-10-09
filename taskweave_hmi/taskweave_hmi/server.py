@@ -22,6 +22,7 @@ HTTP API (JSON):
   GET  /api/robot_pose             current base pose in the cell and relative to every placed object
   GET  /api/robot                  joint poses (with the missions using each), navigation clearance, footprint
   GET  /api/robot/joints           current joint positions
+  GET  /api/robot/tools            current tool targets {tool: {tcp, approach, closing}} (MoveIt forward kinematics)
   PUT  /api/robot/poses/<name>     {joints[, rename, create]};  DELETE the same
   PUT  /api/robot/navigation       {envelope: {front, back, left, right}, padding, inflation_radius, driving}: checked
                                    against the robot's base, saved and applied to the running costmaps
@@ -62,6 +63,7 @@ from taskweave_interfaces.action import RunSkill
 from taskweave_interfaces.msg import Plan as PlanMsg
 from taskweave_interfaces.msg import TaskStatus
 from taskweave_interfaces.srv import ListSkills, StartMission
+from taskweave_skills.ik import pose_matrix, tool_target
 from taskweave_skills.nav2 import nav2_parameters
 
 from . import missions, points, robot
@@ -73,6 +75,7 @@ STATIC_FILES = ('app.js', 'robot.js', 'style.css')
 MANUAL_SKILL_TIMEOUT_S = 120.0
 NAV_COSTMAPS = ['/local_costmap/local_costmap', '/global_costmap/global_costmap']  # Nav2 defaults
 NAV_CONTROLLER = '/controller_server'
+FK_SERVICE = '/compute_fk'  # MoveIt move_group
 OUTCOMES = ['succeeded', 'failed', 'timeout', 'canceled', 'rejected']
 CONTENT_TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
                  '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml'}
@@ -145,6 +148,7 @@ class Bridge(Node):
             for node in [*self.get_parameter('nav_costmaps').value, self.get_parameter('nav_controller').value]}
         self.skill_lock = threading.Lock()  # one manual skill at a time
         self.skill_clients: dict[str, ActionClient] = {}
+        self.fk_client = None  # created on first use (MoveIt)
 
     # ---- ROS -> state ------------------------------------------------------------
     def _broadcast(self, kind: str, data) -> None:
@@ -214,6 +218,29 @@ class Bridge(Node):
             except TimeoutError as error:
                 result[node] = str(error)
         return result
+
+    def tool_targets(self) -> dict:
+        """Current tool targets (TCP, approach, closing in the base frame) from the IK planner's forward kinematics."""
+        from moveit_msgs.msg import RobotState
+        from moveit_msgs.srv import GetPositionFK
+
+        profile = self.config.robot(self.robot).data
+        tools = {tool: profile['tool_frames'][tool] for tool in profile.get('ik', {}).get('groups', {})
+                 if tool in profile.get('tool_frames', {})}
+        if not tools:
+            raise TimeoutError('the robot profile has no IK tools')
+        if self.fk_client is None:
+            self.fk_client = self.create_client(GetPositionFK, FK_SERVICE, callback_group=self.group)
+        request = GetPositionFK.Request(fk_link_names=[frame['link'] for frame in tools.values()],
+                                        robot_state=RobotState(is_diff=True))
+        request.header.frame_id = self.config.robot(self.robot).base['frame']
+        response = self.call(self.fk_client, request)
+        if response.error_code.val != 1:
+            raise TimeoutError(f'forward kinematics failed (code {response.error_code.val})')
+        links = zip(response.fk_link_names, response.pose_stamped, strict=False)
+        poses = {link: stamped.pose for link, stamped in links}
+        return {tool: tool_target(pose_matrix(poses[frame['link']].position, poses[frame['link']].orientation), frame)
+                for tool, frame in tools.items()}
 
     def run_skill(self, skill: str, args: dict, timeout_s: float = MANUAL_SKILL_TIMEOUT_S) -> dict:
         """Run one skill directly (no mission), e.g. move to a joint pose to check it. Blocks until it ends."""
@@ -366,6 +393,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(robot.overview(bridge.config, bridge.robot, bridge.pose_args()))
             if method == 'GET' and route == ['robot', 'joints']:
                 return self._json(bridge.joint_positions())
+            if method == 'GET' and route == ['robot', 'tools']:
+                return self._json(bridge.tool_targets())
             if method in ('PUT', 'DELETE') and len(route) == 3 and route[:2] == ['robot', 'poses']:
                 bridge.check_idle()
                 name = unquote(route[2])

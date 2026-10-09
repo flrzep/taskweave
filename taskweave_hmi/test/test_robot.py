@@ -13,6 +13,10 @@ CATALOG = [{'name': 'move_to_pose', 'args_schema': {'properties': {'pose': {'x-t
 POSES = """# Named joint poses of the demo bot
 home: {lift: 0.0, j1: 0.0, j2: 0.0}   # IK error 0 mm
 carry: {lift: 0.2, j1: 1.0, j2: -0.5}
+reach:
+  joints: {lift: 0.3}
+  tools:
+    left: {tcp: [0.6, 0.2, 0.4], approach: [1, 0, 0], closing: [0, 1, 0]}
 """
 MISSION = """goal: Carry something
 steps:
@@ -60,7 +64,7 @@ def test_used_poses_cannot_be_renamed_or_deleted(store):
         robot.save_pose(store, ROBOT, 'carry', {'joints': {'lift': 0.2}, 'rename': 'hold'}, args)
     robot.save_pose(store, ROBOT, 'home', {'joints': {'lift': 0.0}, 'rename': 'rest'}, args)
     robot.delete_pose(store, ROBOT, 'rest', args)
-    assert list(store.joint_poses(ROBOT)) == ['carry']
+    assert list(store.joint_poses(ROBOT)) == ['carry', 'reach']
 
 
 def test_navigation_is_checked_and_saved(store):
@@ -83,6 +87,22 @@ def test_a_base_that_is_not_holonomic_cannot_drive_sideways():
     with pytest.raises(robot.RobotSettingsError, match="'differential' and cannot drive sideways"):
         robot.check_navigation(settings, {'type': 'differential'})
     assert robot.check_navigation({**settings, 'driving': {'sideways': False}}, {'type': 'differential'})
+
+
+def test_tool_poses_are_listed_and_saved(store):
+    args = robot.pose_args(CATALOG)
+    poses = {p['name']: p for p in robot.overview(store, ROBOT, args)['poses']}
+    assert poses['reach']['joints'] == {'lift': 0.3} and poses['reach']['tools']['left']['tcp'] == [0.6, 0.2, 0.4]
+    assert poses['home']['tools'] == {}
+    target = {'tcp': [0.7, 0.1, 0.5], 'approach': [0, 0, -1], 'closing': [1, 0, 0]}
+    with pytest.raises(robot.RobotSettingsError, match='has no IK'):                 # demo_bot has no ik section
+        robot.save_pose(store, ROBOT, 'reach', {'joints': {'lift': 0.3}, 'tools': {'left': target}}, args)
+    profile = store.root / 'robots' / ROBOT / 'profile.yaml'
+    profile.write_text(profile.read_text() + "ik: {groups: {left: left_arm}, joints: '{tool}_joint[1-7]'}\n")
+    robot.save_pose(store, ROBOT, 'reach', {'joints': {'lift': 0.3}, 'tools': {'left': target}}, args)
+    assert store.named_pose(ROBOT, 'reach')['tools']['left'] == target
+    with pytest.raises(robot.RobotSettingsError, match='parallel'):
+        robot.save_pose(store, ROBOT, 'reach', {'tools': {'left': {**target, 'closing': [0, 0, 2]}}}, args)
 
 
 def test_pose_args_fall_back_when_the_catalog_names_none():

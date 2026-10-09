@@ -80,7 +80,7 @@ def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
         if kind == 'base_target':
             store.base_target(str(value), robot)
         elif kind == 'joint_pose':
-            store.joint_pose(robot, str(value))
+            store.named_pose(robot, str(value))
         elif kind == 'object_point':
             obj, _, point = str(value).partition('.')
             store.object_point(obj, point)

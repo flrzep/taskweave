@@ -119,6 +119,18 @@ ROBOT_PROFILE = {
                 'additionalProperties': False,
             },
         },
+        # inverse kinematics for tool targets: a GetPositionIK service (MoveIt) and the planning group per tool
+        'ik': {
+            'type': 'object',
+            'required': ['groups', 'joints'],
+            'properties': {
+                'service': {'type': 'string'},
+                'timeout_s': {'type': 'number', 'exclusiveMinimum': 0},
+                'groups': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {'type': 'string'}},
+                'joints': {'type': 'string'},   # regex of the joints IK may move, {tool} = tool name
+            },
+            'additionalProperties': False,
+        },
         'arms': {'type': 'object'},
         'torso': {'type': 'object'},
         'cameras': {'type': 'object'},
@@ -126,11 +138,30 @@ ROBOT_PROFILE = {
     },
 }
 
-# robots/<model>/poses.yaml: named joint-space poses, joint name -> value (rad or m)
+# robots/<model>/poses.yaml: named poses. Either joint name -> value (rad or m), or tool targets solved by IK at run
+# time: per tool (profile tool_frames) the canonical TCP position and its approach (TCP z) and closing (TCP y)
+# directions in the base frame, plus joints set directly (e.g. torso lift, head).
+VECTOR3 = {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3}
+TOOL_TARGET = {
+    'type': 'object',
+    'required': ['tcp', 'approach', 'closing'],
+    'properties': {'tcp': VECTOR3, 'approach': VECTOR3, 'closing': VECTOR3},
+    'additionalProperties': False,
+}
+JOINT_MAP = {'type': 'object', 'minProperties': 1, 'additionalProperties': FINITE}
+TOOL_POSE = {
+    'type': 'object',
+    'required': ['tools'],
+    'properties': {
+        'joints': {'type': 'object', 'additionalProperties': FINITE},
+        'tools': {'type': 'object', 'propertyNames': NAME, 'minProperties': 1, 'additionalProperties': TOOL_TARGET},
+    },
+    'additionalProperties': False,
+}
 JOINT_POSES = {
     'type': 'object',
     'propertyNames': NAME,
-    'additionalProperties': {'type': 'object', 'minProperties': 1, 'additionalProperties': FINITE},
+    'additionalProperties': {'oneOf': [JOINT_MAP, TOOL_POSE]},
 }
 
 POINTS2D = {'type': 'object', 'additionalProperties': POSE2D, 'propertyNames': NAME}

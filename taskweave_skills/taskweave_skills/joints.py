@@ -162,8 +162,9 @@ class _JointSkill(Skill):
 
 class MoveToPose(_JointSkill):
     name = 'move_to_pose'
-    description = ('Move joints to a named pose of this robot (for example home or carry) and hold it. '
-                   'Joint-space motion without collision checking.')
+    description = ('Move to a named pose of this robot (for example home or carry) and hold it. A pose is joint '
+                   'values, or tool (TCP) targets in robot space solved by inverse kinematics. Joint-space motion '
+                   'without collision checking.')
     args_schema = {
         'type': 'object',
         'required': ['pose'],
@@ -175,8 +176,26 @@ class MoveToPose(_JointSkill):
     achieves = ['joints at the named pose']
     default_timeout_s = 60.0
 
+    def setup(self, node, config, robot, params):
+        super().setup(node, config, robot, params)
+        self.ik = None
+        if robot.data.get('ik'):
+            from .ik import IkClient
+            self.ik = IkClient(node, robot)
+
     def execute(self, ctx, args):
-        goal = self.config.joint_pose(self.robot.name, args['pose'])
+        from .ik import IkError
+
+        pose = self.config.named_pose(self.robot.name, args['pose'])
+        goal = dict(pose['joints'])
+        if pose['tools']:
+            if self.ik is None:
+                return SkillResult.rejected(f'pose {args["pose"]} has tool targets, but the robot profile has no ik')
+            ctx.feedback(0.0, 'solving IK')
+            try:
+                goal.update(self.ik.solve(pose['tools'], pose['joints'], lambda: ctx.should_stop))
+            except IkError as error:
+                return SkillResult.failed(str(error))
         result, final = self._move(ctx, goal, args['pose'])
         if result is not None:
             return result

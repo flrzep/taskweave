@@ -98,7 +98,11 @@ function poseItem(pose, isNew = false) {
   const linear = new Set(state.robotData.linear_joints);
   const show = (joint, value) => (linear.has(joint) ? +value.toFixed(4) : +(value * DEG).toFixed(2));
   const unshow = (joint, value) => (linear.has(joint) ? value : value / DEG);
-  const joints = isNew ? [...new Set(state.robotData.poses.flatMap((p) => Object.keys(p.joints)))] : Object.keys(pose.joints);
+  // a pose with tools places each tool's TCP (solved by IK); a new pose does so when the robot has IK tools
+  const toolNames = isNew ? state.robotData.tools : Object.keys(pose.tools || {});
+  const toolPoses = state.robotData.poses.filter((p) => Object.keys(p.tools || {}).length);
+  const joints = !isNew ? Object.keys(pose.joints)
+    : [...new Set((toolNames.length ? toolPoses : state.robotData.poses).flatMap((p) => Object.keys(p.joints)))];
   const inputs = {};
   const groups = {};
   // lift (linear joints) first: it sets the robot's height, the arms follow it
@@ -119,11 +123,27 @@ function poseItem(pose, isNew = false) {
     box.addEventListener('change', () => fields.forEach((field) => { field.hidden = !box.checked; }));
     return el('div', { class: 'joint-group' }, el('label', {}, box, group), el('div', { class: 'grid3' }, fields));
   });
+  // tool targets: TCP position (m) and approach / closing directions, base frame
+  const toolInputs = {};
+  const toolNodes = toolNames.map((tool) => {
+    const target = (pose.tools || {})[tool] || { tcp: [0.5, 0, 0.3], approach: [1, 0, 0], closing: [0, 1, 0] };
+    toolInputs[tool] = {};
+    const rows = [['tcp', 'TCP (m)'], ['approach', 'approach'], ['closing', 'closing']].map(([key, title]) => {
+      toolInputs[tool][key] = ['x', 'y', 'z'].map((axis, i) => {
+        const input = el('input', { type: 'number', step: 'any', inputmode: 'decimal', 'aria-label': `${tool} ${key} ${axis}` });
+        input.value = +Number(target[key][i]).toFixed(4);
+        return input;
+      });
+      return el('div', { class: 'field' }, el('label', { text: `${title}  x · y · z` }), el('div', { class: 'grid3' }, toolInputs[tool][key]));
+    });
+    return el('div', { class: 'joint-group' }, el('label', { text: `${tool} tool (IK)` }), ...rows);
+  });
   const lifts = Object.keys(pose.joints).filter((joint) => linear.has(joint));
   const liftText = lifts.map((joint) => `${lifts.length > 1 ? joint : 'lift'} ${pose.joints[joint].toFixed(2)} m`);
+  const shape = toolNames.length ? `${toolNames.join(', ')} TCP` : `${Object.keys(pose.joints).length} joints`;
   const head = el('button', { class: 'point-head', 'aria-expanded': String(isNew) },
     el('b', { text: pose.name || 'new pose' }),
-    el('span', { class: 'mono', text: [...liftText, `${Object.keys(pose.joints).length} joints`, Object.keys(groups).join(', ')].join(' · ') }),
+    el('span', { class: 'mono', text: [...liftText, shape, Object.keys(groups).join(', ')].join(' · ') }),
     pose.used_by.length ? el('span', { class: 'used', text: `used by ${pose.used_by.join(', ')}` }) : '');
   const nameInput = el('input', { autocomplete: 'off', spellcheck: 'false' });
   nameInput.value = pose.name || '';
@@ -135,7 +155,7 @@ function poseItem(pose, isNew = false) {
   let changed = isNew;  // Move here runs the saved pose, so it waits for a save after edits
   const markChanged = () => { changed = true; moveButton.disabled = true; moveButton.title = 'Save first'; };
   const edit = el('div', { class: 'point-edit' },
-    el('div', { class: 'field' }, el('label', { text: 'Name' }), nameInput), ...groupNodes,
+    el('div', { class: 'field' }, el('label', { text: 'Name' }), nameInput), ...groupNodes, ...toolNodes,
     el('div', { class: 'row gap' }, robotButton, moveButton), msg, el('div', { class: 'row gap' }, deleteButton, saveButton));
   edit.hidden = !isNew;
   edit.addEventListener('input', markChanged);
@@ -148,6 +168,12 @@ function poseItem(pose, isNew = false) {
     if (!ok) { message(msg, data.error || 'no joint states', true); return; }
     const missing = Object.keys(inputs).filter((joint) => data[joint] === undefined);
     Object.entries(inputs).forEach(([joint, input]) => { if (data[joint] !== undefined) input.value = show(joint, data[joint]); });
+    if (toolNames.length) {
+      const tools = await api('GET', '/api/robot/tools');
+      if (!tools.ok) { message(msg, tools.data.error || 'no tool poses (is MoveIt running?)', true); return; }
+      toolNames.forEach((tool) => ['tcp', 'approach', 'closing'].forEach((key) => toolInputs[tool][key]
+        .forEach((input, i) => { input.value = tools.data[tool][key][i]; })));
+    }
     markChanged();
     message(msg, missing.length ? `Not in the joint states: ${missing.join(', ')}` : 'Filled in from the robot. Check, then save.',
       missing.length > 0);
@@ -172,8 +198,18 @@ function poseItem(pose, isNew = false) {
         values[joint] = unshow(joint, value);
       }
     }
-    if (!Object.keys(values).length) { message(msg, 'Keep at least one group.', true); return; }
-    const body = { joints: values };
+    const tools = {};
+    for (const tool of toolNames) {
+      tools[tool] = {};
+      for (const key of ['tcp', 'approach', 'closing']) {
+        tools[tool][key] = toolInputs[tool][key].map((input) => Number(input.value));
+        if (toolInputs[tool][key].some((input) => input.value.trim() === '') || tools[tool][key].some((v) => !Number.isFinite(v))) {
+          message(msg, `${tool} ${key}: enter three numbers.`, true); return;
+        }
+      }
+    }
+    if (!Object.keys(values).length && !toolNames.length) { message(msg, 'Keep at least one group.', true); return; }
+    const body = toolNames.length ? { joints: values, tools } : { joints: values };
     if (isNew) body.create = true; else if (name !== pose.name) body.rename = name;
     const { ok, data } = await api('PUT', `/api/robot/poses/${encodeURIComponent(isNew ? name : pose.name)}`, body);
     if (!ok) { message(msg, (data.problems || [data.error || 'not saved']).join('\n'), true); return; }

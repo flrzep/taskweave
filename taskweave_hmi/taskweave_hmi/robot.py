@@ -54,8 +54,9 @@ def overview(store: ConfigStore, robot: str, args: set[tuple[str, str]]) -> dict
         'robot': robot,
         'files': {'poses': f'robots/{robot}/poses.yaml', 'navigation': f'robots/{robot}/navigation.yaml'},
         'linear_joints': list(joints.get('linear', [])),
-        'poses': [{'name': name, 'joints': values, 'used_by': used.get(name, [])}
-                  for name, values in store.joint_poses(robot).items()],
+        'poses': [{'name': name, **store.named_pose(robot, name), 'used_by': used.get(name, [])}
+                  for name in store.joint_poses(robot)],     # joints set directly, tools solved by IK
+        'tools': list(profile.data.get('ik', {}).get('groups', {})),     # tools a pose can place (IK available)
         'navigation': store.navigation(robot),
         'footprint': profile.base.get('footprint'),
         'base_type': profile.base.get('type'),          # sideways driving only for 'holonomic'
@@ -63,8 +64,32 @@ def overview(store: ConfigStore, robot: str, args: set[tuple[str, str]]) -> dict
     }
 
 
-def _check_values(values) -> dict[str, float]:
-    if not isinstance(values, Mapping) or not values:
+def _check_tools(tools, allowed: list[str]) -> dict:
+    if not isinstance(tools, Mapping):
+        raise RobotSettingsError('tools must map a tool name to {tcp, approach, closing}')
+    result = {}
+    for tool, target in tools.items():
+        if tool not in allowed:
+            known = ', '.join(allowed) or 'none'
+            raise RobotSettingsError(f'tool {tool!r} has no IK in the robot profile (has {known})')
+        try:
+            vectors = {key: [float(v) for v in target[key]] for key in ('tcp', 'approach', 'closing')}
+        except (KeyError, TypeError, ValueError) as error:
+            raise RobotSettingsError(f'{tool}: tcp, approach and closing need three numbers each') from error
+        if any(len(v) != 3 or not all(math.isfinite(x) for x in v) for v in vectors.values()):
+            raise RobotSettingsError(f'{tool}: tcp, approach and closing need three finite numbers each')
+        for key in ('approach', 'closing'):
+            if math.hypot(*vectors[key]) < 1e-6:
+                raise RobotSettingsError(f'{tool}: {key} must not be zero')
+        a, c = vectors['approach'], vectors['closing']
+        if abs(sum(x * y for x, y in zip(a, c, strict=True)) / (math.hypot(*a) * math.hypot(*c))) > 0.999:
+            raise RobotSettingsError(f'{tool}: approach and closing must not be parallel')
+        result[tool] = vectors
+    return result
+
+
+def _check_values(values, allow_empty: bool = False) -> dict[str, float]:
+    if not isinstance(values, Mapping) or (not values and not allow_empty):
         raise RobotSettingsError('a pose needs at least one joint value')
     try:
         result = {str(joint): float(value) for joint, value in values.items()}
@@ -76,7 +101,8 @@ def _check_values(values) -> dict[str, float]:
 
 
 def save_pose(store: ConfigStore, robot: str, name: str, body: Mapping, args: set[tuple[str, str]]) -> str:
-    """Create or update a joint pose. ``body``: joints {name: value}, optional rename and create (no overwrite)."""
+    """Create or update a pose. ``body``: joints {name: value}, optional tools {tool: {tcp, approach, closing}}
+    (base frame, solved by IK when used), rename and create (no overwrite)."""
     store.reload()
     exists = name in store.joint_poses(robot)
     if body.get('create') and exists:
@@ -89,7 +115,13 @@ def save_pose(store: ConfigStore, robot: str, name: str, body: Mapping, args: se
         if users:
             raise RobotSettingsError(f'pose {name} is used by {", ".join(users)}; change those missions first')
     try:
-        path = store.set_joint_pose(robot, name, _check_values(body.get('joints')), rename=rename, note=HMI_NOTE)
+        tools = body.get('tools') or None
+        if tools:
+            allowed = list(store.robot(robot).data.get('ik', {}).get('groups', {}))
+            path = store.set_named_pose(robot, name, _check_values(body.get('joints') or {}, allow_empty=True),
+                                        _check_tools(tools, allowed), rename=rename, note=HMI_NOTE)
+        else:
+            path = store.set_named_pose(robot, name, _check_values(body.get('joints')), rename=rename, note=HMI_NOTE)
     except ValueError as error:
         raise RobotSettingsError(str(error)) from error
     return str(path.relative_to(store.root))
