@@ -131,6 +131,8 @@ class Bridge(Node):
         self.create_subscription(TaskStatus, names.STATUS, self._status, latched, callback_group=self.group)
         self.create_subscription(PlanMsg, names.PLAN, self._plan, latched, callback_group=self.group)
         self.create_subscription(String, names.EPISODES, self._episode, 50, callback_group=self.group)
+        self.pad_mode = 'drive'
+        self.create_subscription(String, names.OPERATOR_MODE, self._pad_mode, latched, callback_group=self.group)
         self.start_client = self.create_client(StartMission, names.START_MISSION, callback_group=self.group)
         self.skills_client = self.create_client(ListSkills, names.LIST_SKILLS, callback_group=self.group)
         self.triggers = {cmd: self.create_client(Trigger, getattr(names, cmd.upper()), callback_group=self.group)
@@ -318,10 +320,15 @@ class Bridge(Node):
             self.events.append(event)
         self._broadcast('episode', event)
 
+    def _pad_mode(self, msg: String) -> None:
+        with self.lock:
+            self.pad_mode = msg.data
+        self._broadcast('pad_mode', msg.data)
+
     def snapshot(self) -> dict:
         with self.lock:
             return {'robot': self.robot, 'status': self.status, 'plan': self.plan, 'outcomes': dict(self.outcomes),
-                    'events': list(self.events)[-50:]}
+                    'events': list(self.events)[-50:], 'pad_mode': self.pad_mode}
 
     # ---- service calls -------------------------------------------------------------
     def call(self, client, request):

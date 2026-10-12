@@ -177,3 +177,4 @@ details[open] summary { margin-bottom: 8px; }
   50% { fill: color-mix(in srgb, var(--k) 24%, var(--g-card)); filter: drop-shadow(0 0 9px color-mix(in srgb, var(--k) 65%, transparent)); }
 }
 @media (prefers-reduced-motion: reduce) { .plan-graph .state-running .node-box { animation: none; } }
+.chip.pad { background: var(--idle); margin-left: auto; margin-right: 10px; } .chip.pad.jog { background: var(--warn); }

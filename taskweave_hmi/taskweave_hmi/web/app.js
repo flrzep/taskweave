@@ -47,6 +47,7 @@ function connect() {
     if (type === 'state') { state.snapshot = data; }
     else if (!state.snapshot) return;
     else if (type === 'status') state.snapshot.status = data;
+    else if (type === 'pad_mode') state.snapshot.pad_mode = data;
     else if (type === 'plan') { if (state.snapshot.plan?.plan_id !== data.plan_id) state.snapshot.outcomes = {}; state.snapshot.plan = data; }
     else if (type === 'episode') {
       state.snapshot.outcomes[data.step_id] = data;
@@ -62,6 +63,9 @@ function renderRun() {
   if (!snap) return;
   const s = snap.status;
   $('robot').textContent = `robot ${snap.robot}`;
+  const pad = snap.pad_mode || 'drive';  // the PS4 pad: drives the base, or jogs one arm's TCP
+  $('pad-mode').textContent = pad === 'drive' ? 'pad: drive' : `pad: ${pad} arm`;
+  $('pad-mode').className = `chip pad ${pad === 'drive' ? '' : 'jog'}`;
   $('state').textContent = s.state;
   $('state').className = `chip ${s.state}`;
   $('goal').textContent = s.goal || 'No mission running';
