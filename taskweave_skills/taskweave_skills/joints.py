@@ -5,8 +5,9 @@ Robot roles used (robots/<robot>/profile.yaml):
     grippers: {<side>: {joint: <name>, open: <value>, closed: <value>}}
 Named poses: robots/<robot>/poses.yaml, ``<pose>: {<joint>: <value>, ...}`` (rad or m).
 
-These are the simple implementations. A ros2_control / MoveIt implementation can later serve the same skill names
-(see skills/<skill>.yaml implementations) without changing missions.
+Moves are streamed as position targets: a straight joint-space move, or, if the profile has a ``planning`` section,
+a collision-free trajectory from MoveIt (motion_plan.py). A ros2_control implementation can later serve the same
+skill names (see skills/<skill>.yaml implementations) without changing missions.
 """
 
 from __future__ import annotations
@@ -89,6 +90,11 @@ class JointInterface:
                 self.velocities.update(zip(msg.name, msg.velocity, strict=False))
             self.stamp = time.monotonic()
 
+    def snapshot(self, max_age: float) -> dict | None:
+        """Every joint seen on the state topic (a planner's start state)."""
+        with self.lock:
+            return dict(self.positions) if time.monotonic() - self.stamp <= max_age else None
+
     def current(self, names, max_age: float) -> dict | None:
         with self.lock:
             if time.monotonic() - self.stamp > max_age or any(n not in self.positions for n in names):
@@ -114,16 +120,23 @@ class _JointSkill(Skill):
             if current:
                 self.joints.command(current)
 
-    def _move(self, ctx, goal: dict, label: str, stall_ok: bool = False):
+    def _move(self, ctx, goal: dict, label: str, stall_ok: bool = False, path=None):
         """Move the joints in ``goal``; returns (result or None, final positions). ``stall_ok``: stopping early
-        (e.g. fingers blocked by an object) ends the move without failing."""
+        (e.g. fingers blocked by an object) ends the move without failing. ``path``: a planned trajectory
+        (motion_plan.Trajectory) the joints follow instead of a straight joint-space move."""
         self._held = goal
         start = self.joints.current(list(goal), self.p.state_timeout_s)
         if start is None:
             missing = [n for n in goal if n not in self.joints.positions]
             reason = f'unknown joints {missing}' if missing else f'no joint states on {self.joints.state_topic}'
             return SkillResult.failed(reason), None
-        duration = plan_duration(start, goal, self.p)
+        if path is None:
+            duration = plan_duration(start, goal, self.p)
+            reference = lambda t: interpolate(start, goal, t / duration)  # noqa: E731
+        else:  # goal joints the planner did not move go straight alongside
+            duration = max(path.duration, self.p.min_duration_s)
+            rest = {n: v for n, v in goal.items() if n not in path.names}
+            reference = lambda t: {**interpolate(start, rest, t / duration), **path.at(t)}  # noqa: E731
         t0 = ctx.now()
         period = 1.0 / self.p.rate_hz
         settled_since, best, best_time = None, math.inf, None
@@ -133,7 +146,7 @@ class _JointSkill(Skill):
                 return ctx.interrupted(), None
             now = ctx.now()
             fraction = (now - t0) / duration
-            self.joints.command(interpolate(start, goal, fraction))
+            self.joints.command(reference(now - t0))
             current = self.joints.current(list(goal), self.p.state_timeout_s)
             if current is None:
                 self.stop()
@@ -163,8 +176,9 @@ class _JointSkill(Skill):
 class MoveToPose(_JointSkill):
     name = 'move_to_pose'
     description = ('Move to a named pose of this robot (for example home or carry) and hold it. A pose is joint '
-                   'values, or tool (TCP) targets in robot space solved by inverse kinematics. Joint-space motion '
-                   'without collision checking.')
+                   'values, or tool (TCP) targets in robot space solved by inverse kinematics. With a motion planner '
+                   'the path avoids collisions with the robot itself and the planning scene; without one it is a '
+                   'straight joint-space move.')
     args_schema = {
         'type': 'object',
         'required': ['pose'],
@@ -178,13 +192,17 @@ class MoveToPose(_JointSkill):
 
     def setup(self, node, config, robot, params):
         super().setup(node, config, robot, params)
-        self.ik = None
+        self.ik = self.planner = None
         if robot.data.get('ik'):
             from .ik import IkClient
             self.ik = IkClient(node, robot)
+        if robot.data.get('planning'):
+            from .motion_plan import MotionPlanner
+            self.planner = MotionPlanner(node, robot)
 
     def execute(self, ctx, args):
         from .ik import IkError
+        from .motion_plan import PlanError
 
         pose = self.config.named_pose(self.robot.name, args['pose'])
         goal = dict(pose['joints'])
@@ -196,7 +214,17 @@ class MoveToPose(_JointSkill):
                 goal.update(self.ik.solve(pose['tools'], pose['joints'], lambda: ctx.should_stop))
             except IkError as error:
                 return SkillResult.failed(str(error))
-        result, final = self._move(ctx, goal, args['pose'])
+        path = None
+        if self.planner is not None:
+            ctx.feedback(0.0, 'planning')
+            start = self.joints.snapshot(self.p.state_timeout_s)
+            if start is None:
+                return SkillResult.failed(f'no joint states on {self.joints.state_topic}')
+            try:
+                path = self.planner.plan(start, goal, lambda: ctx.should_stop)
+            except PlanError as error:
+                return SkillResult.failed(f'{args["pose"]}: {error}')
+        result, final = self._move(ctx, goal, args['pose'], path=path)
         if result is not None:
             return result
         worst = max(abs(goal[n] - final[n]) for n in goal)

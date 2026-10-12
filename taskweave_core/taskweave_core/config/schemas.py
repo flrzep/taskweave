@@ -138,6 +138,22 @@ ROBOT_PROFILE = {
             },
             'additionalProperties': False,
         },
+        # collision-free joint motion: a GetMotionPlan service (MoveIt) and the group that covers a pose's joints
+        'planning': {
+            'type': 'object',
+            'required': ['group'],
+            'properties': {
+                'service': {'type': 'string'},
+                'group': {'type': 'string'},
+                'pipeline': {'type': 'string'},
+                'planner': {'type': 'string'},
+                'timeout_s': {'type': 'number', 'exclusiveMinimum': 0},
+                'attempts': {'type': 'integer', 'minimum': 1},
+                'velocity_scale': {'type': 'number', 'exclusiveMinimum': 0, 'maximum': 1},
+                'acceleration_scale': {'type': 'number', 'exclusiveMinimum': 0, 'maximum': 1},
+            },
+            'additionalProperties': False,
+        },
         'arms': {'type': 'object'},
         'torso': {'type': 'object'},
         'cameras': {'type': 'object'},
