@@ -7,7 +7,8 @@ in the base frame (operator_joy turns pad sticks into it). While commands keep c
 at ``rate_hz`` (sim time), solves each step by one local IK descent from the current joints (the profile's ik
 section: same solver, joint limits and collision checks as named poses), and sends the arm's joints as position
 targets on joints.command. A step without a solution (a joint limit, a collision, out of reach) is not taken: the
-arm stops there and the reason is logged. Silent when no commands come, so it never competes with skills.
+arm stops there and the reason is logged. Silent when no commands come, so it never competes with skills. A tool
+that holds an object (/taskweave/holding) is not jogged.
 """
 
 from __future__ import annotations
@@ -79,10 +80,21 @@ class TcpJog(Node):
                 self.tools[tool] = {'twist': None, 'received': -math.inf, 'target': None, 'blocked': False,
                                     'joints': re.compile(self.ik.joint_pattern.format(tool=tool))}
                 self.create_subscription(TwistStamped, f'{NAMESPACE}/{tool}', lambda m, t=tool: self._twist(t, m), 10)
+        self.held_tools: set = set()  # tools holding an object (taskweave_skills.hold): jogging one would pull it apart
+        from rclpy.qos import DurabilityPolicy, QoSProfile
+        from std_msgs.msg import String
+
+        from .hold import TOPIC as HOLD_TOPIC
+        self.create_subscription(String, HOLD_TOPIC, self._holding,
+                                 QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.last_time = None
         self.create_timer(1.0 / float(self.get_parameter('rate_hz').value), self._step,
                           callback_group=MutuallyExclusiveCallbackGroup())
         self.get_logger().info(f'TCP jog for {", ".join(self.tools)} on {NAMESPACE}/<tool> -> {joints["command"]}')
+
+    def _holding(self, msg) -> None:
+        import json
+        self.held_tools = set(json.loads(msg.data or '{}').get('tools', []))
 
     def _joints(self, msg) -> None:
         with self.lock:
@@ -115,6 +127,12 @@ class TcpJog(Node):
                 current = {n: v for n, v in self.positions.items() if jog['joints'].fullmatch(n)}
             if not fresh or twist is None or not any(abs(v) > 1e-9 for part in twist for v in part):
                 jog['target'], jog['blocked'] = None, False  # the next jog starts from where the arm is
+                continue
+            if tool in self.held_tools:
+                if not jog['blocked']:
+                    self.get_logger().warning(f'jog {tool}: holding an object with it, not jogging (open the gripper '
+                                              'or move the object with move_object)')
+                jog['blocked'] = True
                 continue
             if jog['target'] is None:
                 jog['target'] = self._flange(tool)

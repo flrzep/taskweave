@@ -17,6 +17,7 @@ import threading
 import time
 from dataclasses import dataclass, fields
 
+import numpy as np
 from sensor_msgs.msg import JointState
 
 from taskweave_core.skill import Skill, SkillResult
@@ -112,6 +113,16 @@ class _JointSkill(Skill):
         self.p.linear_joints = tuple(robot.role('joints').get('linear', ()))
         self.joints = JointInterface.for_node(node, robot)
         self._held: dict = {}
+        from .hold import HoldState
+        self.hold = HoldState.for_node(node, robot)
+
+    def _holding_refusal(self):
+        """A free-arm motion would pull the holding hands apart: refuse while something is held."""
+        hold = self.hold.held()
+        if hold is None:
+            return None
+        return SkillResult.rejected(f'holding {hold["object"]} with {" and ".join(hold["tools"])}: move it with '
+                                    'move_object, or open the gripper first')
 
     def stop(self) -> None:
         """Hold where the joints are now."""
@@ -201,20 +212,27 @@ class MoveToPose(_JointSkill):
             self.planner = MotionPlanner(node, robot)
 
     def execute(self, ctx, args):
+        refusal = self._holding_refusal()
+        if refusal is not None:
+            return refusal
         pose = self.config.named_pose(self.robot.name, args['pose'])
+        self.hold.reached_point(None, None, (), None)
         result, worst = self._reach(ctx, pose['joints'], pose['tools'], args['pose'])
         if result is not None:
             return result
         return SkillResult.succeeded(f'at {args["pose"]} (max error {worst:.3f})',
                                      world_state={'arm_pose': args['pose']})
 
-    def _reach(self, ctx, joints: dict, tools: dict, label: str, fallback_joints=()):
+    def _reach(self, ctx, joints: dict, tools: dict, label: str, fallback_joints=(), linear=False):
         """Set ``joints`` and put each tool on its target (IK), along a planned path if there is a planner. If IK
         finds no solution with ``joints``, each of ``fallback_joints`` (e.g. other lift heights) is tried instead.
-        Returns (failure result or None, worst joint error at the end)."""
+        ``linear``: the TCPs move on straight lines (cartesian.linear_path) instead of a planned path; the lift
+        stays. Returns (failure result or None, worst joint error at the end)."""
         from .ik import IkError
         from .motion_plan import PlanError
 
+        if linear:
+            return self._linear(ctx, tools, label)
         goal = dict(joints)
         if (self.ik or self.planner) and self.joints.snapshot(self.p.state_timeout_s) is None:
             return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)'), 0
@@ -248,6 +266,34 @@ class MoveToPose(_JointSkill):
         return None, max(abs(goal[n] - final[n]) for n in goal)
 
 
+    def _linear(self, ctx, tools: dict, label: str, goals=None):
+        """Move the TCPs of ``tools`` ({tool: {tcp, approach, closing}}, or ``goals``: {tool: 4x4}) on straight
+        lines from where they are. Returns (failure result or None, worst joint error)."""
+        import re
+
+        from .cartesian import PathError, linear_path, tcp_targets
+
+        if self.ik is None:
+            return SkillResult.rejected(f'{label}: a straight-line motion needs the profile\'s ik section'), 0
+        current = self.joints.snapshot(self.p.state_timeout_s)
+        if current is None:
+            return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)'), 0
+        goals = goals if goals is not None else tcp_targets(tools)
+        patterns = [re.compile(self.ik.joint_pattern.format(tool=tool)) for tool in goals]
+        arm = {n: v for n, v in current.items() if any(p.fullmatch(n) for p in patterns)}
+        try:
+            starts = self.hold.tcp_poses(goals)
+            ctx.feedback(0.0, 'straight-line path')
+            path = linear_path(self.ik, starts, goals, arm, self.tcp_speed, self.tcp_turn)
+        except (LookupError, PathError) as error:
+            return SkillResult.failed(f'{label}: {error}'), 0
+        goal = dict(zip(path.names, path.points[-1], strict=True))
+        result, final = self._move(ctx, goal, label, path=path)
+        if result is not None:
+            return result, 0
+        return None, max(abs(goal[n] - final[n]) for n in goal)
+
+
 class GoToPoint(MoveToPose):
     name = 'go_to_point'
     description = ('Move one or both tools to a point on a placed object, for example the grasp point of a frame in a '
@@ -264,6 +310,8 @@ class GoToPoint(MoveToPose):
             'offset_m': {'type': 'number', 'minimum': 0, 'description': 'stop this far back along the approach'},
             'tools': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1,
                       'description': 'only these tools (default: every tool the point has)'},
+            'linear': {'type': 'boolean', 'description': 'move the TCPs on straight lines from where they are '
+                                                         '(final approach), instead of a planned path'},
         },
         'additionalProperties': False,
     }
@@ -276,39 +324,88 @@ class GoToPoint(MoveToPose):
         self.cell_frame = params.pop('cell_frame', 'world')  # TF frame of the cell (object and location poses)
         # if the point is out of reach at the current lift: these heights of this joint are tried, in order
         self.lift_joint, self.lift_values = params.pop('lift_joint', None), list(params.pop('lift_values', []))
+        self.tcp_speed = float(params.pop('tcp_speed', 0.05))  # m/s and rad/s for straight-line motions
+        self.tcp_turn = float(params.pop('tcp_turn', 0.3))
         super().setup(node, config, robot, params)
-        from tf2_ros import Buffer, TransformListener
-        self.tf = Buffer()
-        self.tf_listener = TransformListener(self.tf, node)
 
     def execute(self, ctx, args):
-        import rclpy
+        from .points import instance_matrix, point_targets
 
-        from .ik import pose_matrix
-        from .points import point_targets
-
+        refusal = self._holding_refusal()
+        if refusal is not None:
+            return refusal
         try:
             instance, point = self.config.instance_point(args['point'])
         except KeyError as error:
             return SkillResult.rejected(str(error.args[0]))
-        base = self.robot.base['frame']
         try:
-            t = self.tf.lookup_transform(self.cell_frame, base, rclpy.time.Time()).transform
-        except Exception as error:  # noqa: BLE001 - several tf2 exception types
-            return SkillResult.failed(f'where is the robot? no transform {self.cell_frame} -> {base}: {error}')
+            base_in_cell = self.hold.transform(self.cell_frame, self.robot.base['frame'])
+        except LookupError as error:
+            return SkillResult.failed(f'where is the robot? {error}')
+        offset = float(args.get('offset_m', 0.0))
         try:
-            tools = point_targets(point, instance, pose_matrix(t.translation, t.rotation),
-                                  float(args.get('offset_m', 0.0)), args.get('tools'))
+            tools = point_targets(point, instance, base_in_cell, offset, args.get('tools'))
         except KeyError as error:
             return SkillResult.rejected(f'{args["point"]}: {error.args[0]}')
         if not tools:
             return SkillResult.rejected(f'{args["point"]} has no tool poses')
-        label = args['point'] + (f' (-{args["offset_m"]:g} m)' if args.get('offset_m') else '')
+        label = args['point'] + (f' (-{offset:g} m)' if offset else '') + (' (linear)' if args.get('linear') else '')
         lifts = [{self.lift_joint: float(v)} for v in self.lift_values] if self.lift_joint else []
-        result, worst = self._reach(ctx, {}, tools, label, fallback_joints=lifts)
+        self.hold.reached_point(None, None, (), None)
+        result, worst = self._reach(ctx, {}, tools, label, fallback_joints=lifts, linear=bool(args.get('linear')))
         if result is not None:
             return result
+        if offset == 0.0:  # at the point itself: closing the grippers now grasps this object
+            self.hold.reached_point(args['point'], instance.name, list(tools),
+                                    np.linalg.inv(base_in_cell) @ instance_matrix(instance))
         return SkillResult.succeeded(f'at {label} (max error {worst:.3f})', world_state={'arm_pose': label})
+
+
+class MoveObject(GoToPoint):
+    name = 'move_object'
+    description = ('Move the object held with the grippers (after go_to_point to its point and gripper close): every '
+                   'holding tool moves with it, locked in orientation and distance to the object and to each other. '
+                   'The object moves on a straight line by the given offset in the robot\'s frame (x forward, y left, '
+                   'z up), optionally turning about the vertical through the object.')
+    args_schema = {
+        'type': 'object',
+        'required': ['by'],
+        'properties': {
+            'by': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 3, 'maxItems': 3,
+                   'description': '[x, y, z] in metres, robot frame'},
+            'turn_deg': {'type': 'number', 'description': 'turn about the vertical through the object (degrees)'},
+        },
+        'additionalProperties': False,
+    }
+    needs = ['an object held with the grippers']
+    achieves = ['the held object moved']
+    default_timeout_s = 60.0
+
+    def execute(self, ctx, args):
+        import math
+
+        hold = self.hold.held()
+        if hold is None:
+            return SkillResult.rejected('nothing is held: go_to_point to the object, then close the grippers')
+        obj = hold['object_in_base']
+        turn = math.radians(float(args.get('turn_deg', 0.0)))
+        c, s = math.cos(turn), math.sin(turn)
+        rotate = np.eye(4)
+        rotate[:3, :3] = [[c, -s, 0], [s, c, 0], [0, 0, 1]]
+        pivot, back = np.eye(4), np.eye(4)
+        pivot[:3, 3], back[:3, 3] = obj[:3, 3], -obj[:3, 3]
+        shift = np.eye(4)
+        shift[:3, 3] = [float(v) for v in args['by']]
+        moved = shift @ pivot @ rotate @ back @ obj
+        goals = {tool: moved @ pose for tool, pose in hold['tcp_in_object'].items()}
+        label = f'{hold["object"]} by {[round(float(v), 3) for v in args["by"]]}' + \
+            (f', {args["turn_deg"]:g} deg' if args.get('turn_deg') else '')
+        result, worst = self._linear(ctx, {}, label, goals=goals)
+        if result is not None:
+            return result
+        self.hold.moved(moved)
+        return SkillResult.succeeded(f'moved {label} (max error {worst:.3f})',
+                                     world_state={'held_object': hold['object']})
 
 
 class Gripper(_JointSkill):
@@ -340,5 +437,15 @@ class Gripper(_JointSkill):
             stopped_short = abs(final[g['joint']] - float(g[key])) > self.p.position_tolerance
             holding[side] = args['action'] == 'close' and stopped_short
             state[f'{side}_gripper'] = 'holding' if holding[side] else key
-        return SkillResult.succeeded(', '.join(f'{s}: {v}' for s, v in state.items()), holding=holding,
-                                     world_state=state)
+        message = ', '.join(f'{s}: {v}' for s, v in state.items())
+        if args['action'] == 'close':
+            grasped = self.hold.grasp(sides)  # at an object point reached by go_to_point
+            if grasped:
+                message += f'; holding {grasped}'
+                state['held_object'] = grasped
+        else:
+            released = self.hold.release(sides)
+            if released:
+                message += f'; released {released}'
+                state['held_object'] = None
+        return SkillResult.succeeded(message, holding=holding, world_state=state)
