@@ -126,6 +126,7 @@ ROBOT_PROFILE = {
             'properties': {
                 'service': {'type': 'string'},
                 'timeout_s': {'type': 'number', 'exclusiveMinimum': 0},
+                'fallback_timeout_s': {'type': 'number', 'exclusiveMinimum': 0},
                 'groups': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {'type': 'string'}},
                 'joints': {'type': 'string'},   # regex of the joints IK may move, {tool} = tool name
                 # groups with a global solver, tried when no start below reaches the target
