@@ -95,7 +95,8 @@ def test_move_follows_the_planned_path(system):
     assert sim.position['j1'] == pytest.approx(1.0, abs=0.02)
     assert seen['j1_min'] < -0.3  # went through the planner's detour, not straight
     request = planner.requests[-1]
-    assert request.group_name == 'arm' and 'grip' in request.start_state.joint_state.name  # full start state
+    assert request.group_name == 'arm'  # start: the goal joints only (the state topic may carry unknown joints)
+    assert set(request.start_state.joint_state.name) == {'j1', 'j2', 'lift'}
     assert request.start_state.is_diff  # on top of MoveIt's state (base pose from TF)
     assert {c.joint_name for c in request.goal_constraints[0].joint_constraints} == {'j1', 'j2', 'lift'}
 
