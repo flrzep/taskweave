@@ -77,7 +77,8 @@ class MotionPlanner:
         self.client = node.create_client(GetMotionPlan, self.service, callback_group=ReentrantCallbackGroup())
 
     def plan(self, start: dict[str, float], goal: dict[str, float], should_stop=lambda: False) -> Trajectory:
-        """Trajectory from ``start`` (every known joint: the planner's start state) to ``goal``; raises PlanError."""
+        """Trajectory from ``start`` (every known joint, applied to the planner's current state) to ``goal``; raises
+        PlanError."""
         from moveit_msgs.msg import Constraints, JointConstraint, RobotState
         from sensor_msgs.msg import JointState
 
@@ -88,7 +89,8 @@ class MotionPlanner:
         r.group_name, r.pipeline_id, r.planner_id = self.group, self.pipeline, self.planner
         r.num_planning_attempts, r.allowed_planning_time = self.attempts, self.timeout_s
         r.max_velocity_scaling_factor, r.max_acceleration_scaling_factor = self.velocity_scale, self.acceleration_scale
-        r.start_state = RobotState(joint_state=JointState(name=list(start), position=[float(v) for v in start.values()]))
+        r.start_state = RobotState(joint_state=JointState(name=list(start), position=[float(v) for v in start.values()]),
+                                   is_diff=True)  # keeps what MoveIt knows besides joints, e.g. the base pose from TF
         r.goal_constraints = [Constraints(joint_constraints=[
             JointConstraint(joint_name=name, position=float(value), tolerance_above=1e-3, tolerance_below=1e-3,
                             weight=1.0) for name, value in goal.items()])]
