@@ -35,3 +35,17 @@ def test_quaternion_round_trip(angles):
                         [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
                         [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)]])
     assert rebuilt == pytest.approx(rotation, abs=1e-9)
+
+
+def test_backward_approach_is_flagged():
+    from taskweave_skills.ik import target_warnings
+    assert target_warnings({'tcp': [0.85, -0.1, 0.4], 'approach': [-1, 0, 0], 'closing': [0, 1, 0]})
+    assert not target_warnings({'tcp': [0.85, -0.1, 0.4], 'approach': [1, 0, 0], 'closing': [0, 1, 0]})
+    assert not target_warnings({'tcp': [0.5, 0.2, 0.2], 'approach': [0, 0, -1], 'closing': [1, 0, 0]})  # from above
+
+
+def test_reach_search_tries_the_smallest_shifts_first():
+    from taskweave_skills.ik import shifts
+    order = list(shifts(0.05, 0.1))
+    assert len(order) == 12 and order[:2] == [[0.05, 0, 0], [-0.05, 0, 0]]
+    assert max(abs(v) for v in order[5]) == 0.05 and max(abs(v) for v in order[6]) == 0.1

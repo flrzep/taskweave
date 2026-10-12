@@ -116,3 +116,6 @@ details[open] summary { margin-bottom: 8px; }
 .joint-group .grid3 .field label { font-family: var(--mono); font-size: 11.5px; }
 .field label.check { display: flex; gap: 8px; align-items: center; min-height: 42px; color: var(--fg); font-size: 15px; }
 .field label.check input { width: auto; min-height: 0; }
+.reach { margin-top: 6px; display: grid; gap: 4px; font-size: 14px; }
+.reach .ok { color: var(--ok); font-weight: 600; } .reach .bad { color: var(--bad); font-weight: 600; }
+.reach .warn { color: var(--warn); }

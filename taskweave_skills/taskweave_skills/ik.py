@@ -106,6 +106,27 @@ def quaternion(rotation: np.ndarray) -> tuple[float, float, float, float]:
     return (m[k, j] - m[j, k]) / s, *q
 
 
+def target_warnings(target: dict) -> list[str]:
+    """Likely mistakes in a tool target that IK alone reports only as 'no solution'."""
+    warnings = []
+    tcp, approach = np.asarray(target['tcp'], float), np.asarray(target['approach'], float)
+    if np.linalg.norm(tcp[:2]) > 0.2 and approach[:2] @ tcp[:2] < -0.3 * np.linalg.norm(approach[:2]) * np.linalg.norm(
+            tcp[:2]):
+        warnings.append('approach points back toward the robot: it is the direction the gripper moves into the object '
+                        '(forward = [1, 0, 0]); the wrist sits behind the TCP along it')
+    return warnings
+
+
+def shifts(step: float, max_shift: float):
+    """TCP offsets for the reach search, smallest first: along each base axis, both ways."""
+    for k in range(1, int(round(max_shift / step)) + 1):
+        for axis in range(3):
+            for sign in (1, -1):
+                offset = [0.0, 0.0, 0.0]
+                offset[axis] = sign * k * step
+                yield offset
+
+
 class IkClient:
     def __init__(self, node, robot):
         from moveit_msgs.srv import GetPositionIK  # only needed when the robot has an ik section
@@ -159,6 +180,30 @@ class IkClient:
             result.update({name: float(value) for name, value in zip(state.name, state.position, strict=False)
                            if pattern.fullmatch(name)})
         return result
+
+    def reachable(self, tool: str, target: dict, fixed: dict, timeout_s: float = 0.15) -> bool:
+        """One quick IK attempt (the fallback group's global search if there is one): a probe, not a solution."""
+        from moveit_msgs.msg import RobotState
+        from sensor_msgs.msg import JointState
+
+        request = self._request(tool, self.fallback_groups.get(tool, self.groups[tool]),
+                                flange_target(target, self.tools[tool]), timeout_s)
+        request.ik_request.robot_state = RobotState(
+            joint_state=JointState(name=list(fixed), position=[float(v) for v in fixed.values()]), is_diff=True)
+        return self._call(request, tool, timeout_s, lambda: False).error_code.val == SUCCESS
+
+    def nearest_reachable(self, tool: str, target: dict, fixed: dict, step: float = 0.05,
+                          max_shift: float = 0.4) -> dict | None:
+        """The target with its TCP moved the least along a base axis (same orientation) that IK solves, or None."""
+        for offset in shifts(step, max_shift):
+            candidate = {**target, 'tcp': [round(float(v) + d, 4) for v, d in zip(target['tcp'], offset, strict=True)]}
+            if self.reachable(tool, candidate, fixed):
+                try:
+                    self.solve({tool: candidate}, fixed)  # confirm the way a move would solve it
+                except IkError:
+                    continue
+                return candidate
+        return None
 
     def _request(self, tool: str, group: str, pose: np.ndarray, timeout_s: float):
         request = self.Request()

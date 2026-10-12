@@ -28,6 +28,7 @@ HTTP API (JSON):
                                    against the robot's base, saved and applied to the running costmaps
                                    (parameter nav_costmaps) and controller (nav_controller)
   POST /api/robot/move {pose}      run move_to_pose now (no mission running); returns the outcome when it ends
+  POST /api/robot/reach {joints, tools, search: [tool]}   per tool: ok, message, warnings, nearest reachable target
 Missions and points are edited between runs (409 while a mission runs) and are used at the next start.
 """
 
@@ -149,6 +150,8 @@ class Bridge(Node):
         self.skill_lock = threading.Lock()  # one manual skill at a time
         self.skill_clients: dict[str, ActionClient] = {}
         self.fk_client = None  # created on first use (MoveIt)
+        self.ik = None  # IkClient, created on first reach check
+        self.reach_lock = threading.Lock()
 
     # ---- ROS -> state ------------------------------------------------------------
     def _broadcast(self, kind: str, data) -> None:
@@ -241,6 +244,34 @@ class Bridge(Node):
         poses = {link: stamped.pose for link, stamped in links}
         return {tool: tool_target(pose_matrix(poses[frame['link']].position, poses[frame['link']].orientation), frame)
                 for tool, frame in tools.items()}
+
+    def reach(self, body: dict) -> dict:
+        """Can the robot put its tools on these targets? Per tool: ok, message, warnings, and with ``search`` the
+        nearest reachable target (TCP moved along a base axis). Solved like move_to_pose solves a pose."""
+        from taskweave_skills.ik import IkClient, IkError, target_warnings
+
+        profile = self.config.robot(self.robot)
+        if not profile.data.get('ik'):
+            raise TimeoutError('the robot profile has no ik section')
+        joints = {name: float(value) for name, value in (body.get('joints') or {}).items()}
+        with self.reach_lock:
+            if self.ik is None:
+                self.ik = IkClient(self, profile)
+            result = {}
+            for tool, target in (body.get('tools') or {}).items():
+                entry = {'ok': False, 'message': '', 'warnings': [], 'suggestion': None}
+                try:
+                    entry['warnings'] = target_warnings(target)
+                    self.ik.solve({tool: target}, joints)
+                    entry['ok'] = True
+                except IkError as error:
+                    entry['message'] = str(error)
+                    if tool in body.get('search', []):
+                        entry['suggestion'] = self.ik.nearest_reachable(tool, target, joints)
+                except (KeyError, ValueError, TypeError) as error:
+                    entry['message'] = f'invalid target: {error}'
+                result[tool] = entry
+            return result
 
     def run_skill(self, skill: str, args: dict, timeout_s: float = MANUAL_SKILL_TIMEOUT_S) -> dict:
         """Run one skill directly (no mission), e.g. move to a joint pose to check it. Blocks until it ends."""
@@ -411,6 +442,8 @@ class Handler(BaseHTTPRequestHandler):
                 applied = bridge.apply_navigation(settings)
                 bridge.get_logger().info(f'HMI saved navigation clearance -> {file}; {applied}')
                 return self._json({'file': file, 'applied': applied})
+            if method == 'POST' and route == ['robot', 'reach']:
+                return self._json(bridge.reach(self._body()))
             if method == 'POST' and route == ['robot', 'move']:
                 return self._json(bridge.run_skill('move_to_pose', {'pose': self._body()['pose']}))
             return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)

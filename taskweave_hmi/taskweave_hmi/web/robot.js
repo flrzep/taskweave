@@ -1,5 +1,6 @@
 'use strict';
-// taskweave HMI, Robot tab: navigation clearance (applied live to the path planner) and named joint poses.
+// taskweave HMI, Robot tab: navigation clearance (applied live to the path planner) and named poses; tool targets
+// are checked for reachability (IK) while they are edited.
 // Uses helpers and state from app.js ($, el, api, message, state, DEG, NAME_RE, setPointsBusy, pointsBusy).
 
 const NAV_FIELDS = ['front', 'back', 'left', 'right'];
@@ -125,6 +126,7 @@ function poseItem(pose, isNew = false) {
   });
   // tool targets: TCP position (m) and approach / closing directions, base frame
   const toolInputs = {};
+  const reach = {};  // per tool: reachability line (checked while editing)
   const toolNodes = toolNames.map((tool) => {
     const target = (pose.tools || {})[tool] || { tcp: [0.5, 0, 0.3], approach: [1, 0, 0], closing: [0, 1, 0] };
     toolInputs[tool] = {};
@@ -136,7 +138,8 @@ function poseItem(pose, isNew = false) {
       });
       return el('div', { class: 'field' }, el('label', { text: `${title}  x · y · z` }), el('div', { class: 'grid3' }, toolInputs[tool][key]));
     });
-    return el('div', { class: 'joint-group' }, el('label', { text: `${tool} tool (IK)` }), ...rows);
+    reach[tool] = el('div', { class: 'reach' });
+    return el('div', { class: 'joint-group' }, el('label', { text: `${tool} tool (IK)` }), ...rows, reach[tool]);
   });
   const lifts = Object.keys(pose.joints).filter((joint) => linear.has(joint));
   const liftText = lifts.map((joint) => `${lifts.length > 1 ? joint : 'lift'} ${pose.joints[joint].toFixed(2)} m`);
@@ -159,9 +162,97 @@ function poseItem(pose, isNew = false) {
     el('div', { class: 'row gap' }, robotButton, moveButton), msg, el('div', { class: 'row gap' }, deleteButton, saveButton));
   edit.hidden = !isNew;
   edit.addEventListener('input', markChanged);
+
+  // Reachability: solved the way Move here solves it (current lift / head values from the form), while editing.
+  const formJoints = () => {
+    const values = {};
+    Object.entries(groups).forEach(([group, members]) => {
+      if (!included[group].checked) return;
+      members.forEach((joint) => {
+        const value = Number(inputs[joint].value);
+        if (inputs[joint].value.trim() !== '' && Number.isFinite(value)) values[joint] = unshow(joint, value);
+      });
+    });
+    return values;
+  };
+  const formTarget = (tool) => {
+    const target = {};
+    for (const key of ['tcp', 'approach', 'closing']) {
+      target[key] = toolInputs[tool][key].map((input) => Number(input.value));
+      if (toolInputs[tool][key].some((input) => input.value.trim() === '') || target[key].some((v) => !Number.isFinite(v))) return null;
+    }
+    return target;
+  };
+  const AXES = [['forward', 'back'], ['left', 'right'], ['up', 'down']];
+  const shiftText = (from, to) => to.map((v, i) => [v - from[i], i]).filter(([d]) => Math.abs(d) > 1e-6)
+    .map(([d, i]) => `${Math.abs(d).toFixed(2)} m ${AXES[i][d > 0 ? 0 : 1]}`).join(', ');
+  const showReach = (tool, result, target) => {
+    const line = reach[tool];
+    const parts = [];
+    if (result.ok) {
+      parts.push(el('span', { class: 'ok', text: '✓ reachable' }));
+    } else {
+      parts.push(el('span', { class: 'bad', text: '✗ not reachable' }), el('div', { class: 'small-text muted', text: result.message }));
+      if (result.suggestion) {
+        const tcp = result.suggestion.tcp;
+        const use = el('button', { class: 'btn small', text: 'Use' });
+        use.addEventListener('click', () => {
+          toolInputs[tool].tcp.forEach((input, i) => { input.value = tcp[i]; });
+          markChanged(); scheduleReach();
+        });
+        parts.push(el('div', { class: 'row gap' }, el('span', {
+          text: `Nearest reachable with this orientation: TCP (${tcp.map((v) => v.toFixed(2)).join(', ')}), ${shiftText(target.tcp, tcp)}` }), use));
+      } else if (result.searched) {
+        parts.push(el('div', { class: 'small-text', text: 'Nothing reachable within 0.4 m with this orientation: change approach / closing or the lift.' }));
+      } else {
+        const find = el('button', { class: 'btn small', text: 'Find nearest reachable' });
+        find.addEventListener('click', () => checkReach(tool));
+        parts.push(find);
+      }
+    }
+    result.warnings.forEach((warning) => parts.push(el('div', { class: 'small-text warn', text: `⚠ ${warning}` })));
+    line.replaceChildren(...parts);
+  };
+  let reachRun = 0;
+  async function checkReach(searchTool = null) {
+    if (!toolNames.length) return;
+    const run = ++reachRun;
+    const tools = {};
+    toolNames.forEach((tool) => {
+      const target = formTarget(tool);
+      if (target) tools[tool] = target;
+      else reach[tool].replaceChildren(el('span', { class: 'muted', text: 'enter three numbers per row' }));
+    });
+    if (!Object.keys(tools).length) return;
+    Object.keys(tools).forEach((tool) => {
+      if (!searchTool || tool === searchTool) {
+        reach[tool].replaceChildren(el('span', { class: 'muted', text: tool === searchTool ? 'searching nearby TCP positions…' : 'checking…' }));
+      }
+    });
+    const { ok, data } = await api('POST', '/api/robot/reach',
+      { joints: formJoints(), tools, search: searchTool ? [searchTool] : [] });
+    if (run !== reachRun) return;  // a newer check is under way
+    if (!ok) {
+      Object.keys(tools).forEach((tool) => reach[tool].replaceChildren(
+        el('span', { class: 'muted', text: data.error || (data.problems || []).join(' ') || 'reach check unavailable' })));
+      return;
+    }
+    Object.entries(data).forEach(([tool, result]) => {
+      if (searchTool && tool === searchTool) result.searched = true;
+      showReach(tool, result, tools[tool]);
+    });
+  }
+  let reachTimer = null;
+  const scheduleReach = () => { clearTimeout(reachTimer); reachTimer = setTimeout(() => checkReach(), 700); };
+  if (toolNames.length) edit.addEventListener('input', scheduleReach);
   moveButton.disabled = changed;
   const item = el('li', { class: 'point' }, head, edit);
-  head.addEventListener('click', () => { edit.hidden = !edit.hidden; head.setAttribute('aria-expanded', String(!edit.hidden)); });
+  head.addEventListener('click', () => {
+    edit.hidden = !edit.hidden;
+    head.setAttribute('aria-expanded', String(!edit.hidden));
+    if (!edit.hidden) checkReach();
+  });
+  if (isNew) checkReach();
 
   robotButton.addEventListener('click', async () => {
     const { ok, data } = await api('GET', '/api/robot/joints');
@@ -175,6 +266,7 @@ function poseItem(pose, isNew = false) {
         .forEach((input, i) => { input.value = tools.data[tool][key][i]; })));
     }
     markChanged();
+    checkReach();
     message(msg, missing.length ? `Not in the joint states: ${missing.join(', ')}` : 'Filled in from the robot. Check, then save.',
       missing.length > 0);
   });
