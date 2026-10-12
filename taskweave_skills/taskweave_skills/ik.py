@@ -150,8 +150,10 @@ class IkClient:
             else:
                 if response.error_code.val == FRAME_TRANSFORM_FAILURE:
                     raise IkError(f'IK for {tool}: MoveIt has no transform to {self.frame} (TF not published?)')
-                raise IkError(f'no IK solution for {tool}: TCP {list(target["tcp"])}, '
-                              f'approach {list(target["approach"])} (code {response.error_code.val})')
+                flange = ', '.join(f'{v:.2f}' for v in pose[:3, 3])
+                raise IkError(f'no IK solution for {tool}: TCP {list(target["tcp"])}, approach '
+                              f'{list(target["approach"])} needs the flange at ({flange}) in {self.frame}: out of '
+                              f'reach, too close to the body, or in collision (code {response.error_code.val})')
             pattern = re.compile(self.joint_pattern.format(tool=tool))
             state = response.solution.joint_state
             result.update({name: float(value) for name, value in zip(state.name, state.position, strict=False)

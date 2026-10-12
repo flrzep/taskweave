@@ -23,6 +23,8 @@ import time
 
 SUCCESS = 1
 POLL_S = 0.02
+PLAN_TRIES = 3
+RETRY = {-1, -2, -6, 99999}  # planning failed, invalid plan (final validation), timed out, pipeline failure
 
 
 class PlanError(RuntimeError):
@@ -96,6 +98,18 @@ class MotionPlanner:
         r.goal_constraints = [Constraints(joint_constraints=[
             JointConstraint(joint_name=name, position=float(value), tolerance_above=1e-3, tolerance_below=1e-3,
                             weight=1.0) for name, value in goal.items()])]
+        for _ in range(PLAN_TRIES):  # a sampled path can fail MoveIt's final check at finer spacing: plan again
+            response = self._call(request, should_stop)
+            code = response.error_code.val
+            if code not in RETRY:
+                break
+        if code != SUCCESS:
+            raise PlanError(f'no collision-free path: {ERRORS.get(code, "MoveIt error")} (code {code})')
+        trajectory = response.trajectory.joint_trajectory
+        times = [p.time_from_start.sec + p.time_from_start.nanosec * 1e-9 for p in trajectory.points]
+        return Trajectory(list(trajectory.joint_names), times, [list(p.positions) for p in trajectory.points])
+
+    def _call(self, request, should_stop):
         future = self.client.call_async(request)
         deadline = time.monotonic() + self.timeout_s + 10.0
         while not future.done():
@@ -104,10 +118,4 @@ class MotionPlanner:
             if time.monotonic() > deadline:
                 raise PlanError(f'planning service {self.service} did not answer')
             time.sleep(POLL_S)
-        response = future.result().motion_plan_response
-        code = response.error_code.val
-        if code != SUCCESS:
-            raise PlanError(f'no collision-free path: {ERRORS.get(code, "MoveIt error")} (code {code})')
-        trajectory = response.trajectory.joint_trajectory
-        times = [p.time_from_start.sec + p.time_from_start.nanosec * 1e-9 for p in trajectory.points]
-        return Trajectory(list(trajectory.joint_names), times, [list(p.positions) for p in trajectory.points])
+        return future.result().motion_plan_response

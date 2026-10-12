@@ -31,14 +31,16 @@ class FakePlanner(Node):
     def __init__(self):
         super().__init__('fake_planner')
         self.error = 0
+        self.fail_first = 0  # answer this many requests with a pipeline failure first
         self.requests = []
         self.create_service(GetMotionPlan, '/plan_kinematic_path', self.plan)
 
     def plan(self, request, response):
         r = request.motion_plan_request
         self.requests.append(r)
-        if self.error:
-            response.motion_plan_response.error_code.val = self.error
+        if self.error or self.fail_first:
+            response.motion_plan_response.error_code.val = self.error or 99999
+            self.fail_first = max(0, self.fail_first - 1)
             return response
         start = dict(zip(r.start_state.joint_state.name, r.start_state.joint_state.position, strict=True))
         goal = {c.joint_name: c.position for c in r.goal_constraints[0].joint_constraints}
@@ -107,3 +109,11 @@ def test_no_path_fails_without_moving(system):
     result = run(client, 'move_to_pose', {'pose': 'ready'})
     assert result.outcome == RunSkill.Result.FAILED and 'goal in collision' in result.message
     assert sim.position['j1'] == 0.0
+
+
+def test_a_failed_plan_is_planned_again(system):
+    sim, planner, client, _ = system
+    planner.fail_first = 1  # e.g. the path failed MoveIt's final validation
+    result = run(client, 'move_to_pose', {'pose': 'ready'})
+    assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
+    assert len(planner.requests) == 2 and sim.position['j1'] == pytest.approx(1.0, abs=0.02)
