@@ -136,7 +136,7 @@ details[open] summary { margin-bottom: 8px; }
 .plan-graph .kind-wait .node-kind, .legend .kind-wait i { fill: #6b7785; background: #6b7785; }
 .plan-graph .kind-other .node-kind, .legend .kind-other i { fill: #2e8b7a; background: #2e8b7a; }
 .plan-graph .state-running .node-box { stroke: var(--accent); stroke-width: 3; fill: color-mix(in srgb, var(--accent) 12%, var(--field));
-  animation: node-pulse 1.4s ease-in-out infinite; }
+  animation: node-breathe 2.8s ease-in-out infinite; }
 .plan-graph .state-running .node-state { fill: var(--accent); }
 .plan-graph .state-paused .node-box { stroke: var(--warn); stroke-width: 3; }
 .plan-graph .state-paused .node-state { fill: var(--warn); }
@@ -160,5 +160,9 @@ details[open] summary { margin-bottom: 8px; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .legend-item i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
 .legend-item i.swatch-fail { background: none; border-top: 2px dashed var(--bad); height: 0; width: 16px; border-radius: 0; }
-@keyframes node-pulse { 50% { stroke-width: 5; } }
+@keyframes node-breathe {  /* slow in and out: fill and a soft glow swell, then fade */
+  0%, 100% { fill: color-mix(in srgb, var(--accent) 6%, var(--field)); filter: drop-shadow(0 0 0 transparent); }
+  50% { fill: color-mix(in srgb, var(--accent) 26%, var(--field));
+        filter: drop-shadow(0 0 7px color-mix(in srgb, var(--accent) 70%, transparent)); }
+}
 @media (prefers-reduced-motion: reduce) { .plan-graph .state-running .node-box { animation: none; } }
