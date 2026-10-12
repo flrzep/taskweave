@@ -7,9 +7,10 @@ Move (default): the TCP moves in the robot's base frame (left stick: forward/bac
 up/down) and right stick left/right turns the gripper about its approach axis. Tilt (R2 held): the sticks turn the
 gripper about the TCP: left stick up/down tilts the approach up/down, left/right tilts it left/right.
 
-A servo commands the flange (the tool's link), so the command is expressed in the flange frame: base-frame velocity
-rotated into it, TCP-frame rotation rotated into it, plus the flange velocity that keeps the TCP itself still while
-the gripper turns (the TCP sits ``r`` from the flange).
+A servo moves the flange (the tool's link), so the command is the flange's velocity, in the base frame: the TCP's
+velocity, the TCP-frame rotation turned into base axes, and the flange velocity that keeps the TCP itself still while
+the gripper turns about it (the TCP sits ``r`` from the flange). MoveIt Servo applies the rotation about the flange
+(apply_twist_commands_about_ee_frame); it ignores twists given in the flange frame itself, hence the base frame.
 """
 
 from __future__ import annotations
@@ -36,10 +37,6 @@ def apply(m, v) -> Vec:
     return tuple(sum(m[i][j] * v[j] for j in range(3)) for i in range(3))
 
 
-def transpose(m):
-    return [[m[j][i] for j in range(3)] for i in range(3)]
-
-
 def cross(a, b) -> Vec:
     return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
 
@@ -53,14 +50,12 @@ def stick_velocity(axes, tilt: bool, speed: float, turn: float) -> tuple[Vec, Ve
 
 
 def flange_twist(linear_base: Vec, angular_tcp: Vec, base_to_flange, tool_frame: dict) -> tuple[Vec, Vec]:
-    """Flange (linear, angular) velocity in the flange frame for a base-frame TCP velocity and a TCP-frame rotation.
+    """Flange (linear, angular) velocity in the base frame for a base-frame TCP velocity and a TCP-frame rotation.
 
     ``base_to_flange``: rotation matrix of the flange in the base frame. ``tool_frame``: profile tool_frames entry
     (xyz, rpy of the TCP relative to the flange)."""
-    tcp_rotation = rpy_rotation(tool_frame.get('rpy', [0, 0, 0]))
-    r = tuple(float(v) for v in tool_frame.get('xyz', [0, 0, 0]))  # TCP position in the flange frame
-    angular = apply(tcp_rotation, angular_tcp)
-    linear = apply(transpose(base_to_flange), linear_base)  # the TCP's own velocity
+    angular = apply(base_to_flange, apply(rpy_rotation(tool_frame.get('rpy', [0, 0, 0])), angular_tcp))
+    r = apply(base_to_flange, tuple(float(v) for v in tool_frame.get('xyz', [0, 0, 0])))  # flange -> TCP, base axes
     # flange velocity = TCP velocity - angular x r (the TCP turns in place)
     turn = cross(angular, r)
-    return tuple(v - t for v, t in zip(linear, turn, strict=True)), angular
+    return tuple(v - t for v, t in zip(linear_base, turn, strict=True)), angular

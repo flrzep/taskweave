@@ -89,7 +89,7 @@ def test_tool_mode_jogs_only_with_the_enable_button_and_blocks_the_base(pad):
     assert not seen['twist']
     send(buttons=(4,), axes=(0.0, 1.0, 0, 0, 0, 0))  # enable + left stick up: forward
     twist = seen['twist'][-1]
-    assert twist.header.frame_id == 'left_link7' and twist.twist.linear.x == pytest.approx(0.1)
+    assert twist.header.frame_id == operator.base_frame and twist.twist.linear.x == pytest.approx(0.1)
     send()  # enable released: one stop command
     assert seen['twist'][-1].twist.linear.x == 0.0
     assert len(seen['drive']) == drive_before  # the base got nothing in the tool mode

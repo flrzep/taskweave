@@ -24,10 +24,16 @@ def test_tilt_mode_only_rotates():
     assert linear == (0.0, 0.0, 0.0) and angular == pytest.approx((-0.3, -0.3, 0.0))
 
 
-def test_translation_is_rotated_into_the_flange_frame():
-    flange_in_base = rpy_rotation([0.0, 0.0, math.pi / 2])  # flange x = base y
+def test_translation_stays_in_the_base_frame():
+    flange_in_base = rpy_rotation([0.0, 0.0, math.pi / 2])  # the flange's orientation does not matter for it
     v, w = flange_twist((0.0, 0.1, 0.0), (0, 0, 0), flange_in_base, TOOL)
-    assert v == pytest.approx((0.1, 0.0, 0.0)) and w == pytest.approx((0, 0, 0))
+    assert v == pytest.approx((0.0, 0.1, 0.0)) and w == pytest.approx((0, 0, 0))
+
+
+def test_rotation_is_turned_into_base_axes():
+    flange_in_base = rpy_rotation([0.0, 0.0, math.pi / 2])
+    _, w = flange_twist((0, 0, 0), (0, 0, 1.0), flange_in_base, TOOL)  # about the approach = -x of the flange
+    assert w == pytest.approx((0.0, -1.0, 0.0), abs=1e-9)  # flange x = base y
 
 
 def test_turning_keeps_the_tcp_in_place():

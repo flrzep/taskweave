@@ -165,7 +165,7 @@ class OperatorJoy(Node):
     def _send(self, arm: dict, linear, angular) -> None:
         twist = self.TwistStamped()
         twist.header.stamp = self.get_clock().now().to_msg()
-        twist.header.frame_id = arm['frame']['link']
+        twist.header.frame_id = self.base_frame
         twist.twist.linear.x, twist.twist.linear.y, twist.twist.linear.z = (float(v) for v in linear)
         twist.twist.angular.x, twist.twist.angular.y, twist.twist.angular.z = (float(v) for v in angular)
         arm['pub'].publish(twist)
