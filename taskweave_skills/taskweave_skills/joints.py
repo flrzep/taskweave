@@ -208,8 +208,9 @@ class MoveToPose(_JointSkill):
         return SkillResult.succeeded(f'at {args["pose"]} (max error {worst:.3f})',
                                      world_state={'arm_pose': args['pose']})
 
-    def _reach(self, ctx, joints: dict, tools: dict, label: str):
-        """Set ``joints`` and put each tool on its target (IK), along a planned path if there is a planner.
+    def _reach(self, ctx, joints: dict, tools: dict, label: str, fallback_joints=()):
+        """Set ``joints`` and put each tool on its target (IK), along a planned path if there is a planner. If IK
+        finds no solution with ``joints``, each of ``fallback_joints`` (e.g. other lift heights) is tried instead.
         Returns (failure result or None, worst joint error at the end)."""
         from .ik import IkError
         from .motion_plan import PlanError
@@ -221,10 +222,16 @@ class MoveToPose(_JointSkill):
             if self.ik is None:
                 return SkillResult.rejected(f'{label} has tool targets, but the robot profile has no ik'), 0
             ctx.feedback(0.0, 'solving IK')
-            try:
-                goal.update(self.ik.solve(tools, joints, lambda: ctx.should_stop))
-            except IkError as error:
-                return SkillResult.failed(str(error)), 0
+            first_error = None
+            for attempt in [joints, *fallback_joints]:
+                try:
+                    goal = {**attempt, **self.ik.solve(tools, attempt, lambda: ctx.should_stop)}
+                    break
+                except IkError as error:
+                    first_error = first_error or error
+            else:
+                tried = f' (also tried {", ".join(str(a) for a in fallback_joints)})' if fallback_joints else ''
+                return SkillResult.failed(f'{first_error}{tried}'), 0
         path = None
         if self.planner is not None:
             ctx.feedback(0.0, 'planning')
@@ -246,7 +253,8 @@ class GoToPoint(MoveToPose):
     description = ('Move one or both tools to a point on a placed object, for example the grasp point of a frame in a '
                    'bin: the point is taught relative to the object, the robot solves where its tools must go from '
                    'where it stands. offset_m stops short of the point along its approach direction (a pre-grasp '
-                   'pose). Collision-free path with a motion planner; the torso lift stays where it is.')
+                   'pose). Collision-free path with a motion planner. The torso lift stays where it is unless the '
+                   'point is only in reach at another of the configured lift heights.')
     args_schema = {
         'type': 'object',
         'required': ['point'],
@@ -266,6 +274,8 @@ class GoToPoint(MoveToPose):
     def setup(self, node, config, robot, params):
         params = dict(params)
         self.cell_frame = params.pop('cell_frame', 'world')  # TF frame of the cell (object and location poses)
+        # if the point is out of reach at the current lift: these heights of this joint are tried, in order
+        self.lift_joint, self.lift_values = params.pop('lift_joint', None), list(params.pop('lift_values', []))
         super().setup(node, config, robot, params)
         from tf2_ros import Buffer, TransformListener
         self.tf = Buffer()
@@ -294,7 +304,8 @@ class GoToPoint(MoveToPose):
         if not tools:
             return SkillResult.rejected(f'{args["point"]} has no tool poses')
         label = args['point'] + (f' (-{args["offset_m"]:g} m)' if args.get('offset_m') else '')
-        result, worst = self._reach(ctx, {}, tools, label)
+        lifts = [{self.lift_joint: float(v)} for v in self.lift_values] if self.lift_joint else []
+        result, worst = self._reach(ctx, {}, tools, label, fallback_joints=lifts)
         if result is not None:
             return result
         return SkillResult.succeeded(f'at {label} (max error {worst:.3f})', world_state={'arm_pose': label})
