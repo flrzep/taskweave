@@ -102,13 +102,17 @@ function renderGraph() {
     const group = svg('g', { class: `node kind-${kind} state-${status}` });
     const title = svg('title', {}, `${i + 1}. ${step.instruction}\n${step.skill} ${JSON.stringify(step.args)}`);
     group.append(title,
-      svg('rect', { x: G.nodeX, y, width: G.nodeW, height: G.nodeH, rx: 10, class: 'node-box' }),
-      svg('rect', { x: G.nodeX, y, width: 8, height: G.nodeH, rx: 4, class: 'node-kind' }),
-      svg('text', { x: G.nodeX + 18, y: y + 21, class: 'node-title' }, `${i + 1} · ${step.skill}`),
-      svg('text', { x: G.nodeX + 18, y: y + 40, class: 'node-arg' }, mainArg(step).slice(0, 30)));
-    if (status !== 'pending') {
-      group.append(svg('text', { x: right - 10, y: y + 21, class: 'node-state', 'text-anchor': 'end' },
-        status === 'running' ? 'running' : status));
+      svg('rect', { x: G.nodeX, y, width: G.nodeW, height: G.nodeH, rx: 14, class: 'node-box' }),
+      svg('rect', { x: G.nodeX + 9, y: y + 11, width: 5, height: G.nodeH - 22, rx: 2.5, class: 'node-kind' }),
+      svg('text', { x: G.nodeX + 24, y: y + 22, class: 'node-title' }, `${i + 1} · ${step.skill}`),
+      svg('text', { x: G.nodeX + 24, y: y + 39, class: 'node-arg' }, mainArg(step).slice(0, 28)));
+    if (status === 'running' || status === 'paused') {
+      group.append(svg('text', { x: right - 12, y: y + 22, class: 'node-state', 'text-anchor': 'end' }, status));
+    } else if (status !== 'pending') {  // finished: a round badge
+      const glyph = { succeeded: '✓', failed: '✕', timeout: '⏱', rejected: '✕', canceled: '–' }[status] || '•';
+      group.append(svg('circle', { cx: right - 18, cy: y + G.nodeH / 2, r: 10, class: 'node-badge' }),
+        svg('text', { x: right - 18, y: y + G.nodeH / 2 + 4.5, class: 'node-badge-text', 'text-anchor': 'middle' }, glyph),
+        svg('title', {}, status));
     }
     root.append(group);
     // next step (or end): success, and skip when the step fails with on_failure skip

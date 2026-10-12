@@ -120,49 +120,60 @@ details[open] summary { margin-bottom: 8px; }
 .reach .ok { color: var(--ok); font-weight: 600; } .reach .bad { color: var(--bad); font-weight: 600; }
 .reach .warn { color: var(--warn); }
 
-/* plan graph (graph.js) */
-.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.segmented button { border: 0; background: var(--field); color: var(--muted); font: 600 13px var(--sans); padding: 6px 12px; min-height: 32px; }
-.segmented button[aria-pressed="true"] { background: var(--accent); color: #fff; }
-.graph-box { display: grid; gap: 8px; }
-.plan-graph { width: 100%; height: auto; max-width: 520px; justify-self: center; }
-.plan-graph .node-box { fill: var(--field); stroke: var(--line); stroke-width: 1.5; }
-.plan-graph .node-title { font: 600 13px var(--sans); fill: var(--fg); }
-.plan-graph .node-arg { font: 12px var(--mono); fill: var(--muted); }
-.plan-graph .node-state { font: 600 11px var(--mono); fill: var(--muted); text-transform: uppercase; }
-.plan-graph .kind-drive .node-kind, .legend .kind-drive i { fill: #0b5cad; background: #0b5cad; }
-.plan-graph .kind-arm .node-kind, .legend .kind-arm i { fill: #7a3fbf; background: #7a3fbf; }
-.plan-graph .kind-grip .node-kind, .legend .kind-grip i { fill: #c46a00; background: #c46a00; }
-.plan-graph .kind-wait .node-kind, .legend .kind-wait i { fill: #6b7785; background: #6b7785; }
-.plan-graph .kind-other .node-kind, .legend .kind-other i { fill: #2e8b7a; background: #2e8b7a; }
-.plan-graph .state-running .node-box { stroke: var(--accent); stroke-width: 3; fill: color-mix(in srgb, var(--accent) 12%, var(--field));
-  animation: node-breathe 2.8s ease-in-out infinite; }
-.plan-graph .state-running .node-state { fill: var(--accent); }
-.plan-graph .state-paused .node-box { stroke: var(--warn); stroke-width: 3; }
-.plan-graph .state-paused .node-state { fill: var(--warn); }
-.plan-graph .state-succeeded .node-box { stroke: var(--ok); fill: color-mix(in srgb, var(--ok) 10%, var(--field)); }
-.plan-graph .state-succeeded .node-state { fill: var(--ok); }
-.plan-graph .state-failed .node-box, .plan-graph .state-timeout .node-box, .plan-graph .state-rejected .node-box { stroke: var(--bad); fill: color-mix(in srgb, var(--bad) 10%, var(--field)); }
-.plan-graph .state-failed .node-state, .plan-graph .state-timeout .node-state, .plan-graph .state-rejected .node-state { fill: var(--bad); }
-.plan-graph .state-canceled .node-box { stroke: var(--warn); }
-.plan-graph .edge { fill: none; stroke-width: 1.6; }
-.plan-graph .edge-ok { stroke: var(--muted); } .plan-graph .head-ok { fill: var(--muted); }
-.plan-graph .edge-fail { stroke: var(--bad); } .plan-graph .head-fail { fill: var(--bad); }
-.plan-graph .edge-loop { stroke: var(--accent); stroke-width: 2; } .plan-graph .head-loop { fill: var(--accent); }
-.plan-graph .dashed { stroke-dasharray: 4 3; }
-.plan-graph .edge-label { font: 11px var(--sans); }
-.plan-graph .fail-label { fill: var(--bad); } .plan-graph .loop-label { fill: var(--accent); font-weight: 600; }
-.plan-graph .muted-label { fill: var(--muted); }
-.plan-graph .terminal { fill: var(--card); stroke: var(--muted); stroke-width: 1.5; }
-.plan-graph .terminal-abort { stroke: var(--bad); }
-.plan-graph .terminal-text { font: 600 12px var(--sans); fill: var(--fg); }
-.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--muted); }
+/* plan graph (graph.js): one colour per skill (--k), bright and soft; state shown by badge, glow and breathing */
+.segmented { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--field); border: 1px solid var(--line); }
+.segmented button { border: 0; background: none; color: var(--muted); font: 600 13px var(--sans); padding: 5px 12px; min-height: 30px;
+                    border-radius: 7px; transition: background .15s, color .15s; }
+.segmented button[aria-pressed="true"] { background: var(--card); color: var(--fg); box-shadow: 0 1px 3px rgba(15, 23, 42, .15); }
+.graph-box { display: grid; gap: 10px; }
+.plan-graph { width: 100%; height: auto; max-width: 520px; justify-self: center; overflow: visible;
+  --g-edge: #cbd5e1; --g-fail: #f87171; --g-loop: #6366f1; --g-ok: #22c55e; --g-bad: #ef4444; --g-warn: #f59e0b;
+  --g-card: #ffffff; --g-ink: #0f172a; --g-sub: #64748b; }
+@media (prefers-color-scheme: dark) {
+  .plan-graph { --g-edge: #475569; --g-fail: #fb7185; --g-loop: #818cf8; --g-ok: #4ade80; --g-bad: #f87171;
+                --g-warn: #fbbf24; --g-card: #1e293b; --g-ink: #f1f5f9; --g-sub: #94a3b8; }
+}
+.plan-graph .kind-drive, .legend .kind-drive { --k: #3b82f6; }
+.plan-graph .kind-arm, .legend .kind-arm { --k: #a855f7; }
+.plan-graph .kind-grip, .legend .kind-grip { --k: #f97316; }
+.plan-graph .kind-wait, .legend .kind-wait { --k: #94a3b8; }
+.plan-graph .kind-other, .legend .kind-other { --k: #14b8a6; }
+.plan-graph .node-box { fill: color-mix(in srgb, var(--k) 7%, var(--g-card)); stroke: color-mix(in srgb, var(--k) 35%, transparent);
+  stroke-width: 1.5; filter: drop-shadow(0 1px 2px rgba(15, 23, 42, .08)); transition: fill .3s, stroke .3s; }
+.plan-graph .node-kind { fill: var(--k); }
+.plan-graph .node-title { font: 650 13.5px var(--sans); fill: var(--g-ink); }
+.plan-graph .node-arg { font: 12px var(--mono); fill: var(--g-sub); }
+.plan-graph .node-state { font: 700 10.5px var(--sans); letter-spacing: .06em; text-transform: uppercase; fill: var(--k); }
+.plan-graph .node-badge { stroke: none; }
+.plan-graph .node-badge-text { font: 700 12px var(--sans); fill: #fff; }
+.plan-graph .state-succeeded .node-badge { fill: var(--g-ok); }
+.plan-graph .state-failed .node-badge, .plan-graph .state-rejected .node-badge { fill: var(--g-bad); }
+.plan-graph .state-timeout .node-badge, .plan-graph .state-canceled .node-badge { fill: var(--g-warn); }
+.plan-graph .state-succeeded .node-box { stroke: color-mix(in srgb, var(--g-ok) 55%, transparent); }
+.plan-graph .state-failed .node-box, .plan-graph .state-timeout .node-box, .plan-graph .state-rejected .node-box {
+  stroke: color-mix(in srgb, var(--g-bad) 60%, transparent); fill: color-mix(in srgb, var(--g-bad) 7%, var(--g-card)); }
+.plan-graph .state-pending .node-box { stroke: color-mix(in srgb, var(--k) 22%, transparent); }
+.plan-graph .state-running .node-box { stroke: var(--k); stroke-width: 2.5; animation: node-breathe 2.8s ease-in-out infinite; }
+.plan-graph .state-paused .node-box { stroke: var(--g-warn); stroke-width: 2.5; }
+.plan-graph .state-paused .node-state { fill: var(--g-warn); }
+.plan-graph .edge { fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.plan-graph .edge-ok { stroke: var(--g-edge); } .plan-graph .head-ok { fill: var(--g-edge); }
+.plan-graph .edge-fail { stroke: var(--g-fail); } .plan-graph .head-fail { fill: var(--g-fail); }
+.plan-graph .edge-loop { stroke: var(--g-loop); stroke-width: 2.25; } .plan-graph .head-loop { fill: var(--g-loop); }
+.plan-graph .dashed { stroke-dasharray: 5 4; }
+.plan-graph .edge-label { font: 600 11px var(--sans); }
+.plan-graph .fail-label { fill: var(--g-fail); } .plan-graph .loop-label { fill: var(--g-loop); }
+.plan-graph .muted-label { fill: var(--g-sub); font-weight: 500; }
+.plan-graph .terminal { fill: color-mix(in srgb, var(--g-sub) 10%, var(--g-card)); stroke: color-mix(in srgb, var(--g-sub) 35%, transparent);
+  stroke-width: 1.25; }
+.plan-graph .terminal-abort { fill: color-mix(in srgb, var(--g-bad) 10%, var(--g-card)); stroke: color-mix(in srgb, var(--g-bad) 55%, transparent); }
+.plan-graph .terminal-text { font: 650 12px var(--sans); fill: var(--g-ink); }
+.legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; font-size: 12.5px; color: var(--muted); }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
-.legend-item i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
-.legend-item i.swatch-fail { background: none; border-top: 2px dashed var(--bad); height: 0; width: 16px; border-radius: 0; }
-@keyframes node-breathe {  /* slow in and out: fill and a soft glow swell, then fade */
-  0%, 100% { fill: color-mix(in srgb, var(--accent) 6%, var(--field)); filter: drop-shadow(0 0 0 transparent); }
-  50% { fill: color-mix(in srgb, var(--accent) 26%, var(--field));
-        filter: drop-shadow(0 0 7px color-mix(in srgb, var(--accent) 70%, transparent)); }
+.legend-item i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--k); }
+.legend-item i.swatch-fail { background: none; border-top: 2px dashed #f87171; height: 0; width: 16px; border-radius: 0; }
+@keyframes node-breathe {  /* slow in and out: fill and a soft glow in the skill colour swell, then fade */
+  0%, 100% { fill: color-mix(in srgb, var(--k) 8%, var(--g-card)); filter: drop-shadow(0 0 0 transparent); }
+  50% { fill: color-mix(in srgb, var(--k) 24%, var(--g-card)); filter: drop-shadow(0 0 9px color-mix(in srgb, var(--k) 65%, transparent)); }
 }
 @media (prefers-reduced-motion: reduce) { .plan-graph .state-running .node-box { animation: none; } }
