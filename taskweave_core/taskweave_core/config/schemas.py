@@ -133,6 +133,7 @@ ROBOT_PROFILE = {
                                     'additionalProperties': {'type': 'string'}},
                 # known-good postures IK starts from, in order (then the current state)
                 'seeds': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': FINITE}},
+                'avoid_collisions': {'type': 'boolean'},  # reject solutions in collision (robot + planning scene)
             },
             'additionalProperties': False,
         },

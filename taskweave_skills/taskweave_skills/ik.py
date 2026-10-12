@@ -12,6 +12,7 @@ flange link, so the IK target for the flange is TCP * (flange -> TCP)^-1. Profil
       seeds:                          # optional known-good postures, tried in order
         - {left_joint1: -1.55, ...}
       fallback_groups: {left: left_arm_global, right: right_arm_global}   # optional, global solver
+      avoid_collisions: true          # optional: a solution in collision counts as none (next start is tried)
 
 A redundant arm (7 joints) reaches a TCP pose in a whole family of configurations, and which one a solver returns
 depends on where it starts. IK starts from each seed posture in turn, then from the current state; the pose's fixed
@@ -115,6 +116,7 @@ class IkClient:
         self.frame = robot.base['frame']
         self.service = spec.get('service', '/compute_ik')
         self.fallback_groups = spec.get('fallback_groups', {})
+        self.avoid_collisions = bool(spec.get('avoid_collisions', False))
         self.seeds = [{name: float(value) for name, value in seed.items()} for seed in spec.get('seeds', [])]
         self.Request = GetPositionIK.Request
         self.client = node.create_client(GetPositionIK, self.service, callback_group=ReentrantCallbackGroup())
@@ -154,7 +156,7 @@ class IkClient:
     def _request(self, tool: str, group: str, pose: np.ndarray):
         request = self.Request()
         ik = request.ik_request
-        ik.group_name, ik.ik_link_name, ik.avoid_collisions = group, self.tools[tool]['link'], False
+        ik.group_name, ik.ik_link_name, ik.avoid_collisions = group, self.tools[tool]['link'], self.avoid_collisions
         ik.pose_stamped.header.frame_id = self.frame
         position = ik.pose_stamped.pose.position
         position.x, position.y, position.z = (float(v) for v in pose[:3, 3])
