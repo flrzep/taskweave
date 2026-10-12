@@ -17,11 +17,11 @@ TOOL_SUFFIX = '_tool'
 
 
 def instance_matrix(instance) -> np.ndarray:
-    """4x4 pose of a placed object (taskweave_core ObjectInstance) in the cell frame."""
+    """4x4 pose of a placed object (taskweave_core ObjectInstance) in the cell frame; of a stack's top item."""
     c, s = math.cos(instance.pose.yaw), math.sin(instance.pose.yaw)
     m = np.eye(4)
     m[:3, :3] = [[c, -s, 0], [s, c, 0], [0, 0, 1]]
-    m[:3, 3] = [instance.pose.x, instance.pose.y, instance.z]
+    m[:3, 3] = [instance.pose.x, instance.pose.y, instance.top_z]  # a stack: its top item
     return m
 
 

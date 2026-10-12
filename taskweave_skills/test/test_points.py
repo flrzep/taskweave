@@ -36,3 +36,10 @@ def test_offset_backs_off_along_the_approach_and_tools_can_be_chosen():
     assert set(targets) == {'right'} and targets['right']['tcp'] == pytest.approx([0.5, -0.2, 0.4])
     with pytest.raises(KeyError, match='no left'):
         point_targets({'right_tool': point['right_tool']}, box, base_at(0, 0, 0, 0), tools=['left'])
+
+
+def test_points_of_a_stack_refer_to_its_top_item():
+    stack = ObjectInstance('stack_1', 'box', Pose2D(0.0, 0.0, 0.0), z=0.1, stack_count=8, stack_pitch=0.04)
+    point = {'left_tool': Pose3D((0.0, 0.0, 0.05), DOWN, 'box')}
+    assert stack.top_z == pytest.approx(0.38)
+    assert point_targets(point, stack, base_at(0, 0, 0, 0))['left']['tcp'] == pytest.approx([0, 0, 0.43])

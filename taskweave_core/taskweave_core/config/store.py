@@ -176,7 +176,9 @@ class ConfigStore:
     def object_instances(self) -> dict[str, ObjectInstance]:
         """cell/objects.yaml: placed objects. From config for now; a perception system can provide the same."""
         data = self._load('cell/objects.yaml', schemas.OBJECT_INSTANCES, required=False, default={})
-        return {name: ObjectInstance(name, entry['object'], Pose2D.from_dict(entry), float(entry.get('z', 0.0)))
+        return {name: ObjectInstance(name, entry['object'], Pose2D.from_dict(entry), float(entry.get('z', 0.0)),
+                                     int(entry.get('stack', {}).get('count', 1)),
+                                     float(entry.get('stack', {}).get('pitch', 0.0)))
                 for name, entry in data.items()}
 
     def stance_offsets(self, robot: str) -> dict:

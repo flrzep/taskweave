@@ -37,12 +37,20 @@ class Pose2D:
 
 @dataclass(frozen=True)
 class ObjectInstance:
-    """A placed object in the cell: its type (``objects/<object>.yaml``), planar pose and height."""
+    """A placed object in the cell: its type (``objects/<object>.yaml``), planar pose and height. A stack of
+    ``stack_count`` nested items ``stack_pitch`` apart starts at ``z``; its points refer to the top item."""
 
     name: str
     object: str
     pose: Pose2D
     z: float = 0.0
+    stack_count: int = 1
+    stack_pitch: float = 0.0
+
+    @property
+    def top_z(self) -> float:
+        """Height of the top item (the one a robot reaches first)."""
+        return self.z + max(self.stack_count - 1, 0) * self.stack_pitch
 
 
 @dataclass(frozen=True)

@@ -163,3 +163,10 @@ def test_instance_point_resolves_a_placed_objects_point(config_dir):
     with pytest.raises(KeyError, match='box_9/top_grasp'):
         store.instance_point('box_9/top_grasp')
     assert check_point('object_point', 'box_1/nope', store, 'demo_bot') is not None
+
+
+def test_object_instances_can_be_stacks(config_dir):
+    (config_dir / 'cell' / 'objects.yaml').write_text(
+        'pile: {object: box, frame: cell, x: 1.0, y: 2.0, z: 0.1, yaw: 0.0, stack: {count: 3, pitch: 0.05}}\n')
+    pile = ConfigStore(config_dir).object_instances()['pile']
+    assert pile.stack_count == 3 and pile.top_z == pytest.approx(0.2)

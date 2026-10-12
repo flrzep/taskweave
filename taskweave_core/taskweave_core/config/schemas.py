@@ -231,7 +231,10 @@ OBJECT_INSTANCES = {
         'type': 'object',
         'required': ['object', 'x', 'y', 'yaw'],
         'properties': {'object': NAME, 'frame': {'type': 'string'}, 'x': FINITE, 'y': FINITE, 'z': FINITE,
-                       'yaw': FINITE},
+                       'yaw': FINITE,
+                       # a stack of nested items from z up: count items pitch apart; points refer to the top one
+                       'stack': {'type': 'object', 'required': ['count', 'pitch'], 'additionalProperties': False,
+                                 'properties': {'count': {'type': 'integer', 'minimum': 0}, 'pitch': FINITE}}},
         'additionalProperties': False,
     },
 }
