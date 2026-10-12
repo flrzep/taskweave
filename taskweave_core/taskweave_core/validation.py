@@ -81,9 +81,13 @@ def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
             store.base_target(str(value), robot)
         elif kind == 'joint_pose':
             store.named_pose(robot, str(value))
-        elif kind == 'object_point':
-            obj, _, point = str(value).partition('.')
-            store.object_point(obj, point)
+        elif kind == 'object_point':  # <instance>/<point> (a placed object) or <object>.<point> (a type's point)
+            if '/' in str(value):
+                instance, _ = store.instance_point(str(value))
+                obj, point = instance.object, str(value).partition('/')[2]
+            else:
+                obj, _, point = str(value).partition('.')
+                store.object_point(obj, point)
             problems = check_grasp(store.object(obj)['points'][point], store.embodiment(robot))
             if problems:
                 return f'{value} does not fit robot {robot!r}: ' + '; '.join(problems)

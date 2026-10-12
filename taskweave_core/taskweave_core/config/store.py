@@ -276,6 +276,17 @@ class ConfigStore:
         result.update({tool: Pose3D.from_dict(pose, obj) for tool, pose in entry.items()})
         return result
 
+    def instance_point(self, reference: str) -> tuple[ObjectInstance, dict]:
+        """Resolve ``<instance>/<point>``: a placed object (cell/objects.yaml) and a point of its type, as
+        object_point() returns it (tool poses relative to the object)."""
+        name, _, point = reference.partition(VARIANT_SEPARATOR)
+        instances = self.object_instances()
+        if name not in instances or not point:
+            raise KeyError(f'unknown object point {reference!r}: expected <instance>/<point>, instances in '
+                           f'cell/objects.yaml: {", ".join(sorted(instances)) or "none"}')
+        instance = instances[name]
+        return instance, self.object_point(instance.object, point)
+
     def base_target(self, reference: str, robot: str) -> Pose2D:
         """Resolve a base target: ``stance:<instance>[/<variant>]`` (robot-specific, relative to an object),
         ``location:<name>`` or a bare location name."""

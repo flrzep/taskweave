@@ -152,3 +152,14 @@ def test_edits_by_other_processes_are_picked_up(config_dir):
     assert 'charger' not in reader.locations()
     writer.save_base_pose('charger', Pose2D(2.0, 1.0, 0.5))
     assert reader.base_target('charger', 'demo_bot') == Pose2D(2.0, 1.0, 0.5)
+
+
+def test_instance_point_resolves_a_placed_objects_point(config_dir):
+    from taskweave_core.validation import check_point
+    (config_dir / 'cell' / 'objects.yaml').write_text('box_1: {object: box, frame: cell, x: 1.0, y: 2.0, yaw: 0.0}\n')
+    store = ConfigStore(config_dir)
+    instance, point = store.instance_point('box_1/top_grasp')
+    assert instance.object == 'box' and point['left_tool'].xyz == (0.0, 0.1, 0.2)
+    with pytest.raises(KeyError, match='box_9/top_grasp'):
+        store.instance_point('box_9/top_grasp')
+    assert check_point('object_point', 'box_1/nope', store, 'demo_bot') is not None

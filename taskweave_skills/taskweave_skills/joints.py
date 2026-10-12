@@ -201,37 +201,103 @@ class MoveToPose(_JointSkill):
             self.planner = MotionPlanner(node, robot)
 
     def execute(self, ctx, args):
+        pose = self.config.named_pose(self.robot.name, args['pose'])
+        result, worst = self._reach(ctx, pose['joints'], pose['tools'], args['pose'])
+        if result is not None:
+            return result
+        return SkillResult.succeeded(f'at {args["pose"]} (max error {worst:.3f})',
+                                     world_state={'arm_pose': args['pose']})
+
+    def _reach(self, ctx, joints: dict, tools: dict, label: str):
+        """Set ``joints`` and put each tool on its target (IK), along a planned path if there is a planner.
+        Returns (failure result or None, worst joint error at the end)."""
         from .ik import IkError
         from .motion_plan import PlanError
 
-        pose = self.config.named_pose(self.robot.name, args['pose'])
-        goal = dict(pose['joints'])
+        goal = dict(joints)
         if (self.ik or self.planner) and self.joints.snapshot(self.p.state_timeout_s) is None:
-            return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)')
-        if pose['tools']:
+            return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)'), 0
+        if tools:
             if self.ik is None:
-                return SkillResult.rejected(f'pose {args["pose"]} has tool targets, but the robot profile has no ik')
+                return SkillResult.rejected(f'{label} has tool targets, but the robot profile has no ik'), 0
             ctx.feedback(0.0, 'solving IK')
             try:
-                goal.update(self.ik.solve(pose['tools'], pose['joints'], lambda: ctx.should_stop))
+                goal.update(self.ik.solve(tools, joints, lambda: ctx.should_stop))
             except IkError as error:
-                return SkillResult.failed(str(error))
+                return SkillResult.failed(str(error)), 0
         path = None
         if self.planner is not None:
             ctx.feedback(0.0, 'planning')
             start = self.joints.snapshot(self.p.state_timeout_s)
             if start is None:
-                return SkillResult.failed(f'no joint states on {self.joints.state_topic}')
+                return SkillResult.failed(f'no joint states on {self.joints.state_topic}'), 0
             try:
                 path = self.planner.plan(start, goal, lambda: ctx.should_stop)
             except PlanError as error:
-                return SkillResult.failed(f'{args["pose"]}: {error}')
-        result, final = self._move(ctx, goal, args['pose'], path=path)
+                return SkillResult.failed(f'{label}: {error}'), 0
+        result, final = self._move(ctx, goal, label, path=path)
+        if result is not None:
+            return result, 0
+        return None, max(abs(goal[n] - final[n]) for n in goal)
+
+
+class GoToPoint(MoveToPose):
+    name = 'go_to_point'
+    description = ('Move one or both tools to a point on a placed object, for example the grasp point of a frame in a '
+                   'bin: the point is taught relative to the object, the robot solves where its tools must go from '
+                   'where it stands. offset_m stops short of the point along its approach direction (a pre-grasp '
+                   'pose). Collision-free path with a motion planner; the torso lift stays where it is.')
+    args_schema = {
+        'type': 'object',
+        'required': ['point'],
+        'properties': {
+            'point': {'type': 'string', 'x-taskweave-point': 'object_point',
+                      'description': '<instance>/<point>: a placed object (cell/objects.yaml) and its point'},
+            'offset_m': {'type': 'number', 'minimum': 0, 'description': 'stop this far back along the approach'},
+            'tools': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1,
+                      'description': 'only these tools (default: every tool the point has)'},
+        },
+        'additionalProperties': False,
+    }
+    needs = ["the robot stands where the point is in reach (e.g. at the object's stance)"]
+    achieves = ['tools at the object point']
+    default_timeout_s = 60.0
+
+    def setup(self, node, config, robot, params):
+        params = dict(params)
+        self.cell_frame = params.pop('cell_frame', 'world')  # TF frame of the cell (object and location poses)
+        super().setup(node, config, robot, params)
+        from tf2_ros import Buffer, TransformListener
+        self.tf = Buffer()
+        self.tf_listener = TransformListener(self.tf, node)
+
+    def execute(self, ctx, args):
+        import rclpy
+
+        from .ik import pose_matrix
+        from .points import point_targets
+
+        try:
+            instance, point = self.config.instance_point(args['point'])
+        except KeyError as error:
+            return SkillResult.rejected(str(error.args[0]))
+        base = self.robot.base['frame']
+        try:
+            t = self.tf.lookup_transform(self.cell_frame, base, rclpy.time.Time()).transform
+        except Exception as error:  # noqa: BLE001 - several tf2 exception types
+            return SkillResult.failed(f'where is the robot? no transform {self.cell_frame} -> {base}: {error}')
+        try:
+            tools = point_targets(point, instance, pose_matrix(t.translation, t.rotation),
+                                  float(args.get('offset_m', 0.0)), args.get('tools'))
+        except KeyError as error:
+            return SkillResult.rejected(f'{args["point"]}: {error.args[0]}')
+        if not tools:
+            return SkillResult.rejected(f'{args["point"]} has no tool poses')
+        label = args['point'] + (f' (-{args["offset_m"]:g} m)' if args.get('offset_m') else '')
+        result, worst = self._reach(ctx, {}, tools, label)
         if result is not None:
             return result
-        worst = max(abs(goal[n] - final[n]) for n in goal)
-        return SkillResult.succeeded(f'at {args["pose"]} (max error {worst:.3f})',
-                                     world_state={'arm_pose': args['pose']})
+        return SkillResult.succeeded(f'at {label} (max error {worst:.3f})', world_state={'arm_pose': label})
 
 
 class Gripper(_JointSkill):

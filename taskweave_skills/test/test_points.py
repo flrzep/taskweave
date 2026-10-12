@@ -1,0 +1,38 @@
+"""Object point -> tool targets in the base frame (taskweave_skills.points)."""
+
+import math
+
+import numpy as np
+import pytest
+
+from taskweave_core.config.poses import ObjectInstance, Pose2D, Pose3D
+from taskweave_skills.points import point_targets
+
+DOWN = (0.0, math.pi, 0.0)  # canonical TCP pointing down: approach = -z, closing = +y
+
+
+def base_at(x, y, z, yaw):
+    m = np.eye(4)
+    m[:3, :3] = [[math.cos(yaw), -math.sin(yaw), 0], [math.sin(yaw), math.cos(yaw), 0], [0, 0, 1]]
+    m[:3, 3] = [x, y, z]
+    return m
+
+
+def test_point_on_a_turned_object_seen_from_the_robot():
+    crate = ObjectInstance('crate_1', 'crate', Pose2D(2.0, 1.0, math.pi / 2), z=0.4)
+    point = {'left_tool': Pose3D((0.1, 0.0, 0.2), DOWN, 'crate'), 'right_tool': None, 'tool_type': None}
+    targets = point_targets(point, crate, base_at(1.0, 1.0, 0.5, 0.0))
+    left = targets['left']
+    assert left['tcp'] == pytest.approx([1.0, 0.1, 0.1])  # object x (+0.1) is cell +y after the 90 deg turn
+    assert left['approach'] == pytest.approx([0, 0, -1], abs=1e-9)
+    assert left['closing'] == pytest.approx([-1, 0, 0], abs=1e-9)  # object y = cell -x
+    assert set(targets) == {'left'}
+
+
+def test_offset_backs_off_along_the_approach_and_tools_can_be_chosen():
+    box = ObjectInstance('box_1', 'box', Pose2D(0.0, 0.0, 0.0))
+    point = {'left_tool': Pose3D((0.5, 0.2, 0.3), DOWN, 'box'), 'right_tool': Pose3D((0.5, -0.2, 0.3), DOWN, 'box')}
+    targets = point_targets(point, box, base_at(0, 0, 0, 0), offset_m=0.1, tools=['right'])
+    assert set(targets) == {'right'} and targets['right']['tcp'] == pytest.approx([0.5, -0.2, 0.4])
+    with pytest.raises(KeyError, match='no left'):
+        point_targets({'right_tool': point['right_tool']}, box, base_at(0, 0, 0, 0), tools=['left'])
