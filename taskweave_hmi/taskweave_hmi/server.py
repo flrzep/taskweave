@@ -72,7 +72,7 @@ from . import missions, points, robot
 WEB = Path(__file__).parent / 'web'
 STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
 CALL_TIMEOUT_S = 5.0
-STATIC_FILES = ('app.js', 'robot.js', 'style.css')
+STATIC_FILES = ('app.js', 'robot.js', 'graph.js', 'style.css')
 MANUAL_SKILL_TIMEOUT_S = 120.0
 NAV_COSTMAPS = ['/local_costmap/local_costmap', '/global_costmap/global_costmap']  # Nav2 defaults
 NAV_CONTROLLER = '/controller_server'

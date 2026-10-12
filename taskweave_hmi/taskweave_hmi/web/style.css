@@ -119,3 +119,46 @@ details[open] summary { margin-bottom: 8px; }
 .reach { margin-top: 6px; display: grid; gap: 4px; font-size: 14px; }
 .reach .ok { color: var(--ok); font-weight: 600; } .reach .bad { color: var(--bad); font-weight: 600; }
 .reach .warn { color: var(--warn); }
+
+/* plan graph (graph.js) */
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.segmented button { border: 0; background: var(--field); color: var(--muted); font: 600 13px var(--sans); padding: 6px 12px; min-height: 32px; }
+.segmented button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.graph-box { display: grid; gap: 8px; }
+.plan-graph { width: 100%; height: auto; max-width: 520px; justify-self: center; }
+.plan-graph .node-box { fill: var(--field); stroke: var(--line); stroke-width: 1.5; }
+.plan-graph .node-title { font: 600 13px var(--sans); fill: var(--fg); }
+.plan-graph .node-arg { font: 12px var(--mono); fill: var(--muted); }
+.plan-graph .node-state { font: 600 11px var(--mono); fill: var(--muted); text-transform: uppercase; }
+.plan-graph .kind-drive .node-kind, .legend .kind-drive i { fill: #0b5cad; background: #0b5cad; }
+.plan-graph .kind-arm .node-kind, .legend .kind-arm i { fill: #7a3fbf; background: #7a3fbf; }
+.plan-graph .kind-grip .node-kind, .legend .kind-grip i { fill: #c46a00; background: #c46a00; }
+.plan-graph .kind-wait .node-kind, .legend .kind-wait i { fill: #6b7785; background: #6b7785; }
+.plan-graph .kind-other .node-kind, .legend .kind-other i { fill: #2e8b7a; background: #2e8b7a; }
+.plan-graph .state-running .node-box { stroke: var(--accent); stroke-width: 3; fill: color-mix(in srgb, var(--accent) 12%, var(--field));
+  animation: node-pulse 1.4s ease-in-out infinite; }
+.plan-graph .state-running .node-state { fill: var(--accent); }
+.plan-graph .state-paused .node-box { stroke: var(--warn); stroke-width: 3; }
+.plan-graph .state-paused .node-state { fill: var(--warn); }
+.plan-graph .state-succeeded .node-box { stroke: var(--ok); fill: color-mix(in srgb, var(--ok) 10%, var(--field)); }
+.plan-graph .state-succeeded .node-state { fill: var(--ok); }
+.plan-graph .state-failed .node-box, .plan-graph .state-timeout .node-box, .plan-graph .state-rejected .node-box { stroke: var(--bad); fill: color-mix(in srgb, var(--bad) 10%, var(--field)); }
+.plan-graph .state-failed .node-state, .plan-graph .state-timeout .node-state, .plan-graph .state-rejected .node-state { fill: var(--bad); }
+.plan-graph .state-canceled .node-box { stroke: var(--warn); }
+.plan-graph .edge { fill: none; stroke-width: 1.6; }
+.plan-graph .edge-ok { stroke: var(--muted); } .plan-graph .head-ok { fill: var(--muted); }
+.plan-graph .edge-fail { stroke: var(--bad); } .plan-graph .head-fail { fill: var(--bad); }
+.plan-graph .edge-loop { stroke: var(--accent); stroke-width: 2; } .plan-graph .head-loop { fill: var(--accent); }
+.plan-graph .dashed { stroke-dasharray: 4 3; }
+.plan-graph .edge-label { font: 11px var(--sans); }
+.plan-graph .fail-label { fill: var(--bad); } .plan-graph .loop-label { fill: var(--accent); font-weight: 600; }
+.plan-graph .muted-label { fill: var(--muted); }
+.plan-graph .terminal { fill: var(--card); stroke: var(--muted); stroke-width: 1.5; }
+.plan-graph .terminal-abort { stroke: var(--bad); }
+.plan-graph .terminal-text { font: 600 12px var(--sans); fill: var(--fg); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--muted); }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.legend-item i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+.legend-item i.swatch-fail { background: none; border-top: 2px dashed var(--bad); height: 0; width: 16px; border-radius: 0; }
+@keyframes node-pulse { 50% { stroke-width: 5; } }
+@media (prefers-reduced-motion: reduce) { .plan-graph .state-running .node-box { animation: none; } }

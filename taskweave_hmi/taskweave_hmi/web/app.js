@@ -99,6 +99,8 @@ function renderRun() {
         note ? el('div', { class: 'muted', text: note }) : '')));
   });
 
+  if (typeof renderGraph === 'function') renderGraph();  // graph.js
+
   const log = $('log');
   log.replaceChildren(...snap.events.slice().reverse().map((e) => el('li', {
     text: `t=${Number(e.time).toFixed(1)}s ${e.plan_id} c${e.cycle} ${e.step_id} ${e.skill} ${e.event.replace('step_', '')}`

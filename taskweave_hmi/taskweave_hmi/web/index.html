@@ -50,8 +50,12 @@
     </div>
 
     <div class="card">
-      <div class="label">Plan</div>
-      <ol id="plan" class="steps"><li class="muted">No plan yet</li></ol>
+      <div class="row between"><div class="label">Plan</div>
+        <div id="plan-view" class="segmented" role="group" aria-label="Plan view">
+          <button data-view="graph" aria-pressed="true">Graph</button><button data-view="list" aria-pressed="false">List</button>
+        </div></div>
+      <div id="plan-graph" class="graph-box"></div>
+      <ol id="plan" class="steps" hidden><li class="muted">No plan yet</li></ol>
     </div>
   </section>
 
@@ -188,5 +192,6 @@
 
 <script src="app.js"></script>
 <script src="robot.js"></script>
+<script src="graph.js"></script>
 </body>
 </html>
