@@ -32,6 +32,7 @@ import time
 import numpy as np
 
 SUCCESS = 1
+FRAME_TRANSFORM_FAILURE = -21
 POLL_S = 0.02
 
 
@@ -147,6 +148,8 @@ class IkClient:
                 if response.error_code.val == SUCCESS:
                     break
             else:
+                if response.error_code.val == FRAME_TRANSFORM_FAILURE:
+                    raise IkError(f'IK for {tool}: MoveIt has no transform to {self.frame} (TF not published?)')
                 raise IkError(f'no IK solution for {tool}: TCP {list(target["tcp"])}, '
                               f'approach {list(target["approach"])} (code {response.error_code.val})')
             pattern = re.compile(self.joint_pattern.format(tool=tool))

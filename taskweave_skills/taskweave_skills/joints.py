@@ -206,6 +206,8 @@ class MoveToPose(_JointSkill):
 
         pose = self.config.named_pose(self.robot.name, args['pose'])
         goal = dict(pose['joints'])
+        if (self.ik or self.planner) and self.joints.snapshot(self.p.state_timeout_s) is None:
+            return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)')
         if pose['tools']:
             if self.ik is None:
                 return SkillResult.rejected(f'pose {args["pose"]} has tool targets, but the robot profile has no ik')
