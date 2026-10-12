@@ -56,7 +56,7 @@ ERRORS = {-1: 'planning failed', -2: 'invalid motion plan', -4: 'control failed'
           -10: 'start state in collision', -11: 'start state violates path constraints',
           -12: 'goal in collision', -13: 'goal violates path constraints', -14: 'goal constraints violated',
           -15: 'invalid group name', -16: 'invalid goal constraints', -17: 'invalid robot state',
-          -31: 'no IK solution'}
+          -31: 'no IK solution', 99999: 'planner failed (see the move_group log, e.g. start state outside joint limits)'}
 
 
 class MotionPlanner:
