@@ -24,7 +24,7 @@ OPERATOR = """joy:
   drive_topic: /joy_drive
   drive_button: 8
   arms:
-    left: {button: 13, twist: /servo_left/delta_twist_cmds}
+    left: {button: 13, twist: /taskweave/jog/left}
   jog: {enable_button: 4, speed: 0.1}
   actions:
     - {button: 0, skill: wait, args: {seconds: 0.1}, arm_args: {note: '{arm}'}}
@@ -45,7 +45,7 @@ def pad(config_dir):
     client = rclpy.create_node('pad_test')
     seen = {'drive': [], 'twist': [], 'mode': []}
     client.create_subscription(Joy, '/joy_drive', seen['drive'].append, 10)
-    client.create_subscription(TwistStamped, '/servo_left/delta_twist_cmds', seen['twist'].append, 10)
+    client.create_subscription(TwistStamped, '/taskweave/jog/left', seen['twist'].append, 10)
     latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
     client.create_subscription(String, names.OPERATOR_MODE, lambda m: seen['mode'].append(m.data), latched)
     status = client.create_publisher(TaskStatus, names.STATUS, latched)

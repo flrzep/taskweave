@@ -181,6 +181,23 @@ class IkClient:
                            if pattern.fullmatch(name)})
         return result
 
+    def step(self, tool: str, flange: np.ndarray, current: dict, timeout_s: float = 0.05) -> dict[str, float] | None:
+        """Arm joints that put the tool's flange on ``flange`` (4x4, base frame), by one local descent from the
+        ``current`` joints (a small jog step), or None. Not repeatable like solve(): it follows the arm."""
+        from moveit_msgs.msg import RobotState
+        from sensor_msgs.msg import JointState
+
+        request = self._request(tool, self.groups[tool], flange, timeout_s)
+        request.ik_request.robot_state = RobotState(
+            joint_state=JointState(name=list(current), position=[float(v) for v in current.values()]), is_diff=True)
+        response = self._call(request, tool, timeout_s, lambda: False)
+        if response.error_code.val != SUCCESS:
+            return None
+        pattern = re.compile(self.joint_pattern.format(tool=tool))
+        state = response.solution.joint_state
+        return {name: float(value) for name, value in zip(state.name, state.position, strict=False)
+                if pattern.fullmatch(name)}
+
     def reachable(self, tool: str, target: dict, fixed: dict, timeout_s: float = 0.15) -> bool:
         """One quick IK attempt (the fallback group's global search if there is one): a probe, not a solution."""
         from moveit_msgs.msg import RobotState

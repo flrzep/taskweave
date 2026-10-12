@@ -17,5 +17,5 @@ setup(
     description='Generic, robot-agnostic taskweave skills (wait, navigate_to, go_to_point).',
     license='TBD',
     tests_require=['pytest'],
-    entry_points={'console_scripts': []},
+    entry_points={'console_scripts': ['tcp_jog = taskweave_skills.tcp_jog:main']},
 )

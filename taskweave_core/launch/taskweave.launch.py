@@ -29,6 +29,9 @@ def nodes(context):
              parameters=[{**common, 'robot': robot}]),
         Node(package='taskweave_core', executable='teach', name='teach', output='screen',
              parameters=[{**common, 'robot': robot}]),
+        # pad tool modes: TCP velocity -> IK steps -> joint targets (idle without an ik section)
+        Node(package='taskweave_skills', executable='tcp_jog', name='tcp_jog', output='screen',
+             parameters=[{**common, 'robot': robot}]),
     ]
 
 

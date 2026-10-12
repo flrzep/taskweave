@@ -14,6 +14,8 @@
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>nav2_msgs</exec_depend>   <!-- navigate_to through Nav2 (taskweave_skills.nav2) -->
   <exec_depend>moveit_msgs</exec_depend>   <!-- IK (taskweave_skills.ik) and motion planning (motion_plan) -->
+  <exec_depend>geometry_msgs</exec_depend>   <!-- TCP jog commands (tcp_jog) -->
+  <exec_depend>tf2_ros_py</exec_depend>
   <test_depend>trajectory_msgs</test_depend>
   <exec_depend>python3-numpy</exec_depend>
   <test_depend>rclpy</test_depend>

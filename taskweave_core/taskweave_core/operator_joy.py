@@ -12,13 +12,14 @@ Acts on button press (rising edge). Manual actions go straight to the skill's Ru
 while a mission runs or is paused, so manual and mission commands never compete. A new press of the same action
 while it is still running is ignored. Without a ``joy`` entry the node logs that and stays idle.
 
-Pad modes (optional): drive, or one per tool that jogs that tool's TCP (taskweave_core.jog):
+Pad modes (optional): drive, or one per tool that jogs that tool's TCP (taskweave_core.jog, sent as the flange's
+velocity in the base frame to e.g. taskweave_skills' tcp_jog):
 
     joy:
       drive_topic: /joy_drive         # the pad goes on here only in drive mode (the base teleop listens here)
       drive_button: 8                 # back to drive
-      arms:                           # tool -> mode button and the twist input of its servo (e.g. MoveIt Servo)
-        left:  {button: 13, twist: /servo_left/delta_twist_cmds}
+      arms:                           # tool -> mode button and where its jog twists go (taskweave_skills tcp_jog)
+        left:  {button: 13, twist: /taskweave/jog/left}
       jog: {enable_button: 4, fast_button: 5, tilt_axis: 5, speed: 0.05, fast_speed: 0.15, turn: 0.3, fast_turn: 0.6}
       actions:
         - {button: 0, skill: gripper, args: {side: both, action: close}, arm_args: {side: '{arm}'}}

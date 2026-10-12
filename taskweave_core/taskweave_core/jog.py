@@ -9,8 +9,8 @@ gripper about the TCP: left stick up/down tilts the approach up/down, left/right
 
 A servo moves the flange (the tool's link), so the command is the flange's velocity, in the base frame: the TCP's
 velocity, the TCP-frame rotation turned into base axes, and the flange velocity that keeps the TCP itself still while
-the gripper turns about it (the TCP sits ``r`` from the flange). MoveIt Servo applies the rotation about the flange
-(apply_twist_commands_about_ee_frame); it ignores twists given in the flange frame itself, hence the base frame.
+the gripper turns about it (the TCP sits ``r`` from the flange); the rotation is about the flange
+(taskweave_skills' tcp_jog integrates it that way).
 """
 
 from __future__ import annotations
