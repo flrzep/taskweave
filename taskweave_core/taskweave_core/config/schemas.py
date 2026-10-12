@@ -128,6 +128,11 @@ ROBOT_PROFILE = {
                 'timeout_s': {'type': 'number', 'exclusiveMinimum': 0},
                 'groups': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {'type': 'string'}},
                 'joints': {'type': 'string'},   # regex of the joints IK may move, {tool} = tool name
+                # groups with a global solver, tried when no start below reaches the target
+                'fallback_groups': {'type': 'object', 'propertyNames': NAME,
+                                    'additionalProperties': {'type': 'string'}},
+                # known-good postures IK starts from, in order (then the current state)
+                'seeds': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': FINITE}},
             },
             'additionalProperties': False,
         },

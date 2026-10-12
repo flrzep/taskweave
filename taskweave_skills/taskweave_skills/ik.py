@@ -9,9 +9,16 @@ flange link, so the IK target for the flange is TCP * (flange -> TCP)^-1. Profil
       timeout_s: 1.0                  # per tool
       groups: {left: left_arm, right: right_arm}    # planning group per tool
       joints: '{tool}_joint[1-7]'     # which solved joints to command (regex, {tool} = tool name)
+      seeds:                          # optional known-good postures, tried in order
+        - {left_joint1: -1.55, ...}
+      fallback_groups: {left: left_arm_global, right: right_arm_global}   # optional, global solver
 
-The robot state the IK starts from is the planner's current state with the pose's fixed joints (e.g. the torso lift)
-applied, so the arms are solved for the torso height the pose sets.
+A redundant arm (7 joints) reaches a TCP pose in a whole family of configurations, and which one a solver returns
+depends on where it starts. IK starts from each seed posture in turn, then from the current state; the pose's fixed
+joints (e.g. the torso lift) are applied on top, so the arms are solved for the torso height the pose sets. With a
+deterministic local solver (pick_ik mode local: gradient descent from the start), a named pose then always solves
+to the same configuration, whatever pose the robot comes from; only targets no seed reaches depend on the current
+state. If nothing converges, the fallback group (a global solver) searches from the current state.
 """
 
 from __future__ import annotations
@@ -107,6 +114,8 @@ class IkClient:
         self.joint_pattern = spec['joints']
         self.frame = robot.base['frame']
         self.service = spec.get('service', '/compute_ik')
+        self.fallback_groups = spec.get('fallback_groups', {})
+        self.seeds = [{name: float(value) for name, value in seed.items()} for seed in spec.get('seeds', [])]
         self.Request = GetPositionIK.Request
         self.client = node.create_client(GetPositionIK, self.service, callback_group=ReentrantCallbackGroup())
 
@@ -122,27 +131,18 @@ class IkClient:
             if tool not in self.groups or tool not in self.tools:
                 raise IkError(f'tool {tool!r} has no IK group or tool frame in the robot profile')
             pose = flange_target(target, self.tools[tool])
-            request = self.Request()
-            ik = request.ik_request
-            ik.group_name, ik.ik_link_name, ik.avoid_collisions = self.groups[tool], self.tools[tool]['link'], False
-            seed = {**fixed, **result}
-            state = JointState(name=list(seed), position=[float(v) for v in seed.values()])
-            ik.robot_state = RobotState(joint_state=state, is_diff=True)
-            ik.pose_stamped.header.frame_id = self.frame
-            position = ik.pose_stamped.pose.position
-            position.x, position.y, position.z = (float(v) for v in pose[:3, 3])
-            w, x, y, z = quaternion(pose[:3, :3])
-            orientation = ik.pose_stamped.pose.orientation
-            orientation.w, orientation.x, orientation.y, orientation.z = w, x, y, z
-            ik.timeout.sec, ik.timeout.nanosec = int(self.timeout_s), int((self.timeout_s % 1) * 1e9)
-            future = self.client.call_async(request)
-            deadline = time.monotonic() + self.timeout_s + 5.0
-            while not future.done():
-                if should_stop() or time.monotonic() > deadline:
-                    raise IkError(f'IK for {tool} interrupted' if should_stop() else f'IK service timed out for {tool}')
-                time.sleep(POLL_S)
-            response = future.result()
-            if response.error_code.val != SUCCESS:
+            attempts = [(self.groups[tool], seed) for seed in [*self.seeds, {}]]  # {}: from the current state
+            if tool in self.fallback_groups:
+                attempts.append((self.fallback_groups[tool], {}))
+            for group, seed in attempts:
+                request = self._request(tool, group, pose)
+                start = {**seed, **fixed, **result}
+                request.ik_request.robot_state = RobotState(
+                    joint_state=JointState(name=list(start), position=list(start.values())), is_diff=True)
+                response = self._call(request, tool, should_stop)
+                if response.error_code.val == SUCCESS:
+                    break
+            else:
                 raise IkError(f'no IK solution for {tool}: TCP {list(target["tcp"])}, '
                               f'approach {list(target["approach"])} (code {response.error_code.val})')
             pattern = re.compile(self.joint_pattern.format(tool=tool))
@@ -150,3 +150,25 @@ class IkClient:
             result.update({name: float(value) for name, value in zip(state.name, state.position, strict=False)
                            if pattern.fullmatch(name)})
         return result
+
+    def _request(self, tool: str, group: str, pose: np.ndarray):
+        request = self.Request()
+        ik = request.ik_request
+        ik.group_name, ik.ik_link_name, ik.avoid_collisions = group, self.tools[tool]['link'], False
+        ik.pose_stamped.header.frame_id = self.frame
+        position = ik.pose_stamped.pose.position
+        position.x, position.y, position.z = (float(v) for v in pose[:3, 3])
+        w, x, y, z = quaternion(pose[:3, :3])
+        orientation = ik.pose_stamped.pose.orientation
+        orientation.w, orientation.x, orientation.y, orientation.z = w, x, y, z
+        ik.timeout.sec, ik.timeout.nanosec = int(self.timeout_s), int((self.timeout_s % 1) * 1e9)
+        return request
+
+    def _call(self, request, tool: str, should_stop):
+        future = self.client.call_async(request)
+        deadline = time.monotonic() + self.timeout_s + 5.0
+        while not future.done():
+            if should_stop() or time.monotonic() > deadline:
+                raise IkError(f'IK for {tool} interrupted' if should_stop() else f'IK service timed out for {tool}')
+            time.sleep(POLL_S)
+        return future.result()
