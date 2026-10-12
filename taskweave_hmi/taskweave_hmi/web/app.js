@@ -435,22 +435,46 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
   const [yawField, yawInput] = input('yaw (°)', String(+(pose.yaw * DEG).toFixed(2)), { type: 'number', step: 'any', inputmode: 'decimal' });
   const msg = el('div', { class: 'msg', hidden: '' });
   const robotButton = el('button', { class: 'btn small', text: 'Set from robot' });
+  const driveButton = el('button', { class: 'btn small', text: 'Drive here', 'data-edit': '' });
   const saveButton = el('button', { class: 'btn primary', text: 'Save', 'data-edit': '' });
   const deleteButton = el('button', { class: 'btn danger', text: isNew ? 'Cancel' : 'Delete', 'data-edit': '' });
   const edit = el('div', { class: 'point-edit' }, nameField, el('div', { class: 'grid3' }, xField, yField, yawField),
-    el('div', { class: 'row gap' }, instancePicker || '', robotButton),
+    el('div', { class: 'row gap' }, instancePicker || '', robotButton, driveButton),
     note ? el('p', { class: 'muted small-text', text: note }) : '',
     msg, el('div', { class: 'row gap' }, deleteButton, saveButton));
   edit.hidden = !isNew;
   const item = el('li', { class: 'point' }, head, edit);
   head.addEventListener('click', () => { edit.hidden = !edit.hidden; head.setAttribute('aria-expanded', String(!edit.hidden)); });
   if (isNew) setTimeout(() => nameInput.focus(), 0);
+  // Drive here goes to the saved point, so it waits for a save after edits
+  let changed = isNew;
+  const markChanged = () => { changed = true; driveButton.disabled = true; driveButton.title = 'Save first'; };
+  driveButton.disabled = changed;
+  [nameInput, xInput, yInput, yawInput].forEach((field) => field.addEventListener('input', markChanged));
+  // navigate_to target: a location by name, a stance at a placed object (the picked one for a type-level stance)
+  const driveTarget = () => {
+    if (address[0] === 'location') return name;
+    const [, scope, owner, variant] = address;
+    const instance = scope === 'instances' ? owner : instancePicker?.value;
+    return instance ? `stance:${instance}/${variant}` : null;
+  };
+  driveButton.addEventListener('click', async () => {
+    const target = driveTarget();
+    if (!target) { message(msg, 'Pick the object to drive to.', true); return; }
+    message(msg, `Driving to ${target}…`);
+    driveButton.disabled = true;
+    const { ok, data } = await api('POST', '/api/points/drive', { target });
+    driveButton.disabled = changed;
+    if (!ok) { message(msg, (data.problems || [data.error || 'not driven']).join('\n'), true); return; }
+    message(msg, `${data.outcome}${data.message ? ': ' + data.message : ''}`, data.outcome !== 'succeeded');
+  });
 
   robotButton.addEventListener('click', async () => {
     const robot = await refreshPose();
     const value = robot && fromRobot(robot);
     if (!value) { message(msg, 'No current robot pose.', true); return; }
     xInput.value = value.x; yInput.value = value.y; yawInput.value = +(value.yaw * DEG).toFixed(2);
+    markChanged();
     message(msg, 'Filled in from the robot. Check, then save.');
   });
   saveButton.addEventListener('click', async () => {

@@ -20,6 +20,7 @@ HTTP API (JSON):
   PUT  /api/points/stance/<objects|instances>/<owner>/<variant>  {x, y, yaw[, rename]}  (offset in the object frame)
   DELETE the same addresses;  422 with {problems} if refused, nothing written
   GET  /api/robot_pose             current base pose in the cell and relative to every placed object
+  POST /api/points/drive {target}  run navigate_to now (no mission running): location name or stance:<object>/<variant>
   GET  /api/robot                  joint poses (with the missions using each), navigation clearance, footprint
   GET  /api/robot/joints           current joint positions
   GET  /api/robot/tools            current tool targets {tool: {tcp, approach, closing}} (MoveIt forward kinematics)
@@ -74,6 +75,7 @@ STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
 CALL_TIMEOUT_S = 5.0
 STATIC_FILES = ('app.js', 'robot.js', 'graph.js', 'style.css')
 MANUAL_SKILL_TIMEOUT_S = 120.0
+DRIVE_TIMEOUT_S = 300.0  # sim time; a drive across the cell in a slow sim
 NAV_COSTMAPS = ['/local_costmap/local_costmap', '/global_costmap/global_costmap']  # Nav2 defaults
 NAV_CONTROLLER = '/controller_server'
 FK_SERVICE = '/compute_fk'  # MoveIt move_group
@@ -455,6 +457,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({'file': file, 'applied': applied})
             if method == 'POST' and route == ['robot', 'reach']:
                 return self._json(bridge.reach(self._body()))
+            if method == 'POST' and route == ['points', 'drive']:
+                target = str(self._body()['target'])
+                return self._json(bridge.run_skill('navigate_to', {'target': target}, timeout_s=DRIVE_TIMEOUT_S))
             if method == 'POST' and route == ['robot', 'move']:
                 return self._json(bridge.run_skill('move_to_pose', {'pose': self._body()['pose']}))
             return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
