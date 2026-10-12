@@ -26,7 +26,7 @@ def nodes(context):
         Node(package='taskweave_core', executable='skill_server', name='generic_skills', output='screen',
              parameters=[{**common, 'robot': robot, 'skills': skills}]),
         Node(package='taskweave_core', executable='operator_joy', name='operator_joy', output='screen',
-             parameters=[common]),
+             parameters=[{**common, 'robot': robot}]),
         Node(package='taskweave_core', executable='teach', name='teach', output='screen',
              parameters=[{**common, 'robot': robot}]),
     ]

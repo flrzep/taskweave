@@ -280,13 +280,24 @@ OPERATOR = {
                 'topic': {'type': 'string'},
                 'pause_resume_button': {'type': 'integer', 'minimum': 0},
                 'abort_button': {'type': 'integer', 'minimum': 0},
+                # pad modes: drive (pad passed on to drive_topic) or jog one tool's TCP (operator_joy.py)
+                'drive_topic': {'type': 'string'},
+                'drive_button': {'type': 'integer', 'minimum': 0},
+                'arms': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {
+                    'type': 'object', 'required': ['button', 'twist'],
+                    'properties': {'button': {'type': 'integer', 'minimum': 0}, 'twist': {'type': 'string'}},
+                    'additionalProperties': False}},
+                'jog': {'type': 'object', 'additionalProperties': False, 'properties': {
+                    **{k: {'type': 'integer', 'minimum': 0} for k in ('enable_button', 'fast_button', 'tilt_axis')},
+                    **{k: {'type': 'number', 'exclusiveMinimum': 0}
+                       for k in ('speed', 'fast_speed', 'turn', 'fast_turn')}}},
                 'actions': {
                     'type': 'array',
                     'items': {
                         'type': 'object',
                         'required': ['button', 'skill'],
                         'properties': {'button': {'type': 'integer', 'minimum': 0}, 'skill': NAME,
-                                       'args': {'type': 'object'}},
+                                       'args': {'type': 'object'}, 'arm_args': {'type': 'object'}},
                         'additionalProperties': False,
                     },
                 },
