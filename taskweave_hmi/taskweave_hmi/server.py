@@ -254,6 +254,10 @@ class Bridge(Node):
         if not profile.data.get('ik'):
             raise TimeoutError('the robot profile has no ik section')
         joints = {name: float(value) for name, value in (body.get('joints') or {}).items()}
+        try:
+            self.joint_positions()
+        except TimeoutError as error:  # MoveIt places the robot from live TF: nothing to solve against
+            raise TimeoutError(f'{error}: the robot (or sim) is not running, start it to check reach') from error
         with self.reach_lock:
             if self.ik is None:
                 self.ik = IkClient(self, profile)
