@@ -105,5 +105,20 @@ def test_tool_poses_are_listed_and_saved(store):
         robot.save_pose(store, ROBOT, 'reach', {'tools': {'left': {**target, 'closing': [0, 0, 2]}}}, args)
 
 
+def test_poses_outside_the_joint_limits_are_refused_and_flagged(store):
+    args = robot.pose_args(CATALOG)
+    profile = store.root / 'robots' / ROBOT / 'profile.yaml'
+    limits = '{lift: [0.0, 0.5], j1: [-1, 1], j2: [-1, 1]}'
+    profile.write_text(profile.read_text() + f'joints: {{command: /c, state: /s, linear: [lift], limits: {limits}}}\n')
+    with pytest.raises(robot.RobotSettingsError, match='lift: 0.800 m is outside 0.000..0.500 m'):
+        robot.save_pose(store, ROBOT, 'home', {'joints': {'lift': 0.8, 'j1': 0.0, 'j2': 0.0}}, args)
+    with pytest.raises(robot.RobotSettingsError, match='no such joint'):
+        robot.save_pose(store, ROBOT, 'new', {'joints': {'leg_joint1': 0.1}, 'create': True}, args)
+    data = robot.overview(store, ROBOT, args)
+    assert data['joint_limits']['lift'] == [0.0, 0.5]
+    poses = {p['name']: p for p in data['poses']}
+    assert poses['home']['problems'] == [] and poses['carry']['problems'] == []
+
+
 def test_pose_args_fall_back_when_the_catalog_names_none():
     assert robot.pose_args([]) == robot.DEFAULT_POSE_ARGS

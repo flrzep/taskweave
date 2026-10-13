@@ -80,7 +80,11 @@ def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
         if kind == 'base_target':
             store.base_target(str(value), robot)
         elif kind == 'joint_pose':
-            store.named_pose(robot, str(value))
+            from .config.limits import pose_problems
+
+            problems = pose_problems(store, robot, str(value))   # raises KeyError for an unknown pose
+            if problems:
+                return f'pose {value} does not fit robot {robot!r}: ' + '; '.join(problems)
         elif kind == 'object_point':  # <instance>/<point> (a placed object) or <object>.<point> (a type's point)
             if '/' in str(value):
                 instance, _ = store.instance_point(str(value))

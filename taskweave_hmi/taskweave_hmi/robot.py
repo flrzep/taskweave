@@ -14,6 +14,7 @@ from collections.abc import Iterable, Mapping
 from jsonschema import Draft202012Validator
 
 from taskweave_core.config import ConfigError, ConfigStore, schemas
+from taskweave_core.config.limits import joint_limits, joint_problems, pose_problems
 
 HMI_NOTE = 'edited in the HMI'
 DEFAULT_POSE_ARGS = {('move_to_pose', 'pose')}
@@ -54,8 +55,12 @@ def overview(store: ConfigStore, robot: str, args: set[tuple[str, str]]) -> dict
         'robot': robot,
         'files': {'poses': f'robots/{robot}/poses.yaml', 'navigation': f'robots/{robot}/navigation.yaml'},
         'linear_joints': list(joints.get('linear', [])),
-        'poses': [{'name': name, **store.named_pose(robot, name), 'used_by': used.get(name, [])}
+        'poses': [{'name': name, **store.named_pose(robot, name), 'used_by': used.get(name, []),
+                   'problems': pose_problems(store, robot, name)}    # e.g. copied from another robot
                   for name in store.joint_poses(robot)],     # joints set directly, tools solved by IK
+        # joint -> [lower, upper] (rad or m; null = unbounded) for the editor's input ranges and checks
+        'joint_limits': {joint: [None if math.isinf(v) else v for v in bounds]
+                         for joint, bounds in joint_limits(store, robot).items()},
         'tools': list(profile.data.get('ik', {}).get('groups', {})),     # tools a pose can place (IK available)
         'navigation': store.navigation(robot),
         'footprint': profile.base.get('footprint'),
@@ -110,6 +115,11 @@ def save_pose(store: ConfigStore, robot: str, name: str, body: Mapping, args: se
     rename = body.get('rename') or None
     if rename == name:
         rename = None
+    joints = _check_values(body.get('joints') or {}, allow_empty=bool(body.get('tools')))
+    linear = set(store.robot(robot).data.get('joints', {}).get('linear', []))
+    problems = joint_problems(joints, joint_limits(store, robot), linear)
+    if problems:
+        raise RobotSettingsError('outside the joint limits of this robot: ' + '; '.join(problems))
     if rename:
         users = pose_usage(store, args).get(name, [])
         if users:
@@ -118,10 +128,10 @@ def save_pose(store: ConfigStore, robot: str, name: str, body: Mapping, args: se
         tools = body.get('tools') or None
         if tools:
             allowed = list(store.robot(robot).data.get('ik', {}).get('groups', {}))
-            path = store.set_named_pose(robot, name, _check_values(body.get('joints') or {}, allow_empty=True),
+            path = store.set_named_pose(robot, name, joints,
                                         _check_tools(tools, allowed), rename=rename, note=HMI_NOTE)
         else:
-            path = store.set_named_pose(robot, name, _check_values(body.get('joints')), rename=rename, note=HMI_NOTE)
+            path = store.set_named_pose(robot, name, joints, rename=rename, note=HMI_NOTE)
     except ValueError as error:
         raise RobotSettingsError(str(error)) from error
     return str(path.relative_to(store.root))

@@ -115,10 +115,17 @@ function poseItem(pose, isNew = false) {
     box.checked = true;
     included[group] = box;
     const fields = members.map((joint) => {
-      const input = el('input', { type: 'number', step: 'any', inputmode: 'decimal' });
+      // the robot's range for this joint, in the shown unit: the field flags values outside it
+      const [lower, upper] = (state.robotData.joint_limits || {})[joint] || [null, null];
+      const range = {};
+      if (lower !== null) range.min = show(joint, lower);
+      if (upper !== null) range.max = show(joint, upper);
+      const input = el('input', { type: 'number', step: 'any', inputmode: 'decimal', ...range });
       input.value = pose.joints[joint] === undefined ? '' : show(joint, pose.joints[joint]);
       inputs[joint] = input;
-      const label = `${joint.startsWith(`${group}_`) ? joint.slice(group.length + 1) : joint} ${linear.has(joint) ? 'm' : '°'}`;
+      const unit = linear.has(joint) ? 'm' : '°';
+      const bounds = 'min' in range && 'max' in range ? ` (${range.min} to ${range.max})` : '';
+      const label = `${joint.startsWith(`${group}_`) ? joint.slice(group.length + 1) : joint} ${unit}${bounds}`;
       return el('div', { class: 'field' }, el('label', { text: label }), input);
     });
     box.addEventListener('change', () => fields.forEach((field) => { field.hidden = !box.checked; }));
@@ -147,7 +154,8 @@ function poseItem(pose, isNew = false) {
   const head = el('button', { class: 'point-head', 'aria-expanded': String(isNew) },
     el('b', { text: pose.name || 'new pose' }),
     el('span', { class: 'mono', text: [...liftText, shape, Object.keys(groups).join(', ')].join(' · ') }),
-    pose.used_by.length ? el('span', { class: 'used', text: `used by ${pose.used_by.join(', ')}` }) : '');
+    pose.used_by.length ? el('span', { class: 'used', text: `used by ${pose.used_by.join(', ')}` }) : '',
+    (pose.problems || []).length ? el('span', { class: 'bad', text: `outside this robot's limits: ${pose.problems.join('; ')}` }) : '');
   const nameInput = el('input', { autocomplete: 'off', spellcheck: 'false' });
   nameInput.value = pose.name || '';
   const msg = el('div', { class: 'msg', hidden: '' });
@@ -287,6 +295,10 @@ function poseItem(pose, isNew = false) {
       for (const joint of members) {
         const value = Number(inputs[joint].value);
         if (inputs[joint].value.trim() === '' || !Number.isFinite(value)) { message(msg, `${joint}: enter a number.`, true); return; }
+        const field = inputs[joint];
+        if (field.validity.rangeUnderflow || field.validity.rangeOverflow) {
+          message(msg, `${joint}: ${field.value} is outside this robot's range ${field.min} to ${field.max}.`, true); return;
+        }
         values[joint] = unshow(joint, value);
       }
     }
