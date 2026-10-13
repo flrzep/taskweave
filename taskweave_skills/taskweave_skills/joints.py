@@ -299,8 +299,9 @@ class GoToPoint(MoveToPose):
     description = ('Move one or both tools to a point on a placed object, for example the grasp point of a frame in a '
                    'bin: the point is taught relative to the object, the robot solves where its tools must go from '
                    'where it stands. offset_m stops short of the point along its approach direction (a pre-grasp '
-                   'pose). Collision-free path with a motion planner. The torso lift stays where it is unless the '
-                   'point is only in reach at another of the configured lift heights.')
+                   'pose). Collision-free path with a motion planner to approach_m before the point, then a straight '
+                   'line along the approach for the rest. The torso lift stays where it is unless the point is only '
+                   'in reach at another of the configured lift heights.')
     args_schema = {
         'type': 'object',
         'required': ['point'],
@@ -308,6 +309,9 @@ class GoToPoint(MoveToPose):
             'point': {'type': 'string', 'x-taskweave-point': 'object_point',
                       'description': '<instance>/<point>: a placed object (cell/objects.yaml) and its point'},
             'offset_m': {'type': 'number', 'minimum': 0, 'description': 'stop this far back along the approach'},
+            'approach_m': {'type': 'number', 'minimum': 0,
+                           'description': 'the last part of the way, in a straight line along the approach '
+                                          '(default from the skill config; 0 = planned path all the way)'},
             'tools': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1,
                       'description': 'only these tools (default: every tool the point has)'},
             'linear': {'type': 'boolean', 'description': 'move the TCPs on straight lines from where they are '
@@ -326,6 +330,7 @@ class GoToPoint(MoveToPose):
         self.lift_joint, self.lift_values = params.pop('lift_joint', None), list(params.pop('lift_values', []))
         self.tcp_speed = float(params.pop('tcp_speed', 0.05))  # m/s and rad/s for straight-line motions
         self.tcp_turn = float(params.pop('tcp_turn', 0.3))
+        self.approach_m = float(params.pop('approach_m', 0.0))  # straight final approach (m) unless args say other
         super().setup(node, config, robot, params)
 
     def execute(self, ctx, args):
@@ -352,7 +357,16 @@ class GoToPoint(MoveToPose):
         label = args['point'] + (f' (-{offset:g} m)' if offset else '') + (' (linear)' if args.get('linear') else '')
         lifts = [{self.lift_joint: float(v)} for v in self.lift_values] if self.lift_joint else []
         self.hold.reached_point(None, None, (), None)
-        result, worst = self._reach(ctx, {}, tools, label, fallback_joints=lifts, linear=bool(args.get('linear')))
+        approach = 0.0 if args.get('linear') else float(args.get('approach_m', self.approach_m))
+        if approach > 0:  # planned (free) path to the start of the approach, then straight in
+            before = point_targets(point, instance, base_in_cell, offset + approach, args.get('tools'))
+            result, _ = self._reach(ctx, {}, before, f'{label} (-{approach:g} m approach)', fallback_joints=lifts)
+            if result is not None:
+                return result
+            label += f' ({approach:g} m straight)'
+            result, worst = self._linear(ctx, tools, label)
+        else:
+            result, worst = self._reach(ctx, {}, tools, label, fallback_joints=lifts, linear=bool(args.get('linear')))
         if result is not None:
             return result
         if offset == 0.0:  # at the point itself: closing the grippers now grasps this object
