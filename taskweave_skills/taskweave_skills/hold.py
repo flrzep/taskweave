@@ -3,7 +3,8 @@
 go_to_point reports when its tools reached an object point exactly (no offset). Closing the grippers of those tools
 then makes a hold: the object, the point, and each TCP's pose relative to the object, measured at that moment.
 While a hold lasts, free-arm motions (move_to_pose, go_to_point) refuse and move_object moves the object with all
-holding tools locked to it; opening one of the holding grippers releases it.
+holding tools locked to it; opening one of the holding grippers releases it. A simulator reset (sim time jumps back:
+Stop/Play, restart) ends the hold too: the world starts over with open hands.
 
 The hold is published latched on /taskweave/holding (std_msgs/String, JSON; ``{}`` when nothing is held):
 ``{"object": instance, "point": "<instance>/<point>", "tools": [...], "links": [flange links]}``. A simulator can
@@ -18,6 +19,7 @@ import threading
 import numpy as np
 
 TOPIC = '/taskweave/holding'
+RESET_JUMP_S = 0.5  # sim time going back by more than this is a simulator reset
 
 
 class HoldState:
@@ -45,6 +47,18 @@ class HoldState:
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.publisher = node.create_publisher(String, TOPIC, latched)
         self._publish()
+        from rclpy.clock import JumpThreshold
+        from rclpy.duration import Duration
+        threshold = JumpThreshold(min_forward=None, min_backward=Duration(seconds=-RESET_JUMP_S), on_clock_change=True)
+        self.jump_handle = node.get_clock().create_jump_callback(threshold, post_callback=self._on_reset)
+
+    def _on_reset(self, _jump) -> None:
+        with self.lock:
+            hold = self.hold
+            self.hold, self.reached = None, None
+        if hold is not None:
+            self.node.get_logger().warning(f'sim time jumped back: hold of {hold["object"]} ended')
+            self._publish()
 
     # ---- poses ------------------------------------------------------------------
     def transform(self, parent: str, child: str) -> np.ndarray:

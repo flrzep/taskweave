@@ -66,3 +66,15 @@ def test_grasp_only_at_a_reached_point_then_release(hold):
     assert state.release(['right']) == 'crate_1' and state.held() is None
     time.sleep(0.2)
     assert seen[-1] == {}
+
+
+def test_a_simulator_reset_ends_the_hold(hold):
+    state, seen = hold
+    obj = np.eye(4)
+    state.reached_point('crate_1/rails', 'crate_1', ['left', 'right'], obj)
+    assert state.grasp(['left', 'right']) == 'crate_1'
+    state._on_reset(None)  # what the clock's jump callback calls when sim time goes back
+    assert state.held() is None
+    time.sleep(0.2)
+    assert seen[-1] == {}
+    assert state.grasp(['left', 'right']) is None  # the reached point is gone too: no grasp without a new approach
