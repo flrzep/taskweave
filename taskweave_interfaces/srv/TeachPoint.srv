@@ -1,8 +1,11 @@
-# Save the robot's current base pose as a named point in config.
+# Save the robot's current base pose, or its tools' TCP poses, as a named point in config.
 
-string name             # location name, or for stances "<object instance>[/<variant>]", e.g. "bay_2_stack_1/pick"
+string name             # location name, for stances "<object instance>[/<variant>]", e.g. "bay_2_stack_1/pick",
+                        # for object points "<object instance>/<point>", e.g. "bay_2_stack_1/rails_top"
 string kind             # "location" (cell/locations.yaml), "stance" (robots/<robot>/stances.yaml, per object
-                        # type) or "stance_instance" (same file, override for this object instance only)
+                        # type), "stance_instance" (same file, override for this object instance only) or
+                        # "object_point" (objects/<object>.yaml: each tool's canonical TCP relative to the object)
+string[] tools          # object_point: the tools to store (empty: every tool in the profile's tool_frames)
 ---
 bool success
 string message

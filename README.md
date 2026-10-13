@@ -107,7 +107,7 @@ Early development. The interfaces are defined; the core packages are being built
 - [x] Joint skills `move_to_pose` (named poses) and `gripper` (open/close, holding detection)
 - [x] Joystick buttons for pause/abort and manual skill calls (`operator.yaml`)
 - [x] Web HMI: live status, start/pause/resume/abort, mission editor with validation
-- [ ] Teaching tool poses, `go_to_point`, Nav2 and MoveIt adapters
+- [x] Teaching tool poses (pad or CLI), `go_to_point`, Nav2 and MoveIt adapters
 - [ ] VLM planner
 
 ## Usage
@@ -120,6 +120,7 @@ ros2 run taskweave_core taskweave run frame_cycle           # start a mission
 ros2 run taskweave_core taskweave status --follow
 ros2 run taskweave_core taskweave pause | resume | abort
 ros2 run taskweave_core taskweave teach location bay_2      # save the current base pose
+ros2 run taskweave_core taskweave teach point bay_2_stack_1/rails_top   # save the tools' TCPs on an object
 ros2 run taskweave_hmi hmi_server --ros-args -p config_dir:=/path/to/config -p robot:=a2d -p host:=<address>
 ```
 

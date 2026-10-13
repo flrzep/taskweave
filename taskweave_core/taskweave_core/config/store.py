@@ -32,6 +32,7 @@ STANCE_PREFIX = 'stance:'
 LOCATION_PREFIX = 'location:'
 VARIANT_SEPARATOR = '/'     # stance:<instance>/<variant>
 POINT_METADATA = ('approach', 'tool_type', 'grip_width_m')  # keys of an object point that are not tool poses
+TOOL_SUFFIX = '_tool'       # an object point's tool pose key: <tool>_tool
 POINT_FILE_SCHEMAS = {  # files that teaching and the HMI may edit (a file name matches any robot folder)
     'cell/locations.yaml': schemas.POINTS2D, 'stances.yaml': schemas.STANCES, 'poses.yaml': schemas.JOINT_POSES,
     'navigation.yaml': schemas.NAVIGATION,
@@ -329,6 +330,43 @@ class ConfigStore:
         keys = ['instances', instance.name, variant] if per_instance else ['objects', instance.object, variant]
         return self.update_point(f'robots/{robot}/stances.yaml', keys, offset), offset
 
+    def save_object_point(self, reference: str, tool_poses: dict, note: str | None = None) -> tuple[Path, dict]:
+        """Store tool TCP poses (cell frame: ``{tool: (position, quaternion xyzw)}``) as the point ``<point>`` of
+        ``<instance>``'s object type, relative to its top item. Other tools and the point's metadata are kept.
+        Returns the file and the stored ``{tool: Pose3D}``."""
+        from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+        name, _, point = reference.partition(VARIANT_SEPARATOR)
+        instances = self.object_instances()
+        if name not in instances or not point:
+            raise ValueError(f'expected <instance>/<point> with an instance from cell/objects.yaml, got {reference!r}')
+        if not tool_poses:
+            raise ValueError('no tool poses to store')
+        self._check_name(point)
+        instance = instances[name]
+        stored = {tool: instance.relative_pose(*pose) for tool, pose in tool_poses.items()}
+
+        def flow(values) -> CommentedSeq:
+            seq = CommentedSeq(round(float(v), 4) + 0.0 for v in values)  # + 0.0: no "-0.0"
+            seq.fa.set_flow_style()
+            return seq
+
+        def edit(document):
+            points = document.setdefault('points', CommentedMap())
+            entry = points.get(point)
+            if not isinstance(entry, dict):
+                entry = points[point] = CommentedMap()
+            for tool, pose in stored.items():
+                key = f'{tool}{TOOL_SUFFIX}'
+                value = CommentedMap(xyz=flow(pose.xyz), rpy=flow(pose.rpy))
+                value.fa.set_flow_style()
+                entry[key] = value
+                entry.ca.items.pop(key, None)  # a hand-written comment no longer describes the taught pose
+                if note:
+                    entry.yaml_add_eol_comment(note, key, column=4)
+
+        return self._edit_yaml(f'objects/{instance.object}.yaml', edit), stored
+
     # ---- editing points (teach mode, HMI) ---------------------------------------
     def update_point(self, relative: str, keys: list[str], pose: Pose2D | None = None,
                      rename: str | None = None) -> Path:
@@ -477,7 +515,8 @@ class ConfigStore:
         from ruamel.yaml import YAML  # only needed for writing
         from ruamel.yaml.comments import CommentedMap
 
-        schema = POINT_FILE_SCHEMAS.get(relative) or POINT_FILE_SCHEMAS.get(Path(relative).name)
+        schema = (POINT_FILE_SCHEMAS.get(relative) or POINT_FILE_SCHEMAS.get(Path(relative).name)
+                  or (schemas.OBJECT if Path(relative).parent == Path('objects') else None))
         if schema is None:
             raise ValueError(f'{relative} is not a point file')
         path = self.root / relative

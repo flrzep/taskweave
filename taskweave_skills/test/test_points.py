@@ -43,3 +43,19 @@ def test_points_of_a_stack_refer_to_its_top_item():
     point = {'left_tool': Pose3D((0.0, 0.0, 0.05), DOWN, 'box')}
     assert stack.top_z == pytest.approx(0.38)
     assert point_targets(point, stack, base_at(0, 0, 0, 0))['left']['tcp'] == pytest.approx([0, 0, 0.43])
+
+
+def test_a_taught_tcp_comes_back_as_the_same_target():
+    """ObjectInstance.relative_pose (teaching) is the inverse of point_targets (go_to_point)."""
+    from taskweave_core.config.poses import quaternion_from_rpy
+
+    stack = ObjectInstance('stack_1', 'box', Pose2D(8.8, 1.1, 1.5708), z=0.1, stack_count=8, stack_pitch=0.04)
+    position, rpy = (8.6, 1.3, 0.55), (0.3, 2.8, -1.0)  # some TCP pose in the cell frame
+    taught = stack.relative_pose(position, quaternion_from_rpy(rpy))
+    base = base_at(7.9, 0.4, 0.0, 0.7)
+    left = point_targets({'left_tool': taught}, stack, base)['left']
+    from taskweave_skills.ik import rpy_matrix
+    expected = np.linalg.inv(base) @ rpy_matrix(position, rpy)
+    assert left['tcp'] == pytest.approx(expected[:3, 3], abs=1e-5)
+    assert left['approach'] == pytest.approx(expected[:3, 2], abs=1e-5)
+    assert left['closing'] == pytest.approx(expected[:3, 1], abs=1e-5)

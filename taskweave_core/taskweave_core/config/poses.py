@@ -52,6 +52,15 @@ class ObjectInstance:
         """Height of the top item (the one a robot reaches first)."""
         return self.z + max(self.stack_count - 1, 0) * self.stack_pitch
 
+    def relative_pose(self, position, quaternion) -> Pose3D:
+        """A cell-frame pose (position, quaternion x, y, z, w) relative to the top item, as object points store it:
+        the inverse of how go_to_point places a point (taskweave_skills.points.instance_matrix)."""
+        c, s = math.cos(self.pose.yaw), math.sin(self.pose.yaw)
+        dx, dy, dz = position[0] - self.pose.x, position[1] - self.pose.y, position[2] - self.top_z
+        unturn = quaternion_from_rpy((0.0, 0.0, -self.pose.yaw))
+        return Pose3D((c * dx + s * dy, -s * dx + c * dy, dz),
+                      rpy_from_quaternion(quaternion_multiply(unturn, quaternion)), self.object)
+
 
 @dataclass(frozen=True)
 class Pose3D:
@@ -72,3 +81,30 @@ class Pose3D:
 def wrap_angle(angle: float) -> float:
     """Wrap an angle to [-pi, pi)."""
     return (angle + math.pi) % (2 * math.pi) - math.pi
+
+
+# Quaternions are (x, y, z, w) as in geometry_msgs; roll-pitch-yaw is R = Rz(yaw) Ry(pitch) Rx(roll) as in URDF.
+def quaternion_from_rpy(rpy) -> tuple[float, float, float, float]:
+    (cr, cp, cy), (sr, sp, sy) = ((math.cos(a / 2) for a in rpy), (math.sin(a / 2) for a in rpy))
+    return (sr * cp * cy - cr * sp * sy, cr * sp * cy + sr * cp * sy, cr * cp * sy - sr * sp * cy,
+            cr * cp * cy + sr * sp * sy)
+
+
+def rpy_from_quaternion(q) -> tuple[float, float, float]:
+    x, y, z, w = q
+    sin_pitch = max(-1.0, min(1.0, 2 * (w * y - z * x)))
+    return (math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y)), math.asin(sin_pitch),
+            math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)))
+
+
+def quaternion_multiply(a, b) -> tuple[float, float, float, float]:
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz)
+
+
+def rotate(q, v) -> tuple[float, float, float]:
+    """Vector ``v`` rotated by quaternion ``q``."""
+    x, y, z, _ = quaternion_multiply(quaternion_multiply(q, (*v, 0.0)), (-q[0], -q[1], -q[2], q[3]))
+    return x, y, z

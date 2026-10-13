@@ -170,3 +170,23 @@ def test_object_instances_can_be_stacks(config_dir):
         'pile: {object: box, frame: cell, x: 1.0, y: 2.0, z: 0.1, yaw: 0.0, stack: {count: 3, pitch: 0.05}}\n')
     pile = ConfigStore(config_dir).object_instances()['pile']
     assert pile.stack_count == 3 and pile.top_z == pytest.approx(0.2)
+
+
+def test_teach_object_point_stores_tcps_relative_to_the_top_item(config_dir):
+    import math
+
+    from taskweave_core.config.poses import quaternion_from_rpy
+    (config_dir / 'cell' / 'objects.yaml').write_text(
+        'pile: {object: box, frame: cell, x: 1.0, y: 2.0, z: 0.1, yaw: 1.5708, stack: {count: 3, pitch: 0.05}}\n')
+    store = ConfigStore(config_dir)
+    down = quaternion_from_rpy((0.0, math.pi, 0.0))
+    path, stored = store.save_object_point('pile/top_grasp', {'right': ((1.0, 2.5, 0.4), down)}, 'taught today')
+    assert path.name == 'box.yaml' and stored['right'].xyz == pytest.approx((0.5, 0.0, 0.2), abs=1e-4)
+    point = store.object_point('box', 'top_grasp')
+    assert point['right_tool'].xyz == pytest.approx((0.5, 0.0, 0.2), abs=1e-4)
+    assert point['left_tool'].xyz == (0.0, 0.1, 0.2) and point['grip_width_m'] == 0.05  # rest kept
+    assert 'right_tool: {xyz: [0.5, 0.0, 0.2]' in path.read_text() and '# taught today' in path.read_text()
+    store.save_object_point('pile/new_point', {'left': ((1.0, 2.0, 0.3), down)})
+    assert store.object_point('box', 'new_point')['left_tool'].xyz == pytest.approx((0.0, 0.0, 0.1), abs=1e-4)
+    with pytest.raises(ValueError, match='<instance>/<point>'):
+        store.save_object_point('nowhere/top_grasp', {'left': ((0, 0, 0), down)})

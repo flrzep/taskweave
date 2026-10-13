@@ -212,6 +212,11 @@ Tool poses are canonical-TCP poses relative to the object, so they hold for any 
 `<role>_tool` names the robot tool (`left_tool` is `tools.left`). Validation checks tool type and grip width against
 the robot's tools.
 
+To teach a point, jog the tools onto a placed object with the pad. Then press the `joy.teach` button in
+`operator.yaml`, or run `taskweave teach point bay_2_stack_1/side_rails [--tool left]`. That stores each tool's
+current TCP (profile `tool_frames`, read from TF in the cell frame) relative to the instance's top item, for the
+object type. It keeps the point's other tools and metadata.
+
 ## Skill parameters
 
 ```yaml

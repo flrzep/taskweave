@@ -27,6 +27,13 @@ velocity in the base frame to e.g. taskweave_skills' tcp_jog):
 In a tool mode the base gets no pad input, actions use ``arm_args`` ('{arm}' = the tool), and the TCP moves only
 while the enable button is held. Modes switch only while no mission runs; a starting mission puts the pad back to
 drive. The mode is published on names.OPERATOR_MODE. Tool links and the base frame come from the robot profile.
+
+Teaching object points (optional): jog the tools onto the object, then press the teach button. It stores the TCP
+of the tool being jogged (in drive mode: of every tool) as ``point`` (``<instance>/<point>``) through the teach
+node. ``point`` is read from operator.yaml at each press, so it can be changed while the system runs:
+
+    joy:
+      teach: {button: 10, point: bay_2_stack_1/rails_top}
 """
 
 from __future__ import annotations
@@ -43,6 +50,7 @@ from std_srvs.srv import Trigger
 
 from taskweave_interfaces.action import RunSkill
 from taskweave_interfaces.msg import TaskStatus
+from taskweave_interfaces.srv import TeachPoint
 
 from . import jog, names
 from .config import ConfigStore
@@ -59,7 +67,7 @@ class OperatorJoy(Node):
         super().__init__(kwargs.pop('node_name', 'operator_joy'), **kwargs)
         self.declare_parameter('config_dir', '')
         self.declare_parameter('robot', '')
-        store = ConfigStore(self.get_parameter('config_dir').value)
+        self.store = store = ConfigStore(self.get_parameter('config_dir').value)
         config = store.operator().get('joy')
         self.state = TaskStatus.IDLE
         self.previous: list[int] = []
@@ -76,6 +84,8 @@ class OperatorJoy(Node):
         self.buttons = {'toggle': config.get('pause_resume_button'), 'abort': config.get('abort_button')}
         services = (('pause', names.PAUSE), ('resume', names.RESUME), ('abort', names.ABORT))
         self.triggers = {name: self.create_client(Trigger, service) for name, service in services}
+        self.teach_button = config.get('teach', {}).get('button')
+        self.teach_client = self.create_client(TeachPoint, names.TEACH_POINT) if self.teach_button is not None else None
         self.actions = list(config.get('actions', []))
         self.skill_clients = {skill: ActionClient(self, RunSkill, names.skill_action(skill))
                               for skill in {a['skill'] for a in self.actions}}
@@ -190,6 +200,8 @@ class OperatorJoy(Node):
             self._call('resume' if self.state == TaskStatus.PAUSED else 'pause')
         if self.mode_pub is not None:
             self._modes(msg, buttons)
+        if self._pressed(buttons, self.teach_button):
+            self._teach()
         for index, action in enumerate(self.actions):
             if self._pressed(buttons, action['button']):
                 self._run(index, self._for_mode(action))
@@ -201,6 +213,29 @@ class OperatorJoy(Node):
             return action
         args = {k: v.replace('{arm}', self.mode) if isinstance(v, str) else v for k, v in action['arm_args'].items()}
         return {**action, 'args': {**action.get('args', {}), **args}}
+
+    def _teach(self) -> None:
+        point = self.store.operator().get('joy', {}).get('teach', {}).get('point')
+        if self.state in BUSY:
+            self.get_logger().warning('teach ignored: a mission is running or paused')
+            return
+        if not point:
+            self.get_logger().warning('teach: no joy.teach.point in operator.yaml')
+            return
+        if not self.teach_client.service_is_ready():
+            self.get_logger().warning('teach: teach node not available')
+            return
+        tools = [] if self.mode == DRIVE else [self.mode]
+        self.get_logger().info(f'teach {point} ({", ".join(tools) or "all tools"})')
+        request = TeachPoint.Request(name=point, kind='object_point', tools=tools)
+        self.teach_client.call_async(request).add_done_callback(self._taught)
+
+    def _taught(self, future) -> None:
+        response = future.result()
+        if response.success:
+            self.get_logger().info(f'taught {response.message} -> {response.file}')
+        else:
+            self.get_logger().warning(f'teach failed: {response.message}')
 
     def _call(self, command: str) -> None:
         client = self.triggers[command]

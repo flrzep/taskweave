@@ -9,6 +9,8 @@
     taskweave teach stance OBJ[/VARIANT] [--instance]
                                           save it as the robot's stance at an object (for the object type,
                                           or for this instance only)
+    taskweave teach point INSTANCE/POINT [--tool TOOL ...]
+                                          save the tools' current TCP poses as a point on the object type
     taskweave describe [CONFIG_DIR ROBOT]  robot card + skills (running system, or offline from config)
 """
 
@@ -166,12 +168,13 @@ def trigger(node, command: str) -> int:
     return 0 if response.success else 1
 
 
-def teach(node, kind: str, name: str) -> int:
+def teach(node, kind: str, name: str, tools: list[str] | None = None) -> int:
     from taskweave_interfaces.srv import TeachPoint
 
     from . import names
 
-    response = _call(node, TeachPoint, names.TEACH_POINT, TeachPoint.Request(name=name, kind=kind))
+    request = TeachPoint.Request(name=name, kind=kind, tools=tools or [])
+    response = _call(node, TeachPoint, names.TEACH_POINT, request)
     print(('saved ' + response.message + ' -> ' + response.file) if response.success else 'failed: ' + response.message)
     return 0 if response.success else 1
 
@@ -217,10 +220,13 @@ def main(argv=None) -> int:
     for command in ('pause', 'resume', 'abort'):
         sub.add_parser(command)
     teach_parser = sub.add_parser('teach')
-    teach_parser.add_argument('kind', choices=['location', 'stance'])
-    teach_parser.add_argument('name', help='location name, or OBJECT_INSTANCE[/VARIANT] for a stance')
+    teach_parser.add_argument('kind', choices=['location', 'stance', 'point'])
+    teach_parser.add_argument('name', help='location name, OBJECT_INSTANCE[/VARIANT] for a stance, '
+                                           'OBJECT_INSTANCE/POINT for an object point')
     teach_parser.add_argument('--instance', action='store_true',
                               help='stance: store for this object instance only, not for its object type')
+    teach_parser.add_argument('--tool', action='append', dest='tools',
+                              help='point: store only this tool (repeatable; default: every tool)')
     describe_parser = sub.add_parser('describe')
     describe_parser.add_argument('config_dir', nargs='?')
     describe_parser.add_argument('robot', nargs='?')
@@ -236,8 +242,9 @@ def main(argv=None) -> int:
             return describe_offline(options.config_dir, options.robot)
         return _ros(describe)
     if options.command == 'teach':
-        kind = 'stance_instance' if options.kind == 'stance' and options.instance else options.kind
-        return _ros(lambda node: teach(node, kind, options.name))
+        kind = {'point': 'object_point', 'stance': 'stance_instance' if options.instance else 'stance'}.get(
+            options.kind, options.kind)
+        return _ros(lambda node: teach(node, kind, options.name, options.tools))
     if options.command == 'status':
         return _ros(lambda node: status(node, options.follow))
     return _ros(lambda node: trigger(node, options.command))

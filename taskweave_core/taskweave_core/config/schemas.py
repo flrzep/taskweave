@@ -294,6 +294,9 @@ OPERATOR = {
                     **{k: {'type': 'integer', 'minimum': 0} for k in ('enable_button', 'fast_button', 'tilt_axis')},
                     **{k: {'type': 'number', 'exclusiveMinimum': 0}
                        for k in ('speed', 'fast_speed', 'turn', 'fast_turn')}}},
+                # teach object points from the pad (operator_joy.py): button + <instance>/<point>
+                'teach': {'type': 'object', 'required': ['button'], 'additionalProperties': False, 'properties': {
+                    'button': {'type': 'integer', 'minimum': 0}, 'point': {'type': 'string'}}},
                 'actions': {
                     'type': 'array',
                     'items': {
