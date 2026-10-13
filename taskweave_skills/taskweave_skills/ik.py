@@ -213,10 +213,10 @@ class IkClient:
             self.fk = node.create_client(GetPositionFK, self.choose.get('fk_service', '/compute_fk'),
                                          callback_group=ReentrantCallbackGroup())
 
-    def solve(self, tools: dict, fixed: dict, should_stop=lambda: False, current: dict | None = None
-              ) -> dict[str, float]:
+    def solve(self, tools: dict, fixed: dict, should_stop=lambda: False, current: dict | None = None,
+              allow_flip: bool = True) -> dict[str, float]:
         """Joint values for every tool target (plus nothing else); raises IkError. ``current``: the joints now, for
-        the size-of-move cost when choosing."""
+        the size-of-move cost when choosing. ``allow_flip`` False: solve the targets as given (no flipped grasp)."""
         if not self.client.wait_for_service(timeout_sec=2.0):
             raise IkError(f'no IK service {self.service} (is MoveIt running?)')
         result: dict[str, float] = {}
@@ -227,7 +227,7 @@ class IkClient:
             target = tools[tool]
             if tool not in self.groups or tool not in self.tools:
                 raise IkError(f'tool {tool!r} has no IK group or tool frame in the robot profile')
-            flip = self.choose is not None and self.tools[tool].get('flip')
+            flip = allow_flip and self.choose is not None and self.tools[tool].get('flip')
             variants = [target, flipped(target)] if flip else [target]
             local = [(self.groups[tool], seed, self.timeout_s) for seed in [*self.seeds, {}]]  # {}: current state
             image = self._mirrored(tool, chosen)
