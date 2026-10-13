@@ -151,6 +151,7 @@ ROBOT_PROFILE = {
                 'attempts': {'type': 'integer', 'minimum': 1},
                 'velocity_scale': {'type': 'number', 'exclusiveMinimum': 0, 'maximum': 1},
                 'acceleration_scale': {'type': 'number', 'exclusiveMinimum': 0, 'maximum': 1},
+                'joints': {'type': 'string'},   # regex: the group's joints; those not in a goal are held
             },
             'additionalProperties': False,
         },

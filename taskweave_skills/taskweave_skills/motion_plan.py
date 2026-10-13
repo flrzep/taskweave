@@ -19,6 +19,7 @@ skills stream it as position targets. Goal joints outside the group are moved st
 from __future__ import annotations
 
 import bisect
+import re
 import time
 
 SUCCESS = 1
@@ -75,6 +76,9 @@ class MotionPlanner:
         self.attempts = int(spec.get('attempts', 3))
         self.velocity_scale = float(spec.get('velocity_scale', 1.0))
         self.acceleration_scale = float(spec.get('acceleration_scale', 1.0))
+        # the planning group's joints (regex): those not in a goal stay where they are, else the planner may move
+        # them anywhere on the way (e.g. a lift or the other arm while one arm moves)
+        self.joints = re.compile(spec['joints']) if spec.get('joints') else None
         self.Request = GetMotionPlan.Request
         self.client = node.create_client(GetMotionPlan, self.service, callback_group=ReentrantCallbackGroup())
 
@@ -92,6 +96,8 @@ class MotionPlanner:
         r.group_name, r.pipeline_id, r.planner_id = self.group, self.pipeline, self.planner
         r.num_planning_attempts, r.allowed_planning_time = self.attempts, self.timeout_s
         r.max_velocity_scaling_factor, r.max_acceleration_scaling_factor = self.velocity_scale, self.acceleration_scale
+        if self.joints is not None:
+            goal = {**{n: v for n, v in start.items() if self.joints.fullmatch(n) and n not in goal}, **goal}
         start = {name: start[name] for name in goal if name in start}
         r.start_state = RobotState(joint_state=JointState(name=list(start), position=[float(v) for v in start.values()]),
                                    is_diff=True)  # keeps what MoveIt knows besides joints, e.g. the base pose from TF

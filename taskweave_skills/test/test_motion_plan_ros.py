@@ -3,6 +3,7 @@
 import shutil
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,7 +21,7 @@ from trajectory_msgs.msg import JointTrajectoryPoint  # noqa: E402
 
 from taskweave_core.skill_server import SkillServer  # noqa: E402
 from taskweave_interfaces.action import RunSkill  # noqa: E402
-from taskweave_skills.motion_plan import Trajectory  # noqa: E402
+from taskweave_skills.motion_plan import MotionPlanner, Trajectory  # noqa: E402
 
 PLANNING = 'planning: {group: arm, timeout_s: 1.0}\n'
 
@@ -117,3 +118,12 @@ def test_a_failed_plan_is_planned_again(system):
     result = run(client, 'move_to_pose', {'pose': 'ready'})
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     assert len(planner.requests) == 2 and sim.position['j1'] == pytest.approx(1.0, abs=0.02)
+
+
+def test_joints_outside_the_goal_are_held_where_they_are(system):
+    _, planner, client, _ = system
+    robot = SimpleNamespace(data={'planning': {'group': 'arm', 'timeout_s': 1.0, 'joints': 'j[12]|lift'}})
+    start = {'j1': 0.0, 'j2': 0.3, 'lift': 0.1, 'base_x_joint': 4.0}  # base_x_joint: not a planning joint
+    MotionPlanner(client, robot).plan(start, {'j1': 0.5})
+    goal = {c.joint_name: c.position for c in planner.requests[-1].goal_constraints[0].joint_constraints}
+    assert goal == pytest.approx({'j1': 0.5, 'j2': 0.3, 'lift': 0.1})  # without joints: j2 and lift would be free
