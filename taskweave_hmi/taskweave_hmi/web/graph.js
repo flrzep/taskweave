@@ -6,6 +6,7 @@
 const SVG = 'http://www.w3.org/2000/svg';
 const SKILL_KINDS = { navigate_to: 'drive', move_to_pose: 'arm', gripper: 'grip', wait: 'wait' };
 const G = { width: 384, nodeX: 70, nodeW: 220, nodeH: 52, gap: 30, top: 44, lane: 34, abortLane: 368 };
+const BREATHE_MS = 2800;  // period of node-breathe for the running step (style.css)
 const missionCache = {};
 
 function svg(tag, attrs = {}, text) {
@@ -101,8 +102,11 @@ function renderGraph() {
     const status = stepState(snap, step, i);
     const group = svg('g', { class: `node kind-${kind} state-${status}` });
     const title = svg('title', {}, `${i + 1}. ${step.instruction}\n${step.skill} ${JSON.stringify(step.args)}`);
-    group.append(title,
-      svg('rect', { x: G.nodeX, y, width: G.nodeW, height: G.nodeH, rx: 14, class: 'node-box' }),
+    const nodeBox = svg('rect', { x: G.nodeX, y, width: G.nodeW, height: G.nodeH, rx: 14, class: 'node-box' });
+    // the graph is rebuilt on every status update: start the breathing at the phase of a page-wide clock, so it
+    // runs on (in and out) instead of restarting with every update
+    if (status === 'running') nodeBox.style.animationDelay = `-${(performance.now() % BREATHE_MS) / 1000}s`;
+    group.append(title, nodeBox,
       svg('rect', { x: G.nodeX + 9, y: y + 11, width: 5, height: G.nodeH - 22, rx: 2.5, class: 'node-kind' }),
       svg('text', { x: G.nodeX + 24, y: y + 22, class: 'node-title' }, `${i + 1} · ${step.skill}`),
       svg('text', { x: G.nodeX + 24, y: y + 39, class: 'node-arg' }, mainArg(step).slice(0, 28)));

@@ -155,7 +155,7 @@ details[open] summary { margin-bottom: 8px; }
 .plan-graph .state-failed .node-box, .plan-graph .state-timeout .node-box, .plan-graph .state-rejected .node-box {
   stroke: color-mix(in srgb, var(--g-bad) 60%, transparent); fill: color-mix(in srgb, var(--g-bad) 7%, var(--g-card)); }
 .plan-graph .state-pending .node-box { stroke: color-mix(in srgb, var(--k) 22%, transparent); }
-.plan-graph .state-running .node-box { stroke: var(--k); stroke-width: 2.5; animation: node-breathe 2.8s ease-in-out infinite; }
+.plan-graph .state-running .node-box { stroke: var(--k); stroke-width: 2.5; animation: node-breathe 2.8s ease-in-out infinite; }  /* period = BREATHE_MS in graph.js */
 .plan-graph .state-paused .node-box { stroke: var(--g-warn); stroke-width: 2.5; }
 .plan-graph .state-paused .node-state { fill: var(--g-warn); }
 .plan-graph .edge { fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
