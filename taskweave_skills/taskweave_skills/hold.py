@@ -32,13 +32,13 @@ class HoldState:
     def __init__(self, node, robot):
         from rclpy.qos import DurabilityPolicy, QoSProfile
         from std_msgs.msg import String
-        from tf2_ros import Buffer, TransformListener
+
+        from taskweave_core import tf_util
 
         self.node, self.String = node, String
         self.base = robot.base['frame']
         self.tool_frames = robot.data.get('tool_frames', {})
-        self.tf = Buffer()
-        self.tf_listener = TransformListener(self.tf, node)
+        self.tf, self.tf_listener = tf_util.buffer(node)  # cleared when sim time jumps back
         self.lock = threading.Lock()
         self.reached: dict | None = None   # {point, instance, tools, object_in_base}
         self.hold: dict | None = None      # {object, point, tools, tcp_in_object, object_in_base}

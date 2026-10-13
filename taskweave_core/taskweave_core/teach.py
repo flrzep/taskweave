@@ -26,11 +26,10 @@ import math
 import rclpy
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
-from tf2_ros import Buffer, TransformListener
 
 from taskweave_interfaces.srv import TeachPoint
 
-from . import names
+from . import names, tf_util
 from .config import ConfigError, ConfigStore, Pose2D
 from .config.poses import quaternion_from_rpy, quaternion_multiply, rotate
 
@@ -52,8 +51,7 @@ class Teach(Node):
         self.cell_frame = self.get_parameter('cell_frame').value or self._skill_cell_frame()
         self.pose: Pose2D | None = None
         self.stamp = 0.0
-        self.tf = Buffer()
-        self.tf_listener = TransformListener(self.tf, self)
+        self.tf, self.tf_listener = tf_util.buffer(self)  # cleared when sim time jumps back
         self.create_subscription(Odometry, self.robot.base['odom'], self._odom, 10)
         self.create_service(TeachPoint, names.TEACH_POINT, self._teach)
         self.get_logger().info(f'teach: base pose from {self.robot.base["odom"]}, tool TCPs in {self.cell_frame}')

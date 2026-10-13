@@ -14,10 +14,9 @@ that holds an object (/taskweave/holding) is not jogged.
 from __future__ import annotations
 
 import math
+import re
 import threading
 import time
-
-import re
 
 import numpy as np
 import rclpy
@@ -61,15 +60,15 @@ class TcpJog(Node):
         from geometry_msgs.msg import TwistStamped
         from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
         from sensor_msgs.msg import JointState
-        from tf2_ros import Buffer, TransformListener
+
+        from taskweave_core import tf_util
 
         from .ik import IkClient
 
         self.JointState = JointState
         self.ik = IkClient(self, profile)
         self.base = profile.base['frame']
-        self.tf = Buffer()
-        self.tf_listener = TransformListener(self.tf, self)
+        self.tf, self.tf_listener = tf_util.buffer(self)  # cleared when sim time jumps back
         joints = profile.role('joints')
         self.command = self.create_publisher(JointState, joints['command'], 10)
         self.positions: dict[str, float] = {}

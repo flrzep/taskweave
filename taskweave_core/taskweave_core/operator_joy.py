@@ -52,7 +52,7 @@ from taskweave_interfaces.action import RunSkill
 from taskweave_interfaces.msg import TaskStatus
 from taskweave_interfaces.srv import TeachPoint
 
-from . import jog, names
+from . import jog, names, tf_util
 from .config import ConfigStore
 
 DRIVE = 'drive'
@@ -104,7 +104,6 @@ class OperatorJoy(Node):
         arms = config.get('arms', {})
         if arms:
             from geometry_msgs.msg import TwistStamped
-            from tf2_ros import Buffer, TransformListener
 
             robot = self.get_parameter('robot').value
             if not robot:
@@ -112,8 +111,7 @@ class OperatorJoy(Node):
             profile = store.robot(robot)
             self.base_frame = profile.base['frame']
             self.TwistStamped = TwistStamped
-            self.tf = Buffer()
-            self.tf_listener = TransformListener(self.tf, self)
+            self.tf, self.tf_listener = tf_util.buffer(self)  # cleared when sim time jumps back
             for tool, spec in arms.items():
                 frame = profile.data.get('tool_frames', {}).get(tool)
                 if frame is None:
