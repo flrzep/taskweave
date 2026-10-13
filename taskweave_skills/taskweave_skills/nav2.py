@@ -6,11 +6,19 @@ slow at settling, so as soon as the robot is within ``handover_distance`` of the
 the direct controller of ``navigate.py`` drives the rest with its tolerances. If Nav2 gives up further away, the skill
 fails with Nav2's reason.
 
+Before the Nav2 goal: if the robot's footprint overlaps an obstacle on the map where it stands (at a pick stance the
+envelope reaches into the bin the arms reach over), Nav2 would see it in collision and not move it at all. The robot
+then first backs straight out until the footprint is clear (depart.py), after checking the strip behind it is free.
+
 Parameters (``skills/navigate_to.yaml``): the direct controller's (see ``navigate.py``), plus
   action: navigate_to_pose      Nav2 NavigateToPose action
   frame: map                    frame of the goal pose
   server_timeout_s: 10.0        wait for the Nav2 action server
   handover_distance: 0.3        m; direct controller takes over within this distance
+  map_topic: /map               occupancy grid the departure check uses (the map Nav2 plans on)
+  depart_max_m: 1.0             back out at most this far (0: never)
+  depart_margin_m: 0.1          beyond the point where the footprint comes clear
+  depart_speed: 0.15            m/s backwards
 """
 
 from __future__ import annotations
@@ -18,13 +26,15 @@ from __future__ import annotations
 import math
 import threading
 import time
+from types import SimpleNamespace
 
 from taskweave_core.config import Pose2D
 from taskweave_core.skill import SkillResult
 
 from .navigate import NavigateTo
 
-NAV2_DEFAULTS = {'action': 'navigate_to_pose', 'frame': 'map', 'server_timeout_s': 10.0, 'handover_distance': 0.3}
+NAV2_DEFAULTS = {'action': 'navigate_to_pose', 'frame': 'map', 'server_timeout_s': 10.0, 'handover_distance': 0.3,
+                 'map_topic': '/map', 'depart_max_m': 1.0, 'depart_margin_m': 0.1, 'depart_speed': 0.15}
 POLL_S = 0.05
 NEUTRAL_PATH_ANGLE_WEIGHT = 2.0  # PathAngleCritic without a forward preference (follows the path, any heading)
 
@@ -84,6 +94,57 @@ class Nav2NavigateTo(NavigateTo):
         self.goal_handle = None
         self.goal_lock = threading.Lock()
         self.remaining = math.nan
+        self.map = None  # (grid, info) of the latest occupancy grid
+        if self.nav['depart_max_m'] > 0:
+            from nav_msgs.msg import OccupancyGrid
+            from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+
+            latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                                 reliability=ReliabilityPolicy.RELIABLE)
+            node.create_subscription(OccupancyGrid, self.nav['map_topic'], self._map, latched)
+
+    def _map(self, msg) -> None:
+        import numpy as np
+
+        info = SimpleNamespace(resolution=msg.info.resolution, origin_x=msg.info.origin.position.x,
+                               origin_y=msg.info.origin.position.y)
+        self.map = (np.array(msg.data, dtype=np.int16).reshape(msg.info.height, msg.info.width), info)
+
+    def _depart(self, ctx) -> SkillResult | None:
+        """Back straight out if the footprint overlaps an obstacle where the robot stands (see the module doc)."""
+        from .depart import departure, footprint_box
+
+        pose, grid = self._current(), self.map
+        if self.nav['depart_max_m'] <= 0 or grid is None or pose is None:
+            return None
+        box = footprint_box(self.config.navigation(self.robot.name), self.base)
+        try:
+            distance = departure(grid[0], grid[1], (pose.x, pose.y, pose.yaw), box, self.nav['depart_max_m'],
+                                 self.nav['depart_margin_m'])
+        except ValueError as error:
+            return SkillResult.failed(f'cannot drive off: {error}')
+        if distance <= 0:
+            return None
+        self.node.get_logger().info(f'navigate_to: footprint overlaps an obstacle, backing out {distance:.2f} m')
+        start, deadline = pose, ctx.now() + 5.0 + 3.0 * distance / self.nav['depart_speed']
+        while True:
+            if ctx.should_stop:
+                self.stop()
+                return ctx.interrupted()
+            pose = self._current()
+            if pose is None:
+                self.stop()
+                return SkillResult.failed(f'odometry lost on {self.base["odom"]}')
+            travelled = math.hypot(pose.x - start.x, pose.y - start.y)
+            if travelled >= distance:
+                self.stop()
+                return None
+            if ctx.now() > deadline:
+                self.stop()
+                return SkillResult.failed(f'backing out: only {travelled:.2f} of {distance:.2f} m')
+            ctx.feedback(0.0, f'backing out {distance - travelled:.2f} m')
+            self._publish(-self.nav['depart_speed'], 0.0, 0.0)
+            time.sleep(POLL_S)
 
     def stop(self) -> None:
         with self.goal_lock:
@@ -117,6 +178,9 @@ class Nav2NavigateTo(NavigateTo):
             return SkillResult.failed(f'no odometry on {self.base["odom"]}')
         if not self.client.wait_for_server(timeout_sec=self.nav['server_timeout_s']):
             return SkillResult.failed(f'Nav2 is not running (no {self.nav["action"]} action server)')
+        departed = self._depart(ctx)
+        if departed is not None:
+            return departed
         self.remaining = math.nan
         sent = self.client.send_goal_async(self._goal(target), feedback_callback=self._feedback)
         if not self._wait(ctx, sent):
