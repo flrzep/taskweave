@@ -264,7 +264,9 @@ class Bridge(Node):
             raise TimeoutError(f'{error}: the robot (or sim) is not running, start it to check reach') from error
         with self.reach_lock:
             if self.ik is None:
-                self.ik = IkClient(self, profile)
+                from taskweave_core.config.limits import joint_limits
+
+                self.ik = IkClient(self, profile, limits=joint_limits(self.config, self.robot))
             result = {}
             for tool, target in (body.get('tools') or {}).items():
                 entry = {'ok': False, 'message': '', 'warnings': [], 'suggestion': None}

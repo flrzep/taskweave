@@ -115,7 +115,9 @@ ROBOT_PROFILE = {
                 'required': ['link', 'xyz', 'rpy'],
                 'properties': {'link': {'type': 'string'},
                                'xyz': {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3},
-                               'rpy': {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3}},
+                               'rpy': {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3},
+                               # the grasp is the same turned 180 deg about the approach: IK may use either
+                               'flip': {'type': 'boolean'}},
                 'additionalProperties': False,
             },
         },
@@ -135,6 +137,26 @@ ROBOT_PROFILE = {
                 # known-good postures IK starts from, in order (then the current state)
                 'seeds': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': FINITE}},
                 'avoid_collisions': {'type': 'boolean'},  # reject solutions in collision (robot + planning scene)
+                # tool -> the tool whose joints it mirrors with the same values (names with the prefix swapped)
+                'mirror': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {'type': 'string'}},
+                # pick the best of several solutions (taskweave_skills/ik.py): joint-limit room, elbow side, move size
+                'choose': {
+                    'type': 'object',
+                    'properties': {
+                        'elbow': {'oneOf': [{'enum': ['down', 'up', 'out', 'in', 'back', 'forward']},
+                                            {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3}]},
+                        'elbow_links': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 3, 'maxItems': 3},
+                        'limit_margin_deg': {'type': 'number', 'minimum': 0},
+                        'weights': {'type': 'object',
+                                    'properties': {k: {'type': 'number', 'minimum': 0}
+                                                   for k in ('limits', 'elbow', 'motion', 'symmetry')},
+                                    'additionalProperties': False},
+                        'fk_service': {'type': 'string'},
+                        'starts': {'type': 'integer', 'minimum': 0},
+                        'start_timeout_s': {'type': 'number', 'exclusiveMinimum': 0},
+                    },
+                    'additionalProperties': False,
+                },
             },
             'additionalProperties': False,
         },

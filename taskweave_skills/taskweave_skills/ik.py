@@ -14,6 +14,15 @@ flange link, so the IK target for the flange is TCP * (flange -> TCP)^-1. Profil
         - {left_joint1: -1.55, ...}
       fallback_groups: {left: left_arm_global, right: right_arm_global}   # optional, global solver
       avoid_collisions: true          # optional: a solution in collision counts as none (next start is tried)
+      mirror: {right: left}           # optional: the right arm mirrors the left with the same joint values
+                                      # (names with the tool prefix swapped); a mirrored target then solves the same
+      choose:                         # optional: pick the best of several solutions instead of the first
+        elbow: down                   # preferred elbow side: down | up | out | in | [x, y, z] (y = away from the body)
+        elbow_links: ['{tool}_link2', '{tool}_link4', '{tool}_link6']   # shoulder, elbow, wrist centres
+        limit_margin_deg: 25          # joints closer than this to a limit cost (more the closer)
+        weights: {limits: 2.0, elbow: 1.0, motion: 0.2, symmetry: 0.5}
+        starts: 0                     # extra start postures (fixed pseudo-random, so repeatable) for more candidates
+        start_timeout_s: 0.05         # per extra start
 
 A redundant arm (7 joints) reaches a TCP pose in a whole family of configurations, and which one a solver returns
 depends on where it starts. IK starts from each seed posture in turn, then from the current state; the pose's fixed
@@ -21,6 +30,15 @@ joints (e.g. the torso lift) are applied on top, so the arms are solved for the 
 deterministic local solver (pick_ik mode local: gradient descent from the start), a named pose then always solves
 to the same configuration, whatever pose the robot comes from; only targets no seed reaches depend on the current
 state. If nothing converges, the fallback group (a global solver) searches from the current state.
+
+With ``choose``, every start that converges is a candidate, for the target and, if the tool frame says
+``flip: true`` (a grasp that is the same turned 180 degrees about the approach), for the flipped target too. The
+candidate with the lowest cost wins: joints near their limits (an arm at a limit cannot move on, e.g. lift a held
+object), the elbow away from the preferred side (the swivel of the elbow about the shoulder-wrist line, measured with
+/compute_fk; "out" and y are mirrored for an arm on the right, so symmetric targets give mirrored arms), and the size
+of the move from the current joints. With ``mirror``, an arm is solved after the arm it mirrors, starts from the mirror
+image of that arm's solution and prefers it (``symmetry``): symmetric targets give mirrored arms. Industrial
+controllers store such a configuration with every taught point; here the profile gives the default.
 """
 
 from __future__ import annotations
@@ -127,8 +145,49 @@ def shifts(step: float, max_shift: float):
                 yield offset
 
 
+ELBOW_WORDS = {'down': (0.0, 0.0, -1.0), 'up': (0.0, 0.0, 1.0), 'out': (0.0, 1.0, 0.0), 'in': (0.0, -1.0, 0.0),
+               'back': (-1.0, 0.0, 0.0), 'forward': (1.0, 0.0, 0.0)}
+
+
+def flipped(target: dict) -> dict:
+    """The same grasp turned 180 degrees about the approach (closing reversed)."""
+    return {**target, 'closing': [-float(v) for v in target['closing']]}
+
+
+def preferred_elbow(spec, shoulder) -> np.ndarray:
+    """Preferred elbow direction in the base frame. y means away from the body: mirrored for a shoulder at -y."""
+    vector = np.asarray(ELBOW_WORDS[spec] if isinstance(spec, str) else spec, float)
+    if shoulder[1] < 0:
+        vector = vector * [1.0, -1.0, 1.0]
+    return vector / np.linalg.norm(vector)
+
+
+def elbow_deviation(shoulder, elbow, wrist, preferred) -> float:
+    """Angle (rad, 0..pi) between where the elbow points, seen along the shoulder-wrist line, and ``preferred``."""
+    shoulder, elbow, wrist = (np.asarray(v, float) for v in (shoulder, elbow, wrist))
+    axis = wrist - shoulder
+    axis /= np.linalg.norm(axis)
+    side = (elbow - shoulder) - ((elbow - shoulder) @ axis) * axis
+    want = preferred - (preferred @ axis) * axis
+    if np.linalg.norm(side) < 1e-6 or np.linalg.norm(want) < 1e-6:
+        return 0.0  # arm stretched, or the preference lies along the arm: no side to prefer
+    cos = side @ want / np.linalg.norm(side) / np.linalg.norm(want)
+    return float(math.acos(max(-1.0, min(1.0, cos))))
+
+
+def limit_cost(values: dict, limits: dict, margin: float) -> float:
+    """0 while every joint is at least ``margin`` from its limits, growing quadratically to 1 per joint at a limit."""
+    cost = 0.0
+    for name, value in values.items():
+        if name in limits and margin > 0:
+            lower, upper = limits[name]
+            room = min(value - lower, upper - value)
+            cost += max(0.0, (margin - room) / margin) ** 2
+    return cost
+
+
 class IkClient:
-    def __init__(self, node, robot):
+    def __init__(self, node, robot, limits: dict | None = None):
         from moveit_msgs.srv import GetPositionIK  # only needed when the robot has an ik section
         from rclpy.callback_groups import ReentrantCallbackGroup
 
@@ -144,42 +203,156 @@ class IkClient:
         self.seeds = [{name: float(value) for name, value in seed.items()} for seed in spec.get('seeds', [])]
         self.Request = GetPositionIK.Request
         self.client = node.create_client(GetPositionIK, self.service, callback_group=ReentrantCallbackGroup())
+        self.choose = spec.get('choose')  # None: the first solution wins (seed order)
+        self.mirror = spec.get('mirror', {})  # tool -> the tool whose joints it mirrors
+        self.limits = limits or {}
+        self.last: dict[str, dict] = {}   # per tool: how the last solve() chose (for messages)
+        if self.choose is not None:
+            from moveit_msgs.srv import GetPositionFK
 
-    def solve(self, tools: dict, fixed: dict, should_stop=lambda: False) -> dict[str, float]:
-        """Joint values for every tool target (plus nothing else); raises IkError."""
-        from moveit_msgs.msg import RobotState
-        from sensor_msgs.msg import JointState
+            self.fk = node.create_client(GetPositionFK, self.choose.get('fk_service', '/compute_fk'),
+                                         callback_group=ReentrantCallbackGroup())
 
+    def solve(self, tools: dict, fixed: dict, should_stop=lambda: False, current: dict | None = None
+              ) -> dict[str, float]:
+        """Joint values for every tool target (plus nothing else); raises IkError. ``current``: the joints now, for
+        the size-of-move cost when choosing."""
         if not self.client.wait_for_service(timeout_sec=2.0):
             raise IkError(f'no IK service {self.service} (is MoveIt running?)')
         result: dict[str, float] = {}
-        for tool, target in tools.items():
+        self.last = {}
+        chosen: dict[str, dict] = {}  # per tool: its arm joints, for the arm that mirrors it
+        order = sorted(tools, key=lambda t: self.mirror.get(t) in tools)  # mirror sources first
+        for tool in order:
+            target = tools[tool]
             if tool not in self.groups or tool not in self.tools:
                 raise IkError(f'tool {tool!r} has no IK group or tool frame in the robot profile')
-            pose = flange_target(target, self.tools[tool])
-            attempts = [(self.groups[tool], seed, self.timeout_s) for seed in [*self.seeds, {}]]  # {}: current state
-            if tool in self.fallback_groups:
-                attempts.append((self.fallback_groups[tool], {}, self.fallback_timeout_s))
-            for group, seed, timeout_s in attempts:
-                request = self._request(tool, group, pose, timeout_s)
-                start = {**seed, **fixed, **result}
-                request.ik_request.robot_state = RobotState(
-                    joint_state=JointState(name=list(start), position=list(start.values())), is_diff=True)
-                response = self._call(request, tool, timeout_s, should_stop)
-                if response.error_code.val == SUCCESS:
+            flip = self.choose is not None and self.tools[tool].get('flip')
+            variants = [target, flipped(target)] if flip else [target]
+            local = [(self.groups[tool], seed, self.timeout_s) for seed in [*self.seeds, {}]]  # {}: current state
+            image = self._mirrored(tool, chosen)
+            if image:
+                local.insert(0, (self.groups[tool], image, self.timeout_s))
+            if self.choose is not None:
+                local += [(self.groups[tool], start, float(self.choose.get('start_timeout_s', 0.05)))
+                          for start in self._starts(tool)]
+            fallback = [(self.fallback_groups[tool], {}, self.fallback_timeout_s)] if tool in self.fallback_groups \
+                else []
+            candidates, response = [], None
+            for attempts in (local, fallback):  # the global search only if no local descent converged
+                for index, variant in enumerate(variants):
+                    for group, seed, timeout_s in attempts:
+                        response = self._attempt(tool, group, variant, {**seed, **fixed, **result}, timeout_s,
+                                                 should_stop)
+                        if response.error_code.val == SUCCESS:
+                            candidates.append((index, self._arm(tool, response)))
+                            if self.choose is None:
+                                break
+                    if candidates and self.choose is None:
+                        break
+                if candidates:
                     break
-            else:
-                if response.error_code.val == FRAME_TRANSFORM_FAILURE:
+            if not candidates:
+                if response is not None and response.error_code.val == FRAME_TRANSFORM_FAILURE:
                     raise IkError(f'IK for {tool}: MoveIt has no transform to {self.frame} (TF not published?)')
-                flange = ', '.join(f'{v:.2f}' for v in pose[:3, 3])
+                flange = ', '.join(f'{v:.2f}' for v in flange_target(target, self.tools[tool])[:3, 3])
+                code = response.error_code.val if response is not None else '?'
                 raise IkError(f'no IK solution for {tool}: TCP {list(target["tcp"])}, approach '
                               f'{list(target["approach"])} needs the flange at ({flange}) in {self.frame}: out of '
-                              f'reach, too close to the body, or in collision (code {response.error_code.val})')
-            pattern = re.compile(self.joint_pattern.format(tool=tool))
-            state = response.solution.joint_state
-            result.update({name: float(value) for name, value in zip(state.name, state.position, strict=False)
-                           if pattern.fullmatch(name)})
+                              f'reach, too close to the body, or in collision (code {code})')
+            _, arm = self._best(tool, candidates, {**fixed, **result}, current or {}, image)
+            chosen[tool] = arm
+            result.update(arm)
         return result
+
+    def _mirrored(self, tool: str, chosen: dict) -> dict:
+        """The mirror image of the solution of the arm this tool mirrors (same values, names renamed), or {}."""
+        source = self.mirror.get(tool)
+        if source not in chosen:
+            return {}
+        return {name.replace(f'{source}_', f'{tool}_', 1): value for name, value in chosen[source].items()}
+
+    def _starts(self, tool: str) -> list[dict]:
+        """``choose.starts`` postures spread over the tool's joint ranges, the same every time (seeded)."""
+        pattern = re.compile(self.joint_pattern.format(tool=tool))
+        names = sorted(n for n in self.limits if pattern.fullmatch(n))
+        rng = np.random.default_rng(0)
+        starts = []
+        for _ in range(int(self.choose.get('starts', 0)) if names else 0):
+            start = {}
+            for name in names:
+                lower, upper = (max(v, -math.pi) if i == 0 else min(v, math.pi)
+                                for i, v in enumerate(self.limits[name]))
+                start[name] = float(rng.uniform(lower, upper))
+            starts.append(start)
+        return starts
+
+    def _attempt(self, tool, group, target, start, timeout_s, should_stop):
+        from moveit_msgs.msg import RobotState
+        from sensor_msgs.msg import JointState
+
+        request = self._request(tool, group, flange_target(target, self.tools[tool]), timeout_s)
+        request.ik_request.robot_state = RobotState(
+            joint_state=JointState(name=list(start), position=[float(v) for v in start.values()]), is_diff=True)
+        return self._call(request, tool, timeout_s, should_stop)
+
+    def _arm(self, tool: str, response) -> dict[str, float]:
+        pattern = re.compile(self.joint_pattern.format(tool=tool))
+        state = response.solution.joint_state
+        return {name: float(value) for name, value in zip(state.name, state.position, strict=False)
+                if pattern.fullmatch(name)}
+
+    def _best(self, tool: str, candidates: list, fixed: dict, current: dict, image: dict | None = None):
+        """The candidate (variant index, arm joints) with the lowest cost; records the choice in self.last."""
+        unique = []
+        for index, arm in candidates:
+            if not any(i == index and all(abs(arm[n] - other[n]) < 1e-3 for n in arm) for i, other in unique):
+                unique.append((index, arm))
+        if self.choose is None:
+            self.last[tool] = {'flipped': False, 'candidates': len(unique)}
+            return unique[0]
+        weights = {'limits': 2.0, 'elbow': 1.0, 'motion': 0.2, 'symmetry': 0.5, **self.choose.get('weights', {})}
+        margin = math.radians(float(self.choose.get('limit_margin_deg', 25.0)))
+        scored = []
+        for index, arm in unique:
+            limits = limit_cost(arm, self.limits, margin)
+            elbow = self._elbow(tool, {**fixed, **arm}) if self.choose.get('elbow') else 0.0
+            motion = sum(abs(arm[n] - current[n]) for n in arm if n in current) / len(arm) if current else 0.0
+            symmetry = sum(abs(arm[n] - image[n]) for n in arm if n in image) / len(arm) if image else 0.0
+            cost = (weights['limits'] * limits + weights['elbow'] * elbow / math.pi + weights['motion'] * motion
+                    + weights['symmetry'] * symmetry)
+            scored.append((cost, index, arm, elbow, limits))
+        _, index, arm, elbow, limits = min(scored, key=lambda item: item[0])
+        self.last[tool] = {'flipped': bool(index), 'candidates': len(unique), 'elbow_deg': round(math.degrees(elbow)),
+                           'limit_cost': round(limits, 3)}
+        return index, arm
+
+    def _elbow(self, tool: str, joints: dict) -> float:
+        """Elbow deviation (rad) from the preferred side for these joints (FK through MoveIt)."""
+        from moveit_msgs.msg import RobotState
+        from moveit_msgs.srv import GetPositionFK
+        from sensor_msgs.msg import JointState
+
+        links = [link.format(tool=tool) for link in self.choose.get(
+            'elbow_links', ['{tool}_link2', '{tool}_link4', '{tool}_link6'])]
+        request = GetPositionFK.Request()
+        request.header.frame_id = self.frame
+        request.fk_link_names = links
+        request.robot_state = RobotState(joint_state=JointState(
+            name=list(joints), position=[float(v) for v in joints.values()]), is_diff=True)
+        if not self.fk.wait_for_service(timeout_sec=2.0):
+            raise IkError('no FK service /compute_fk (is MoveIt running?)')
+        future = self.fk.call_async(request)
+        deadline = time.monotonic() + 5.0
+        while not future.done():
+            if time.monotonic() > deadline:
+                raise IkError(f'FK service timed out for {tool}')
+            time.sleep(POLL_S)
+        poses = future.result().pose_stamped
+        if len(poses) != 3:
+            return 0.0
+        shoulder, elbow, wrist = (np.array([p.pose.position.x, p.pose.position.y, p.pose.position.z]) for p in poses)
+        return elbow_deviation(shoulder, elbow, wrist, preferred_elbow(self.choose['elbow'], shoulder))
 
     def step(self, tool: str, flange: np.ndarray, current: dict, timeout_s: float = 0.05) -> dict[str, float] | None:
         """Arm joints that put the tool's flange on ``flange`` (4x4, base frame), by one local descent from the

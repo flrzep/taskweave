@@ -205,8 +205,10 @@ class MoveToPose(_JointSkill):
         super().setup(node, config, robot, params)
         self.ik = self.planner = None
         if robot.data.get('ik'):
+            from taskweave_core.config.limits import joint_limits
+
             from .ik import IkClient
-            self.ik = IkClient(node, robot)
+            self.ik = IkClient(node, robot, limits=joint_limits(config, robot.name))
         if robot.data.get('planning'):
             from .motion_plan import MotionPlanner
             self.planner = MotionPlanner(node, robot)
@@ -243,7 +245,8 @@ class MoveToPose(_JointSkill):
             first_error = None
             for attempt in [joints, *fallback_joints]:
                 try:
-                    goal = {**attempt, **self.ik.solve(tools, attempt, lambda: ctx.should_stop)}
+                    goal = {**attempt, **self.ik.solve(tools, attempt, lambda: ctx.should_stop,
+                                                       current=self.joints.snapshot(self.p.state_timeout_s))}
                     break
                 except IkError as error:
                     first_error = first_error or error
