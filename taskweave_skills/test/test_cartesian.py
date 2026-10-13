@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from taskweave_skills.cartesian import PathError, interpolate, linear_path, rotation_angle, slerp
+from taskweave_skills.cartesian import PathError, interpolate, linear_path, matching_flip, rotation_angle, slerp
 from taskweave_skills.tcp_jog import rotation
 
 
@@ -51,3 +51,12 @@ def test_a_step_without_solution_fails_before_moving():
     with pytest.raises(PathError, match='step 6 of 10'):
         linear_path(FakeIk(limit=0.555), {'left': pose(0.5, 0, 0)}, {'left': pose(0.6, 0, 0)}, {'left_j': 0.5},
                     speed=0.05, turn=0.3)
+
+
+def test_a_flippable_goal_is_turned_the_way_the_tcp_already_is():
+    start, goal = np.eye(4), np.eye(4)
+    start[:3, :3] = np.diag([-1.0, -1.0, 1.0])  # reached with the grasp turned 180 deg about the approach
+    goal[:3, 3] = [0.0, 0.0, -0.1]
+    out = matching_flip({'left': goal, 'right': goal}, {'left': start, 'right': start}, {'left': {'flip': True}})
+    assert np.allclose(out['left'][:3, :3], start[:3, :3]) and np.allclose(out['left'][:3, 3], goal[:3, 3])
+    assert out['right'] is goal  # not flippable: unchanged

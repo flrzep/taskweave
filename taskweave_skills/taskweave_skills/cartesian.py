@@ -63,6 +63,16 @@ def tcp_targets(tools: dict) -> dict[str, np.ndarray]:
     return {tool: tcp_matrix(target) for tool, target in tools.items()}
 
 
+def matching_flip(goals: dict, starts: dict, tool_frames: dict) -> dict:
+    """For a tool whose grasp may be turned 180 deg about the approach (tool frame ``flip``), the goal turned the way
+    the TCP already is: IK may have reached the start with the flipped grasp, and a straight line must not turn it."""
+    out = dict(goals)
+    for tool, goal in goals.items():
+        if tool_frames.get(tool, {}).get('flip') and tool in starts and starts[tool][:3, 1] @ goal[:3, 1] < 0:
+            out[tool] = goal @ np.diag([-1.0, -1.0, 1.0, 1.0])
+    return out
+
+
 def linear_path(ik, starts: dict, goals: dict, current: dict, speed: float, turn: float,
                 step_m: float = 0.01, step_rad: float = 0.05) -> Trajectory:
     """Joint trajectory moving each tool's TCP from ``starts`` to ``goals`` (4x4 TCP poses in the base frame) in

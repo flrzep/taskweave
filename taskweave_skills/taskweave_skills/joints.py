@@ -274,7 +274,7 @@ class MoveToPose(_JointSkill):
         lines from where they are. Returns (failure result or None, worst joint error)."""
         import re
 
-        from .cartesian import PathError, linear_path, tcp_targets
+        from .cartesian import PathError, linear_path, matching_flip, tcp_targets
 
         if self.ik is None:
             return SkillResult.rejected(f'{label}: a straight-line motion needs the profile\'s ik section'), 0
@@ -286,6 +286,7 @@ class MoveToPose(_JointSkill):
         arm = {n: v for n, v in current.items() if any(p.fullmatch(n) for p in patterns)}
         try:
             starts = self.hold.tcp_poses(goals)
+            goals = matching_flip(goals, starts, self.robot.data.get('tool_frames', {}))
             ctx.feedback(0.0, 'straight-line path')
             path = linear_path(self.ik, starts, goals, arm, self.tcp_speed, self.tcp_turn)
         except (LookupError, PathError) as error:
