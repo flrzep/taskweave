@@ -11,6 +11,7 @@ rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('moveit_msgs')
 
 from builtin_interfaces.msg import Duration  # noqa: E402
+from moveit_msgs.msg import ContactInformation  # noqa: E402
 from moveit_msgs.srv import GetMotionPlan, GetStateValidity  # noqa: E402
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
@@ -36,14 +37,21 @@ class FakePlanner(Node):
         self.fail_first = 0  # answer this many requests with a pipeline failure first
         self.requests = []
         self.free = False
+        self.touching = None  # state -> {(body, body): depth} it touches, overrides free
         self.checked = []
         self.create_service(GetMotionPlan, '/plan_kinematic_path', self.plan)
         self.create_service(GetStateValidity, '/check_state_validity', self.validity)
 
     def validity(self, request, response):
-        self.checked.append(dict(zip(request.robot_state.joint_state.name, request.robot_state.joint_state.position,
-                                     strict=True)))
-        response.valid = self.free
+        state = dict(zip(request.robot_state.joint_state.name, request.robot_state.joint_state.position, strict=True))
+        self.checked.append(state)
+        if self.touching is None:
+            response.valid = self.free
+            return response
+        contacts = self.touching(state)
+        response.valid = not contacts
+        response.contacts = [ContactInformation(contact_body_1=a, contact_body_2=b, depth=d)
+                             for (a, b), d in contacts.items()]
         return response
 
     def plan(self, request, response):
@@ -151,3 +159,47 @@ def test_a_free_straight_move_is_not_planned(system):
 def test_trajectory_reversed():
     path = Trajectory(['a'], [0.0, 1.0, 3.0], [[0.0], [1.0], [2.0]]).reversed()
     assert path.times == [0.0, 2.0, 3.0] and path.points == [[2.0], [1.0], [0.0]]
+
+
+def test_trajectory_then():
+    path = Trajectory(['a'], [0.0, 1.0], [[0.0], [1.0]]).then(Trajectory(['a', 'b'], [0.0, 2.0], [[1.0, 5.0], [3.0, 6.0]]))
+    assert path.names == ['a', 'b'] and path.times == [0.0, 1.0, 3.0]
+    assert path.points == [[0.0, 5.0], [1.0, 5.0], [3.0, 6.0]]  # b holds its first value while only a moves
+
+
+def elbow_at_upright(clear_from=0.2, deeper_toward_goal=False):
+    """The elbow (j1) touches the upright below ``clear_from``, less the further j1 goes (or more)."""
+    def touching(state):
+        j1 = state.get('j1', 0.0)
+        if j1 >= clear_from:
+            return {}
+        return {('elbow', 'upright'): 0.01 + (j1 * 0.1 if deeper_toward_goal else -j1 * 0.02)}
+    return touching
+
+
+def test_a_start_in_collision_moves_out_toward_the_goal(system):
+    sim, planner, client, seen = system
+    planner.touching = elbow_at_upright()
+    result = run(client, 'move_to_pose', {'pose': 'ready'})
+    assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
+    assert not planner.requests and sim.position['j1'] == pytest.approx(1.0, abs=0.02)  # straight out, then free
+
+
+def test_an_escape_that_goes_deeper_fails_naming_the_contact(system):
+    sim, planner, client, _ = system
+    planner.touching = elbow_at_upright(clear_from=9.0, deeper_toward_goal=True)
+    result = run(client, 'move_to_pose', {'pose': 'ready'})
+    assert result.outcome == RunSkill.Result.FAILED and 'elbow - upright' in result.message
+    assert 'jog it free' in result.message and sim.position['j1'] == 0.0
+
+
+def test_after_the_escape_the_rest_is_planned(system):
+    _, planner, client, _ = system
+    planner.touching = lambda s: elbow_at_upright()(s) or ({('hand', 'bin'): 0.0} if s.get('j1', 0) > 0.6 else {})
+    robot = SimpleNamespace(data={'planning': {'group': 'arm', 'timeout_s': 1.0}})
+    path = MotionPlanner(client, robot).plan({'j1': 0.0, 'j2': 0.0}, {'j1': 1.0, 'j2': 0.0})
+    start = dict(zip(planner.requests[-1].start_state.joint_state.name,
+                     planner.requests[-1].start_state.joint_state.position, strict=True))
+    assert start['j1'] == pytest.approx(0.2, abs=0.031)  # planned from the first free state
+    assert path.at(0.0)['j1'] == 0.0 and path.at(path.duration)['j1'] == pytest.approx(1.0)
+    assert min(p[path.names.index('j1')] for p in path.points) == pytest.approx(-0.5)  # then the planner's detour

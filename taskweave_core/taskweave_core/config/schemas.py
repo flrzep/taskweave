@@ -178,6 +178,10 @@ ROBOT_PROFILE = {
                 'velocity_scale': {'type': 'number', 'exclusiveMinimum': 0, 'maximum': 1},
                 'acceleration_scale': {'type': 'number', 'exclusiveMinimum': 0, 'maximum': 1},
                 'joints': {'type': 'string'},   # regex: the group's joints; those not in a goal are held
+                'direct': {'type': 'boolean'},  # a straight joint move when it is free (taskweave_skills.motion_plan)
+                'validity_service': {'type': 'string'},
+                **{k: {'type': 'number', 'exclusiveMinimum': 0}
+                   for k in ('direct_step_rad', 'escape_max_rad', 'escape_speed')},
             },
             'additionalProperties': False,
         },
