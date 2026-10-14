@@ -299,11 +299,13 @@ function buildJoints(names) {
     el('summary', { text: group }),
     ...members.map((joint) => {
       const [lower, upper] = limits[joint];
-      const input = el('input', { type: 'number', step: isLinear(joint) ? '0.01' : '1', inputmode: 'decimal', 'aria-label': `${joint} target`,
-        min: showJoint(joint, lower), max: showJoint(joint, upper) });
+      const range = {};  // a bound may be missing (null: unbounded)
+      if (lower !== null) range.min = showJoint(joint, lower);
+      if (upper !== null) range.max = showJoint(joint, upper);
+      const input = el('input', { type: 'number', step: isLinear(joint) ? '0.01' : '1', inputmode: 'decimal', 'aria-label': `${joint} target`, ...range });
       input.value = showJoint(joint, teach.joints[joint]);
       const now = el('span', { class: 'mono' });
-      const bar = el('span', { class: 'limit-bar', title: `${showJoint(joint, lower)} to ${showJoint(joint, upper)} ${jointUnit(joint)}` });
+      const bar = el('span', { class: 'limit-bar', title: `${range.min ?? '–∞'} to ${range.max ?? '∞'} ${jointUnit(joint)}` });
       const send = async (value) => {
         input.value = value;
         const { ok, data } = await api('PUT', '/api/robot/joints', { joints: { [joint]: unshowJoint(joint, Number(value)) } });
