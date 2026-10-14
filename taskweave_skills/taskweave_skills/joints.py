@@ -458,15 +458,18 @@ class MoveObject(GoToPoint):
     description = ('Move the object held with the grippers (after go_to_point to its point and gripper close): every '
                    'holding tool moves with it, locked in orientation and distance to the object and to each other. '
                    'The object moves on a straight line: by an offset in the robot\'s frame (x forward, y left, z up), '
-                   'optionally turning about the vertical through the object and tilting it (far side up), or to a '
+                   'optionally turning about the vertical through the object and tilting it (far side up); to a '
+                   'position in the robot\'s frame (at: where its origin goes, orientation kept); or to a '
                    'contact on a placed object: one of the held object\'s contacts goes onto it (e.g. a frame\'s hook '
                    'plate onto a hook), offset_m short of it against the contact\'s engage direction.')
     args_schema = {
         'type': 'object',
-        'oneOf': [{'required': ['by']}, {'required': ['to', 'contact']}],
+        'oneOf': [{'required': ['by']}, {'required': ['to', 'contact']}, {'required': ['at']}],
         'properties': {
             'by': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 3, 'maxItems': 3,
                    'description': '[x, y, z] in metres, robot frame'},
+            'at': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 3, 'maxItems': 3,
+                   'description': '[x, y, z] in metres, robot frame: where the object\'s origin goes'},
             'turn_deg': {'type': 'number', 'description': 'with by: turn about the vertical through the object (deg)'},
             'tilt_deg': {'type': 'number', 'description': 'with by: tilt about the robot\'s y axis through the object, '
                                                           'far side up (degrees)'},
@@ -489,6 +492,8 @@ class MoveObject(GoToPoint):
         if hold is None:
             return SkillResult.rejected('nothing is held: go_to_point to the object, then close the grippers')
         obj = hold['object_in_base']
+        if 'at' in args:
+            args = {**args, 'by': [float(a) - float(o) for a, o in zip(args['at'], obj[:3, 3], strict=True)]}
         if 'to' in args:
             moved = self._onto(hold, args)
             if isinstance(moved, SkillResult):
@@ -508,7 +513,8 @@ class MoveObject(GoToPoint):
             shift = np.eye(4)
             shift[:3, 3] = [float(v) for v in args['by']]
             moved = shift @ pivot @ rotate @ back @ obj
-            label = f'{hold["object"]} by {[round(float(v), 3) for v in args["by"]]}' + \
+            label = f'{hold["object"]} ' + (f'to {args["at"]}' if 'at' in args else
+                                            f'by {[round(float(v), 3) for v in args["by"]]}') + \
                 (f', {args["turn_deg"]:g} deg' if args.get('turn_deg') else '') + \
                 (f', tilted {args["tilt_deg"]:g} deg' if args.get('tilt_deg') else '')
         goals = {tool: moved @ pose for tool, pose in hold['tcp_in_object'].items()}
