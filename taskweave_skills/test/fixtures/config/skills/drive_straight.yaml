@@ -1,0 +1,4 @@
+implementations:
+  - {name: drive_straight, type: script, class: "taskweave_skills.drive:DriveStraight"}
+max_distance_m: 1.0
+stuck_timeout_s: 2.0

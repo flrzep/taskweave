@@ -63,7 +63,7 @@ def system(request, tmp_path):
     params = [Parameter('config_dir', value=str(config)), Parameter('robot', value=robot)]
     sim = BaseSim(prefix, holonomic)
     # production path: skill names resolved through config/skills/<name>.yaml implementations
-    server = SkillServer(parameter_overrides=params + [Parameter('skills', value=['navigate_to', 'wait'])])
+    server = SkillServer(parameter_overrides=params + [Parameter('skills', value=['navigate_to', 'wait', 'drive_straight'])])
     teach = Teach(parameter_overrides=params)
     client = rclpy.create_node('test_client')
     executor = MultiThreadedExecutor(num_threads=8)
@@ -135,3 +135,27 @@ def test_teach_then_drive_back(system):
     result = run_skill(client, 'navigate_to', {'target': 'taught_dock'})
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     assert math.hypot(sim.x - 1.0, sim.y - 0.5) < 0.05
+
+
+def test_drive_straight_forward_and_back_keeps_the_heading(system):
+    sim, client, _ = system
+    sim.yaw = 0.5
+    time.sleep(0.2)  # odometry with the new heading
+    result = run_skill(client, 'drive_straight', {'distance_m': 0.4})
+    assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
+    assert sim.x == pytest.approx(0.4 * math.cos(0.5), abs=0.04) and sim.y == pytest.approx(0.4 * math.sin(0.5), abs=0.04)
+    assert sim.yaw == pytest.approx(0.5, abs=0.03)
+    result = run_skill(client, 'drive_straight', {'distance_m': -0.4})   # backs out without turning round
+    assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
+    assert math.hypot(sim.x, sim.y) < 0.04 and sim.yaw == pytest.approx(0.5, abs=0.03)
+
+
+def test_drive_straight_limits(system):
+    sim, client, _ = system
+    result = run_skill(client, 'drive_straight', {'distance_m': 2.0})
+    assert result.outcome == RunSkill.Result.REJECTED and 'max_distance_m' in result.message
+    result = run_skill(client, 'drive_straight', {'distance_m': 0.0, 'sideways_m': 0.3})
+    if sim.holonomic:
+        assert result.outcome == RunSkill.Result.SUCCEEDED and sim.y == pytest.approx(0.3, abs=0.04)
+    else:
+        assert result.outcome == RunSkill.Result.REJECTED and 'sideways' in result.message

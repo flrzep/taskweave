@@ -294,9 +294,15 @@ class ConfigStore:
                 placed += [f'{name}{VARIANT_SEPARATOR}{point}' for point in self.object(instance.object).get('points', {})]
             except ConfigError:
                 continue
+        contacts = []  # <instance>/<contact>: where a held object can be put (move_object to)
+        for name, instance in sorted(self.object_instances().items()):
+            try:
+                contacts += [f'{name}{VARIANT_SEPARATOR}{c}' for c in self.object(instance.object).get('contacts', {})]
+            except ConfigError:
+                continue
         return {'locations': sorted(self.locations()), 'stances': self.stance_names(robot),
                 'joint poses': sorted(self.joint_poses(robot)), 'object points': objects,
-                'placed object points': placed}
+                'placed object points': placed, 'placed object contacts': contacts}
 
     def object_point(self, obj: str, point: str) -> dict:
         """A named point on an object: tool poses (canonical TCP, object-relative) plus its metadata.
@@ -323,6 +329,23 @@ class ConfigStore:
                            f'cell/objects.yaml: {", ".join(sorted(instances)) or "none"}')
         instance = instances[name] if robot is None else self.handling_instance(instances[name], robot, near)
         return instance, self.object_point(instance.object, point)
+
+    def object_contact(self, obj: str, contact: str) -> Pose3D:
+        """A contact frame of an object type (objects/<object>.yaml contacts), relative to the object."""
+        contacts = self.object(obj).get('contacts', {})
+        if contact not in contacts:
+            raise KeyError(f'object {obj!r} has no contact {contact!r}'
+                           + (f' (it has {", ".join(sorted(contacts))})' if contacts else ''))
+        return Pose3D.from_dict(contacts[contact], obj)
+
+    def instance_contact(self, reference: str) -> tuple[ObjectInstance, Pose3D]:
+        """Resolve ``<instance>/<contact>``: a placed object and a contact of its type."""
+        name, _, contact = reference.partition(VARIANT_SEPARATOR)
+        instances = self.object_instances()
+        if name not in instances or not contact:
+            raise KeyError(f'unknown object contact {reference!r}: expected <instance>/<contact>, instances in '
+                           f'cell/objects.yaml: {", ".join(sorted(instances)) or "none"}')
+        return instances[name], self.object_contact(instances[name].object, contact)
 
     def base_target(self, reference: str, robot: str, near: Pose2D | None = None) -> Pose2D:
         """Resolve a base target: ``stance:<instance>[/<variant>]`` (robot-specific, relative to an object, handled

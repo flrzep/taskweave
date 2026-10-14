@@ -4,7 +4,8 @@ Checks: the robot profile and embodiment exist, every skill has an implementatio
 the catalog, every argument object matches the skill's JSON Schema, every point a skill argument refers to exists
 in config (object points also fit the robot's tools), and ``replan_from`` targets exist.
 
-Skills mark point arguments in their schema with ``"x-taskweave-point": "base_target" | "joint_pose" | "object_point"``.
+Skills mark point arguments in their schema with ``"x-taskweave-point": "base_target" | "joint_pose" | "object_point"
+| "instance_point" | "instance_contact"``.
 Arguments that contain placeholders are only checked once their values are known (at step start).
 """
 
@@ -100,6 +101,8 @@ def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
             problems = check_grasp(store.object(obj)['points'][point], store.embodiment(robot))
             if problems:
                 return f'{value} does not fit robot {robot!r}: ' + '; '.join(problems)
+        elif kind == 'instance_contact':  # <instance>/<contact>: where a held object is put
+            store.instance_contact(str(value))
         else:
             return f'unknown point kind {kind!r} in skill schema'
     except KeyError as error:

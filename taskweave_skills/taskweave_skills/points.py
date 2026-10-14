@@ -1,4 +1,5 @@
-"""Object points -> tool targets in the robot's base frame (pure math; used by go_to_point).
+"""Object points -> tool targets in the robot's base frame, and contacts -> object poses (pure math; used by
+go_to_point and move_object).
 
 An object point gives each tool's canonical TCP pose relative to its object (``<tool>_tool: {xyz, rpy}``, z =
 approach, y = closing; objects/<object>.yaml). A placed object instance stands at x, y, z, yaw in the cell frame
@@ -48,3 +49,13 @@ def point_targets(point: dict, instance, base_in_cell: np.ndarray, offset_m: flo
     if tools is not None and set(tools) - set(targets):
         raise KeyError(f'the point has no {", ".join(sorted(set(tools) - set(targets)))} tool pose')
     return targets
+
+
+def onto_pose(target, target_contact, held_contact, base_in_cell: np.ndarray, offset_m: float = 0.0) -> np.ndarray:
+    """4x4 pose (base frame) of a held object whose contact ``held_contact`` (Pose3D, relative to the held object)
+    lies on ``target_contact`` (Pose3D) of the placed object ``target``, ``offset_m`` back against that contact's z
+    (the direction the held object moves to engage, e.g. down onto a hook)."""
+    back = np.eye(4)
+    back[2, 3] = -offset_m
+    at = instance_matrix(target) @ rpy_matrix(target_contact.xyz, target_contact.rpy) @ back  # cell frame
+    return np.linalg.inv(base_in_cell) @ at @ np.linalg.inv(rpy_matrix(held_contact.xyz, held_contact.rpy))

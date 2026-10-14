@@ -457,15 +457,24 @@ class MoveObject(GoToPoint):
     name = 'move_object'
     description = ('Move the object held with the grippers (after go_to_point to its point and gripper close): every '
                    'holding tool moves with it, locked in orientation and distance to the object and to each other. '
-                   'The object moves on a straight line by the given offset in the robot\'s frame (x forward, y left, '
-                   'z up), optionally turning about the vertical through the object.')
+                   'The object moves on a straight line: by an offset in the robot\'s frame (x forward, y left, z up), '
+                   'optionally turning about the vertical through the object and tilting it (far side up), or to a '
+                   'contact on a placed object: one of the held object\'s contacts goes onto it (e.g. a frame\'s hook '
+                   'plate onto a hook), offset_m short of it against the contact\'s engage direction.')
     args_schema = {
         'type': 'object',
-        'required': ['by'],
+        'oneOf': [{'required': ['by']}, {'required': ['to', 'contact']}],
         'properties': {
             'by': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 3, 'maxItems': 3,
                    'description': '[x, y, z] in metres, robot frame'},
-            'turn_deg': {'type': 'number', 'description': 'turn about the vertical through the object (degrees)'},
+            'turn_deg': {'type': 'number', 'description': 'with by: turn about the vertical through the object (deg)'},
+            'tilt_deg': {'type': 'number', 'description': 'with by: tilt about the robot\'s y axis through the object, '
+                                                          'far side up (degrees)'},
+            'to': {'type': 'string', 'x-taskweave-point': 'instance_contact',
+                   'description': '<instance>/<contact>: where on a placed object the held object goes'},
+            'contact': {'type': 'string', 'description': 'the held object\'s contact that goes there'},
+            'offset_m': {'type': 'number', 'minimum': 0,
+                         'description': 'with to: stop this far before the contact, against its engage direction'},
         },
         'additionalProperties': False,
     }
@@ -480,24 +489,55 @@ class MoveObject(GoToPoint):
         if hold is None:
             return SkillResult.rejected('nothing is held: go_to_point to the object, then close the grippers')
         obj = hold['object_in_base']
-        turn = math.radians(float(args.get('turn_deg', 0.0)))
-        c, s = math.cos(turn), math.sin(turn)
-        rotate = np.eye(4)
-        rotate[:3, :3] = [[c, -s, 0], [s, c, 0], [0, 0, 1]]
-        pivot, back = np.eye(4), np.eye(4)
-        pivot[:3, 3], back[:3, 3] = obj[:3, 3], -obj[:3, 3]
-        shift = np.eye(4)
-        shift[:3, 3] = [float(v) for v in args['by']]
-        moved = shift @ pivot @ rotate @ back @ obj
+        if 'to' in args:
+            moved = self._onto(hold, args)
+            if isinstance(moved, SkillResult):
+                return moved
+            label = f'{hold["object"]} {args["contact"]} to {args["to"]}' + \
+                (f' (-{args["offset_m"]:g} m)' if args.get('offset_m') else '')
+        else:
+            turn = math.radians(float(args.get('turn_deg', 0.0)))
+            tilt = -math.radians(float(args.get('tilt_deg', 0.0)))  # about +y a positive angle lowers the far side
+            c, s = math.cos(turn), math.sin(turn)
+            ct, st = math.cos(tilt), math.sin(tilt)
+            rotate = np.eye(4)
+            rotate[:3, :3] = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]]) @ np.array([[ct, 0, st], [0, 1, 0],
+                                                                                     [-st, 0, ct]])
+            pivot, back = np.eye(4), np.eye(4)
+            pivot[:3, 3], back[:3, 3] = obj[:3, 3], -obj[:3, 3]
+            shift = np.eye(4)
+            shift[:3, 3] = [float(v) for v in args['by']]
+            moved = shift @ pivot @ rotate @ back @ obj
+            label = f'{hold["object"]} by {[round(float(v), 3) for v in args["by"]]}' + \
+                (f', {args["turn_deg"]:g} deg' if args.get('turn_deg') else '') + \
+                (f', tilted {args["tilt_deg"]:g} deg' if args.get('tilt_deg') else '')
         goals = {tool: moved @ pose for tool, pose in hold['tcp_in_object'].items()}
-        label = f'{hold["object"]} by {[round(float(v), 3) for v in args["by"]]}' + \
-            (f', {args["turn_deg"]:g} deg' if args.get('turn_deg') else '')
         result, worst = self._linear(ctx, {}, label, goals=goals)
         if result is not None:
             return result
         self.hold.moved(moved)
         return SkillResult.succeeded(f'moved {label} (max error {worst:.3f})',
                                      world_state={'held_object': hold['object']})
+
+    def _onto(self, hold: dict, args: dict):
+        """The held object's pose (base frame) with its contact ``args['contact']`` on the placed contact
+        ``args['to']``, ``offset_m`` back against that contact's z (engage direction); a SkillResult if that cannot be
+        resolved."""
+        from .points import onto_pose
+
+        instances = self.config.object_instances()
+        held = instances.get(hold['object'])
+        if held is None:
+            return SkillResult.rejected(f'the held {hold["object"]} is not in cell/objects.yaml: its contacts are unknown')
+        try:
+            target, contact = self.config.instance_contact(args['to'])
+            mine = self.config.object_contact(held.object, args['contact'])
+            base_in_cell = self.hold.transform(self.cell_frame, self.robot.base['frame'])
+        except KeyError as error:
+            return SkillResult.rejected(str(error.args[0]))
+        except LookupError as error:
+            return SkillResult.failed(f'where is the robot? {error}')
+        return onto_pose(target, contact, mine, base_in_cell, float(args.get('offset_m', 0.0)))
 
 
 class Gripper(_JointSkill):

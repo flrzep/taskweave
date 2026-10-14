@@ -22,3 +22,14 @@ def test_an_instance_point_must_name_a_placed_object(config_dir):
     problem = check_point('instance_point', 'box.top_grasp', store, 'demo_bot')
     assert 'names no placed object' in problem and 'box_1/' in problem       # with an example to pick
     assert check_point('object_point', 'box.top_grasp', store, 'demo_bot') is None   # a type's point is fine there
+
+
+def test_contacts_of_placed_objects(config_dir):
+    box = config_dir / 'objects' / 'box.yaml'
+    box.write_text(box.read_text() + 'contacts:\n  lid: {xyz: [0.0, 0.0, 0.3], rpy: [3.14159, 0.0, 0.0]}\n')
+    store = placed(config_dir)
+    assert 'box_1/lid' in store.point_names('demo_bot')['placed object contacts']
+    instance, lid = store.instance_contact('box_1/lid')
+    assert instance.name == 'box_1' and lid.xyz == (0.0, 0.0, 0.3)
+    assert check_point('instance_contact', 'box_1/lid', store, 'demo_bot') is None
+    assert 'no contact' in check_point('instance_contact', 'box_1/hinge', store, 'demo_bot')

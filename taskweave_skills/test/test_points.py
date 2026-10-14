@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from taskweave_core.config.poses import ObjectInstance, Pose2D, Pose3D
-from taskweave_skills.points import point_targets
+from taskweave_skills.points import onto_pose, point_targets
 
 DOWN = (0.0, math.pi, 0.0)  # canonical TCP pointing down: approach = -z, closing = +y
 
@@ -59,3 +59,17 @@ def test_a_taught_tcp_comes_back_as_the_same_target():
     assert left['tcp'] == pytest.approx(expected[:3, 3], abs=1e-5)
     assert left['approach'] == pytest.approx(expected[:3, 2], abs=1e-5)
     assert left['closing'] == pytest.approx(expected[:3, 1], abs=1e-5)
+
+
+def test_a_held_frame_goes_onto_a_hook_hook_end_up():
+    """The frame's hook plate (CAD x 0.3, engaging along -x) onto a hook whose engage direction is down: the frame
+    hangs with its x up and its z (the grasped side) towards the robot, which faces the hook from +x."""
+    hook = ObjectInstance('hanger_1', 'hanger', Pose2D(-0.14, 0.0, 0.0), z=1.15)
+    down = Pose3D((0.0, 0.0, 0.0), (math.pi, 0.0, 0.0), 'hanger')            # z down, x towards +x
+    plate = Pose3D((0.3, 0.0, 0.065), (0.0, -math.pi / 2, 0.0), 'frame')     # z = frame -x, x = frame z
+    robot = base_at(0.75, 0.0, 0.583, math.pi)                                 # facing the hook
+    frame = onto_pose(hook, down, plate, robot, offset_m=0.1)
+    assert frame[:3, 0] == pytest.approx([0, 0, 1], abs=1e-9)                 # hook end up
+    assert frame[:3, 2] == pytest.approx([-1, 0, 0], abs=1e-9)                 # grasped side faces the robot
+    plate_in_base = frame @ np.array([0.3, 0.0, 0.065, 1.0])
+    assert plate_in_base[:3] == pytest.approx([0.89, 0.0, 1.15 + 0.1 - 0.583])  # 10 cm above the hook

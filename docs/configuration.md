@@ -69,8 +69,13 @@ Point references: `stance:<instance>[/<variant>]` (where this robot stands at a 
 or a bare name (cell location),
 `<object>.<point>` (a point of an object type) or `<instance>/<point>` (that point on one placed object). A skill
 declares which arguments are points in its argument schema with `"x-taskweave-point": "base_target"`, `"object_point"`
-(either form) or `"instance_point"` (only `<instance>/<point>`, e.g. go_to_point), so missing points are reported before
-anything moves.
+(either form), `"instance_point"` (only `<instance>/<point>`, e.g. go_to_point) or `"instance_contact"`
+(`<instance>/<contact>`, e.g. move_object `to`), so missing points are reported before anything moves.
+
+Contacts (`contacts:` in `objects/<object>.yaml`, `{xyz, rpy}` relative to the object) are frames where one object
+meets another: a hook plate on a frame, the hook it hangs on. Their z axis is the direction the held object moves to
+engage (down onto a hook). `move_object {to: <instance>/<contact>, contact: <held object's contact>, offset_m}` puts the
+held object's contact onto the placed one's, `offset_m` short of it against that direction.
 
 ## Robot profile
 

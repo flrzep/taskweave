@@ -311,6 +311,9 @@ OBJECT = {
                 'additionalProperties': POSE3D,
             },
         },
+        # frames on the object where it meets another (a hook plate, the hook it goes on): z = the direction the held
+        # object moves to engage (e.g. down onto a hook); move_object puts a held object's contact onto a placed one's
+        'contacts': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': POSE3D},
     },
 }
 
