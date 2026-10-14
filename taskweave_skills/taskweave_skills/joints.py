@@ -555,7 +555,7 @@ class Gripper(_JointSkill):
         'type': 'object',
         'required': ['side', 'action'],
         'properties': {
-            'side': {'enum': ['left', 'right', 'both']},
+            'side': {'type': 'string', 'description': 'a gripper of this robot (profile grippers) or both'},
             'action': {'enum': ['open', 'close']},
             'place_as': {'type': 'string', 'description': 'with open: save the released object\'s pose under this '
                                                           'name in cell/objects.yaml'},
@@ -564,14 +564,20 @@ class Gripper(_JointSkill):
     }
 
     def setup(self, node, config, robot, params):
+        import copy
+
         params = dict(params)
         self.cell_frame = params.pop('cell_frame', 'world')  # TF frame of the cell (place_as)
         super().setup(node, config, robot, params)
+        self.tools = list(robot.data.get('grippers', {}))  # the robot's grippers by tool name, e.g. left and right
+        self.args_schema = copy.deepcopy(self.args_schema)
+        self.args_schema['properties']['side'] = {'enum': [*self.tools, 'both'],
+                                                  'description': 'one gripper, or both (all of them)'}
     achieves = ['gripper open, or closed (holding an object if one was between the fingers)']
     default_timeout_s = 20.0
 
     def execute(self, ctx, args):
-        sides = ['left', 'right'] if args['side'] == 'both' else [args['side']]
+        sides = self.tools if args['side'] == 'both' else [args['side']]
         grippers = {side: self.robot.role(f'grippers.{side}') for side in sides}
         key = 'open' if args['action'] == 'open' else 'closed'
         goal = {g['joint']: float(g[key]) for g in grippers.values()}

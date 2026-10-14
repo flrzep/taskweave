@@ -143,3 +143,11 @@ def test_while_holding_a_pose_with_arm_joints_is_refused(system):
             hold.hold = None
     assert result.outcome == RunSkill.Result.REJECTED and 'holding box' in result.message
     assert sim.position['j1'] == 0.0
+
+
+def test_gripper_sides_are_the_robots_grippers(system):
+    _, client = system
+    result = run(client, 'gripper', {'side': 'right', 'action': 'close'})  # arm_bot has only a left gripper
+    assert result.outcome == RunSkill.Result.REJECTED and 'left' in result.message
+    result = run(client, 'gripper', {'side': 'both', 'action': 'close'})
+    assert result.outcome == RunSkill.Result.SUCCEEDED and json.loads(result.data_json)['holding'] == {'left': False}
