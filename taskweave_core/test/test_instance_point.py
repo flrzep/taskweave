@@ -33,3 +33,17 @@ def test_contacts_of_placed_objects(config_dir):
     assert instance.name == 'box_1' and lid.xyz == (0.0, 0.0, 0.3)
     assert check_point('instance_contact', 'box_1/lid', store, 'demo_bot') is None
     assert 'no contact' in check_point('instance_contact', 'box_1/hinge', store, 'demo_bot')
+
+
+def test_an_object_put_down_is_saved_as_a_placed_object(config_dir):
+    objects = config_dir / 'cell' / 'objects.yaml'
+    objects.write_text('# placed objects\nbox_1: {object: box, frame: cell, x: 1.0, y: 2.0, yaw: 0.0, '
+                       'stack: {count: 3, pitch: 0.1}}\n')
+    store = ConfigStore(config_dir)
+    store.save_object_instance('box_floor', 'box', 0.5, -0.25, 0.02, 3.1416)
+    store.save_object_instance('box_1', 'box', 1.5, 2.0, 0.3, 0.0)   # moved: a single item now
+    text = objects.read_text()
+    assert text.startswith('# placed objects') and 'box_floor: {object: box, frame: cell, x: 0.5, y: -0.25' in text
+    instances = ConfigStore(config_dir).object_instances()
+    assert instances['box_floor'].pose.yaw == 3.1416 and instances['box_1'].pose.x == 1.5
+    assert instances['box_1'].stack_count == 1 and instances['box_1'].top_z == 0.3

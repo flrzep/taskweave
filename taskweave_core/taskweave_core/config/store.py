@@ -37,6 +37,7 @@ TOOL_SUFFIX = '_tool'       # an object point's tool pose key: <tool>_tool
 POINT_FILE_SCHEMAS = {  # files that teaching and the HMI may edit (a file name matches any robot folder)
     'cell/locations.yaml': schemas.POINTS2D, 'stances.yaml': schemas.STANCES, 'poses.yaml': schemas.JOINT_POSES,
     'navigation.yaml': schemas.NAVIGATION, 'profile.yaml': schemas.ROBOT_PROFILE,  # profile: ik.choose only
+    'cell/objects.yaml': schemas.OBJECT_INSTANCES,  # where an object was put down (gripper place_as)
 }
 
 
@@ -386,6 +387,24 @@ class ConfigStore:
         offset = pose.relative_to(instance.pose, instance.object)
         keys = ['instances', instance.name, variant] if per_instance else ['objects', instance.object, variant]
         return self.update_point(f'robots/{robot}/stances.yaml', keys, offset), offset
+
+    def save_object_instance(self, name: str, obj: str, x: float, y: float, z: float, yaw: float) -> Path:
+        """Place (or move) the object instance ``name`` of type ``obj`` at x, y, z, yaw in the cell frame
+        (cell/objects.yaml); other entries and comments are kept, an existing entry keeps its other keys."""
+        from ruamel.yaml.comments import CommentedMap
+
+        self._check_name(name)
+        self.object(obj)  # the object type must exist
+
+        def edit(document):
+            entry = document.get(name) if isinstance(document.get(name), dict) else CommentedMap()
+            entry.update({'object': obj, 'frame': entry.get('frame', 'cell'), 'x': round(x, 4), 'y': round(y, 4),
+                          'z': round(z, 4), 'yaw': round(yaw, 4)})
+            entry.pop('stack', None)  # a single item now
+            entry.fa.set_flow_style()
+            document[name] = entry
+
+        return self._edit_yaml('cell/objects.yaml', edit)
 
     def save_object_point(self, reference: str, tool_poses: dict, note: str | None = None, robot: str | None = None,
                           near: Pose2D | None = None) -> tuple[Path, dict]:

@@ -542,16 +542,25 @@ class MoveObject(GoToPoint):
 
 class Gripper(_JointSkill):
     name = 'gripper'
-    description = 'Open or close the left, right or both grippers. Reports whether an object is held after closing.'
+    description = ('Open or close the left, right or both grippers. Reports whether an object is held after closing. '
+                   'Opening with place_as records where the released object now is, as a placed object of that name '
+                   '(cell/objects.yaml), so it can be picked again or used to teach points on.')
     args_schema = {
         'type': 'object',
         'required': ['side', 'action'],
         'properties': {
             'side': {'enum': ['left', 'right', 'both']},
             'action': {'enum': ['open', 'close']},
+            'place_as': {'type': 'string', 'description': 'with open: save the released object\'s pose under this '
+                                                          'name in cell/objects.yaml'},
         },
         'additionalProperties': False,
     }
+
+    def setup(self, node, config, robot, params):
+        params = dict(params)
+        self.cell_frame = params.pop('cell_frame', 'world')  # TF frame of the cell (place_as)
+        super().setup(node, config, robot, params)
     achieves = ['gripper open, or closed (holding an object if one was between the fingers)']
     default_timeout_s = 20.0
 
@@ -576,8 +585,33 @@ class Gripper(_JointSkill):
                 message += f'; holding {grasped}'
                 state['held_object'] = grasped
         else:
+            placed = self._placed(args['place_as'], sides) if args.get('place_as') else None
             released = self.hold.release(sides)
             if released:
                 message += f'; released {released}'
                 state['held_object'] = None
+            if placed:
+                message += f'; {placed}'
         return SkillResult.succeeded(message, holding=holding, world_state=state)
+
+    def _placed(self, name: str, sides) -> str:
+        """Save the held object's pose (cell frame, yaw only) as the placed object ``name``; says what was done."""
+        import math
+
+        hold = self.hold.held()
+        if hold is None or not set(hold['tools']) & set(sides):
+            return f'nothing held, {name} not placed'
+        instance = self.config.object_instances().get(hold['object'])
+        if instance is None:
+            return f'{hold["object"]} is not a placed object, {name} not placed'
+        try:
+            pose = self.hold.transform(self.cell_frame, self.robot.base['frame']) @ hold['object_in_base']
+        except LookupError as error:
+            return f'where is the robot? {error}; {name} not placed'
+        yaw = math.atan2(pose[1, 0], pose[0, 0])
+        tilt = math.degrees(math.acos(max(-1.0, min(1.0, pose[2, 2]))))
+        path = self.config.save_object_instance(name, instance.object, float(pose[0, 3]), float(pose[1, 3]),
+                                                float(pose[2, 3]), yaw)
+        return (f'placed {name} at ({pose[0, 3]:.3f}, {pose[1, 3]:.3f}, {pose[2, 3]:.3f}), yaw '
+                f'{math.degrees(yaw):.1f} deg in {path.name}' + (f' (tilted {tilt:.0f} deg: stored level)'
+                                                                  if tilt > 2 else ''))
