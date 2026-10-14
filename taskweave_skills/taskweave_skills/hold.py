@@ -44,6 +44,7 @@ class HoldState:
         self.lock = threading.Lock()
         self.reached: dict | None = None   # {point, instance, tools, object_in_base}
         self.hold: dict | None = None      # {object, point, tools, tcp_in_object, object_in_base}
+        self.on_reset: list = []           # called after a simulator reset (e.g. clear the object state)
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.publisher = node.create_publisher(String, TOPIC, latched)
         self._publish()
@@ -59,6 +60,11 @@ class HoldState:
         if hold is not None:
             self.node.get_logger().warning(f'sim time jumped back: hold of {hold["object"]} ended')
             self._publish()
+        for callback in list(self.on_reset):
+            try:
+                callback()
+            except Exception as error:  # noqa: BLE001 - a reset hook must not stop the others
+                self.node.get_logger().warning(f'sim time jumped back: {error}')
 
     # ---- poses ------------------------------------------------------------------
     def transform(self, parent: str, child: str) -> np.ndarray:

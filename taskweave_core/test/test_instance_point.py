@@ -74,3 +74,25 @@ def test_held_poses_are_the_robots(config_dir):
     assert pose['joints'] == {'lift': 0.5} and [p.xyz for p in pose['path']] == [(0.8, 0.0, 0.1), (0.8, 0.0, 0.3)]
     with pytest.raises(KeyError, match="no held pose 'stand_up'.*it has: carry"):
         store.held_pose('demo_bot', 'box', 'stand_up')
+
+
+def test_object_state_takes_items_off_stacks_and_puts_objects_down(config_dir):
+    import pytest
+    (config_dir / 'cell' / 'objects.yaml').write_text(
+        'pile: {object: box, frame: cell, x: 1.0, y: 2.0, z: 0.1, yaw: 0.0, stack: {count: 2, pitch: 0.05}}\n'
+        'single: {object: box, frame: cell, x: 3.0, y: 0.0, yaw: 0.0}\n')
+    store = ConfigStore(config_dir)
+    assert store.take_object('pile') == 'took one off pile, 1 left'
+    assert store.object_instances()['pile'].top_z == pytest.approx(0.1)        # the top item is the bottom one now
+    assert store.take_object('pile') == 'took one off pile, 0 left'
+    with pytest.raises(KeyError, match='pile is empty'):
+        store.instance_point('pile/top_grasp')
+    store.take_object('single')
+    assert 'single' not in store.object_instances() and 'single' in store.object_instances(state=False)
+    store.put_object('on_floor', 'box', 0.5, -0.2, 0.02, 3.1416)
+    assert ConfigStore(config_dir).object_instances()['on_floor'].pose.yaw == 3.1416   # other processes see it
+    assert 'on_floor' not in (config_dir / 'cell' / 'objects.yaml').read_text()        # config stays the start state
+    store.take_object('on_floor')
+    assert 'on_floor' not in store.object_instances()
+    store.clear_object_state()
+    assert store.object_instances()['pile'].stack_count == 2 and 'single' in store.object_instances()

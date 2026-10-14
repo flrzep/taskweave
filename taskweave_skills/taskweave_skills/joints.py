@@ -593,15 +593,16 @@ class Gripper(_JointSkill):
     name = 'gripper'
     description = ('Open or close the left, right or both grippers. Reports whether an object is held after closing. '
                    'Opening with place_as records where the released object now is, as a placed object of that name '
-                   '(cell/objects.yaml), so it can be picked again or used to teach points on.')
+                   '(object state), so it can be picked again or used to teach points on. Closing on an object '
+                   'takes it off its stack in the object state.')
     args_schema = {
         'type': 'object',
         'required': ['side', 'action'],
         'properties': {
             'side': {'type': 'string', 'description': 'a gripper of this robot (profile grippers) or both'},
             'action': {'enum': ['open', 'close']},
-            'place_as': {'type': 'string', 'description': 'with open: save the released object\'s pose under this '
-                                                          'name in cell/objects.yaml'},
+            'place_as': {'type': 'string', 'description': 'with open: the released object is a placed object of '
+                                                          'this name now (object state)'},
         },
         'additionalProperties': False,
     }
@@ -612,6 +613,7 @@ class Gripper(_JointSkill):
         params = dict(params)
         self.cell_frame = params.pop('cell_frame', 'world')  # TF frame of the cell (place_as)
         super().setup(node, config, robot, params)
+        self.hold.on_reset.append(config.clear_object_state)  # a sim reset puts every object back
         self.tools = list(robot.data.get('grippers', {}))  # the robot's grippers by tool name, e.g. left and right
         self.args_schema = copy.deepcopy(self.args_schema)
         self.args_schema['properties']['side'] = {'enum': [*self.tools, 'both'],
@@ -639,6 +641,10 @@ class Gripper(_JointSkill):
             if grasped:
                 message += f'; holding {grasped}'
                 state['held_object'] = grasped
+                try:
+                    message += f'; {self.config.take_object(grasped)}'  # one off its stack (object state)
+                except (KeyError, ValueError) as error:
+                    message += f'; object state not updated: {error}'
         else:
             placed = self._placed(args['place_as'], sides) if args.get('place_as') else None
             released = self.hold.release(sides)
@@ -665,8 +671,6 @@ class Gripper(_JointSkill):
             return f'where is the robot? {error}; {name} not placed'
         yaw = math.atan2(pose[1, 0], pose[0, 0])
         tilt = math.degrees(math.acos(max(-1.0, min(1.0, pose[2, 2]))))
-        path = self.config.save_object_instance(name, instance.object, float(pose[0, 3]), float(pose[1, 3]),
-                                                float(pose[2, 3]), yaw)
+        self.config.put_object(name, instance.object, float(pose[0, 3]), float(pose[1, 3]), float(pose[2, 3]), yaw)
         return (f'placed {name} at ({pose[0, 3]:.3f}, {pose[1, 3]:.3f}, {pose[2, 3]:.3f}), yaw '
-                f'{math.degrees(yaw):.1f} deg in {path.name}' + (f' (tilted {tilt:.0f} deg: stored level)'
-                                                                  if tilt > 2 else ''))
+                f'{math.degrees(yaw):.1f} deg' + (f' (tilted {tilt:.0f} deg: stored level)' if tilt > 2 else ''))

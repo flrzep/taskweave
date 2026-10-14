@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -72,8 +73,14 @@ class RobotProfile:
         return node
 
 
+STATE_DIR_ENV = 'TASKWEAVE_STATE_DIR'  # where run-time state lives (default: next to the config directory, state/)
+
+
 class ConfigStore:
-    """Read-mostly view of one config directory. Files are validated on first use and cached."""
+    """Read-mostly view of one config directory. Files are validated on first use and cached.
+
+    Placed objects (cell/objects.yaml) are the start state; what happens to them at run time (items taken off a stack,
+    objects put down) is kept in <state dir>/objects.yaml and laid over them by object_instances()."""
 
     def __init__(self, root: str | Path):
         self.root = Path(root).expanduser().resolve()
@@ -189,13 +196,84 @@ class ConfigStore:
         data = self._load('cell/locations.yaml', schemas.POINTS2D, required=False, default={})
         return {name: Pose2D.from_dict(pose) for name, pose in data.items()}
 
-    def object_instances(self) -> dict[str, ObjectInstance]:
-        """cell/objects.yaml: placed objects. From config for now; a perception system can provide the same."""
-        data = self._load('cell/objects.yaml', schemas.OBJECT_INSTANCES, required=False, default={})
+    def object_instances(self, state: bool = True) -> dict[str, ObjectInstance]:
+        """Placed objects: cell/objects.yaml, with the run-time object state on top (``state``: items taken off
+        stacks, objects taken away or put down). A perception system can provide the same later."""
+        data = dict(self._load('cell/objects.yaml', schemas.OBJECT_INSTANCES, required=False, default={}))
+        for name, change in (self.object_state() if state else {}).items():
+            if change.get('gone'):
+                data.pop(name, None)
+            elif 'object' in change:
+                data[name] = change
+            elif name in data and 'count' in change:
+                data[name] = {**data[name], 'stack': {'pitch': 0.0, **data[name].get('stack', {}), 'count': change['count']}}
         return {name: ObjectInstance(name, entry['object'], Pose2D.from_dict(entry), float(entry.get('z', 0.0)),
                                      int(entry.get('stack', {}).get('count', 1)),
                                      float(entry.get('stack', {}).get('pitch', 0.0)))
                 for name, entry in data.items()}
+
+    # ---- run-time object state ---------------------------------------------
+    def state_path(self) -> Path:
+        return Path(os.environ.get(STATE_DIR_ENV) or self.root.parent / 'state') / 'objects.yaml'
+
+    def object_state(self) -> dict:
+        """<state dir>/objects.yaml: run-time changes to the placed objects ({} if none)."""
+        return self._load(str(self.state_path()), schemas.OBJECT_STATE, required=False, default={})
+
+    def _change_object_state(self, edit) -> None:
+        state = {k: dict(v) for k, v in self.object_state().items()}
+        edit(state)
+        errors = list(Draft202012Validator(schemas.OBJECT_STATE).iter_errors(state))
+        if errors:
+            raise ValueError(f'object state: {errors[0].message}')
+        path = self.state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text('# run-time object state over cell/objects.yaml (taskweave); cleared on a sim reset\n'
+                             + yaml.safe_dump(state, sort_keys=False, default_flow_style=None), encoding='utf-8')
+        temporary.replace(path)
+        with self._lock:
+            self._cache.pop(path, None)
+
+    def take_object(self, name: str) -> str:
+        """One item of ``name`` was taken: a stack has one less (an empty stack stays, count 0), a single object is
+        gone. Returns what happened, for a log."""
+        instance = self.object_instances().get(name)
+        if instance is None:
+            raise KeyError(f'no placed object {name!r}')
+        configured = name in self._load('cell/objects.yaml', schemas.OBJECT_INSTANCES, required=False, default={})
+
+        def edit(state):
+            if instance.stack_count > 1 or (configured and 'stack' in self._load(
+                    'cell/objects.yaml', schemas.OBJECT_INSTANCES, required=False, default={})[name]):
+                state[name] = {**({} if 'object' in state.get(name, {}) else state.get(name, {})),
+                               'count': max(instance.stack_count - 1, 0)}
+            elif configured:
+                state[name] = {'gone': True}
+            else:
+                state.pop(name, None)
+
+        self._change_object_state(edit)
+        left = self.object_instances().get(name)
+        return f'took one off {name}, {left.stack_count} left' if left else f'took {name}'
+
+    def put_object(self, name: str, obj: str, x: float, y: float, z: float, yaw: float) -> None:
+        """An object of type ``obj`` was put down at x, y, z, yaw (cell frame) and is now the placed object ``name``."""
+        self._check_name(name)
+        self.object(obj)
+
+        def edit(state):
+            state[name] = {'object': obj, 'frame': 'cell', 'x': round(x, 4), 'y': round(y, 4), 'z': round(z, 4),
+                           'yaw': round(yaw, 4)}
+
+        self._change_object_state(edit)
+
+    def clear_object_state(self) -> None:
+        """Back to cell/objects.yaml as configured (e.g. after a simulator reset)."""
+        path = self.state_path()
+        path.unlink(missing_ok=True)
+        with self._lock:
+            self._cache.pop(path, None)
 
     def stance_offsets(self, robot: str) -> dict:
         """robots/<robot>/stances.yaml as stored: ``{'objects': {type: {variant: pose}}, 'instances': {...}}``."""
@@ -360,6 +438,8 @@ class ConfigStore:
         if name not in instances or not point:
             raise KeyError(f'unknown object point {reference!r}: expected <instance>/<point>, instances in '
                            f'cell/objects.yaml: {", ".join(sorted(instances)) or "none"}')
+        if instances[name].stack_count == 0:
+            raise KeyError(f'{name} is empty: no items left on the stack (object state)')
         instance = instances[name] if robot is None else self.handling_instance(instances[name], robot, near)
         return instance, self.object_point(instance.object, point, robot)
 

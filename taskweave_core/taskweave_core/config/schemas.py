@@ -285,6 +285,19 @@ OBJECT_INSTANCES = {
     },
 }
 
+# <state dir>/objects.yaml: what happened to placed objects at run time, over cell/objects.yaml (ConfigStore
+# object_instances): {count: n} items left on a stack, {gone: true} taken away, or a whole entry for an object put down
+OBJECT_STATE = {
+    'type': 'object',
+    'propertyNames': NAME,
+    'additionalProperties': {
+        'type': 'object',
+        'properties': {**OBJECT_INSTANCES['additionalProperties']['properties'],
+                       'count': {'type': 'integer', 'minimum': 0}, 'gone': {'const': True}},
+        'additionalProperties': False,
+    },
+}
+
 # robots/<model>/stances.yaml: base poses relative to objects. Named variants (e.g. pick, place) per object type,
 # optionally overridden per object instance. The first variant of a type is its default.
 STANCE_VARIANTS = {'type': 'object', 'propertyNames': NAME, 'additionalProperties': POSE2D, 'minProperties': 1}
