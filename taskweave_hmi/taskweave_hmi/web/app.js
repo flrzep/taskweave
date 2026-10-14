@@ -4,7 +4,8 @@
 const $ = (id) => document.getElementById(id);
 const ON_FAILURE = ['', 'retry', 'replan', 'skip', 'abort'];
 const POINT_KINDS = { base_target: ['locations', 'stances'], joint_pose: ['joint poses'], object_point: ['object points'],
-  instance_point: ['placed object points'], instance_contact: ['placed object contacts'] };
+  instance_point: ['placed object points'], instance_contact: ['placed object contacts'], instance: ['placed objects'] };
+const INCLUDE = 'mission:';  // skill choice that includes another mission's steps
 const state = { snapshot: null, skills: [], points: {}, missions: [], editing: null, dirty: false };
 
 // ---------- helpers ----------
@@ -215,7 +216,10 @@ function stepCard(step, index, steps) {
   const q = (key) => card.querySelector(`[data-k="${key}"]`);
   card.querySelector('.step-no').textContent = `Step ${index + 1}`;
   q('instruction').value = step.instruction || '';
-  fillSelect(q('skill'), state.skills.map((s) => s.name).concat(state.skills.some((s) => s.name === step.skill) ? [] : [step.skill]), step.skill);
+  const missions = state.missions.filter((m) => m.valid && m.name !== state.editing?.name).map((m) => INCLUDE + m.name);
+  const chosen = step.include ? INCLUDE + step.include : step.skill;
+  const names = state.skills.map((s) => s.name).concat(missions);
+  fillSelect(q('skill'), names.concat(names.includes(chosen) || !chosen ? [] : [chosen]), chosen);
   q('id').value = step.id || '';
   q('timeout_s').value = step.timeout_s ?? '';
   q('retries').value = step.retries ?? '';
@@ -225,12 +229,18 @@ function stepCard(step, index, steps) {
   q('replan_from').options[0].textContent = 'this step';
   const argsBox = card.querySelector('.args');
   const renderArgs = (args) => {
+    if (q('skill').value.startsWith(INCLUDE)) {  // another mission's steps: its params
+      const params = state.missions.find((m) => INCLUDE + m.name === q('skill').value)?.params || {};
+      argsBox.replaceChildren(...Object.entries(params).map(([key, p]) => argField(key,
+        { type: 'string', 'x-taskweave-point': p.point, description: p.description }, true, args[key])));
+      return;
+    }
     const skill = state.skills.find((s) => s.name === q('skill').value);
     const props = skill?.args_schema?.properties || {};
     const required = skill?.args_schema?.required || [];
     argsBox.replaceChildren(...Object.entries(props).map(([key, spec]) => argField(key, spec, required.includes(key), args[key])));
   };
-  renderArgs(step.args || {});
+  renderArgs(step.include ? step.with || {} : step.args || {});
   q('skill').addEventListener('change', () => { renderArgs({}); markDirty(); });
   card.addEventListener('input', markDirty);
   card.addEventListener('change', markDirty);
@@ -238,10 +248,12 @@ function stepCard(step, index, steps) {
   card.querySelector('[data-act="down"]').addEventListener('click', () => move(index, 1));
   card.querySelector('[data-act="remove"]').addEventListener('click', () => { const s = readSteps(); s.splice(index, 1); renderSteps(s); markDirty(); });
   card._read = () => {
-    const out = { instruction: q('instruction').value.trim(), skill: q('skill').value, args: {} };
+    const including = q('skill').value.startsWith(INCLUDE);
+    const out = including ? { instruction: q('instruction').value.trim(), include: q('skill').value.slice(INCLUDE.length), with: {} }
+      : { instruction: q('instruction').value.trim(), skill: q('skill').value, args: {} };
     argsBox.querySelectorAll('[data-arg]').forEach((input) => {
       const value = input._value();
-      if (value !== undefined) out.args[input.dataset.arg] = value;
+      if (value !== undefined) out[including ? 'with' : 'args'][input.dataset.arg] = value;
     });
     if (q('id').value.trim()) out.id = q('id').value.trim();
     if (q('timeout_s').value !== '') out.timeout_s = Number(q('timeout_s').value);

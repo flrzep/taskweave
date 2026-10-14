@@ -85,7 +85,7 @@ def check(config_dir: str) -> int:
     for path in sorted((store.root / 'skills').glob('*.yaml')):
         attempt(f'skills/{path.name}', lambda n=path.stem: _importable(store.skill_config(n)))
     for name in store.mission_names():
-        attempt(f'missions/{name}.yaml', lambda n=name: Plan.from_mission(store.mission(n), 'check'))
+        attempt(f'missions/{name}.yaml', lambda n=name: Plan.from_mission(store.expanded_mission(n), 'check'))
     print(f'{problems} problem(s)' if problems else 'config ok (skill arguments are checked against a running catalog)')
     return 1 if problems else 0
 

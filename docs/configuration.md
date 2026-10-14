@@ -65,6 +65,13 @@ Decision rules per step (falling back to `defaults`):
 `{name}` placeholders are resolved from the world state when the step starts; arguments that contain placeholders
 are validated at that point instead of before the mission starts.
 
+A step can include another mission instead of calling a skill: `{instruction, include: <mission>, with: {param:
+value}}`. The included mission declares its parameters (`params: {frame: {point: instance, description: ...}}`; the
+point kind lets the mission editor offer names) and uses them as `{param}` in its steps; placeholders that are not
+parameters stay world-state placeholders. When the plan is made, the step is replaced by the included steps (ids
+`<step>_<inner step>`), with the include step's `timeout_s`, `retries`, `on_failure` and `max_replans` if set, else
+the included mission's defaults. Includes can nest (5 deep), not loop.
+
 Point references: `stance:<instance>[/<variant>]` (where this robot stands at a placed object), `location:<name>`
 or a bare name (cell location),
 `<object>.<point>` (a point of an object type) or `<instance>/<point>` (that point on one placed object). A skill

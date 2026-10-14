@@ -38,7 +38,7 @@ def pose_usage(store: ConfigStore, args: set[tuple[str, str]]) -> dict[str, list
     result: dict[str, list[str]] = {}
     for mission_name in store.mission_names():
         try:
-            steps = store.mission(mission_name).get('steps', [])
+            steps = store.expanded_mission(mission_name).get('steps', [])
         except ConfigError:
             continue
         used = {step.get('args', {}).get(arg) for step in steps for skill, arg in args if step.get('skill') == skill}

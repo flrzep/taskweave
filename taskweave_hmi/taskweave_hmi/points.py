@@ -68,7 +68,7 @@ def usage(store: ConfigStore, robot: str) -> dict[tuple, list[str]]:
     instances = store.object_instances()
     for mission_name in store.mission_names():
         try:
-            mission = store.mission(mission_name)
+            mission = store.expanded_mission(mission_name)  # steps of included missions count too
         except ConfigError:
             continue
         used = set()

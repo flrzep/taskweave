@@ -32,11 +32,16 @@ ON_FAILURE = {'enum': ['retry', 'replan', 'skip', 'abort']}
 
 STEP = {
     'type': 'object',
-    'required': ['instruction', 'skill'],
+    'required': ['instruction'],
+    # a skill call, or another mission's steps (include, with its params filled in from `with`)
+    'oneOf': [{'required': ['skill'], 'not': {'required': ['include']}},
+              {'required': ['include'], 'not': {'anyOf': [{'required': ['skill']}, {'required': ['args']}]}}],
     'properties': {
         'id': NAME,
         'instruction': {'type': 'string', 'minLength': 1},
         'skill': NAME,
+        'include': NAME,
+        'with': {'type': 'object', 'propertyNames': NAME},
         'args': {'type': 'object'},
         'timeout_s': {'type': 'number', 'exclusiveMinimum': 0},
         'retries': {'type': 'integer', 'minimum': 0},
@@ -56,6 +61,13 @@ MISSION = {
         'loop': {'enum': ['once', 'forever']},
         'max_cycles': {'type': 'integer', 'minimum': 1},
         'stop_when': {'type': 'string', 'minLength': 1},
+        # parameters a mission takes when another one includes it: name -> what it is (the point kind, if any, lets
+        # the mission editor offer the right names)
+        'params': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {
+            'type': 'object', 'additionalProperties': False,
+            'properties': {'description': {'type': 'string'},
+                           'point': {'enum': ['base_target', 'joint_pose', 'object_point', 'instance_point',
+                                              'instance_contact', 'instance']}}}},
         'defaults': {
             'type': 'object',
             'properties': {

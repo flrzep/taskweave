@@ -30,7 +30,7 @@ class MissionFilePlanner(Planner):
 
     def __init__(self, store: ConfigStore, mission: str, goal: str | None = None, robot: str = ''):
         self.store, self.mission_name, self.goal, self.robot = store, mission, goal, robot
-        self.mission = store.mission(mission)  # validates now, so errors surface before anything starts
+        self.mission = store.expanded_mission(mission)  # validates now, so errors surface before anything starts
         self._ids = itertools.count(1)
 
     def make_plan(self, world: Mapping[str, Any], cycle: int) -> Plan | None:

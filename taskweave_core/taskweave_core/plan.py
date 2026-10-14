@@ -3,12 +3,73 @@
 from __future__ import annotations
 
 import copy
+import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 DEFAULT_TIMEOUT_S = 60.0
 DEFAULT_RETRIES = 0
 DEFAULT_ON_FAILURE = 'abort'
 DEFAULT_MAX_REPLANS = 1
+MAX_INCLUDE_DEPTH = 5
+STEP_SETTINGS = ('timeout_s', 'retries', 'on_failure', 'max_replans')
+
+
+class IncludeError(ValueError):
+    """A mission include cannot be expanded (unknown mission, missing or unknown parameter, a cycle)."""
+
+
+def _fill(value, values: dict):
+    """``value`` with ``{param}`` replaced by ``values[param]``; other placeholders (world state) stay. A string that
+    is just one placeholder takes the value's type."""
+    if isinstance(value, str):
+        whole = re.fullmatch(r'\{(\w+)\}', value)
+        if whole and whole.group(1) in values:
+            return copy.deepcopy(values[whole.group(1)])
+        return re.sub(r'\{(\w+)\}', lambda m: str(values[m.group(1)]) if m.group(1) in values else m.group(0), value)
+    if isinstance(value, dict):
+        return {k: _fill(v, values) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_fill(v, values) for v in value]
+    return value
+
+
+def expand_includes(mission: dict, load: Callable[[str], dict], _depth: int = 0, _stack: tuple = ()) -> dict:
+    """The mission with every include step replaced by the included mission's steps (recursively): their ``{param}``
+    placeholders filled from the step's ``with``, the include step's timeout_s / retries / on_failure / max_replans
+    (if set) and else the included mission's defaults applied to them, ids prefixed with
+    the include step's id (``s3_s2``). Every step gets an explicit id. ``load(name)`` returns a mission dict."""
+    steps = []
+    for number, raw in enumerate(mission['steps'], start=1):
+        step_id = raw.get('id', f's{number}')
+        if 'include' not in raw:
+            steps.append({**copy.deepcopy(raw), 'id': step_id})
+            continue
+        name = raw['include']
+        if name in _stack or _depth >= MAX_INCLUDE_DEPTH:
+            raise IncludeError(f'step {step_id}: including {name!r} again ({" > ".join((*_stack, name))})')
+        try:
+            inner = load(name)
+        except Exception as error:  # noqa: BLE001 - the loader's error, with where it came from
+            raise IncludeError(f'step {step_id}: cannot include mission {name!r}: {error}') from error
+        params, values = inner.get('params', {}), dict(raw.get('with', {}))
+        unknown, missing = sorted(set(values) - set(params)), sorted(set(params) - set(values))
+        if unknown or missing:
+            raise IncludeError(f'step {step_id}: mission {name!r} ' + '; '.join(
+                ([f'has no parameter {", ".join(unknown)} (it takes: {", ".join(params) or "none"})'] if unknown else [])
+                + ([f'needs {", ".join(missing)}'] if missing else [])))
+        expanded = expand_includes(inner, load, _depth + 1, (*_stack, name))
+        inner_defaults = inner.get('defaults', {})
+        overrides = {k: raw[k] for k in STEP_SETTINGS if k in raw}  # the include step's own settings win
+        for sub in expanded['steps']:
+            sub = {**_fill(sub, values), **overrides}
+            sub.update({k: inner_defaults[k] for k in STEP_SETTINGS if k in inner_defaults and k not in sub})
+            sub['id'] = f'{step_id}_{sub["id"]}'
+            if sub.get('replan_from'):
+                sub['replan_from'] = f'{step_id}_{sub["replan_from"]}'
+            steps.append(sub)
+    return {**copy.deepcopy({k: v for k, v in mission.items() if k != 'steps'}), 'steps': steps}
+
 
 
 @dataclass
@@ -46,11 +107,15 @@ class Plan:
     def from_mission(cls, mission: dict, plan_id: str, goal: str | None = None, robot: str = '') -> Plan:
         """Build a plan from a validated mission dict, applying the mission's defaults to every step.
 
-        Missions may name a robot; without one they run on ``robot`` (the robot the system drives).
+        Missions may name a robot; without one they run on ``robot`` (the robot the system drives). Include steps
+        must be expanded first (expand_includes, ConfigStore.expanded_mission).
         """
         defaults = mission.get('defaults', {})
         steps = []
         for number, raw in enumerate(mission['steps'], start=1):
+            if 'include' in raw:
+                raise IncludeError(f'step {raw.get("id", f"s{number}")} includes {raw["include"]!r}: expand includes '
+                                   'first')
             steps.append(Step(
                 id=raw.get('id', f's{number}'),
                 instruction=raw['instruction'],

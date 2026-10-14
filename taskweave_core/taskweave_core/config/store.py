@@ -124,6 +124,17 @@ class ConfigStore:
     def mission(self, name: str) -> dict:
         return self._load(f'missions/{name}.yaml', schemas.MISSION)
 
+    def expanded_mission(self, name: str) -> dict:
+        """The mission with its include steps replaced by the included missions' steps (plan.expand_includes);
+        a bad include is a ConfigError of this mission's file."""
+        from ..plan import IncludeError, expand_includes
+
+        mission = self.mission(name)
+        try:
+            return expand_includes(mission, self.mission)
+        except IncludeError as error:
+            raise ConfigError(self.root / f'missions/{name}.yaml', str(error)) from error
+
     def robot(self, name: str) -> RobotProfile:
         data = self._load(f'robots/{name}/profile.yaml', schemas.ROBOT_PROFILE)
         if data['name'] != name:
@@ -303,7 +314,8 @@ class ConfigStore:
                 continue
         return {'locations': sorted(self.locations()), 'stances': self.stance_names(robot),
                 'joint poses': sorted(self.joint_poses(robot)), 'object points': objects,
-                'placed object points': placed, 'placed object contacts': contacts}
+                'placed object points': placed, 'placed object contacts': contacts,
+                'placed objects': sorted(self.object_instances())}
 
     def object_point(self, obj: str, point: str) -> dict:
         """A named point on an object: tool poses (canonical TCP, object-relative) plus its metadata.

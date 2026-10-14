@@ -17,7 +17,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from taskweave_core.config import ConfigError, ConfigStore, schemas
-from taskweave_core.plan import Plan
+from taskweave_core.plan import IncludeError, Plan, expand_includes
 from taskweave_core.validation import validate_plan
 
 NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_\-]*$')
@@ -44,8 +44,9 @@ def list_missions(store: ConfigStore) -> list[dict]:
     for name in store.mission_names():
         try:
             mission = store.mission(name)
+            steps = len(store.expanded_mission(name)['steps'])
             result.append({'name': name, 'goal': mission['goal'], 'robot': mission.get('robot', ''),
-                           'steps': len(mission['steps']), 'valid': True})
+                           'steps': steps, 'valid': True, 'params': mission.get('params', {})})
         except ConfigError as error:
             result.append({'name': name, 'goal': '', 'robot': '', 'steps': 0, 'valid': False, 'error': str(error)})
     return result
@@ -59,7 +60,11 @@ def validate(mission: Mapping, store: ConfigStore, catalog: Mapping[str, dict], 
     problems = []
     if mission.get('robot') and mission['robot'] != robot:
         problems.append(f'mission is for robot {mission["robot"]!r}, this system drives {robot!r}')
-    plan = Plan.from_mission(dict(mission), 'hmi-check', robot=robot)
+    try:
+        expanded = expand_includes(dict(mission), store.mission)
+    except IncludeError as error:
+        return problems + [str(error)]
+    plan = Plan.from_mission(expanded, 'hmi-check', robot=robot)
     return problems + validate_plan(plan, catalog, store)
 
 
