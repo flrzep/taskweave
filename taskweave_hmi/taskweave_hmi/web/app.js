@@ -154,11 +154,12 @@ async function loadMissions() {
   state.missions = data;
   const select = $('mission-select');
   const current = select.value;
-  select.replaceChildren(...data.filter((m) => m.valid).map((m) => el('option', { value: m.name, text: `${m.name} — ${m.goal}` })));
+  const block = (m) => Object.keys(m.params || {}).length > 0;  // takes parameters: only for other missions to include
+  select.replaceChildren(...data.filter((m) => m.valid && !block(m)).map((m) => el('option', { value: m.name, text: `${m.name} — ${m.goal}` })));
   if (current) select.value = current;
   $('mission-list').replaceChildren(...data.map((m) => {
     const item = el('li', { tabindex: '0' }, el('b', { text: m.name }),
-      el('span', { class: 'muted', text: m.valid ? `${m.goal} · ${m.steps} steps` : '' }),
+      el('span', { class: 'muted', text: m.valid ? `${m.goal} · ${m.steps} steps${block(m) ? ' · block (include it)' : ''}` : '' }),
       m.valid ? '' : el('span', { class: 'bad', text: m.error }));
     item.addEventListener('click', () => openEditor(m.name));
     item.addEventListener('keydown', (e) => { if (e.key === 'Enter') openEditor(m.name); });

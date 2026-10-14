@@ -56,3 +56,13 @@ def test_the_store_expands_mission_files(config_dir):
     assert 'include' in store.mission('whole')['steps'][0]  # the file itself is unchanged
     with pytest.raises(ConfigError, match="cannot include mission 'nothing'"):
         store.expanded_mission('broken')
+
+
+def test_a_block_with_params_is_not_run_on_its_own(config_dir):
+    from taskweave_core.planner import MissionFilePlanner
+    missions = config_dir / 'missions'
+    missions.mkdir(exist_ok=True)
+    (missions / 'part.yaml').write_text('goal: part\nparams: {seconds: {}}\n'
+                                        'steps:\n- {instruction: wait, skill: wait, args: {seconds: "{seconds}"}}\n')
+    with pytest.raises(ConfigError, match='a block for other missions to include'):
+        MissionFilePlanner(ConfigStore(config_dir), 'part')

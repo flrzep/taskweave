@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from typing import Any
 
-from .config import ConfigStore
+from .config import ConfigError, ConfigStore
 from .plan import Plan
 
 
@@ -31,6 +31,9 @@ class MissionFilePlanner(Planner):
     def __init__(self, store: ConfigStore, mission: str, goal: str | None = None, robot: str = ''):
         self.store, self.mission_name, self.goal, self.robot = store, mission, goal, robot
         self.mission = store.expanded_mission(mission)  # validates now, so errors surface before anything starts
+        if self.mission.get('params'):
+            raise ConfigError(store.root / f'missions/{mission}.yaml', 'takes parameters '
+                              f'({", ".join(self.mission["params"])}): a block for other missions to include, not run')
         self._ids = itertools.count(1)
 
     def make_plan(self, world: Mapping[str, Any], cycle: int) -> Plan | None:
