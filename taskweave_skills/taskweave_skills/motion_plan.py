@@ -11,20 +11,25 @@ Profile section ``planning`` (without it, joint skills move straight in joint sp
       attempts: 3
       velocity_scale: 1.0             # of the planner's joint limits (MoveIt joint_limits.yaml)
       acceleration_scale: 1.0
+      direct: true                    # default: a straight joint-space move when it is collision-free (checked with
+      direct_step_rad: 0.03           # /check_state_validity every this many rad or m), the planner only otherwise
 
-The planner checks the robot against itself and the planning scene; the trajectory comes back timed, and the joint
+A sampling planner's path wanders (the arms swing out and back) even where the straight move is free, so the straight
+move is tried first. The planner checks the robot against itself and the planning scene; the trajectory comes back timed, and the joint
 skills stream it as position targets. Goal joints outside the group are moved straight alongside.
 """
 
 from __future__ import annotations
 
 import bisect
+import math
 import re
 import time
 
 SUCCESS = 1
 POLL_S = 0.02
 PLAN_TRIES = 3
+CHECK_BATCH = 8  # state validity requests in flight at once
 RETRY = {-1, -2, -6, 99999}  # planning failed, invalid plan (final validation), timed out, pipeline failure
 
 
@@ -54,6 +59,10 @@ class Trajectory:
         s = (t - t0) / (t1 - t0) if t1 > t0 else 1.0
         return {n: a + (b - a) * s for n, a, b in zip(self.names, self.points[i - 1], self.points[i], strict=True)}
 
+    def reversed(self) -> Trajectory:
+        """The same path backwards."""
+        return Trajectory(self.names, [self.duration - t for t in reversed(self.times)], self.points[::-1])
+
 
 ERRORS = {-1: 'planning failed', -2: 'invalid motion plan', -4: 'control failed', -6: 'timed out',
           -10: 'start state in collision', -11: 'start state violates path constraints',
@@ -64,7 +73,7 @@ ERRORS = {-1: 'planning failed', -2: 'invalid motion plan', -4: 'control failed'
 
 class MotionPlanner:
     def __init__(self, node, robot):
-        from moveit_msgs.srv import GetMotionPlan  # only needed when the robot has a planning section
+        from moveit_msgs.srv import GetMotionPlan, GetStateValidity  # only needed with a planning section
         from rclpy.callback_groups import ReentrantCallbackGroup
 
         spec = robot.data['planning']
@@ -81,9 +90,13 @@ class MotionPlanner:
         self.joints = re.compile(spec['joints']) if spec.get('joints') else None
         self.Request = GetMotionPlan.Request
         self.client = node.create_client(GetMotionPlan, self.service, callback_group=ReentrantCallbackGroup())
+        self.direct = bool(spec.get('direct', True))
+        self.direct_step = float(spec.get('direct_step_rad', 0.03))
+        self.validity = node.create_client(GetStateValidity, spec.get('validity_service', '/check_state_validity'),
+                                           callback_group=ReentrantCallbackGroup())
 
-    def plan(self, start: dict[str, float], goal: dict[str, float], should_stop=lambda: False) -> Trajectory:
-        """Trajectory from ``start`` to ``goal``; raises PlanError. Only the goal joints' start values are sent, on top
+    def plan(self, start: dict[str, float], goal: dict[str, float], should_stop=lambda: False) -> Trajectory | None:
+        """Trajectory from ``start`` to ``goal``, or None if the straight joint-space move is free; raises PlanError. Only the goal joints' start values are sent, on top
         of the planner's own current state: the state topic can carry joints the planner's model lacks (e.g. a
         simulator's base joints), and MoveIt rejects unknown names."""
         from moveit_msgs.msg import Constraints, JointConstraint, RobotState
@@ -98,6 +111,8 @@ class MotionPlanner:
         r.max_velocity_scaling_factor, r.max_acceleration_scaling_factor = self.velocity_scale, self.acceleration_scale
         if self.joints is not None:
             goal = {**{n: v for n, v in start.items() if self.joints.fullmatch(n) and n not in goal}, **goal}
+        if self.direct and self._free(start, goal, should_stop):
+            return None
         start = {name: start[name] for name in goal if name in start}
         r.start_state = RobotState(joint_state=JointState(name=list(start), position=[float(v) for v in start.values()]),
                                    is_diff=True)  # keeps what MoveIt knows besides joints, e.g. the base pose from TF
@@ -114,6 +129,34 @@ class MotionPlanner:
         trajectory = response.trajectory.joint_trajectory
         times = [p.time_from_start.sec + p.time_from_start.nanosec * 1e-9 for p in trajectory.points]
         return Trajectory(list(trajectory.joint_names), times, [list(p.positions) for p in trajectory.points])
+
+    def _free(self, start: dict, goal: dict, should_stop) -> bool:
+        """True if every state on the straight joint-space line from ``start`` to ``goal`` is collision-free."""
+        from moveit_msgs.msg import RobotState
+        from moveit_msgs.srv import GetStateValidity
+        from sensor_msgs.msg import JointState
+
+        names = list(goal)
+        if any(n not in start for n in names) or not self.validity.wait_for_service(timeout_sec=2.0):
+            return False
+        count = max(1, math.ceil(max(abs(goal[n] - start[n]) for n in names) / self.direct_step))
+        deadline = time.monotonic() + 10.0
+        for first in range(1, count + 1, CHECK_BATCH):  # batches: the service queue drops requests beyond its depth
+            futures = []
+            for i in range(first, min(first + CHECK_BATCH, count + 1)):
+                request = GetStateValidity.Request()
+                request.group_name = self.group
+                request.robot_state = RobotState(joint_state=JointState(
+                    name=names, position=[float(start[n] + (goal[n] - start[n]) * i / count) for n in names]),
+                    is_diff=True)
+                futures.append(self.validity.call_async(request))
+            while not all(f.done() for f in futures):
+                if should_stop() or time.monotonic() > deadline:
+                    return False
+                time.sleep(0.002)
+            if not all(f.result().valid for f in futures):
+                return False
+        return True
 
     def _call(self, request, should_stop):
         future = self.client.call_async(request)

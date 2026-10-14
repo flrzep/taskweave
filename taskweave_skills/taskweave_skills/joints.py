@@ -231,7 +231,6 @@ class MoveToPose(_JointSkill):
         ``linear``: the TCPs move on straight lines (cartesian.linear_path) instead of a planned path; the lift
         stays. Returns (failure result or None, worst joint error at the end)."""
         from .ik import IkError
-        from .motion_plan import PlanError
 
         if linear:
             return self._linear(ctx, tools, label)
@@ -254,6 +253,13 @@ class MoveToPose(_JointSkill):
             else:
                 tried = f' (also tried {", ".join(str(a) for a in fallback_joints)})' if fallback_joints else ''
                 return SkillResult.failed(f'{first_error}{tried}'), 0
+        return self._go(ctx, goal, label)
+
+    def _go(self, ctx, goal: dict, label: str):
+        """Move to the joint ``goal`` along a planned path if there is a planner. Returns (failure or None, worst
+        joint error at the end)."""
+        from .motion_plan import PlanError
+
         path = None
         if self.planner is not None:
             ctx.feedback(0.0, 'planning')
@@ -339,6 +345,7 @@ class GoToPoint(MoveToPose):
         super().setup(node, config, robot, params)
 
     def execute(self, ctx, args):
+        from .cartesian import PathError, linear_path, tcp_targets
         from .ik import flipped
         from .points import instance_matrix, point_targets
 
@@ -369,14 +376,21 @@ class GoToPoint(MoveToPose):
             end = self._end_of_approach(ctx, tools, lifts, label)  # how the point itself is reached decides
             if isinstance(end, SkillResult):
                 return end
-            lift, flips = end
+            lift, flips, solution = end
             tools = {t: flipped(v) if t in flips else v for t, v in tools.items()}
             before = {t: flipped(v) if t in flips else v for t, v in before.items()}
-            result, _ = self._reach(ctx, lift, before, f'{label} (-{approach:g} m approach)', flip=False)
+            try:  # solved backwards from the point: the approach starts in the configuration that ends there
+                path = linear_path(self.ik, tcp_targets(tools), tcp_targets(before), {**lift, **solution},
+                                   self.tcp_speed, self.tcp_turn).reversed()
+            except PathError as error:
+                return SkillResult.failed(f'{label}: no straight {approach:g} m approach to the point: {error}')
+            first, last = ({**lift, **dict(zip(path.names, path.points[i], strict=True))} for i in (0, -1))
+            result, _ = self._go(ctx, first, f'{label} (-{approach:g} m approach)')
             if result is not None:
                 return result
             label += f' ({approach:g} m straight)'
-            result, worst = self._linear(ctx, tools, label)
+            result, final = self._move(ctx, last, label, path=path)
+            worst = 0 if result is not None else max(abs(last[n] - final[n]) for n in last)
         else:
             result, worst = self._reach(ctx, {}, tools, label, fallback_joints=lifts, linear=bool(args.get('linear')))
         if result is not None:
@@ -388,21 +402,21 @@ class GoToPoint(MoveToPose):
 
 
     def _end_of_approach(self, ctx, tools: dict, lifts: list, label: str):
-        """Solve the point itself first: the lift height (current, else the first of ``lifts``) and the tools whose
-        grasp is reached flipped, so the approach starts the way it ends (both checked before anything moves)."""
+        """Solve the point itself first: the lift height (current, else the first of ``lifts``), the tools whose grasp
+        is reached flipped and the arm joints there, so the approach can be solved back from it."""
         from .ik import IkError
 
         if self.ik is None:
-            return {}, set()
+            return SkillResult.rejected(f'{label}: a straight approach needs the profile ik section')
         first_error = None
         for attempt in [{}, *lifts]:
             try:
-                self.ik.solve(tools, attempt, lambda: ctx.should_stop,
-                              current=self.joints.snapshot(self.p.state_timeout_s))
+                solution = self.ik.solve(tools, attempt, lambda: ctx.should_stop,
+                                         current=self.joints.snapshot(self.p.state_timeout_s))
             except IkError as error:
                 first_error = first_error or error
                 continue
-            return attempt, {tool for tool, info in self.ik.last.items() if info.get('flipped')}
+            return attempt, {tool for tool, info in self.ik.last.items() if info.get('flipped')}, solution
         return SkillResult.failed(f'{label}: the point itself is out of reach: {first_error}')
 
 

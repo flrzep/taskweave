@@ -11,7 +11,7 @@ rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('moveit_msgs')
 
 from builtin_interfaces.msg import Duration  # noqa: E402
-from moveit_msgs.srv import GetMotionPlan  # noqa: E402
+from moveit_msgs.srv import GetMotionPlan, GetStateValidity  # noqa: E402
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
@@ -27,14 +27,24 @@ PLANNING = 'planning: {group: arm, timeout_s: 1.0}\n'
 
 
 class FakePlanner(Node):
-    """Plans start -> (j1 = -0.5 detour) -> goal, or answers with ``error``."""
+    """Plans start -> (j1 = -0.5 detour) -> goal, or answers with ``error``. State validity: every state is in
+    collision unless ``free`` (so the straight move is only taken when free)."""
 
     def __init__(self):
         super().__init__('fake_planner')
         self.error = 0
         self.fail_first = 0  # answer this many requests with a pipeline failure first
         self.requests = []
+        self.free = False
+        self.checked = []
         self.create_service(GetMotionPlan, '/plan_kinematic_path', self.plan)
+        self.create_service(GetStateValidity, '/check_state_validity', self.validity)
+
+    def validity(self, request, response):
+        self.checked.append(dict(zip(request.robot_state.joint_state.name, request.robot_state.joint_state.position,
+                                     strict=True)))
+        response.valid = self.free
+        return response
 
     def plan(self, request, response):
         r = request.motion_plan_request
@@ -127,3 +137,17 @@ def test_joints_outside_the_goal_are_held_where_they_are(system):
     MotionPlanner(client, robot).plan(start, {'j1': 0.5})
     goal = {c.joint_name: c.position for c in planner.requests[-1].goal_constraints[0].joint_constraints}
     assert goal == pytest.approx({'j1': 0.5, 'j2': 0.3, 'lift': 0.1})  # without joints: j2 and lift would be free
+
+
+def test_a_free_straight_move_is_not_planned(system):
+    sim, planner, client, seen = system
+    planner.free = True
+    result = run(client, 'move_to_pose', {'pose': 'ready'})
+    assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
+    assert not planner.requests and seen['j1_min'] > -0.05  # straight in joint space, no detour
+    assert planner.checked[-1]['j1'] == pytest.approx(1.0) and len(planner.checked) > 10  # checked up to the goal
+
+
+def test_trajectory_reversed():
+    path = Trajectory(['a'], [0.0, 1.0, 3.0], [[0.0], [1.0], [2.0]]).reversed()
+    assert path.times == [0.0, 2.0, 3.0] and path.points == [[2.0], [1.0], [0.0]]
