@@ -46,3 +46,32 @@ def test_a_clock_jump_back_clears_the_buffer():
         node.destroy_node()
     finally:
         rclpy.shutdown()
+
+
+def test_a_late_transform_of_the_old_run_is_cleared_too():
+    rclpy.init()
+    try:
+        node = rclpy.create_node('tf_util_late', parameter_overrides=[Parameter('use_sim_time', value=True)])
+        clock = node.create_publisher(Clock, '/clock', 10)
+        tf, _listener = tf_util.buffer(node, settle_s=1.0)
+
+        def spin(seconds: float) -> None:
+            deadline = time.time() + seconds
+            while time.time() < deadline:
+                rclpy.spin_once(node, timeout_sec=0.02)
+
+        clock.publish(Clock(clock=Time(sec=100)))
+        spin(0.5)
+        clock.publish(Clock(clock=Time(sec=3)))  # simulator restarted
+        spin(0.3)
+        tf.set_transform(transform(99, 5.0), 'test')  # the old run's, still in flight
+        spin(0.4)  # the re-clear drops it
+        tf.set_transform(transform(3, 1.0), 'test')
+        assert tf.lookup_transform('world', 'base_link', rclpy.time.Time()).transform.translation.x == 1.0
+        spin(1.0)  # settled: transforms stay again
+        tf.set_transform(transform(4, 2.0), 'test')
+        spin(0.4)
+        assert tf.lookup_transform('world', 'base_link', rclpy.time.Time()).transform.translation.x == 2.0
+        node.destroy_node()
+    finally:
+        rclpy.shutdown()
