@@ -6,7 +6,8 @@ in config (object points also fit the robot's tools), and ``replan_from`` target
 
 Skills mark point arguments in their schema with ``"x-taskweave-point": "base_target" | "joint_pose" | "object_point"
 | "instance_point" | "instance_contact"``.
-Arguments that contain placeholders are only checked once their values are known (at step start).
+Arguments that contain placeholders are only checked once their values are known (at step start). So are points on
+an object an earlier step of the plan puts down (an argument ``place_as: <name>``, e.g. gripper): it does not exist yet.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ def validate_plan(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) -
         except ConfigError as error:
             problems.append(f'robot {plan.robot!r}: {error}')
     ids = [step.id for step in plan.steps]
+    put_down: set[str] = set()  # objects earlier steps put down (place_as): their points exist only then
     for duplicate in sorted({i for i in ids if ids.count(i) > 1}):
         problems.append(f'step id {duplicate!r} is used more than once')
     for step in plan.steps:
@@ -51,12 +53,22 @@ def validate_plan(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) -
         if step.skill not in catalog:
             problems.append(f'{where}: no skill server offers it; available: {", ".join(sorted(catalog)) or "none"}')
             continue
-        problems.extend(f'{where}: {p}' for p in validate_args(step.args, catalog[step.skill], store, plan.robot))
+        problems.extend(f'{where}: {p}' for p in validate_args(step.args, catalog[step.skill], store, plan.robot,
+                                                               later=put_down))
+        if isinstance(step.args.get('place_as'), str):
+            put_down.add(step.args['place_as'])
     return problems
 
 
-def validate_args(args: dict, schema: dict, store: ConfigStore, robot: str) -> list[str]:
-    """Validate one argument object; keys whose values still contain placeholders are skipped."""
+def _object_of(value) -> str:
+    """The placed object a point reference names: stance:<instance>[/v], <instance>/<point>, <object>.<point>."""
+    text = str(value).removeprefix('stance:')
+    return text.split('/', 1)[0] if '/' in text else text
+
+
+def validate_args(args: dict, schema: dict, store: ConfigStore, robot: str, later: set[str] = frozenset()) -> list[str]:
+    """Validate one argument object; keys whose values still contain placeholders are skipped, and point checks of
+    objects in ``later`` (put down by an earlier step, not there yet)."""
     pending = {key for key, value in args.items() if placeholders.names(value)}
     checked_schema = copy.deepcopy(schema)
     if pending and isinstance(checked_schema.get('required'), list):
@@ -68,7 +80,7 @@ def validate_args(args: dict, schema: dict, store: ConfigStore, robot: str) -> l
         problems.append(f'args{"." + key if key else ""}: {error.message}')
     for key, spec in checked_schema.get('properties', {}).items():
         kind = spec.get(POINT_KEYWORD) if isinstance(spec, dict) else None
-        if kind and key in concrete:
+        if kind and key in concrete and _object_of(concrete[key]) not in later:
             problem = check_point(kind, concrete[key], store, robot)
             if problem:
                 problems.append(f'args.{key}: {problem}')

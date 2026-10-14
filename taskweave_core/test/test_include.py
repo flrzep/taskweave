@@ -66,3 +66,17 @@ def test_a_block_with_params_is_not_run_on_its_own(config_dir):
                                         'steps:\n- {instruction: wait, skill: wait, args: {seconds: "{seconds}"}}\n')
     with pytest.raises(ConfigError, match='a block for other missions to include'):
         MissionFilePlanner(ConfigStore(config_dir), 'part')
+
+
+
+def test_points_on_an_object_a_step_puts_down_are_checked_later(config_dir):
+    from taskweave_core.validation import validate_plan
+    store = ConfigStore(config_dir)
+    catalog = {'gripper': {'type': 'object', 'properties': {'place_as': {'type': 'string'}}},
+               'go_to_point': {'type': 'object', 'properties': {
+                   'point': {'type': 'string', 'x-taskweave-point': 'instance_point'}}}}
+    steps = [{'instruction': 'put it down', 'skill': 'gripper', 'args': {'place_as': 'on_floor'}},
+             {'instruction': 'to it', 'skill': 'go_to_point', 'args': {'point': 'on_floor/top_grasp'}}]
+    assert validate_plan(Plan.from_mission({'goal': 'g', 'steps': steps}, 'p', robot='demo_bot'), catalog, store) == []
+    before = Plan.from_mission({'goal': 'g', 'steps': steps[::-1]}, 'p', robot='demo_bot')
+    assert any('on_floor' in p for p in validate_plan(before, catalog, store))  # used before it is put down
