@@ -85,7 +85,12 @@ def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
             problems = pose_problems(store, robot, str(value))   # raises KeyError for an unknown pose
             if problems:
                 return f'pose {value} does not fit robot {robot!r}: ' + '; '.join(problems)
-        elif kind == 'object_point':  # <instance>/<point> (a placed object) or <object>.<point> (a type's point)
+        elif kind in ('object_point', 'instance_point'):
+            # object_point: <instance>/<point> (a placed object) or <object>.<point> (a type's point);
+            # instance_point: only <instance>/<point>, for skills that go to one placed object
+            if kind == 'instance_point' and '/' not in str(value):
+                example = next(iter(store.point_names(robot)['placed object points']), '<instance>/<point>')
+                return f'{value} names no placed object: use <instance>/<point>, e.g. {example}'
             if '/' in str(value):
                 instance, _ = store.instance_point(str(value))
                 obj, point = instance.object, str(value).partition('/')[2]

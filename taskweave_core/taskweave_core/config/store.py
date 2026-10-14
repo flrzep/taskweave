@@ -288,8 +288,15 @@ class ConfigStore:
         objects = []
         for path in sorted((self.root / 'objects').glob('*.yaml')):
             objects += [f'{path.stem}.{name}' for name in self.object(path.stem).get('points', {})]
+        placed = []  # <instance>/<point>: a point on one placed object (go_to_point)
+        for name, instance in sorted(self.object_instances().items()):
+            try:
+                placed += [f'{name}{VARIANT_SEPARATOR}{point}' for point in self.object(instance.object).get('points', {})]
+            except ConfigError:
+                continue
         return {'locations': sorted(self.locations()), 'stances': self.stance_names(robot),
-                'joint poses': sorted(self.joint_poses(robot)), 'object points': objects}
+                'joint poses': sorted(self.joint_poses(robot)), 'object points': objects,
+                'placed object points': placed}
 
     def object_point(self, obj: str, point: str) -> dict:
         """A named point on an object: tool poses (canonical TCP, object-relative) plus its metadata.

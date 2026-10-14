@@ -67,8 +67,10 @@ are validated at that point instead of before the mission starts.
 
 Point references: `stance:<instance>[/<variant>]` (where this robot stands at a placed object), `location:<name>`
 or a bare name (cell location),
-`<object>.<point>` (object point). A skill declares which arguments are points in its argument schema with
-`"x-taskweave-point": "base_target"` or `"object_point"`, so missing points are reported before anything moves.
+`<object>.<point>` (a point of an object type) or `<instance>/<point>` (that point on one placed object). A skill
+declares which arguments are points in its argument schema with `"x-taskweave-point": "base_target"`, `"object_point"`
+(either form) or `"instance_point"` (only `<instance>/<point>`, e.g. go_to_point), so missing points are reported before
+anything moves.
 
 ## Robot profile
 

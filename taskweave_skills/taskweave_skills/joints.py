@@ -343,7 +343,7 @@ class GoToPoint(MoveToPose):
         'type': 'object',
         'required': ['point'],
         'properties': {
-            'point': {'type': 'string', 'x-taskweave-point': 'object_point',
+            'point': {'type': 'string', 'x-taskweave-point': 'instance_point',
                       'description': '<instance>/<point>: a placed object (cell/objects.yaml) and its point'},
             'offset_m': {'type': 'number', 'minimum': 0, 'description': 'stop this far back along the approach'},
             'approach_m': {'type': 'number', 'minimum': 0,
