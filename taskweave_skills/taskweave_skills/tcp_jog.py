@@ -9,6 +9,10 @@ section: same solver, joint limits and collision checks as named poses), and sen
 targets on joints.command. A step without a solution (a joint limit, a collision, out of reach) is not taken: the
 arm stops there and the reason is logged. Silent when no commands come, so it never competes with skills. A tool
 that holds an object (/taskweave/holding) is not jogged.
+
+Elbow: std_msgs/Float64 on /taskweave/jog/<tool>/elbow (rad/s) swings the elbow while the flange stays: each step turns
+the swivel joint (profile ik.swivel_joint, default the arm's third joint, the upper-arm roll of a 7-joint arm) by
+rate * dt and lets one IK descent from there put the flange back on its pose.
 """
 
 from __future__ import annotations
@@ -60,6 +64,7 @@ class TcpJog(Node):
         from geometry_msgs.msg import TwistStamped
         from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
         from sensor_msgs.msg import JointState
+        from std_msgs.msg import Float64
 
         from taskweave_core import tf_util
 
@@ -77,8 +82,11 @@ class TcpJog(Node):
         for tool in self.ik.groups:
             if tool in self.ik.tools:
                 self.tools[tool] = {'twist': None, 'received': -math.inf, 'target': None, 'blocked': False,
-                                    'joints': re.compile(self.ik.joint_pattern.format(tool=tool))}
+                                    'joints': re.compile(self.ik.joint_pattern.format(tool=tool)),
+                                    'elbow': 0.0, 'elbow_received': -math.inf,
+                                    'swivel': profile.data['ik'].get('swivel_joint', '').format(tool=tool) or None}
                 self.create_subscription(TwistStamped, f'{NAMESPACE}/{tool}', lambda m, t=tool: self._twist(t, m), 10)
+                self.create_subscription(Float64, f'{NAMESPACE}/{tool}/elbow', lambda m, t=tool: self._elbow(t, m), 10)
         self.held_tools: set = set()  # tools holding an object (taskweave_skills.hold): jogging one would pull it apart
         from rclpy.qos import DurabilityPolicy, QoSProfile
         from std_msgs.msg import String
@@ -105,6 +113,11 @@ class TcpJog(Node):
             self.tools[tool]['twist'] = ((t.linear.x, t.linear.y, t.linear.z), (t.angular.x, t.angular.y, t.angular.z))
             self.tools[tool]['received'] = time.monotonic()
 
+    def _elbow(self, tool: str, msg) -> None:
+        with self.lock:
+            self.tools[tool]['elbow'] = float(msg.data)
+            self.tools[tool]['elbow_received'] = time.monotonic()
+
     def _flange(self, tool: str) -> np.ndarray | None:
         from .ik import pose_matrix
         try:
@@ -124,6 +137,10 @@ class TcpJog(Node):
                 # the arm's joints only: the state topic can carry joints IK's model lacks (a sim's base joints)
                 twist = jog['twist']
                 current = {n: v for n, v in self.positions.items() if jog['joints'].fullmatch(n)}
+                elbow = jog['elbow'] if time.monotonic() - jog['elbow_received'] < FRESH_S else 0.0
+            if abs(elbow) > 1e-9:
+                self._swing(tool, jog, current, elbow * dt)
+                continue
             if not fresh or twist is None or not any(abs(v) > 1e-9 for part in twist for v in part):
                 jog['target'], jog['blocked'] = None, False  # the next jog starts from where the arm is
                 continue
@@ -146,6 +163,27 @@ class TcpJog(Node):
                 continue
             jog['target'], jog['blocked'] = target, False
             self.command.publish(self.JointState(name=list(joints), position=list(joints.values())))
+
+    def _swing(self, tool: str, jog: dict, current: dict, angle: float) -> None:
+        """Turn the swivel joint by ``angle`` and put the flange back where it is (the elbow moves, the TCP not)."""
+        if tool in self.held_tools or not current:
+            return
+        swivel = jog['swivel'] or (sorted(current)[2] if len(current) > 2 else None)
+        if swivel not in current:
+            self.get_logger().warning(f'jog {tool}: no swivel joint {swivel!r}', throttle_duration_sec=5)
+            return
+        if jog['target'] is None:
+            jog['target'] = self._flange(tool)
+            if jog['target'] is None:
+                return
+        joints = self.ik.step(tool, jog['target'], {**current, swivel: current[swivel] + angle})
+        if joints is None:
+            if not jog['blocked']:
+                self.get_logger().warning(f'jog {tool}: elbow stopped (joint limit, collision or no way to keep the TCP)')
+            jog['blocked'] = True
+            return
+        jog['blocked'] = False
+        self.command.publish(self.JointState(name=list(joints), position=list(joints.values())))
 
 
 def main(args=None):

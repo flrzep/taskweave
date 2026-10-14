@@ -49,6 +49,12 @@ def stick_velocity(axes, tilt: bool, speed: float, turn: float) -> tuple[Vec, Ve
     return (a[1] * speed, a[0] * speed, a[3] * speed), (0.0, 0.0, a[2] * turn)
 
 
+def elbow_rate(axes, elbow_axis: int, rate: float) -> float:
+    """Elbow swing (rad/s) while the elbow trigger is held: right stick left/right; 0 otherwise."""
+    a = list(axes) + [0.0] * (max(6, elbow_axis + 1) - len(axes))
+    return -a[2] * rate if a[elbow_axis] > 0.5 else 0.0
+
+
 def flange_twist(linear_base: Vec, angular_tcp: Vec, base_to_flange, tool_frame: dict) -> tuple[Vec, Vec]:
     """Flange (linear, angular) velocity in the base frame for a base-frame TCP velocity and a TCP-frame rotation.
 

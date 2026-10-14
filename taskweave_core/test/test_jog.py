@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from taskweave_core.jog import apply, flange_twist, rpy_rotation, stick_velocity
+from taskweave_core.jog import apply, elbow_rate, flange_twist, rpy_rotation, stick_velocity
 
 # S1-like tool: TCP 0.28 m along -x of the flange, z (approach) = -x of the flange
 TOOL = {'link': 'left_link7', 'xyz': [-0.28, 0.0, 0.0], 'rpy': [math.pi / 2, 0.0, -math.pi / 2]}
@@ -49,3 +49,10 @@ def test_approach_turn_is_about_the_flange_axis_the_tcp_lies_on():
     assert w == pytest.approx(apply(rpy_rotation(TOOL['rpy']), (0, 0, 1.0)))
     assert w == pytest.approx((-1.0, 0, 0), abs=1e-9)  # approach = -x of the flange
     assert v == pytest.approx((0, 0, 0), abs=1e-9)  # the TCP is on that axis: no compensation
+
+
+def test_the_elbow_swings_only_while_its_trigger_is_held():
+    axes = [0.0, 0.0, -0.5, 0.0, 1.0, 0.0]          # right stick half left, L2 (axis 4) pressed
+    assert elbow_rate(axes, 4, 0.4) == pytest.approx(0.2)
+    assert elbow_rate([0.0, 0.0, -0.5, 0.0, 0.0, 0.0], 4, 0.4) == 0.0
+    assert elbow_rate([0.0, 0.0, -0.5], 4, 0.4) == 0.0  # a pad without the trigger axis

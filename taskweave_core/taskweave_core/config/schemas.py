@@ -138,6 +138,9 @@ ROBOT_PROFILE = {
                 # known-good postures IK starts from, in order (then the current state)
                 'seeds': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': FINITE}},
                 'avoid_collisions': {'type': 'boolean'},  # reject solutions in collision (robot + planning scene)
+                # the joint the pad's elbow jog turns before IK puts the TCP back ({tool} = tool name; default:
+                # the third joint the joints pattern matches, the upper-arm roll of a 7-joint arm)
+                'swivel_joint': {'type': 'string'},
                 # tool -> the tool whose joints it mirrors with the same values (names with the prefix swapped)
                 'mirror': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {'type': 'string'}},
                 # pick the best of several solutions (taskweave_skills/ik.py): joint-limit room, elbow side, move size
@@ -325,9 +328,10 @@ OPERATOR = {
                     'properties': {'button': {'type': 'integer', 'minimum': 0}, 'twist': {'type': 'string'}},
                     'additionalProperties': False}},
                 'jog': {'type': 'object', 'additionalProperties': False, 'properties': {
-                    **{k: {'type': 'integer', 'minimum': 0} for k in ('enable_button', 'fast_button', 'tilt_axis')},
+                    **{k: {'type': 'integer', 'minimum': 0}
+                       for k in ('enable_button', 'fast_button', 'tilt_axis', 'elbow_axis')},
                     **{k: {'type': 'number', 'exclusiveMinimum': 0}
-                       for k in ('speed', 'fast_speed', 'turn', 'fast_turn')}}},
+                       for k in ('speed', 'fast_speed', 'turn', 'fast_turn', 'elbow_turn', 'fast_elbow_turn')}}},
                 # teach object points from the pad (operator_joy.py): button + <instance>/<point>
                 'teach': {'type': 'object', 'required': ['button'], 'additionalProperties': False, 'properties': {
                     'button': {'type': 'integer', 'minimum': 0}, 'point': {'type': 'string'}}},

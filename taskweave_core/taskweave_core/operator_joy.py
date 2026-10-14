@@ -25,7 +25,9 @@ velocity in the base frame to e.g. taskweave_skills' tcp_jog):
         - {button: 0, skill: gripper, args: {side: both, action: close}, arm_args: {side: '{arm}'}}
 
 In a tool mode the base gets no pad input, actions use ``arm_args`` ('{arm}' = the tool), and the TCP moves only
-while the enable button is held. Modes switch only while no mission runs; a starting mission puts the pad back to
+while the enable button is held. Holding the elbow trigger too (``jog.elbow_axis``, default L2) swings that arm's elbow
+with the right stick left/right while the TCP stays (``elbow_turn`` / ``fast_elbow_turn`` rad/s, sent as
+std_msgs/Float64 on ``<twist>/elbow``). Modes switch only while no mission runs; a starting mission puts the pad back to
 drive. The mode is published on names.OPERATOR_MODE. Tool links and the base frame come from the robot profile.
 
 Teaching object points (optional): jog the tools onto the object, then press the teach button. It stores the TCP
@@ -56,7 +58,8 @@ from . import jog, names, tf_util
 from .config import ConfigStore
 
 DRIVE = 'drive'
-JOG_DEFAULTS = {'enable_button': 4, 'fast_button': 5, 'tilt_axis': 5, 'speed': 0.05, 'fast_speed': 0.15,
+JOG_DEFAULTS = {'enable_button': 4, 'fast_button': 5, 'tilt_axis': 5, 'elbow_axis': 4, 'elbow_turn': 0.6,
+                'fast_elbow_turn': 1.5, 'speed': 0.05, 'fast_speed': 0.15,
                 'turn': 0.3, 'fast_turn': 0.6}
 
 BUSY = (TaskStatus.RUNNING, TaskStatus.PAUSED)
@@ -75,7 +78,7 @@ class OperatorJoy(Node):
         self.running: dict[int, object] = {}  # action index -> goal handle future while it runs
         self.mode = DRIVE
         self.arms: dict = {}
-        self.moving = False
+        self.moving = self.swinging = False  # jog commands sent; swinging: the elbow trigger is held
         self.drive_pub = self.mode_pub = None
         if not config:
             self.get_logger().info('no joy section in operator.yaml; operator buttons disabled')
@@ -104,7 +107,9 @@ class OperatorJoy(Node):
         arms = config.get('arms', {})
         if arms:
             from geometry_msgs.msg import TwistStamped
+            from std_msgs.msg import Float64
 
+            self.Float64 = Float64
             robot = self.get_parameter('robot').value
             if not robot:
                 raise ValueError('operator.yaml joy.arms needs the robot parameter (tool links, base frame)')
@@ -117,7 +122,8 @@ class OperatorJoy(Node):
                 if frame is None:
                     raise ValueError(f'operator.yaml joy.arms.{tool}: no tool_frames.{tool} in the robot profile')
                 self.arms[tool] = {'button': spec['button'], 'frame': frame,
-                                   'pub': self.create_publisher(TwistStamped, spec['twist'], 10)}
+                                   'pub': self.create_publisher(TwistStamped, spec['twist'], 10),
+                                   'elbow': self.create_publisher(Float64, f'{spec["twist"]}/elbow', 10)}
         self.mode_pub.publish(String(data=DRIVE))
 
     def _set_mode(self, mode: str) -> None:
@@ -156,10 +162,19 @@ class OperatorJoy(Node):
             self._stop_jog()
             return
         fast = held(j['fast_button'])
+        arm = self.arms[self.mode]
+        elbow = jog.elbow_rate(axes, j['elbow_axis'], j['fast_elbow_turn' if fast else 'elbow_turn'])
+        if j['elbow_axis'] < len(axes) and axes[j['elbow_axis']] > 0.5:  # elbow trigger: swing it, the TCP stays
+            self._send(arm, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+            arm['elbow'].publish(self.Float64(data=float(elbow)))
+            self.moving = self.swinging = True
+            return
+        if self.swinging:  # elbow trigger released: stop the swing before the sticks move the TCP again
+            arm['elbow'].publish(self.Float64(data=0.0))
+            self.swinging = False
         tilt = j['tilt_axis'] < len(axes) and axes[j['tilt_axis']] > 0.5
         linear, angular = jog.stick_velocity(axes, tilt, j['fast_speed' if fast else 'speed'],
                                              j['fast_turn' if fast else 'turn'])
-        arm = self.arms[self.mode]
         link = arm['frame']['link']
         try:
             q = self.tf.lookup_transform(self.base_frame, link, rclpy.time.Time()).transform.rotation
@@ -182,7 +197,8 @@ class OperatorJoy(Node):
     def _stop_jog(self) -> None:
         if self.moving and self.mode in self.arms:
             self._send(self.arms[self.mode], (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
-        self.moving = False
+            self.arms[self.mode]['elbow'].publish(self.Float64(data=0.0))
+        self.moving = self.swinging = False
 
     def _pressed(self, buttons: list[int], index: int | None) -> bool:
         if index is None or index >= len(buttons):
