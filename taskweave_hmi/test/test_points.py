@@ -69,3 +69,16 @@ def test_robot_pose_relative_to_objects_nearest_first(store):
     assert data['relative'][0]['instance'] == 'shelf_a'
     offset = data['relative'][0]['offset']
     assert (offset['x'], offset['y'], offset['yaw']) == pytest.approx((0.0, -0.75, 1.5708), abs=1e-4)
+
+
+def test_object_points_are_listed_and_their_settings_saved(store):
+    top = next(p for p in points.object_points(store, 'box', {}) if p['name'] == 'top_grasp')
+    assert top['approach_m'] is None and top['elbow'] is None and top['tools']['left']['xyz'] == [0.0, 0.1, 0.2]
+    points.save_object_point(store, 'box', 'top_grasp', {'approach_m': 0.15, 'elbow': 'down',
+                                                         'tools': {'left': {'xyz': [0, 0.1, 0.22], 'rpy': [0, 1.5, 0]}}})
+    top = next(p for p in points.object_points(store, 'box', {}) if p['name'] == 'top_grasp')
+    assert top['approach_m'] == 0.15 and top['elbow'] == 'down' and top['tools']['left']['xyz'] == [0.0, 0.1, 0.22]
+    with pytest.raises(points.PointError, match='elbow'):
+        points.save_object_point(store, 'box', 'top_grasp', {'elbow': 'sideways'})
+    with pytest.raises(points.PointError, match='approach_m'):
+        points.save_object_point(store, 'box', 'top_grasp', {'approach_m': 3})

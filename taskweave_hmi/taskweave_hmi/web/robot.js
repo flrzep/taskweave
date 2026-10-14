@@ -33,8 +33,38 @@ async function loadRobot() {
   updateSideways();
   drawSketch();
   $('pose-list').replaceChildren(...data.poses.map((pose) => poseItem(pose)));
+  showIkChoice(data.ik_choice);
   setPointsBusy(pointsBusy);
 }
+
+// ---------- arm solutions (profile ik.choose) ----------
+const IK_WEIGHTS = ['limits', 'elbow', 'motion', 'symmetry'];
+const ELBOW_TEXT = { '': 'no preference', down: 'down', up: 'up', out: 'out', in: 'in', back: 'back', forward: 'forward' };
+
+function showIkChoice(choice) {
+  show($('ik-card'), !!choice);
+  if (!choice) return;
+  $('ik-file').textContent = `robots/${state.robotData.robot}/profile.yaml`;
+  const current = choice.elbow || '';
+  $('ik-elbow').replaceChildren(...['', ...choice.elbow_sides].map((side) => {
+    const button = el('button', { text: ELBOW_TEXT[side] || side, 'aria-pressed': String(side === current) });
+    button.dataset.side = side;
+    button.addEventListener('click', () => $('ik-elbow').querySelectorAll('button').forEach(
+      (b) => b.setAttribute('aria-pressed', String(b === button))));
+    return button;
+  }));
+  $('ik-margin').value = choice.limit_margin_deg;
+  IK_WEIGHTS.forEach((k) => { $(`ik-w-${k}`).value = choice.weights[k]; });
+  message($('ik-msg'), choice.elbow_vector ? `The profile sets the elbow as a vector ${JSON.stringify(choice.elbow_vector)}; saving replaces it.` : '');
+}
+
+$('btn-ik-save').addEventListener('click', async () => {
+  const side = $('ik-elbow').querySelector('[aria-pressed="true"]')?.dataset.side || '';
+  const body = { elbow: side || null, limit_margin_deg: Number($('ik-margin').value), weights: {} };
+  IK_WEIGHTS.forEach((k) => { body.weights[k] = Number($(`ik-w-${k}`).value); });
+  const { ok, data } = await api('PUT', '/api/robot/ik', body);
+  message($('ik-msg'), ok ? `Saved to ${data.file}. Used from the next arm move.` : (data.problems || [data.error || 'not saved']).join('\n'), !ok);
+});
 
 function navSettings() {
   const settings = { envelope: {} };

@@ -3,7 +3,8 @@
 Joint poses live in ``robots/<robot>/poses.yaml`` (joint -> rad, or m for the profile's ``joints.linear``). A pose that
 a mission uses cannot be renamed or deleted; which skill arguments name a joint pose comes from the skill catalog
 (``x-taskweave-point: joint_pose``). Navigation clearance lives in ``robots/<robot>/navigation.yaml`` (see
-``schemas.NAVIGATION``); the server applies saved values to the running path planner.
+``schemas.NAVIGATION``); the server applies saved values to the running path planner. Arm solutions: the profile's
+``ik.choose`` (preferred elbow side, how much joint-limit room and move size count); skills read it before every solve.
 """
 
 from __future__ import annotations
@@ -66,7 +67,55 @@ def overview(store: ConfigStore, robot: str, args: set[tuple[str, str]]) -> dict
         'footprint': profile.base.get('footprint'),
         'base_type': profile.base.get('type'),          # sideways driving only for 'holonomic'
         'limits': profile.base.get('limits', {}),       # linear (m/s), angular (rad/s): caps for the driving speeds
+        'ik_choice': ik_choice(profile.data.get('ik', {})),
     }
+
+
+def ik_choice(ik: Mapping) -> dict | None:
+    """The profile's ik.choose with defaults filled in, for the Arm solutions card; None without ik."""
+    from taskweave_skills.ik import LIMIT_MARGIN_DEG, WEIGHTS
+
+    if not ik:
+        return None
+    choose = ik.get('choose') or {}
+    elbow = choose.get('elbow')
+    return {'enabled': 'choose' in ik, 'elbow': elbow if isinstance(elbow, str) else None,
+            'elbow_vector': elbow if isinstance(elbow, list) else None,
+            'limit_margin_deg': choose.get('limit_margin_deg', LIMIT_MARGIN_DEG),
+            'weights': {**WEIGHTS, **choose.get('weights', {})}, 'elbow_sides': schemas.ELBOW_SIDES}
+
+
+def save_ik_choice(store: ConfigStore, robot: str, body: Mapping) -> str:
+    """Elbow side (or null: no preference), limit margin and weights from the Arm solutions card."""
+    from taskweave_skills.ik import WEIGHTS
+
+    choice: dict = {}
+    if 'elbow' in body:
+        if body['elbow'] not in (None, *schemas.ELBOW_SIDES):
+            raise RobotSettingsError(f'elbow: one of {", ".join(schemas.ELBOW_SIDES)} or none')
+        choice['elbow'] = body['elbow']
+    if 'limit_margin_deg' in body:
+        choice['limit_margin_deg'] = _number(body['limit_margin_deg'], 'limit_margin_deg', 0.0, 90.0)
+    if 'weights' in body:
+        unknown = set(body['weights']) - set(WEIGHTS)
+        if unknown:
+            raise RobotSettingsError(f'weights: unknown {", ".join(sorted(unknown))}')
+        choice['weights'] = {k: _number(v, f'weights.{k}', 0.0, 100.0) for k, v in body['weights'].items()}
+    try:
+        path = store.save_ik_choice(robot, choice)
+    except ValueError as error:
+        raise RobotSettingsError(str(error)) from error
+    return str(path.relative_to(store.root))
+
+
+def _number(value, name: str, low: float, high: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise RobotSettingsError(f'{name}: not a number') from None
+    if not low <= number <= high:
+        raise RobotSettingsError(f'{name}: {number:g} is outside {low:g}..{high:g}')
+    return number
 
 
 def _check_tools(tools, allowed: list[str]) -> dict:

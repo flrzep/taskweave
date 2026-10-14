@@ -14,8 +14,8 @@ from __future__ import annotations
 import math
 from collections.abc import Iterator, Mapping
 
-from taskweave_core.config import ConfigError, ConfigStore, Pose2D
-from taskweave_core.config.store import LOCATION_PREFIX, STANCE_PREFIX, VARIANT_SEPARATOR
+from taskweave_core.config import ConfigError, ConfigStore, Pose2D, schemas
+from taskweave_core.config.store import LOCATION_PREFIX, STANCE_PREFIX, TOOL_SUFFIX, VARIANT_SEPARATOR
 
 LOCATIONS = 'cell/locations.yaml'
 SCOPES = ('objects', 'instances')
@@ -61,9 +61,11 @@ def _stance_source(store: ConfigStore, robot: str, reference: str) -> tuple[str,
 
 
 def usage(store: ConfigStore, robot: str) -> dict[tuple, list[str]]:
-    """Which missions use which point: ('location', name) or (scope, owner, variant) -> mission names."""
+    """Which missions use which point: ('location', name), (scope, owner, variant) or ('object_point', type,
+    point) -> mission names."""
     result: dict[tuple, list[str]] = {}
     locations = store.locations()
+    instances = store.object_instances()
     for mission_name in store.mission_names():
         try:
             mission = store.mission(mission_name)
@@ -82,6 +84,9 @@ def usage(store: ConfigStore, robot: str) -> dict[tuple, list[str]]:
                     name = text[len(LOCATION_PREFIX):] if text.startswith(LOCATION_PREFIX) else text
                     if name in locations:
                         used.add(('location', name))
+                    owner, _, point = text.partition(VARIANT_SEPARATOR)
+                    if point and owner in instances:
+                        used.add(('object_point', instances[owner].object, point))
         for key in used:
             result.setdefault(key, []).append(mission_name)
     return result
@@ -111,6 +116,7 @@ def overview(store: ConfigStore, robot: str) -> dict:
             })
         objects.append({
             'object': object_type,
+            'points': object_points(store, object_type, used),
             'variants': [{'variant': v, 'offset': pose_dict(Pose2D.from_dict(p)),
                           'used_by': used.get(('objects', object_type, v), [])} for v, p in variants.items()],
             'instances': placed,
@@ -121,7 +127,58 @@ def overview(store: ConfigStore, robot: str) -> dict:
         'locations': [{'name': n, 'pose': pose_dict(p), 'used_by': used.get(('location', n), [])}
                       for n, p in store.locations().items()],
         'objects': objects,
+        # go_to_point's straight final approach when a point does not set its own
+        'approach_default': float(store.skill_params('go_to_point').get('approach_m', 0.0)),
+        'elbow_sides': schemas.ELBOW_SIDES,
     }
+
+
+def object_points(store: ConfigStore, object_type: str, used: dict) -> list[dict]:
+    """Points on an object type (objects/<type>.yaml): tool poses in the object's frame, approach and elbow."""
+    try:
+        points = store.object(object_type).get('points', {})
+    except ConfigError:
+        return []
+    result = []
+    for name in points:
+        point = store.object_point(object_type, name)
+        result.append({
+            'name': name, 'approach_m': point.get('approach_m'), 'elbow': point.get('elbow'),
+            'tools': {key[:-len(TOOL_SUFFIX)]: {'xyz': list(pose.xyz), 'rpy': list(pose.rpy)}
+                      for key, pose in point.items() if key.endswith(TOOL_SUFFIX) and pose is not None},
+            'used_by': used.get(('object_point', object_type, name), []),
+        })
+    return result
+
+
+def save_object_point(store: ConfigStore, object_type: str, point: str, body: Mapping) -> str:
+    """Approach (m or null = skill default), elbow (side or null = robot default) and tool poses of a point."""
+    settings = {key: body[key] for key in ('approach_m', 'elbow') if key in body}
+    if settings.get('elbow') not in (None, '', *schemas.ELBOW_SIDES):
+        raise PointError(f'elbow: one of {", ".join(schemas.ELBOW_SIDES)} or the robot default')
+    if settings.get('approach_m') not in (None, ''):
+        try:
+            if not 0.0 <= float(settings['approach_m']) <= 1.0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise PointError('approach_m: a distance from 0 to 1 m') from None
+    poses = {}
+    for tool, pose in (body.get('tools') or {}).items():
+        try:
+            poses[tool] = {k: [float(v) for v in pose[k]] for k in ('xyz', 'rpy')}
+        except (KeyError, TypeError, ValueError):
+            raise PointError(f'{tool}: xyz and rpy need three numbers each') from None
+        if any(len(v) != 3 or not all(math.isfinite(x) for x in v) for v in poses[tool].values()):
+            raise PointError(f'{tool}: xyz and rpy need three numbers each')
+    try:
+        path = store.save_object_point_settings(object_type, point, settings) if settings else None
+        if poses:
+            path = store.save_object_point_poses(object_type, point, poses)
+    except ValueError as error:
+        raise PointError(str(error)) from error
+    if path is None:
+        raise PointError('nothing to save')
+    return str(path.relative_to(store.root))
 
 
 def parse_pose(body: Mapping, frame: str) -> Pose2D:

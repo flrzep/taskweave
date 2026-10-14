@@ -187,6 +187,14 @@ details[open] summary { margin-bottom: 8px; }
 .plan-graph .kind-grip, .legend .kind-grip { --k: #e0620d; }
 .plan-graph .kind-wait, .legend .kind-wait { --k: #8a8ea8; }
 .plan-graph .kind-other, .legend .kind-other { --k: #0f9488; }
+
+/* object cards (Points): one of stances / grasp points / placed at a time; elbow choice (Robot) wraps on phones */
+.row.wrap { flex-wrap: wrap; gap: 8px; }
+.pane { display: grid; gap: 10px; min-width: 0; }
+.segmented.choice { display: flex; flex-wrap: wrap; }
+.segmented.choice button { flex: 1 1 auto; }
+.point details { border-top: 1px solid var(--line); padding-top: 6px; }
+.point details summary { font: 13px var(--mono); color: var(--muted); }
 @media (prefers-color-scheme: dark) {
   .plan-graph .kind-drive, .legend .kind-drive { --k: #7a8cff; }
   .plan-graph .kind-arm, .legend .kind-arm { --k: #b57bff; }

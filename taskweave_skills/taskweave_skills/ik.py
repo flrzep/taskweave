@@ -186,6 +186,10 @@ def limit_cost(values: dict, limits: dict, margin: float) -> float:
     return cost
 
 
+WEIGHTS = {'limits': 2.0, 'elbow': 1.0, 'motion': 0.2, 'symmetry': 0.5}  # ik.choose.weights defaults
+LIMIT_MARGIN_DEG = 25.0                                                    # ik.choose.limit_margin_deg default
+
+
 class IkClient:
     def __init__(self, node, robot, limits: dict | None = None):
         from moveit_msgs.srv import GetPositionIK  # only needed when the robot has an ik section
@@ -203,22 +207,32 @@ class IkClient:
         self.seeds = [{name: float(value) for name, value in seed.items()} for seed in spec.get('seeds', [])]
         self.Request = GetPositionIK.Request
         self.client = node.create_client(GetPositionIK, self.service, callback_group=ReentrantCallbackGroup())
-        self.choose = spec.get('choose')  # None: the first solution wins (seed order)
+        self.node, self.fk = node, None
         self.mirror = spec.get('mirror', {})  # tool -> the tool whose joints it mirrors
         self.limits = limits or {}
         self.last: dict[str, dict] = {}   # per tool: how the last solve() chose (for messages)
-        if self.choose is not None:
-            from moveit_msgs.srv import GetPositionFK
+        self.elbow_side = None             # the preferred elbow of the solve() running
+        self.set_choice(spec.get('choose'))
 
-            self.fk = node.create_client(GetPositionFK, self.choose.get('fk_service', '/compute_fk'),
-                                         callback_group=ReentrantCallbackGroup())
+    def set_choice(self, choose: dict | None) -> None:
+        """How to choose between solutions (profile ik.choose; None: the first solution wins, seed order). Skills
+        set it from the profile before solving, so an edit (HMI) applies without a restart."""
+        self.choose = choose
+        if choose is not None and self.fk is None:
+            from moveit_msgs.srv import GetPositionFK
+            from rclpy.callback_groups import ReentrantCallbackGroup
+
+            self.fk = self.node.create_client(GetPositionFK, choose.get('fk_service', '/compute_fk'),
+                                              callback_group=ReentrantCallbackGroup())
 
     def solve(self, tools: dict, fixed: dict, should_stop=lambda: False, current: dict | None = None,
-              allow_flip: bool = True) -> dict[str, float]:
+              allow_flip: bool = True, elbow=None) -> dict[str, float]:
         """Joint values for every tool target (plus nothing else); raises IkError. ``current``: the joints now, for
-        the size-of-move cost when choosing. ``allow_flip`` False: solve the targets as given (no flipped grasp)."""
+        the size-of-move cost when choosing. ``allow_flip`` False: solve the targets as given (no flipped grasp).
+        ``elbow``: preferred elbow side for this solve (e.g. an object point's), else the profile's."""
         if not self.client.wait_for_service(timeout_sec=2.0):
             raise IkError(f'no IK service {self.service} (is MoveIt running?)')
+        self.elbow_side = elbow or (self.choose or {}).get('elbow')
         result: dict[str, float] = {}
         self.last = {}
         chosen: dict[str, dict] = {}  # per tool: its arm joints, for the arm that mirrors it
@@ -311,12 +325,12 @@ class IkClient:
         if self.choose is None:
             self.last[tool] = {'flipped': False, 'candidates': len(unique)}
             return unique[0]
-        weights = {'limits': 2.0, 'elbow': 1.0, 'motion': 0.2, 'symmetry': 0.5, **self.choose.get('weights', {})}
-        margin = math.radians(float(self.choose.get('limit_margin_deg', 25.0)))
+        weights = {**WEIGHTS, **self.choose.get('weights', {})}
+        margin = math.radians(float(self.choose.get('limit_margin_deg', LIMIT_MARGIN_DEG)))
         scored = []
         for index, arm in unique:
             limits = limit_cost(arm, self.limits, margin)
-            elbow = self._elbow(tool, {**fixed, **arm}) if self.choose.get('elbow') else 0.0
+            elbow = self._elbow(tool, {**fixed, **arm}) if self.elbow_side else 0.0
             motion = sum(abs(arm[n] - current[n]) for n in arm if n in current) / len(arm) if current else 0.0
             symmetry = sum(abs(arm[n] - image[n]) for n in arm if n in image) / len(arm) if image else 0.0
             cost = (weights['limits'] * limits + weights['elbow'] * elbow / math.pi + weights['motion'] * motion
@@ -352,7 +366,7 @@ class IkClient:
         if len(poses) != 3:
             return 0.0
         shoulder, elbow, wrist = (np.array([p.pose.position.x, p.pose.position.y, p.pose.position.z]) for p in poses)
-        return elbow_deviation(shoulder, elbow, wrist, preferred_elbow(self.choose['elbow'], shoulder))
+        return elbow_deviation(shoulder, elbow, wrist, preferred_elbow(self.elbow_side, shoulder))
 
     def step(self, tool: str, flange: np.ndarray, current: dict, timeout_s: float = 0.05) -> dict[str, float] | None:
         """Arm joints that put the tool's flange on ``flange`` (4x4, base frame), by one local descent from the

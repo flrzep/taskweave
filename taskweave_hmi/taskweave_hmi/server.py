@@ -465,6 +465,17 @@ class Handler(BaseHTTPRequestHandler):
                     file = robot.delete_pose(bridge.config, bridge.robot, name, bridge.pose_args())
                 bridge.get_logger().info(f'HMI {"saved" if method == "PUT" else "deleted"} pose {name} -> {file}')
                 return self._json({'pose': name, 'file': file})
+            if method == 'PUT' and route == ['robot', 'ik']:
+                bridge.check_idle()
+                file = robot.save_ik_choice(bridge.config, bridge.robot, self._body())
+                bridge.get_logger().info(f'HMI saved arm solutions -> {file}')
+                return self._json({'file': file})
+            if method == 'PUT' and len(route) == 4 and route[0] == 'objects' and route[2] == 'points':
+                bridge.check_idle()
+                object_type, point = unquote(route[1]), unquote(route[3])
+                file = points.save_object_point(bridge.config, object_type, point, self._body())
+                bridge.get_logger().info(f'HMI saved object point {object_type}/{point} -> {file}')
+                return self._json({'saved': f'{object_type}/{point}', 'file': file})
             if method == 'PUT' and route == ['robot', 'navigation']:
                 bridge.check_idle()
                 settings = self._body()

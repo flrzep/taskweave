@@ -125,3 +125,17 @@ def test_a_mirroring_arm_starts_from_and_prefers_the_mirror_image(moveit):
               for r in fake.ik_requests if r.group_name == 'right_arm']
     assert starts[0]['right_joint1'] == pytest.approx(-0.5)  # the first right start is the mirror image
     assert solution['right_joint1'] == pytest.approx(-0.5)
+
+
+def test_a_point_can_ask_for_another_elbow_side_than_the_profile(moveit):
+    _, node = moveit
+    ik = IkClient(node, robot({'elbow': 'down'}))
+    assert ik.solve({'left': TARGET}, {}, elbow='up')['left_joint1'] == pytest.approx(0.5)   # elbow above the line
+    assert ik.solve({'left': TARGET}, {})['left_joint1'] == pytest.approx(-0.5)               # the profile again
+
+
+def test_the_choice_can_change_after_start(moveit):
+    _, node = moveit
+    ik = IkClient(node, robot())  # no choose: the first seed wins
+    ik.set_choice({'elbow': 'down'})
+    assert ik.solve({'left': TARGET}, {})['left_joint1'] == pytest.approx(-0.5)

@@ -122,3 +122,19 @@ def test_poses_outside_the_joint_limits_are_refused_and_flagged(store):
 
 def test_pose_args_fall_back_when_the_catalog_names_none():
     assert robot.pose_args([]) == robot.DEFAULT_POSE_ARGS
+
+
+def test_the_ik_choice_is_shown_with_defaults_and_saved(store):
+    assert robot.overview(store, ROBOT, robot.DEFAULT_POSE_ARGS)['ik_choice'] is None   # demo_bot has no ik
+    profile = store.root / 'robots' / ROBOT / 'profile.yaml'
+    profile.write_text(profile.read_text() + "ik:\n  groups: {left: left_arm}\n  joints: 'left_j[1-7]'\n")
+    choice = robot.overview(store, ROBOT, robot.DEFAULT_POSE_ARGS)['ik_choice']
+    assert not choice['enabled'] and choice['elbow'] is None and choice['weights']['limits'] == 2.0
+    robot.save_ik_choice(store, ROBOT, {'elbow': 'down', 'limit_margin_deg': 30, 'weights': {'motion': 0.5}})
+    choice = robot.overview(store, ROBOT, robot.DEFAULT_POSE_ARGS)['ik_choice']
+    assert choice['enabled'] and choice['elbow'] == 'down' and choice['limit_margin_deg'] == 30
+    assert choice['weights'] == {'limits': 2.0, 'elbow': 1.0, 'motion': 0.5, 'symmetry': 0.5}
+    with pytest.raises(robot.RobotSettingsError, match='elbow'):
+        robot.save_ik_choice(store, ROBOT, {'elbow': 'sideways'})
+    with pytest.raises(robot.RobotSettingsError, match='outside'):
+        robot.save_ik_choice(store, ROBOT, {'limit_margin_deg': 120})

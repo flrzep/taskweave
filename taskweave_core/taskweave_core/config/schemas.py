@@ -7,6 +7,7 @@ Kept as Python data so they are versioned with the code that reads them. Applica
 from ..embodiment import CAPABILITIES, TOOL_TYPES
 
 FINITE = {'type': 'number'}
+ELBOW_SIDES = ['down', 'up', 'out', 'in', 'back', 'forward']  # preferred elbow side, in the robot's frame (ik.py)
 NAME = {'type': 'string', 'pattern': r'^[A-Za-z_][A-Za-z0-9_\-]*$'}
 
 POSE2D = {
@@ -143,7 +144,7 @@ ROBOT_PROFILE = {
                 'choose': {
                     'type': 'object',
                     'properties': {
-                        'elbow': {'oneOf': [{'enum': ['down', 'up', 'out', 'in', 'back', 'forward']},
+                        'elbow': {'oneOf': [{'enum': ELBOW_SIDES},
                                             {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3}]},
                         'elbow_links': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 3, 'maxItems': 3},
                         'limit_margin_deg': {'type': 'number', 'minimum': 0},
@@ -294,6 +295,10 @@ OBJECT = {
                     'approach': {'type': 'object'},
                     'tool_type': {'enum': sorted(TOOL_TYPES)},
                     'grip_width_m': {'type': 'number', 'exclusiveMinimum': 0},
+                    # go_to_point: the last part of the way in a straight line (else the skill's approach_m)
+                    'approach_m': {'type': 'number', 'minimum': 0},
+                    # preferred elbow side at this point, robot frame (else the robot profile's ik.choose.elbow)
+                    'elbow': {'enum': ELBOW_SIDES},
                 },
                 'additionalProperties': POSE3D,
             },

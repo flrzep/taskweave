@@ -161,6 +161,27 @@
       <div id="nav-msg" class="msg" hidden></div>
       <div class="row gap"><button id="btn-nav-save" class="btn primary" data-edit>Save and apply</button></div>
     </div>
+    <div id="ik-card" class="card" hidden>
+      <div class="label">Arm solutions</div>
+      <p class="muted small-text">An arm can usually reach a target in several ways. The robot prefers this elbow side, as
+        seen from the robot (out = away from the body; the right arm is mirrored). A grasp point can set its own in the
+        Points tab. Saved to <span id="ik-file" class="mono"></span>, used from the next arm move.</p>
+      <div id="ik-elbow" class="segmented choice" role="group" aria-label="Preferred elbow side"></div>
+      <details>
+        <summary>Weights and joint-limit room</summary>
+        <p class="muted small-text">How much each counts when solutions are compared. Joints closer to a limit than the
+          room below cost more (an arm at a limit cannot move on, e.g. lift what it holds).</p>
+        <div class="grid2">
+          <div class="field"><label for="ik-margin">Joint-limit room (°)</label><input id="ik-margin" type="number" step="1" min="0" max="90" inputmode="decimal"></div>
+          <div class="field"><label for="ik-w-limits">Limit room</label><input id="ik-w-limits" type="number" step="0.1" min="0" inputmode="decimal"></div>
+          <div class="field"><label for="ik-w-elbow">Elbow side</label><input id="ik-w-elbow" type="number" step="0.1" min="0" inputmode="decimal"></div>
+          <div class="field"><label for="ik-w-motion">Small moves</label><input id="ik-w-motion" type="number" step="0.1" min="0" inputmode="decimal"></div>
+          <div class="field"><label for="ik-w-symmetry">Mirrored arms</label><input id="ik-w-symmetry" type="number" step="0.1" min="0" inputmode="decimal"></div>
+        </div>
+      </details>
+      <div id="ik-msg" class="msg" hidden></div>
+      <div class="row gap"><button id="btn-ik-save" class="btn primary" data-edit>Save</button></div>
+    </div>
     <div class="card">
       <div class="row between"><div class="label">Joint poses</div><button id="btn-add-pose" class="btn small" data-edit>+ Pose</button></div>
       <p class="muted small-text">Named poses for move_to_pose · <span id="poses-file" class="mono"></span>. Angles in degrees,

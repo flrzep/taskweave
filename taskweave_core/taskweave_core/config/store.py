@@ -32,11 +32,11 @@ from .poses import ObjectInstance, Pose2D, Pose3D, wrap_angle
 STANCE_PREFIX = 'stance:'
 LOCATION_PREFIX = 'location:'
 VARIANT_SEPARATOR = '/'     # stance:<instance>/<variant>
-POINT_METADATA = ('approach', 'tool_type', 'grip_width_m')  # keys of an object point that are not tool poses
+POINT_METADATA = ('approach', 'tool_type', 'grip_width_m', 'approach_m', 'elbow')  # object point keys besides tool poses
 TOOL_SUFFIX = '_tool'       # an object point's tool pose key: <tool>_tool
 POINT_FILE_SCHEMAS = {  # files that teaching and the HMI may edit (a file name matches any robot folder)
     'cell/locations.yaml': schemas.POINTS2D, 'stances.yaml': schemas.STANCES, 'poses.yaml': schemas.JOINT_POSES,
-    'navigation.yaml': schemas.NAVIGATION,
+    'navigation.yaml': schemas.NAVIGATION, 'profile.yaml': schemas.ROBOT_PROFILE,  # profile: ik.choose only
 }
 
 
@@ -394,6 +394,74 @@ class ConfigStore:
                     entry.yaml_add_eol_comment(note, key, column=4)
 
         return self._edit_yaml(f'objects/{instance.object}.yaml', edit), stored
+
+    def save_object_point_settings(self, obj: str, point: str, settings: dict) -> Path:
+        """Set or clear (None) an object point's ``approach_m`` and ``elbow``; its tool poses are kept."""
+        unknown = set(settings) - {'approach_m', 'elbow'}
+        if unknown:
+            raise ValueError(f'unknown point settings: {", ".join(sorted(unknown))}')
+
+        def edit(document):
+            entry = document.get('points', {}).get(point)
+            if not isinstance(entry, dict):
+                raise ValueError(f'object {obj!r} has no point {point!r}')
+            for key, value in settings.items():
+                if value is None or value == '':
+                    entry.pop(key, None)
+                else:
+                    entry[key] = round(float(value), 4) if key == 'approach_m' else value
+
+        return self._edit_yaml(f'objects/{obj}.yaml', edit)
+
+    def save_object_point_poses(self, obj: str, point: str, poses: dict) -> Path:
+        """Replace tool poses of an object point: ``{tool: {'xyz': [...], 'rpy': [...]}}`` in the object's frame (its
+        CAD coordinates, as taught; the point and its other tools and settings are kept)."""
+        from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+        def flow(values) -> CommentedSeq:
+            seq = CommentedSeq(round(float(v), 4) + 0.0 for v in values)
+            seq.fa.set_flow_style()
+            return seq
+
+        def edit(document):
+            entry = document.get('points', {}).get(point)
+            if not isinstance(entry, dict):
+                raise ValueError(f'object {obj!r} has no point {point!r}')
+            for tool, pose in poses.items():
+                key = f'{tool}{TOOL_SUFFIX}'
+                value = CommentedMap(xyz=flow(pose['xyz']), rpy=flow(pose['rpy']))
+                value.fa.set_flow_style()
+                entry[key] = value
+                entry.ca.items.pop(key, None)
+
+        return self._edit_yaml(f'objects/{obj}.yaml', edit)
+
+    def save_ik_choice(self, robot: str, choice: dict) -> Path:
+        """Update the profile's ik.choose (elbow, limit_margin_deg, weights); other keys and comments are kept."""
+        from ruamel.yaml.comments import CommentedMap
+
+        unknown = set(choice) - {'elbow', 'limit_margin_deg', 'weights'}
+        if unknown:
+            raise ValueError(f'unknown IK choice settings: {", ".join(sorted(unknown))}')
+
+        def edit(document):
+            ik = document.get('ik')
+            if not isinstance(ik, dict):
+                raise ValueError(f'robot {robot!r} has no ik section')
+            choose = ik.get('choose') if isinstance(ik.get('choose'), dict) else CommentedMap()
+            for key, value in choice.items():
+                if key == 'weights':
+                    weights = choose.get('weights') if isinstance(choose.get('weights'), dict) else CommentedMap()
+                    weights.update({k: round(float(v), 3) for k, v in value.items()})
+                    weights.fa.set_flow_style()
+                    choose['weights'] = weights
+                elif value is None:
+                    choose.pop(key, None)
+                else:
+                    choose[key] = round(float(value), 2) if key == 'limit_margin_deg' else value
+            ik['choose'] = choose
+
+        return self._edit_yaml(f'robots/{robot}/profile.yaml', edit)
 
     # ---- editing points (teach mode, HMI) ---------------------------------------
     def update_point(self, relative: str, keys: list[str], pose: Pose2D | None = None,
