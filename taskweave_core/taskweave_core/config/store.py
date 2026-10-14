@@ -498,6 +498,19 @@ class ConfigStore:
 
         return self._edit_yaml(f'objects/{obj}.yaml', edit)
 
+    def rename_object_point(self, obj: str, point: str, rename: str) -> Path:
+        """Rename an object point in place (position, settings and comment kept)."""
+        self._check_name(rename)
+        relative = f'objects/{obj}.yaml'
+
+        def edit(document):
+            points = document.get('points')
+            if not isinstance(points, dict) or point not in points:
+                raise ValueError(f'object {obj!r} has no point {point!r}')
+            self._rename_key(points, point, rename, f'points/{rename}', relative)
+
+        return self._edit_yaml(relative, edit)
+
     def save_ik_choice(self, robot: str, choice: dict) -> Path:
         """Update the profile's ik.choose (elbow, limit_margin_deg, weights); other keys and comments are kept."""
         from ruamel.yaml.comments import CommentedMap

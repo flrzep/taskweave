@@ -32,6 +32,12 @@ HTTP API (JSON):
                                    (parameter nav_costmaps) and controller (nav_controller)
   POST /api/robot/move {pose}      run move_to_pose now (no mission running); returns the outcome when it ends
   POST /api/robot/reach {joints, tools, search: [tool]}   per tool: ok, message, warnings, nearest reachable target
+  PUT  /api/robot/joints {joints: {name: value}}  send joint targets now (no mission running; within the limits)
+  GET  /api/teach/arm               arm positions: robot poses and object points as one list (arm.py)
+  PUT  /api/teach/arm/<robot|type>/<name>      {hands, joints, elbow, approach_m[, rename]};  DELETE the same
+  POST /api/teach/arm/<robot|type>/<name>/capture {at, tools, form}  save the robot's current arm there (also creates)
+  POST /api/teach/arm/<robot|type>/<name>/test {at}  move there now (move_to_pose / go_to_point at placed object <at>)
+  PUT  /api/teach/target {scope, name, at, form} or {}   the position a pad teach press saves into
 Missions and points are edited between runs (409 while a mission runs) and are used at the next start.
 """
 
@@ -66,16 +72,16 @@ from taskweave_core.teach import MAX_POSE_AGE_S, yaw_from_quaternion
 from taskweave_interfaces.action import RunSkill
 from taskweave_interfaces.msg import Plan as PlanMsg
 from taskweave_interfaces.msg import TaskStatus
-from taskweave_interfaces.srv import ListSkills, StartMission
+from taskweave_interfaces.srv import ListSkills, StartMission, TeachPoint
 from taskweave_skills.ik import pose_matrix, tool_target
 from taskweave_skills.nav2 import nav2_parameters
 
-from . import missions, points, robot
+from . import arm, missions, points, robot
 
 WEB = Path(__file__).parent / 'web'
 STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
 CALL_TIMEOUT_S = 5.0
-STATIC_FILES = ('app.js', 'robot.js', 'graph.js', 'style.css')
+STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'graph.js', 'style.css')
 MANUAL_SKILL_TIMEOUT_S = 120.0
 DRIVE_TIMEOUT_S = 300.0  # sim time; a drive across the cell in a slow sim
 NAV_COSTMAPS = ['/local_costmap/local_costmap', '/global_costmap/global_costmap']  # Nav2 defaults
@@ -159,6 +165,14 @@ class Bridge(Node):
         self.fk_client = None  # created on first use (MoveIt)
         self.ik = None  # IkClient, created on first reach check
         self.reach_lock = threading.Lock()
+        # teaching: the arm position open in the HMI receives pad teach presses (operator_joy)
+        self.teach_client = self.create_client(TeachPoint, names.TEACH_POINT, callback_group=self.group)
+        self.teach_target: dict | None = None
+        self.teach_target_pub = self.create_publisher(String, names.TEACH_TARGET, latched)
+        self.teach_target_pub.publish(String(data=''))
+        self.notice_pub = self.create_publisher(String, names.OPERATOR_NOTICE, 10)
+        self.create_subscription(String, names.TEACH_REQUEST, self._teach_request, 10, callback_group=self.group)
+        self.joint_command = self.create_publisher(JointState, joints['command'], 10) if joints.get('command') else None
 
     # ---- ROS -> state ------------------------------------------------------------
     def _broadcast(self, kind: str, data) -> None:
@@ -322,6 +336,83 @@ class Bridge(Node):
             return {'outcome': OUTCOMES[outcome.outcome], 'message': outcome.message}
         finally:
             self.skill_lock.release()
+
+    def set_teach_target(self, target: dict | None) -> None:
+        with self.lock:
+            self.teach_target = target or None
+        self.teach_target_pub.publish(String(data=json.dumps(target) if target else ''))
+
+    def _teach_request(self, msg: String) -> None:
+        """A pad teach press (operator_joy): save the robot's arm into the position open in the HMI."""
+        with self.lock:
+            target = self.teach_target
+        if not target:
+            return
+        tools = json.loads(msg.data or '{}').get('tools') or []
+        label = f'{target["scope"]} {target["name"]}'
+        try:
+            file = self.capture(target['scope'], target['name'], {'at': target.get('at'), 'tools': tools,
+                                                                  'form': target.get('form')})
+            notice = {'text': f'taught {label} -> {file}', 'ok': True, 'taught': target}
+        except (arm.ArmError, Busy, TimeoutError, KeyError, ConfigError) as error:
+            notice = {'text': f'teach {label} failed: {error}', 'ok': False}
+        self.notice_pub.publish(String(data=json.dumps(notice)))
+
+    def capture(self, scope: str, name: str, body: dict) -> str:
+        """Save the robot's current arm as an arm position: a robot pose from the joint states and forward
+        kinematics, an object point through the teach node at placed object ``at`` (default: the nearest)."""
+        self.check_idle()
+        if scope == arm.ROBOT:
+            try:
+                targets = self.tool_targets()
+            except TimeoutError:
+                targets = None
+            return arm.capture_pose(self.config, self.robot, name, body, self.joint_positions(), targets,
+                                    self.pose_args())
+        at = body.get('at') or self.nearest_placed(scope)
+        instance = self.config.object_instances().get(at)
+        if instance is None or instance.object != scope:
+            raise arm.ArmError(f'{at} is not a placed {scope}')
+        response = self.call(self.teach_client, TeachPoint.Request(name=f'{at}/{name}', kind='object_point',
+                                                                   tools=list(body.get('tools') or [])))
+        if not response.success:
+            raise arm.ArmError(response.message)
+        try:
+            return str(Path(response.file).relative_to(self.config.root))
+        except ValueError:
+            return response.file
+
+    def nearest_placed(self, object_type: str) -> str:
+        return arm.nearest_placed(self.config, object_type,
+                                  points.relative_poses(self.config, self.robot_pose())['relative'])
+
+    def test_position(self, scope: str, name: str, body: dict) -> dict:
+        if scope == arm.ROBOT:
+            return self.run_skill('move_to_pose', {'pose': name})
+        at = body.get('at') or self.nearest_placed(scope)
+        return self.run_skill('go_to_point', {'point': f'{at}/{name}'})
+
+    def send_joints(self, values: dict) -> dict:
+        """Joint targets straight to the robot (the HMI's joint panel): within the limits, no mission running."""
+        from taskweave_core.config.limits import joint_limits, joint_problems
+
+        self.check_idle()
+        if self.joint_command is None:
+            raise arm.ArmError('the robot profile has no joints.command topic')
+        try:
+            values = {str(k): float(v) for k, v in values.items()}
+        except (TypeError, ValueError):
+            raise arm.ArmError('joint values must be numbers') from None
+        current = self.joint_positions()
+        unknown = [joint for joint in values if joint not in current]
+        if unknown:
+            raise arm.ArmError(f'not in the joint states: {", ".join(unknown)}')
+        linear = set(self.config.robot(self.robot).data.get('joints', {}).get('linear', []))
+        problems = joint_problems(values, joint_limits(self.config, self.robot), linear)
+        if problems:
+            raise arm.ArmError('outside the joint limits: ' + '; '.join(problems))
+        self.joint_command.publish(JointState(name=list(values), position=list(values.values())))
+        return values
 
     def _episode(self, msg: String) -> None:
         event = json.loads(msg.data)
@@ -492,12 +583,38 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'POST' and route == ['points', 'drive']:
                 target = str(self._body()['target'])
                 return self._json(bridge.run_skill('navigate_to', {'target': target}, timeout_s=DRIVE_TIMEOUT_S))
+            if method == 'PUT' and route == ['robot', 'joints']:
+                return self._json({'sent': bridge.send_joints(self._body().get('joints') or {})})
+            if method == 'GET' and route == ['teach', 'arm']:
+                return self._json(arm.overview(bridge.config, bridge.robot, bridge.pose_args()))
+            if method == 'PUT' and route == ['teach', 'target']:
+                body = self._body()
+                target = {k: body.get(k) for k in ('scope', 'name', 'at', 'form')} if body.get('name') else None
+                bridge.set_teach_target(target)
+                return self._json({'target': target})
+            if len(route) >= 4 and route[:2] == ['teach', 'arm']:
+                scope, name = unquote(route[2]), unquote(route[3])
+                if len(route) == 4 and method in ('PUT', 'DELETE'):
+                    bridge.check_idle()
+                    if method == 'PUT':
+                        file = arm.save(bridge.config, bridge.robot, scope, name, self._body(), bridge.pose_args())
+                    else:
+                        file = arm.delete(bridge.config, bridge.robot, scope, name, bridge.pose_args())
+                    bridge.get_logger().info(f'HMI {"saved" if method == "PUT" else "deleted"} arm position '
+                                             f'{scope}/{name} -> {file}')
+                    return self._json({'file': file})
+                if len(route) == 5 and method == 'POST' and route[4] == 'capture':
+                    file = bridge.capture(scope, name, self._body())
+                    bridge.get_logger().info(f'HMI captured arm position {scope}/{name} -> {file}')
+                    return self._json({'file': file})
+                if len(route) == 5 and method == 'POST' and route[4] == 'test':
+                    return self._json(bridge.test_position(scope, name, self._body()))
             if method == 'POST' and route == ['robot', 'move']:
                 return self._json(bridge.run_skill('move_to_pose', {'pose': self._body()['pose']}))
             return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
         except missions.MissionError as error:
             return self._json({'problems': error.problems}, HTTPStatus.UNPROCESSABLE_ENTITY)
-        except (points.PointError, robot.RobotSettingsError) as error:
+        except (points.PointError, robot.RobotSettingsError, arm.ArmError) as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)
         except Busy as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.CONFLICT)

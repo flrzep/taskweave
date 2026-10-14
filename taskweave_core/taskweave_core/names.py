@@ -13,6 +13,8 @@ TEACH_POINT = f'{NAMESPACE}/teach_point'
 DESCRIBE_ROBOT = f'{NAMESPACE}/describe_robot'
 OPERATOR_MODE = f'{NAMESPACE}/operator_mode'  # pad mode: drive or a tool name (std_msgs/String, latched)
 OPERATOR_NOTICE = f'{NAMESPACE}/operator_notice'  # what a pad press did, for the HMI (String, JSON {text, ok})
+TEACH_TARGET = f'{NAMESPACE}/teach_target'  # the arm position open in the HMI (String, latched; JSON, '' = none)
+TEACH_REQUEST = f'{NAMESPACE}/teach_request'  # pad teach press for the HMI's target (String, JSON {tools})
 SKILL_ACTION_PREFIX = f'{NAMESPACE}/skills/'
 SKILL_SERVER_CATALOG_SUFFIX = '/list_skills'  # each skill server serves <node>/list_skills
 

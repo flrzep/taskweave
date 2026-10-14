@@ -246,3 +246,20 @@ details[open] summary { margin-bottom: 8px; }
 @property --breath { syntax: '<number>'; inherits: false; initial-value: 0; }
 @keyframes node-breathe { 0%, 100% { --breath: 0; } 50% { --breath: 1; } }
 @media (prefers-reduced-motion: reduce) { .plan-graph .state-running .node-box { animation: none; } }
+
+/* Teach tab (teach.js): arm positions grouped by what they are relative to; the open one is the pad's teach target */
+.arm-groups { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.arm-group { display: grid; gap: 6px; min-width: 0; }
+.arm-group select { width: auto; max-width: 220px; }
+.point.pad-target { box-shadow: inset 3px 0 0 var(--accent); }
+.joint-live { border-top: 1px solid var(--line); padding: 4px 0; }
+.joint-row { display: grid; grid-template-columns: minmax(70px, 1fr) minmax(60px, 2fr) 56px 36px 76px 36px; gap: 6px;
+  align-items: center; padding: 3px 0; font-size: 14px; }
+.joint-row input { padding: 4px 6px; min-height: 32px; }
+.joint-row .btn.small { padding: 0; min-height: 32px; }
+.joint-row .mono { text-align: right; }
+.limit-bar { position: relative; height: 6px; border-radius: 3px; background: var(--field); border: 1px solid var(--line); --at: 50%; }
+.limit-bar::after { content: ''; position: absolute; top: -4px; left: var(--at); width: 3px; height: 12px; margin-left: -1px;
+  border-radius: 1px; background: var(--accent); }
+.joint-row.near-limit .limit-bar::after { background: var(--bad); }
+.joint-row.near-limit .mono, .joint-row.near-limit .joint-name { color: var(--bad); }

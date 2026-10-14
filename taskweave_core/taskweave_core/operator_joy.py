@@ -38,7 +38,9 @@ read from operator.yaml at each press, so it can be changed while the system run
     joy:
       teach: {button: 10, point: bay_2_stack_1/rails_top}
 
-What a teach press did (saved, refused, failed) is published on names.OPERATOR_NOTICE for the HMI.
+When the HMI has an arm position open (names.TEACH_TARGET, latched), a teach press saves into that position instead:
+the press goes to the HMI on names.TEACH_REQUEST ({tools}) and the HMI captures and saves it; ``point`` is then not
+needed. What a teach press did (saved, refused, failed) is published on names.OPERATOR_NOTICE for the HMI.
 """
 
 from __future__ import annotations
@@ -94,11 +96,14 @@ class OperatorJoy(Node):
         self.teach_hold = config.get('teach', {}).get('hold_button', {**JOG_DEFAULTS, **config.get('jog', {})}['enable_button'])
         self.notice_pub = self.create_publisher(String, names.OPERATOR_NOTICE, 10)
         self.teach_client = self.create_client(TeachPoint, names.TEACH_POINT) if self.teach_button is not None else None
+        self.teach_target = ''  # the arm position open in the HMI (JSON), '' = none
+        self.teach_request_pub = self.create_publisher(String, names.TEACH_REQUEST, 10)
         self.actions = list(config.get('actions', []))
         self.skill_clients = {skill: ActionClient(self, RunSkill, names.skill_action(skill))
                               for skill in {a['skill'] for a in self.actions}}
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(TaskStatus, names.STATUS, self._status, latched)
+        self.create_subscription(String, names.TEACH_TARGET, self._teach_target, latched)
         self.create_subscription(Joy, config['topic'], self._joy, 10)
         manual = ', '.join(f'{a["button"]}={a["skill"]}' for a in self.actions) or 'none'
         self.get_logger().info(f'operator buttons on {config["topic"]}: {self.buttons}; manual actions: {manual}')
@@ -237,18 +242,25 @@ class OperatorJoy(Node):
         args = {k: v.replace('{arm}', self.mode) if isinstance(v, str) else v for k, v in action['arm_args'].items()}
         return {**action, 'args': {**action.get('args', {}), **args}}
 
+    def _teach_target(self, msg: String) -> None:
+        self.teach_target = msg.data
+
     def _teach(self) -> None:
         point = self.store.operator().get('joy', {}).get('teach', {}).get('point')
         if self.state in BUSY:
             self._notice('teach ignored: a mission is running or paused', False)
             return
+        tools = [] if self.mode == DRIVE else [self.mode]
+        if self.teach_target and self.teach_request_pub.get_subscription_count():
+            self.get_logger().info(f'teach into the HMI position {self.teach_target} ({", ".join(tools) or "all tools"})')
+            self.teach_request_pub.publish(String(data=json.dumps({'tools': tools})))
+            return
         if not point:
-            self._notice('teach: no joy.teach.point in operator.yaml', False)
+            self._notice('teach: open an arm position in the HMI (Teach) first', False)
             return
         if not self.teach_client.service_is_ready():
             self._notice('teach: teach node not available', False)
             return
-        tools = [] if self.mode == DRIVE else [self.mode]
         self.get_logger().info(f'teach {point} ({", ".join(tools) or "all tools"})')
         request = TeachPoint.Request(name=point, kind='object_point', tools=tools)
         self.teach_client.call_async(request).add_done_callback(self._taught)

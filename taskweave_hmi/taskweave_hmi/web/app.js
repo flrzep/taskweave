@@ -35,7 +35,8 @@ document.querySelectorAll('.tabs button').forEach((button) => button.addEventLis
   document.querySelectorAll('.view').forEach((view) => show(view, view.id === `view-${button.dataset.view}`));
   if (button.dataset.view === 'missions' && !state.editing) loadMissions();
   pointsVisible = button.dataset.view === 'points';
-  if (pointsVisible) { loadPoints(); refreshPose(); }
+  if (pointsVisible) { loadPoints(); loadArm(); refreshPose(); }  // teach.js: arm positions, joints
+  else if (teach.open) { teach.open = null; setTeachTarget(null); }  // the pad teaches only into an open position
   if (button.dataset.view === 'robot') loadRobot();  // robot.js
 }));
 
@@ -50,7 +51,7 @@ function connect() {
     else if (!state.snapshot) return;
     else if (type === 'status') state.snapshot.status = data;
     else if (type === 'pad_mode') state.snapshot.pad_mode = data;
-    else if (type === 'notice') { padNotice(data); return; }
+    else if (type === 'notice') { padNotice(data); if (data.taught) teachTaught(); return; }
     else if (type === 'plan') { if (state.snapshot.plan?.plan_id !== data.plan_id) state.snapshot.outcomes = {}; state.snapshot.plan = data; }
     else if (type === 'episode') {
       state.snapshot.outcomes[data.step_id] = data;
@@ -457,7 +458,7 @@ function stanceCard(obj, data) {
     text: `${i.name}  ${fmt(i.pose)}${Object.entries(i.stances).map(([n, p]) => `\n  stance ${n.split('/')[1]}: ${fmt(p)}`).join('')}`,
   })));
   placed.style.whiteSpace = 'pre-wrap';
-  // one object, three views: where the robot stands, where its hands go, where the objects are
+  // one object, two views: where the robot stands, where the objects are (its points: Arm positions, teach.js)
   const panes = {
     stances: el('div', { class: 'pane' },
       el('div', { class: 'row between' }, el('p', { class: 'muted small-text', text: `Robot ${data.robot}: base pose in the object's frame, so every ${obj.object} follows · ${data.files.stances}` }), addVariant),
@@ -465,14 +466,10 @@ function stanceCard(obj, data) {
       el('div', { class: 'sub', text: 'Per-object overrides' }),
       overrides,
       el('div', { class: 'row gap' }, overrideInstance, addOverride)),
-    points: el('div', { class: 'pane' },
-      el('p', { class: 'muted small-text', text: `Where the hands go on every ${obj.object}, in its own frame (x y z in m, roll pitch yaw in °). Teach a point with the pad (L3); fine-tune it, its straight approach and its elbow side here.` }),
-      obj.points.length ? el('ul', { class: 'points' }, obj.points.map((p) => objectPointItem(obj.object, p, data)))
-        : el('p', { class: 'muted small-text', text: `${obj.object} has no points yet. Jog the hands onto one and press L3 on the pad.` })),
     placed: el('div', { class: 'pane' },
       el('p', { class: 'muted small-text', text: `Placed ${obj.object} objects (from the cell layout, read-only) and the stances that result.` }), placed),
   };
-  const titles = { stances: 'Stances', points: `Grasp points (${obj.points.length})`, placed: `Placed (${obj.instances.length})` };
+  const titles = { stances: 'Stances', placed: `Placed (${obj.instances.length})` };
   state.objectPane = state.objectPane || {};
   const switcher = el('div', { class: 'segmented', role: 'group', 'aria-label': `${obj.object} view` });
   const select = (key) => {
@@ -490,53 +487,6 @@ function stanceCard(obj, data) {
   return el('div', { class: 'card' },
     el('div', { class: 'row between wrap' }, el('div', { class: 'label', text: obj.object }), switcher),
     ...Object.values(panes));
-}
-
-// A grasp point on an object type: straight approach and elbow side (empty = defaults), each tool's TCP pose.
-function objectPointItem(object, point, data) {
-  const elbowText = point.elbow ? `elbow ${point.elbow}` : 'elbow: robot default';
-  const approachText = point.approach_m != null ? `approach ${point.approach_m} m` : `approach ${data.approach_default} m (default)`;
-  const head = el('button', { class: 'point-head', 'aria-expanded': 'false' },
-    el('b', { text: point.name }), el('span', { class: 'mono', text: `${approachText} · ${elbowText}` }),
-    point.used_by.length ? el('span', { class: 'used', text: `used by ${point.used_by.join(', ')}` }) : '');
-  const approach = el('input', { type: 'number', step: '0.01', min: '0', max: '1', inputmode: 'decimal', placeholder: `default ${data.approach_default}` });
-  approach.value = point.approach_m ?? '';
-  const elbow = el('select', { 'aria-label': 'Elbow side' });
-  elbow.replaceChildren(el('option', { value: '', text: 'robot default' }), ...data.elbow_sides.map((s) => el('option', { value: s, text: s })));
-  elbow.value = point.elbow || '';
-  const toolInputs = {};
-  const tools = Object.entries(point.tools).map(([tool, pose]) => {
-    const field = (label, value) => {
-      const input = el('input', { type: 'number', step: 'any', inputmode: 'decimal', 'aria-label': `${tool} ${label}` });
-      input.value = String(value);
-      return [el('div', { class: 'field' }, el('label', { text: label }), input), input];
-    };
-    const xyz = ['x', 'y', 'z'].map((a, i) => field(`${a} (m)`, +pose.xyz[i].toFixed(4)));
-    const rpy = ['roll', 'pitch', 'yaw'].map((a, i) => field(`${a} (°)`, +(pose.rpy[i] * DEG).toFixed(2)));
-    toolInputs[tool] = { xyz: xyz.map(([, i]) => i), rpy: rpy.map(([, i]) => i) };
-    return el('details', {}, el('summary', { text: `${tool} hand  x y z ${pose.xyz.map((v) => v.toFixed(3)).join(' ')}` }),
-      el('div', { class: 'grid3' }, ...xyz.map(([f]) => f)), el('div', { class: 'grid3' }, ...rpy.map(([f]) => f)));
-  });
-  const msg = el('div', { class: 'msg', hidden: '' });
-  const save = el('button', { class: 'btn primary', text: 'Save', 'data-edit': '' });
-  save.addEventListener('click', async () => {
-    const body = { approach_m: approach.value === '' ? null : Number(approach.value), elbow: elbow.value || null, tools: {} };
-    Object.entries(toolInputs).forEach(([tool, inputs]) => {
-      body.tools[tool] = { xyz: inputs.xyz.map((i) => Number(i.value)), rpy: inputs.rpy.map((i) => Number(i.value) / DEG) };
-    });
-    const { ok, data: result } = await api('PUT', `/api/objects/${encodeURIComponent(object)}/points/${encodeURIComponent(point.name)}`, body);
-    if (!ok) { message(msg, (result.problems || [result.error || 'not saved']).join('\n'), true); return; }
-    message(msg, `Saved to ${result.file}. Used from the next go_to_point.`);
-    loadPoints();
-  });
-  const edit = el('div', { class: 'point-edit' },
-    el('div', { class: 'grid2' },
-      el('div', { class: 'field' }, el('label', { text: 'Straight approach (m)' }), approach),
-      el('div', { class: 'field' }, el('label', { text: 'Elbow side' }), elbow)),
-    ...tools, msg, el('div', { class: 'row gap' }, save));
-  edit.hidden = true;
-  head.addEventListener('click', () => { edit.hidden = !edit.hidden; head.setAttribute('aria-expanded', String(!edit.hidden)); });
-  return el('li', { class: 'point' }, head, edit);
 }
 
 // One editable point. address = ['location', name] or ['stance', scope, owner, variant]; the last element is the name.
