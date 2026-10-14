@@ -69,7 +69,12 @@ def test_the_teach_button_stores_the_jogged_tool_relative_to_the_object(system):
     send(buttons=(13,))  # left arm mode: teach only the left tool
     send()
     assert operator.mode == 'left'
-    send(buttons=(10,))
+    send(buttons=(10,))  # without L1 held: ignored, so a stray press stores nothing
+    time.sleep(0.5)
+    store.reload()
+    assert store.object_point('box', 'top_grasp')['left_tool'].xyz == (0.0, 0.1, 0.2)  # unchanged
+    send(buttons=(4,))
+    send(buttons=(4, 10))
     send()
     deadline = time.time() + 3.0
     while time.time() < deadline:

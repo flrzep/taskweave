@@ -334,7 +334,9 @@ OPERATOR = {
                        for k in ('speed', 'fast_speed', 'turn', 'fast_turn', 'elbow_turn', 'fast_elbow_turn')}}},
                 # teach object points from the pad (operator_joy.py): button + <instance>/<point>
                 'teach': {'type': 'object', 'required': ['button'], 'additionalProperties': False, 'properties': {
-                    'button': {'type': 'integer', 'minimum': 0}, 'point': {'type': 'string'}}},
+                    'button': {'type': 'integer', 'minimum': 0}, 'point': {'type': 'string'},
+                    # held together with button, so a stray press stores nothing (default: jog.enable_button)
+                    'hold_button': {'type': 'integer', 'minimum': 0}}},
                 'actions': {
                     'type': 'array',
                     'items': {

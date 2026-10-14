@@ -12,6 +12,7 @@ EPISODES = f'{NAMESPACE}/episodes'
 TEACH_POINT = f'{NAMESPACE}/teach_point'
 DESCRIBE_ROBOT = f'{NAMESPACE}/describe_robot'
 OPERATOR_MODE = f'{NAMESPACE}/operator_mode'  # pad mode: drive or a tool name (std_msgs/String, latched)
+OPERATOR_NOTICE = f'{NAMESPACE}/operator_notice'  # what a pad press did, for the HMI (String, JSON {text, ok})
 SKILL_ACTION_PREFIX = f'{NAMESPACE}/skills/'
 SKILL_SERVER_CATALOG_SUFFIX = '/list_skills'  # each skill server serves <node>/list_skills
 

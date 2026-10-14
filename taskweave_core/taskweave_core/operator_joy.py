@@ -30,12 +30,15 @@ with the right stick left/right while the TCP stays (``elbow_turn`` / ``fast_elb
 std_msgs/Float64 on ``<twist>/elbow``). Modes switch only while no mission runs; a starting mission puts the pad back to
 drive. The mode is published on names.OPERATOR_MODE. Tool links and the base frame come from the robot profile.
 
-Teaching object points (optional): jog the tools onto the object, then press the teach button. It stores the TCP
-of the tool being jogged (in drive mode: of every tool) as ``point`` (``<instance>/<point>``) through the teach
-node. ``point`` is read from operator.yaml at each press, so it can be changed while the system runs:
+Teaching object points (optional): jog the tools onto the object, then press the teach button while holding
+``hold_button`` (default: the jog enable button, L1), so a stray press stores nothing. It stores the TCP of the tool
+being jogged (in drive mode: of every tool) as ``point`` (``<instance>/<point>``) through the teach node. ``point`` is
+read from operator.yaml at each press, so it can be changed while the system runs:
 
     joy:
       teach: {button: 10, point: bay_2_stack_1/rails_top}
+
+What a teach press did (saved, refused, failed) is published on names.OPERATOR_NOTICE for the HMI.
 """
 
 from __future__ import annotations
@@ -88,6 +91,8 @@ class OperatorJoy(Node):
         services = (('pause', names.PAUSE), ('resume', names.RESUME), ('abort', names.ABORT))
         self.triggers = {name: self.create_client(Trigger, service) for name, service in services}
         self.teach_button = config.get('teach', {}).get('button')
+        self.teach_hold = config.get('teach', {}).get('hold_button', {**JOG_DEFAULTS, **config.get('jog', {})}['enable_button'])
+        self.notice_pub = self.create_publisher(String, names.OPERATOR_NOTICE, 10)
         self.teach_client = self.create_client(TeachPoint, names.TEACH_POINT) if self.teach_button is not None else None
         self.actions = list(config.get('actions', []))
         self.skill_clients = {skill: ActionClient(self, RunSkill, names.skill_action(skill))
@@ -215,7 +220,11 @@ class OperatorJoy(Node):
         if self.mode_pub is not None:
             self._modes(msg, buttons)
         if self._pressed(buttons, self.teach_button):
-            self._teach()
+            held = self.teach_hold is None or (self.teach_hold < len(buttons) and buttons[self.teach_hold])
+            if held:
+                self._teach()
+            else:
+                self._notice(f'teach ignored: hold button {self.teach_hold} (L1) while pressing it', False)
         for index, action in enumerate(self.actions):
             if self._pressed(buttons, action['button']):
                 self._run(index, self._for_mode(action))
@@ -231,13 +240,13 @@ class OperatorJoy(Node):
     def _teach(self) -> None:
         point = self.store.operator().get('joy', {}).get('teach', {}).get('point')
         if self.state in BUSY:
-            self.get_logger().warning('teach ignored: a mission is running or paused')
+            self._notice('teach ignored: a mission is running or paused', False)
             return
         if not point:
-            self.get_logger().warning('teach: no joy.teach.point in operator.yaml')
+            self._notice('teach: no joy.teach.point in operator.yaml', False)
             return
         if not self.teach_client.service_is_ready():
-            self.get_logger().warning('teach: teach node not available')
+            self._notice('teach: teach node not available', False)
             return
         tools = [] if self.mode == DRIVE else [self.mode]
         self.get_logger().info(f'teach {point} ({", ".join(tools) or "all tools"})')
@@ -247,9 +256,16 @@ class OperatorJoy(Node):
     def _taught(self, future) -> None:
         response = future.result()
         if response.success:
-            self.get_logger().info(f'taught {response.message} -> {response.file}')
+            self._notice(f'taught {response.message} -> {response.file}', True)
         else:
-            self.get_logger().warning(f'teach failed: {response.message}')
+            self._notice(f'teach failed: {response.message}', False)
+
+    def _notice(self, text: str, ok: bool) -> None:
+        if ok:  # one call site per severity: rclpy refuses to mix them
+            self.get_logger().info(text)
+        else:
+            self.get_logger().warning(text)
+        self.notice_pub.publish(String(data=json.dumps({'text': text, 'ok': ok})))
 
     def _call(self, command: str) -> None:
         client = self.triggers[command]

@@ -49,6 +49,7 @@ function connect() {
     else if (!state.snapshot) return;
     else if (type === 'status') state.snapshot.status = data;
     else if (type === 'pad_mode') state.snapshot.pad_mode = data;
+    else if (type === 'notice') { padNotice(data); return; }
     else if (type === 'plan') { if (state.snapshot.plan?.plan_id !== data.plan_id) state.snapshot.outcomes = {}; state.snapshot.plan = data; }
     else if (type === 'episode') {
       state.snapshot.outcomes[data.step_id] = data;
@@ -57,6 +58,16 @@ function connect() {
     }
     renderRun();
   };
+}
+
+let noticeTimer = null;
+function padNotice({ text, ok }) {  // what a pad press did (e.g. a taught point), shown for a while in the header
+  const node = $('pad-notice');
+  node.textContent = text; node.title = text;
+  node.classList.toggle('bad', !ok);
+  show(node, true);
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => show(node, false), 10000);
 }
 
 function renderRun() {

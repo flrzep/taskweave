@@ -62,7 +62,10 @@ h2 { margin: 0; font: 600 22px/1.25 var(--sans); letter-spacing: -.01em; text-wr
 .chip.paused { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
 .chip.succeeded { color: var(--ok); background: color-mix(in srgb, var(--ok) 13%, transparent); }
 .chip.failed, .chip.aborted { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
-.chip.pad { margin-left: auto; } .chip.pad.jog { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.chip.pad { margin-left: auto; }
+.pad-notice { margin-left: auto; font: 500 13px var(--cond); color: var(--ok); max-width: 45vw; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; } .pad-notice.bad { color: var(--bad); }
+.pad-notice:not([hidden]) + .chip.pad { margin-left: 10px; } .chip.pad.jog { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
 
 /* run status: the andon panel. A rail in the state colour, the state as the headline word */
 .card.status { --state: var(--idle); position: relative; padding-left: 26px; overflow: hidden; gap: 14px; }

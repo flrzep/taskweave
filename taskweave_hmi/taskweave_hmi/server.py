@@ -137,6 +137,7 @@ class Bridge(Node):
         self.create_subscription(String, names.EPISODES, self._episode, 50, callback_group=self.group)
         self.pad_mode = 'drive'
         self.create_subscription(String, names.OPERATOR_MODE, self._pad_mode, latched, callback_group=self.group)
+        self.create_subscription(String, names.OPERATOR_NOTICE, self._notice, 10, callback_group=self.group)
         self.start_client = self.create_client(StartMission, names.START_MISSION, callback_group=self.group)
         self.skills_client = self.create_client(ListSkills, names.LIST_SKILLS, callback_group=self.group)
         self.triggers = {cmd: self.create_client(Trigger, getattr(names, cmd.upper()), callback_group=self.group)
@@ -336,6 +337,9 @@ class Bridge(Node):
         with self.lock:
             self.pad_mode = msg.data
         self._broadcast('pad_mode', msg.data)
+
+    def _notice(self, msg: String) -> None:
+        self._broadcast('notice', json.loads(msg.data))
 
     def snapshot(self) -> dict:
         with self.lock:
