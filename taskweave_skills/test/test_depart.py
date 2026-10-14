@@ -42,3 +42,12 @@ def test_a_wall_behind_or_too_deep_an_overlap_is_refused():
         departure(grid_with((5.6, 3, 7, 7), (4.2, 3, 4.5, 7)), INFO, (5.0, 5.0, 0.0), BOX, 1.0, 0.1)
     with pytest.raises(ValueError, match='does not clear'):
         departure(grid_with((5.2, 3, 7, 7)), INFO, (5.0, 5.0, 0.0), BOX, 0.5, 0.1)
+
+
+def test_the_carry_envelope_counts_only_while_carrying():
+    navigation = {'envelope': {'front': 0.9, 'back': 0.3, 'left': 0.5, 'right': 0.6}, 'padding': 0.1,
+                  'carry_envelope': {'front': 1.4, 'back': 0.3, 'left': 0.5, 'right': 0.6}}
+    assert footprint_box(navigation, {}) == pytest.approx(BOX)
+    assert footprint_box(navigation, {}, carrying=True) == pytest.approx((1.5, 0.4, 0.6, 0.7))
+    del navigation['carry_envelope']
+    assert footprint_box(navigation, {}, carrying=True) == pytest.approx(BOX)

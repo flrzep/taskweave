@@ -10,6 +10,10 @@ Before the Nav2 goal: if the robot's footprint overlaps an obstacle on the map w
 envelope reaches into the bin the arms reach over), Nav2 would see it in collision and not move it at all. The robot
 then first backs straight out until the footprint is clear (depart.py), after checking the strip behind it is free.
 
+While the robot holds an object (hold.py) and navigation.yaml has a ``carry_envelope`` (the robot plus the carried
+object), the costmaps get that footprint for the drive and the departure check uses it; otherwise the envelope. With a carry
+envelope the footprint is set on every goal, so a costmap restart (clock_guard) cannot leave the wrong one.
+
 Parameters (``skills/navigate_to.yaml``): the direct controller's (see ``navigate.py``), plus
   action: navigate_to_pose      Nav2 NavigateToPose action
   frame: map                    frame of the goal pose
@@ -19,6 +23,7 @@ Parameters (``skills/navigate_to.yaml``): the direct controller's (see ``navigat
   depart_max_m: 1.0             back out at most this far (0: never)
   depart_margin_m: 0.1          beyond the point where the footprint comes clear
   depart_speed: 0.15            m/s backwards
+  costmaps: /global_costmap/global_costmap,/local_costmap/local_costmap   nodes whose footprint follows the hold
 """
 
 from __future__ import annotations
@@ -34,23 +39,22 @@ from taskweave_core.skill import SkillResult
 from .navigate import NavigateTo
 
 NAV2_DEFAULTS = {'action': 'navigate_to_pose', 'frame': 'map', 'server_timeout_s': 10.0, 'handover_distance': 0.3,
-                 'map_topic': '/map', 'depart_max_m': 1.0, 'depart_margin_m': 0.1, 'depart_speed': 0.15}
+                 'map_topic': '/map', 'depart_max_m': 1.0, 'depart_margin_m': 0.1, 'depart_speed': 0.15,
+                 'costmaps': '/global_costmap/global_costmap,/local_costmap/local_costmap'}
 POLL_S = 0.05
 NEUTRAL_PATH_ANGLE_WEIGHT = 2.0  # PathAngleCritic without a forward preference (follows the path, any heading)
 
 
-def nav2_parameters(navigation: dict, base: dict, controller: str = 'FollowPath') -> dict:
+def nav2_parameters(navigation: dict, base: dict, controller: str = 'FollowPath', carrying: bool = False) -> dict:
     """Nav2 parameters for robots/<robot>/navigation.yaml and the robot profile's base (no ROS needed).
 
     Returns {'costmap': {...}, 'controller': {...}, 'motion_model': str}: costmap values for both costmaps, MPPI values
     for the controller plugin ``controller`` (prefixed), and the MPPI motion model (set at start-up only). A base that
-    is not holonomic never drives sideways, whatever the settings say."""
-    if navigation.get('envelope'):
-        e = navigation['envelope']
-        front, back, left, right = e['front'], e['back'], e['left'], e['right']
-    else:  # the chassis footprint, centred on the base frame
-        length, width = base['footprint']
-        front, back, left, right = length / 2, length / 2, width / 2, width / 2
+    is not holonomic never drives sideways, whatever the settings say. ``carrying``: the footprint of the carry
+    envelope, if there is one."""
+    from .depart import envelope
+
+    front, back, left, right = envelope(navigation, base, carrying)
     polygon = [[front, left], [front, -right], [-back, -right], [-back, left]]
     costmap = {'footprint': str(polygon), 'footprint_padding': float(navigation.get('padding', 0.01))}
     if 'inflation_radius' in navigation:
@@ -95,6 +99,14 @@ class Nav2NavigateTo(NavigateTo):
         self.goal_lock = threading.Lock()
         self.remaining = math.nan
         self.map = None  # (grid, info) of the latest occupancy grid
+        from rcl_interfaces.srv import SetParameters
+
+        from .hold import HoldState
+        self.hold = HoldState.for_node(node, robot)
+        self.SetParameters = SetParameters
+        self.costmaps = {name: node.create_client(SetParameters, f'{name}/set_parameters',
+                                                  callback_group=ReentrantCallbackGroup())
+                         for name in filter(None, (n.strip() for n in self.nav['costmaps'].split(',')))}
         if self.nav['depart_max_m'] > 0:
             from nav_msgs.msg import OccupancyGrid
             from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
@@ -110,14 +122,39 @@ class Nav2NavigateTo(NavigateTo):
                                origin_y=msg.info.origin.position.y)
         self.map = (np.array(msg.data, dtype=np.int16).reshape(msg.info.height, msg.info.width), info)
 
-    def _depart(self, ctx) -> SkillResult | None:
+    def _carrying(self) -> bool:
+        return self.hold.held() is not None and bool(self.config.navigation(self.robot.name).get('carry_envelope'))
+
+    def _footprint(self, ctx, carrying: bool) -> SkillResult | None:
+        """Set the costmaps' footprint for this drive (carry envelope or envelope); a failure if a costmap refuses.
+        Without a carry envelope the footprint never changes from the one Nav2 was started with."""
+        from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+
+        navigation = self.config.navigation(self.robot.name)
+        if not navigation.get('carry_envelope'):
+            return None
+        footprint = nav2_parameters(navigation, self.base, carrying=carrying)['costmap']['footprint']
+        request = self.SetParameters.Request(parameters=[Parameter(name='footprint', value=ParameterValue(
+            type=ParameterType.PARAMETER_STRING, string_value=footprint))])
+        for name, client in self.costmaps.items():
+            if not client.wait_for_service(timeout_sec=self.nav['server_timeout_s']):
+                return SkillResult.failed(f'cannot set the footprint: {name} is not running')
+            future = client.call_async(request)
+            if not self._wait(ctx, future):
+                return ctx.interrupted()
+            failed = [r.reason for r in future.result().results if not r.successful]
+            if failed:
+                return SkillResult.failed(f'{name} refused the footprint: {"; ".join(failed)}')
+        return None
+
+    def _depart(self, ctx, carrying: bool = False) -> SkillResult | None:
         """Back straight out if the footprint overlaps an obstacle where the robot stands (see the module doc)."""
         from .depart import departure, footprint_box
 
         pose, grid = self._current(), self.map
         if self.nav['depart_max_m'] <= 0 or grid is None or pose is None:
             return None
-        box = footprint_box(self.config.navigation(self.robot.name), self.base)
+        box = footprint_box(self.config.navigation(self.robot.name), self.base, carrying)
         try:
             distance = departure(grid[0], grid[1], (pose.x, pose.y, pose.yaw), box, self.nav['depart_max_m'],
                                  self.nav['depart_margin_m'])
@@ -178,7 +215,13 @@ class Nav2NavigateTo(NavigateTo):
             return SkillResult.failed(f'no odometry on {self.base["odom"]}')
         if not self.client.wait_for_server(timeout_sec=self.nav['server_timeout_s']):
             return SkillResult.failed(f'Nav2 is not running (no {self.nav["action"]} action server)')
-        departed = self._depart(ctx)
+        carrying = self._carrying()
+        refused = self._footprint(ctx, carrying)
+        if refused is not None:
+            return refused
+        if carrying:
+            self.node.get_logger().info('navigate_to: carrying an object, using the carry envelope')
+        departed = self._depart(ctx, carrying)
         if departed is not None:
             return departed
         self.remaining = math.nan

@@ -126,3 +126,20 @@ def test_gripper_close_open_and_holding(system):
     data = json.loads(result.data_json)
     assert result.outcome == RunSkill.Result.SUCCEEDED and data['holding'] == {'left': True}
     assert data['world_state'] == {'left_gripper': 'holding'}
+
+
+def test_while_holding_a_pose_with_arm_joints_is_refused(system):
+    from taskweave_skills.hold import HoldState
+
+    sim, client = system
+    holds = list(HoldState._instances.values())  # the server's, and those of earlier tests' servers
+    for hold in holds:
+        hold.hold = {'object': 'box', 'point': 'box/top', 'tools': ['left'], 'object_in_base': None,
+                     'tcp_in_object': {}}
+    try:  # arm_bot has no ik section: every joint counts as an arm joint
+        result = run(client, 'move_to_pose', {'pose': 'ready'})
+    finally:
+        for hold in holds:
+            hold.hold = None
+    assert result.outcome == RunSkill.Result.REJECTED and 'holding box' in result.message
+    assert sim.position['j1'] == 0.0

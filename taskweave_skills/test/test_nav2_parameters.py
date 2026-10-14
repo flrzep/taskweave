@@ -36,3 +36,9 @@ def test_a_base_that_is_not_holonomic_never_drives_sideways():
     values = nav2_parameters(SETTINGS, {**BASE, 'type': 'differential'})
     assert values['controller']['FollowPath.vy_max'] == 0.0 and values['motion_model'] == 'DiffDrive'
     assert nav2_parameters({}, {**BASE, 'type': 'differential'})['controller']['FollowPath.vy_max'] == 0.0
+
+
+def test_carrying_uses_the_carry_envelope():
+    settings = {**SETTINGS, 'carry_envelope': {'front': 1.3, 'back': 0.3, 'left': 0.45, 'right': 0.4}}
+    assert nav2_parameters(settings, BASE, carrying=True)['costmap']['footprint'].startswith('[[1.3, 0.45]')
+    assert nav2_parameters(settings, BASE)['costmap']['footprint'].startswith('[[0.75, 0.45]')

@@ -189,7 +189,9 @@ class MoveToPose(_JointSkill):
     description = ('Move to a named pose of this robot (for example home or carry) and hold it. A pose is joint '
                    'values, or tool (TCP) targets in robot space solved by inverse kinematics. With a motion planner '
                    'the path avoids collisions with the robot itself and the planning scene; without one it is a '
-                   'straight joint-space move.')
+                   'straight joint-space move. While an object is held, only poses without arm joints or tool '
+                   'targets (for example a lift height) are allowed: the arms keep their joints and the object moves '
+                   'with them.')
     args_schema = {
         'type': 'object',
         'required': ['pose'],
@@ -214,16 +216,32 @@ class MoveToPose(_JointSkill):
             self.planner = MotionPlanner(node, robot)
 
     def execute(self, ctx, args):
-        refusal = self._holding_refusal()
-        if refusal is not None:
-            return refusal
         pose = self.config.named_pose(self.robot.name, args['pose'])
+        held = self.hold.held()
+        if held is not None and (pose['tools'] or self._arm_joints(pose['joints'])):
+            return self._holding_refusal()
         self.hold.reached_point(None, None, (), None)
         result, worst = self._reach(ctx, pose['joints'], pose['tools'], args['pose'])
         if result is not None:
             return result
+        if held is not None:  # the arms kept their joints: the object moved with them (e.g. the lift)
+            tool = held['tools'][0]
+            try:
+                tcp = self.hold.tcp_poses([tool])[tool]
+            except LookupError as error:
+                return SkillResult.failed(f'{args["pose"]} reached, but where is the held object now? {error}')
+            self.hold.moved(tcp @ np.linalg.inv(held['tcp_in_object'][tool]))
         return SkillResult.succeeded(f'at {args["pose"]} (max error {worst:.3f})',
                                      world_state={'arm_pose': args['pose']})
+
+    def _arm_joints(self, joints: dict) -> list[str]:
+        """The joints of ``joints`` that belong to a tool's arm (all of them if the profile has no ik section)."""
+        import re
+
+        if self.ik is None:
+            return list(joints)
+        patterns = [re.compile(self.ik.joint_pattern.format(tool=tool)) for tool in self.ik.groups]
+        return [name for name in joints if any(p.fullmatch(name) for p in patterns)]
 
     def _reach(self, ctx, joints: dict, tools: dict, label: str, fallback_joints=(), linear=False, flip=True):
         """Set ``joints`` and put each tool on its target (IK), along a planned path if there is a planner. If IK

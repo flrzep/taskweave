@@ -17,14 +17,19 @@ OCCUPIED = 50       # occupancy (0-100) from which a map cell counts as an obsta
 SAMPLE = 0.5        # footprint sample spacing, in map cells
 
 
-def footprint_box(navigation: dict, base: dict) -> tuple[float, float, float, float]:
+def envelope(navigation: dict, base: dict, carrying: bool = False) -> tuple[float, float, float, float]:
+    """(front, back, left, right) around the base frame, without padding: the navigation envelope, the carry envelope
+    while the robot carries an object (if there is one), else the chassis footprint centred on the base frame."""
+    e = (navigation.get('carry_envelope') if carrying else None) or navigation.get('envelope')
+    if e:
+        return e['front'], e['back'], e['left'], e['right']
+    length, width = base['footprint']
+    return length / 2, length / 2, width / 2, width / 2
+
+
+def footprint_box(navigation: dict, base: dict, carrying: bool = False) -> tuple[float, float, float, float]:
     """(front, back, left, right) around the base frame, padding included: the box Nav2 checks."""
-    if navigation.get('envelope'):
-        e = navigation['envelope']
-        front, back, left, right = e['front'], e['back'], e['left'], e['right']
-    else:
-        length, width = base['footprint']
-        front, back, left, right = length / 2, length / 2, width / 2, width / 2
+    front, back, left, right = envelope(navigation, base, carrying)
     pad = float(navigation.get('padding', 0.01))
     return front + pad, back + pad, left + pad, right + pad
 

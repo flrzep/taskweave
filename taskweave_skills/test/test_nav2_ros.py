@@ -58,6 +58,14 @@ class FakeNav2(Node):
         return result
 
 
+class FakeCostmap(Node):
+    """A costmap node: only its footprint parameter."""
+
+    def __init__(self, name: str):
+        super().__init__(name, namespace=name)
+        self.declare_parameter('footprint', '[]')
+
+
 @pytest.fixture
 def system(tmp_path):
     import shutil
@@ -65,21 +73,26 @@ def system(tmp_path):
     config = tmp_path / 'config'
     shutil.copytree(FIXTURE, config)
     (config / 'skills' / 'navigate_to.yaml').write_text(NAV2_CONFIG)
+    (config / 'robots' / 'omni_bot' / 'navigation.yaml').write_text(
+        'envelope: {front: 0.4, back: 0.3, left: 0.3, right: 0.3}\n'
+        'carry_envelope: {front: 1.2, back: 0.3, left: 0.4, right: 0.4}\n')
     rclpy.init()
     sim = BaseSim('omni', True)
     nav2 = FakeNav2(sim)
+    costmaps = [FakeCostmap('global_costmap'), FakeCostmap('local_costmap')]
     server = SkillServer(parameter_overrides=[
         Parameter('config_dir', value=str(config)), Parameter('robot', value='omni_bot'),
         Parameter('skills', value=['navigate_to'])])
     client = rclpy.create_node('test_client')
     executor = MultiThreadedExecutor(num_threads=8)
-    for node in (sim, nav2, server, client):
+    for node in (sim, nav2, server, client, *costmaps):
         executor.add_node(node)
     threading.Thread(target=executor.spin, daemon=True).start()
     time.sleep(0.3)
+    nav2.costmaps = costmaps
     yield sim, nav2, client
     executor.shutdown()
-    for node in (sim, nav2, server, client):
+    for node in (sim, nav2, server, client, *costmaps):
         node.destroy_node()
     rclpy.shutdown()
 
@@ -111,3 +124,11 @@ def test_nav2_failure_far_from_the_target_fails_with_the_reason(system):
     nav2.mode = 'abort'
     result = run(client, 'dock')
     assert result.outcome == RunSkill.Result.FAILED and 'Nav2 did not reach dock' in result.message
+
+
+def test_without_a_hold_the_costmaps_get_the_envelope(system):
+    _, nav2, client = system
+    result = run(client, 'dock')
+    assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
+    for costmap in nav2.costmaps:  # the carry envelope only while holding (hold.py)
+        assert costmap.get_parameter('footprint').value == '[[0.4, 0.3], [0.4, -0.3], [-0.3, -0.3], [-0.3, 0.3]]'

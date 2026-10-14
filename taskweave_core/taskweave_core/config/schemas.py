@@ -216,16 +216,18 @@ POINTS2D = {'type': 'object', 'additionalProperties': POSE2D, 'propertyNames': N
 # covers the robot in its driving pose (arms included), as distances from the base frame; padding and inflation as
 # in Nav2 (padding grows the envelope, inflation adds a cost gradient beyond it).
 POSITIVE = {'type': 'number', 'exclusiveMinimum': 0}
+ENVELOPE = {
+    'type': 'object',
+    'required': ['front', 'back', 'left', 'right'],
+    'properties': {side: POSITIVE for side in ('front', 'back', 'left', 'right')},
+    'additionalProperties': False,
+}
 NAVIGATION = {
     'type': 'object',
     'required': ['envelope'],
     'properties': {
-        'envelope': {
-            'type': 'object',
-            'required': ['front', 'back', 'left', 'right'],
-            'properties': {side: POSITIVE for side in ('front', 'back', 'left', 'right')},
-            'additionalProperties': False,
-        },
+        'envelope': ENVELOPE,
+        'carry_envelope': ENVELOPE,   # while the robot holds an object: the robot plus the object (navigate_to)
         'padding': {'type': 'number', 'minimum': 0},
         'inflation_radius': POSITIVE,
         # how the planner may drive: speed limits (m/s, rad/s), sideways only for a holonomic base (checked against
