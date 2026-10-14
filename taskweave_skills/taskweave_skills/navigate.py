@@ -138,7 +138,7 @@ class NavigateTo(Skill):
     def execute(self, ctx, args):
         if self.base['type'] == 'fixed':
             return SkillResult.rejected('robot base is fixed')
-        target = self.config.base_target(args['target'], self.robot.name)
+        target = self.config.base_target(args['target'], self.robot.name, self._current())
         if self._current() is None:
             return SkillResult.failed(f'no odometry on {self.base["odom"]}')
         return self._drive(ctx, target, args['target'])

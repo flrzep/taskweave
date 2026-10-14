@@ -20,6 +20,7 @@ from dataclasses import dataclass, fields
 import numpy as np
 from sensor_msgs.msg import JointState
 
+from taskweave_core.config import Pose2D
 from taskweave_core.skill import Skill, SkillResult
 
 
@@ -371,13 +372,16 @@ class GoToPoint(MoveToPose):
         if refusal is not None:
             return refusal
         try:
-            instance, point = self.config.instance_point(args['point'])
-        except KeyError as error:
-            return SkillResult.rejected(str(error.args[0]))
-        try:
             base_in_cell = self.hold.transform(self.cell_frame, self.robot.base['frame'])
         except LookupError as error:
             return SkillResult.failed(f'where is the robot? {error}')
+        # a symmetric object (e.g. a frame lying the other way round) is grasped from the robot's side
+        base = Pose2D(float(base_in_cell[0, 3]), float(base_in_cell[1, 3]),
+                      math.atan2(base_in_cell[1, 0], base_in_cell[0, 0]))
+        try:
+            instance, point = self.config.instance_point(args['point'], self.robot.name, base)
+        except KeyError as error:
+            return SkillResult.rejected(str(error.args[0]))
         offset = float(args.get('offset_m', 0.0))
         try:
             tools = point_targets(point, instance, base_in_cell, offset, args.get('tools'))

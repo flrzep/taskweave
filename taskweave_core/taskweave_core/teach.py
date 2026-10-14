@@ -86,7 +86,7 @@ class Teach(Node):
         try:
             poses = {tool: self.tcp_pose(tool) for tool in tools}
             note = f'taught {datetime.date.today().isoformat()}'
-            path, stored = self.config.save_object_point(request.name, poses, note)
+            path, stored = self.config.save_object_point(request.name, poses, note, self.robot.name, self.pose)
         except Exception as error:  # noqa: BLE001 - tf2 raises several types; the caller gets the message
             response.success, response.message = False, f'object point {request.name!r}: {error}'
             return response

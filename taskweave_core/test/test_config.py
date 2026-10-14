@@ -190,3 +190,36 @@ def test_teach_object_point_stores_tcps_relative_to_the_top_item(config_dir):
     assert store.object_point('box', 'new_point')['left_tool'].xyz == pytest.approx((0.0, 0.0, 0.1), abs=1e-4)
     with pytest.raises(ValueError, match='<instance>/<point>'):
         store.save_object_point('nowhere/top_grasp', {'left': ((0, 0, 0), down)})
+
+
+def turned_shelf(config_dir):
+    """shelf_c lies turned 180 deg; shelves are declared 180 deg symmetric (e.g. a frame in a front row)."""
+    (config_dir / 'objects' / 'shelf.yaml').write_text(
+        'name: shelf\nyaw_symmetry_deg: 180\n'
+        'points:\n  grip:\n    left_tool: {xyz: [0.0, 0.2, 0.5], rpy: [0.0, 0.0, 0.0]}\n')
+    with open(config_dir / 'cell' / 'objects.yaml', 'a') as f:
+        f.write('shelf_c: {object: shelf, frame: cell, x: 7.0, y: 1.0, yaw: 3.14159}\n')
+    return ConfigStore(config_dir)
+
+
+def test_symmetric_object_is_approached_from_the_robots_side(config_dir):
+    store = turned_shelf(config_dir)
+    as_placed = store.base_target('stance:shelf_c', 'demo_bot')        # no robot pose: the offset as placed
+    assert as_placed.y == pytest.approx(1.75)                          # behind the turned shelf
+    robot = Pose2D(7.0, -1.0, 0.0)                                     # in the aisle at y < 1
+    stance = store.base_target('stance:shelf_c', 'demo_bot', near=robot)
+    assert (stance.x, stance.y) == pytest.approx((7.0, 0.25))          # in front, like shelf_a
+    assert stance.yaw == pytest.approx(1.5708, abs=1e-4)
+    # an object type without symmetry (here: without an object file) stays as placed
+    crate = store.object_instances()['crate_1']
+    assert store.handling_instance(crate, 'demo_bot', robot) == crate
+
+
+def test_symmetric_object_point_and_teaching_use_the_robots_side(config_dir):
+    store = turned_shelf(config_dir)
+    robot = Pose2D(7.0, 0.25, 1.5708)
+    instance, _ = store.instance_point('shelf_c/grip', 'demo_bot', robot)
+    assert instance.pose.yaw == pytest.approx(0.0, abs=1e-4)           # handled like an unturned shelf
+    assert store.instance_point('shelf_c/grip')[0].pose.yaw == pytest.approx(3.14159)
+    _, offset = store.save_stance('shelf_c/front', Pose2D(7.0, 0.3, 1.5708), 'demo_bot', per_instance=True)
+    assert (offset.x, offset.y) == pytest.approx((0.0, -0.7), abs=1e-4)  # in the handled frame, not the turned one

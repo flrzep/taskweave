@@ -282,6 +282,9 @@ OBJECT = {
     'properties': {
         'name': NAME,
         'mesh': {'type': 'string'},
+        # the object is handled the same when turned by this angle about its vertical axis (e.g. 180: a frame lying
+        # the other way round is approached and grasped as if it lay the usual way); 360 / angle turns are equivalent
+        'yaw_symmetry_deg': {'enum': [90, 120, 180]},
         'points': {
             'type': 'object',
             'propertyNames': NAME,

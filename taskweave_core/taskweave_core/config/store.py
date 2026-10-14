@@ -17,8 +17,9 @@ Layout (all files YAML; files marked optional may be absent):
 from __future__ import annotations
 
 import json
+import math
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,7 @@ import yaml
 from jsonschema import Draft202012Validator
 
 from . import schemas
-from .poses import ObjectInstance, Pose2D, Pose3D
+from .poses import ObjectInstance, Pose2D, Pose3D, wrap_angle
 
 STANCE_PREFIX = 'stance:'
 LOCATION_PREFIX = 'location:'
@@ -195,6 +196,28 @@ class ConfigStore:
         return {name: Pose2D(float(v['x']), float(v['y']), float(v['yaw']), instance.object)
                 for name, v in variants.items()}
 
+    def handling_instance(self, instance: ObjectInstance, robot: str, near: Pose2D | None) -> ObjectInstance:
+        """The instance as the robot handles it. An object type with ``yaw_symmetry_deg`` is the same when turned
+        by that angle: of its equivalent turns, the one whose default stance is nearest to ``near`` (the robot's
+        base pose in the cell), so the robot works from its own side, e.g. a frame lying the other way round is
+        approached from the aisle and grasped without crossing the arms. Without ``near``, a symmetry or a stance
+        of the robot: the instance as placed."""
+        step = None if near is None else self._load(f'objects/{instance.object}.yaml', schemas.OBJECT, required=False,
+                                                    default={}).get('yaw_symmetry_deg')
+        offset = next(iter(self.stance_variants(robot, instance).values()), None) if step else None
+        if offset is None:
+            return instance
+        turns = [replace(instance, pose=Pose2D(instance.pose.x, instance.pose.y,
+                                               wrap_angle(instance.pose.yaw + math.radians(k * step)),
+                                               instance.pose.frame))
+                 for k in range(round(360 / step))]
+
+        def distance(turn: ObjectInstance) -> float:
+            stance = turn.pose.compose(offset)
+            return math.hypot(stance.x - near.x, stance.y - near.y)
+
+        return min(turns, key=distance)
+
     def stances(self, robot: str) -> dict[str, Pose2D]:
         """Every stance of the robot in the cell frame: ``<instance>`` (default variant), ``<instance>/<variant>``."""
         result = {}
@@ -215,13 +238,14 @@ class ConfigStore:
                                               f'{instance.name}{VARIANT_SEPARATOR}{variant}'))
         return names
 
-    def stance(self, reference: str, robot: str) -> Pose2D:
-        """Resolve ``<instance>[/<variant>]`` to a base pose in the cell frame: object pose * robot offset."""
+    def stance(self, reference: str, robot: str, near: Pose2D | None = None) -> Pose2D:
+        """Resolve ``<instance>[/<variant>]`` to a base pose in the cell frame: object pose * robot offset; the
+        object as handled from ``near`` (the robot's pose, see handling_instance)."""
         name, _, variant = reference.partition(VARIANT_SEPARATOR)
         instances = self.object_instances()
         if name not in instances:
             raise KeyError(f'unknown stance {reference!r}: no object {name!r} in cell/objects.yaml')
-        instance = instances[name]
+        instance = self.handling_instance(instances[name], robot, near)
         variants = self.stance_variants(robot, instance)
         if not variants:
             raise KeyError(f'unknown stance {reference!r}: robot {robot!r} has no stance for {instance.object!r} '
@@ -279,22 +303,24 @@ class ConfigStore:
         result.update({tool: Pose3D.from_dict(pose, obj) for tool, pose in entry.items()})
         return result
 
-    def instance_point(self, reference: str) -> tuple[ObjectInstance, dict]:
+    def instance_point(self, reference: str, robot: str | None = None,
+                       near: Pose2D | None = None) -> tuple[ObjectInstance, dict]:
         """Resolve ``<instance>/<point>``: a placed object (cell/objects.yaml) and a point of its type, as
-        object_point() returns it (tool poses relative to the object)."""
+        object_point() returns it (tool poses relative to the object). With ``robot`` and ``near`` (its base pose),
+        the instance as that robot handles it (handling_instance)."""
         name, _, point = reference.partition(VARIANT_SEPARATOR)
         instances = self.object_instances()
         if name not in instances or not point:
             raise KeyError(f'unknown object point {reference!r}: expected <instance>/<point>, instances in '
                            f'cell/objects.yaml: {", ".join(sorted(instances)) or "none"}')
-        instance = instances[name]
+        instance = instances[name] if robot is None else self.handling_instance(instances[name], robot, near)
         return instance, self.object_point(instance.object, point)
 
-    def base_target(self, reference: str, robot: str) -> Pose2D:
-        """Resolve a base target: ``stance:<instance>[/<variant>]`` (robot-specific, relative to an object),
-        ``location:<name>`` or a bare location name."""
+    def base_target(self, reference: str, robot: str, near: Pose2D | None = None) -> Pose2D:
+        """Resolve a base target: ``stance:<instance>[/<variant>]`` (robot-specific, relative to an object, handled
+        from ``near``: the robot's current pose), ``location:<name>`` or a bare location name."""
         if reference.startswith(STANCE_PREFIX):
-            return self.stance(reference[len(STANCE_PREFIX):], robot)
+            return self.stance(reference[len(STANCE_PREFIX):], robot, near)
         name = reference[len(LOCATION_PREFIX):] if reference.startswith(LOCATION_PREFIX) else reference
         locations = self.locations()
         if name not in locations:
@@ -323,17 +349,19 @@ class ConfigStore:
         instances = self.object_instances()
         if name not in instances:
             raise ValueError(f'no object {name!r} in cell/objects.yaml')
-        instance = instances[name]
+        instance = self.handling_instance(instances[name], robot, pose)  # a symmetric object: as the robot sees it
         variant = variant or next(iter(self.stance_variants(robot, instance)), 'default')
         self._check_name(variant)
         offset = pose.relative_to(instance.pose, instance.object)
         keys = ['instances', instance.name, variant] if per_instance else ['objects', instance.object, variant]
         return self.update_point(f'robots/{robot}/stances.yaml', keys, offset), offset
 
-    def save_object_point(self, reference: str, tool_poses: dict, note: str | None = None) -> tuple[Path, dict]:
+    def save_object_point(self, reference: str, tool_poses: dict, note: str | None = None, robot: str | None = None,
+                          near: Pose2D | None = None) -> tuple[Path, dict]:
         """Store tool TCP poses (cell frame: ``{tool: (position, quaternion xyzw)}``) as the point ``<point>`` of
-        ``<instance>``'s object type, relative to its top item. Other tools and the point's metadata are kept.
-        Returns the file and the stored ``{tool: Pose3D}``."""
+        ``<instance>``'s object type, relative to its top item (as ``robot`` at ``near`` handles it, see
+        handling_instance). Other tools and the point's metadata are kept. Returns the file and the stored
+        ``{tool: Pose3D}``."""
         from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
         name, _, point = reference.partition(VARIANT_SEPARATOR)
@@ -343,8 +371,8 @@ class ConfigStore:
         if not tool_poses:
             raise ValueError('no tool poses to store')
         self._check_name(point)
-        instance = instances[name]
-        stored = {tool: instance.relative_pose(*pose) for tool, pose in tool_poses.items()}
+        instance = instances[name] if robot is None else self.handling_instance(instances[name], robot, near)
+        stored ={tool: instance.relative_pose(*pose) for tool, pose in tool_poses.items()}
 
         def flow(values) -> CommentedSeq:
             seq = CommentedSeq(round(float(v), 4) + 0.0 for v in values)  # + 0.0: no "-0.0"
