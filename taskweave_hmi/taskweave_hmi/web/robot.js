@@ -178,9 +178,17 @@ function poseItem(pose, isNew = false) {
     reach[tool] = el('div', { class: 'reach' });
     return el('div', { class: 'joint-group' }, el('label', { text: `${tool} tool (IK)` }), ...rows, reach[tool]);
   });
+  // elbow side for the IK of this pose's tools (empty = the robot's, Arm solutions)
+  const elbowSelect = el('select', { 'aria-label': 'Elbow side' });
+  const sides = state.robotData.ik_choice?.elbow_sides || [];
+  elbowSelect.replaceChildren(el('option', { value: '', text: 'robot default' }), ...sides.map((s) => el('option', { value: s, text: s })));
+  elbowSelect.value = pose.elbow || '';
+  const elbowNode = toolNames.length && sides.length
+    ? el('div', { class: 'field' }, el('label', { text: 'Elbow side' }), elbowSelect) : '';
   const lifts = Object.keys(pose.joints).filter((joint) => linear.has(joint));
   const liftText = lifts.map((joint) => `${lifts.length > 1 ? joint : 'lift'} ${pose.joints[joint].toFixed(2)} m`);
-  const shape = toolNames.length ? `${toolNames.join(', ')} TCP` : `${Object.keys(pose.joints).length} joints`;
+  const shape = toolNames.length ? `${toolNames.join(', ')} TCP${pose.elbow ? ` · elbow ${pose.elbow}` : ''}`
+    : `${Object.keys(pose.joints).length} joints`;
   const head = el('button', { class: 'point-head', 'aria-expanded': String(isNew) },
     el('b', { text: pose.name || 'new pose' }),
     el('span', { class: 'mono', text: [...liftText, shape, Object.keys(groups).join(', ')].join(' · ') }),
@@ -196,7 +204,7 @@ function poseItem(pose, isNew = false) {
   let changed = isNew;  // Move here runs the saved pose, so it waits for a save after edits
   const markChanged = () => { changed = true; moveButton.disabled = true; moveButton.title = 'Save first'; };
   const edit = el('div', { class: 'point-edit' },
-    el('div', { class: 'field' }, el('label', { text: 'Name' }), nameInput), ...groupNodes, ...toolNodes,
+    el('div', { class: 'field' }, el('label', { text: 'Name' }), nameInput), ...groupNodes, ...toolNodes, elbowNode,
     el('div', { class: 'row gap' }, robotButton, moveButton), msg, el('div', { class: 'row gap' }, deleteButton, saveButton));
   edit.hidden = !isNew;
   edit.addEventListener('input', markChanged);
@@ -343,7 +351,7 @@ function poseItem(pose, isNew = false) {
       }
     }
     if (!Object.keys(values).length && !toolNames.length) { message(msg, 'Keep at least one group.', true); return; }
-    const body = toolNames.length ? { joints: values, tools } : { joints: values };
+    const body = toolNames.length ? { joints: values, tools, elbow: elbowSelect.value || null } : { joints: values };
     if (isNew) body.create = true; else if (name !== pose.name) body.rename = name;
     const { ok, data } = await api('PUT', `/api/robot/poses/${encodeURIComponent(isNew ? name : pose.name)}`, body);
     if (!ok) { message(msg, (data.problems || [data.error || 'not saved']).join('\n'), true); return; }

@@ -228,7 +228,7 @@ class MoveToPose(_JointSkill):
         if held is not None and (pose['tools'] or self._arm_joints(pose['joints'])):
             return self._holding_refusal()
         self.hold.reached_point(None, None, (), None)
-        result, worst = self._reach(ctx, pose['joints'], pose['tools'], args['pose'])
+        result, worst = self._reach(ctx, pose['joints'], pose['tools'], args['pose'], elbow=pose.get('elbow'))
         if result is not None:
             return result
         if held is not None:  # the arms kept their joints: the object moved with them (e.g. the lift)

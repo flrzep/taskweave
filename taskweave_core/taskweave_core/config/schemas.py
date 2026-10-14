@@ -202,6 +202,7 @@ TOOL_POSE = {
     'properties': {
         'joints': {'type': 'object', 'additionalProperties': FINITE},
         'tools': {'type': 'object', 'propertyNames': NAME, 'minProperties': 1, 'additionalProperties': TOOL_TARGET},
+        'elbow': {'enum': ELBOW_SIDES},   # preferred elbow side for this pose (else the profile's ik.choose.elbow)
     },
     'additionalProperties': False,
 }

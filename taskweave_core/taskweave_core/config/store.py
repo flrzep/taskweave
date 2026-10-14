@@ -261,16 +261,17 @@ class ConfigStore:
         return self._load(f'robots/{robot}/poses.yaml', schemas.JOINT_POSES, required=False, default={})
 
     def named_pose(self, robot: str, name: str) -> dict:
-        """A named pose as ``{'joints': {joint: value}, 'tools': {tool: {tcp, approach, closing}}}``. Joints are set
-        directly; tool targets (TCP in the base frame) are solved by IK when the pose is used. A joint-space pose
-        has no tools."""
+        """A named pose as ``{'joints': {joint: value}, 'tools': {tool: {tcp, approach, closing}}, 'elbow': side}``.
+        Joints are set directly; tool targets (TCP in the base frame) are solved by IK when the pose is used, with the
+        pose's elbow side if it has one (None: the profile's). A joint-space pose has no tools."""
         poses = self.joint_poses(robot)
         if name not in poses:
             raise KeyError(f'unknown pose {name!r} for robot {robot!r}')
         entry = poses[name]
         if 'tools' in entry:
-            return {'joints': {j: float(v) for j, v in entry.get('joints', {}).items()}, 'tools': dict(entry['tools'])}
-        return {'joints': {j: float(v) for j, v in entry.items()}, 'tools': {}}
+            return {'joints': {j: float(v) for j, v in entry.get('joints', {}).items()}, 'tools': dict(entry['tools']),
+                    'elbow': entry.get('elbow')}
+        return {'joints': {j: float(v) for j, v in entry.items()}, 'tools': {}, 'elbow': None}
 
     def joint_pose(self, robot: str, name: str) -> dict[str, float]:
         """A joint-space pose; a pose given as tool targets has no fixed joint values (use named_pose)."""
@@ -518,9 +519,10 @@ class ConfigStore:
         return self.set_named_pose(robot, name, values, rename=rename, note=note)
 
     def set_named_pose(self, robot: str, name: str, joints: dict[str, float] | None = None, tools: dict | None = None,
-                       rename: str | None = None, note: str | None = None) -> Path:
+                       rename: str | None = None, note: str | None = None, elbow: str | None = None) -> Path:
         """Set and/or rename a named pose in robots/<robot>/poses.yaml. Without ``tools`` it is a joint map on one line;
-        with ``tools`` ({tool: {tcp, approach, closing}}) it is written as joints + tool targets, one line each.
+        with ``tools`` ({tool: {tcp, approach, closing}}) it is written as joints + tool targets, one line each, and
+        ``elbow`` (preferred elbow side; None: the profile's).
         ``note`` replaces the entry's end-of-line comment (e.g. an outdated IK error)."""
         from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
@@ -550,6 +552,8 @@ class ConfigStore:
                 entry = CommentedMap(joints=flow(joints or {}), tools=CommentedMap(
                     (tool, flow({key: target[key] for key in ('tcp', 'approach', 'closing')}))
                     for tool, target in tools.items()))
+                if elbow:
+                    entry['elbow'] = elbow
                 document[name] = entry
             elif joints is not None:
                 document[name] = flow(joints)

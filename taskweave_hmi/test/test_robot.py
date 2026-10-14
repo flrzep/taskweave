@@ -138,3 +138,17 @@ def test_the_ik_choice_is_shown_with_defaults_and_saved(store):
         robot.save_ik_choice(store, ROBOT, {'elbow': 'sideways'})
     with pytest.raises(robot.RobotSettingsError, match='outside'):
         robot.save_ik_choice(store, ROBOT, {'limit_margin_deg': 120})
+
+
+def test_a_tool_pose_keeps_its_elbow_side(store):
+    args = robot.pose_args(CATALOG)
+    profile = store.root / 'robots' / ROBOT / 'profile.yaml'
+    profile.write_text(profile.read_text() + "ik: {groups: {left: left_arm}, joints: '{tool}_joint[1-7]'}\n")
+    target = {'tcp': [0.7, 0.1, 0.5], 'approach': [0, 0, -1], 'closing': [1, 0, 0]}
+    robot.save_pose(store, ROBOT, 'reach', {'joints': {'lift': 0.3}, 'tools': {'left': target}, 'elbow': 'down'}, args)
+    assert store.named_pose(ROBOT, 'reach')['elbow'] == 'down'
+    assert {p['name']: p for p in robot.overview(store, ROBOT, args)['poses']}['reach']['elbow'] == 'down'
+    robot.save_pose(store, ROBOT, 'reach', {'joints': {'lift': 0.3}, 'tools': {'left': target}}, args)
+    assert store.named_pose(ROBOT, 'reach')['elbow'] is None                        # back to the robot default
+    with pytest.raises(robot.RobotSettingsError, match='elbow'):
+        robot.save_pose(store, ROBOT, 'reach', {'tools': {'left': target}, 'elbow': 'sideways'}, args)

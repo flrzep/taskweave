@@ -165,6 +165,9 @@ def save_pose(store: ConfigStore, robot: str, name: str, body: Mapping, args: se
     if rename == name:
         rename = None
     joints = _check_values(body.get('joints') or {}, allow_empty=bool(body.get('tools')))
+    elbow = body.get('elbow') or None
+    if elbow not in (None, *schemas.ELBOW_SIDES):
+        raise RobotSettingsError(f'elbow: one of {", ".join(schemas.ELBOW_SIDES)} or the robot default')
     linear = set(store.robot(robot).data.get('joints', {}).get('linear', []))
     problems = joint_problems(joints, joint_limits(store, robot), linear)
     if problems:
@@ -178,7 +181,7 @@ def save_pose(store: ConfigStore, robot: str, name: str, body: Mapping, args: se
         if tools:
             allowed = list(store.robot(robot).data.get('ik', {}).get('groups', {}))
             path = store.set_named_pose(robot, name, joints,
-                                        _check_tools(tools, allowed), rename=rename, note=HMI_NOTE)
+                                        _check_tools(tools, allowed), rename=rename, note=HMI_NOTE, elbow=elbow)
         else:
             path = store.set_named_pose(robot, name, joints, rename=rename, note=HMI_NOTE)
     except ValueError as error:
