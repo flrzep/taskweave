@@ -4,15 +4,18 @@
 
 Per IK tool of the robot profile it takes geometry_msgs/TwistStamped on /taskweave/jog/<tool>: the flange's velocity
 in the base frame (operator_joy turns pad sticks into it). While commands keep coming, it integrates a flange target
-at ``rate_hz`` (sim time), solves each step by one local IK descent from the current joints (the profile's ik
-section: same solver, joint limits and collision checks as named poses), and sends the arm's joints as position
-targets on joints.command. A step without a solution (a joint limit, a collision, out of reach) is not taken: the
-arm stops there and the reason is logged. Silent when no commands come, so it never competes with skills. A tool
-that holds an object (/taskweave/holding) is not jogged.
+at ``rate_hz`` (sim time) and sends the arm's joints as position targets on joints.command. Each step is one damped
+least-squares step on the arm's Jacobian from the robot's URDF (``robots/<robot>/moveit/robot.urdf``, chain.py): near
+a singularity the hand slows down instead of stopping, and a joint that reaches its limit is held there while the
+other joints carry on (the HMI hears which, on the operator notice topic). A step MoveIt finds in collision
+(/check_state_validity) is not taken. Without the URDF, each step is one local IK descent through MoveIt instead.
+Silent when no commands come, so it never competes with skills. A tool that holds an object (/taskweave/holding) is
+not jogged.
 
-Elbow: std_msgs/Float64 on /taskweave/jog/<tool>/elbow (rad/s) swings the elbow while the flange stays: each step turns
-the swivel joint (profile ik.swivel_joint, default the arm's third joint, the upper-arm roll of a 7-joint arm) by
-rate * dt and lets one IK descent from there put the flange back on its pose.
+Elbow: std_msgs/Float64 on /taskweave/jog/<tool>/elbow (rad/s) swings the elbow while the flange stays: the joints move
+along the arm's self-motion (the Jacobian's null space; a 7-joint arm has one), at about that rate, and the step keeps
+correcting the flange onto where it was. Without the URDF: the swivel joint (profile ik.swivel_joint, default the
+arm's third joint) turns and one IK descent puts the flange back.
 """
 
 from __future__ import annotations
@@ -56,7 +59,8 @@ class TcpJog(Node):
         super().__init__(kwargs.pop('node_name', 'tcp_jog'), **kwargs)
         for name, default in (('config_dir', ''), ('robot', ''), ('rate_hz', 20.0)):
             self.declare_parameter(name, default)
-        profile = ConfigStore(self.get_parameter('config_dir').value).robot(self.get_parameter('robot').value)
+        store = ConfigStore(self.get_parameter('config_dir').value)
+        profile = store.robot(self.get_parameter('robot').value)
         self.tools = {}
         if not profile.data.get('ik'):
             self.get_logger().info('no ik section in the robot profile: TCP jogging off')
@@ -87,6 +91,7 @@ class TcpJog(Node):
                                     'swivel': profile.data['ik'].get('swivel_joint', '').format(tool=tool) or None}
                 self.create_subscription(TwistStamped, f'{NAMESPACE}/{tool}', lambda m, t=tool: self._twist(t, m), 10)
                 self.create_subscription(Float64, f'{NAMESPACE}/{tool}/elbow', lambda m, t=tool: self._elbow(t, m), 10)
+        self._setup_chains(store, profile)
         self.held_tools: set = set()  # tools holding an object (taskweave_skills.hold): jogging one would pull it apart
         from rclpy.qos import DurabilityPolicy, QoSProfile
         from std_msgs.msg import String
@@ -98,6 +103,83 @@ class TcpJog(Node):
         self.create_timer(1.0 / float(self.get_parameter('rate_hz').value), self._step,
                           callback_group=MutuallyExclusiveCallbackGroup())
         self.get_logger().info(f'TCP jog for {", ".join(self.tools)} on {NAMESPACE}/<tool> -> {joints["command"]}')
+
+    def _setup_chains(self, store, profile) -> None:
+        """Velocity-level jogging from the URDF (chain.py), plus MoveIt's state validity check for collisions."""
+        from moveit_msgs.srv import GetStateValidity
+        from std_msgs.msg import String
+
+        from taskweave_core import names
+        from taskweave_core.config.limits import URDF, joint_limits
+
+        from .chain import Chain
+
+        self.String = String
+        self.notice = self.create_publisher(String, names.OPERATOR_NOTICE, 10)
+        self.limits = joint_limits(store, profile.name)
+        self.validity = self.create_client(GetStateValidity, '/check_state_validity')
+        path = store.root / URDF.format(robot=profile.name)
+        for tool, jog in self.tools.items():
+            jog['chain'], jog['names'], jog['held'], jog['null'] = None, [], '', None
+            if not path.is_file():
+                continue
+            try:
+                chain = Chain.from_urdf(path, self.base, self.ik.tools[tool]['link'])
+            except (ValueError, OSError) as error:
+                self.get_logger().warning(f'jog {tool}: no URDF chain ({error}); jogging through IK')
+                continue
+            jog['chain'] = chain
+            jog['names'] = [name for name in chain.movable if jog['joints'].fullmatch(name)]
+        if any(jog['chain'] for jog in self.tools.values()):
+            self.get_logger().info(f'jog: velocity steps on the URDF chain ({path.name})')
+
+    def _valid(self, group: str, joints: dict) -> bool:
+        """MoveIt's collision check of the arm at ``joints``; True when the service is not there (nothing to ask)."""
+        from moveit_msgs.msg import RobotState
+        from moveit_msgs.srv import GetStateValidity
+
+        if not self.validity.service_is_ready():
+            return True
+        request = GetStateValidity.Request(group_name=group, robot_state=RobotState(
+            joint_state=self.JointState(name=list(joints), position=list(joints.values())), is_diff=True))
+        future = self.validity.call_async(request)
+        deadline = time.monotonic() + 0.1
+        while not future.done() and time.monotonic() < deadline:
+            time.sleep(0.002)
+        return not future.done() or future.result().valid  # too slow: do not block jogging on it
+
+    def _held_notice(self, tool: str, jog: dict, held: str) -> None:
+        """Tell the operator (HMI header) once when a joint starts holding at its limit."""
+        if held and held != jog['held']:
+            text = f'jog {tool}: {held} at its limit, the other joints carry on'
+            self.get_logger().info(text)
+            self.notice.publish(self.String(data=__import__('json').dumps({'text': text, 'ok': False})))
+        jog['held'] = held
+
+    def _chain_step(self, tool: str, jog: dict, target: np.ndarray, null: np.ndarray | None = None) -> bool:
+        """One velocity step toward ``target`` (flange, base frame) on the URDF chain; False if not taken."""
+        from .chain import pose_error
+
+        with self.lock:
+            positions = dict(self.positions)
+        if any(name not in positions for name in jog['names']):
+            return False
+        joints, held = jog['chain'].solve_step(positions, target, jog['names'], self.limits, null=null)
+        self._held_notice(tool, jog, held)
+        if not self._valid(self.ik.groups[tool], joints):
+            if not jog['blocked']:
+                self.get_logger().warning(f'jog {tool}: stopped (the next step is in collision)')
+                self.notice.publish(self.String(data=__import__('json').dumps(
+                    {'text': f'jog {tool}: stopped, the next step is in collision', 'ok': False})))
+            jog['blocked'] = True
+            return False
+        reached = jog['chain'].fk({**positions, **joints})
+        # where the hand could not follow (a limit, out of reach), the target stays with the hand instead of running off
+        error = pose_error(target, reached)
+        jog['target'] = target if np.linalg.norm(error[:3]) < 0.005 and np.linalg.norm(error[3:]) < 0.02 else reached
+        jog['blocked'] = False
+        self.command.publish(self.JointState(name=list(joints), position=list(joints.values())))
+        return True
 
     def _holding(self, msg) -> None:
         import json
@@ -141,6 +223,8 @@ class TcpJog(Node):
             if abs(elbow) > 1e-9:
                 self._swing(tool, jog, current, elbow * dt)
                 continue
+            if abs(elbow) <= 1e-9:
+                jog['null'] = None
             if not fresh or twist is None or not any(abs(v) > 1e-9 for part in twist for v in part):
                 jog['target'], jog['blocked'] = None, False  # the next jog starts from where the arm is
                 continue
@@ -155,6 +239,9 @@ class TcpJog(Node):
                 if jog['target'] is None:
                     continue
             target = integrate(jog['target'], twist[0], twist[1], dt)
+            if jog.get('chain') is not None:  # IK fallback without a URDF chain
+                self._chain_step(tool, jog, target)
+                continue
             joints = self.ik.step(tool, target, current)
             if joints is None:
                 if not jog['blocked']:
@@ -176,6 +263,21 @@ class TcpJog(Node):
             jog['target'] = self._flange(tool)
             if jog['target'] is None:
                 return
+        if jog.get('chain') is not None:  # IK fallback without a URDF chain
+            with self.lock:
+                positions = dict(self.positions)
+            if any(name not in positions for name in jog['names']):
+                return
+            direction = jog['chain'].null_direction(positions, jog['names'])
+            # the self-motion has no sign of its own: positive turns the swivel joint up, and it keeps its way
+            index = jog['names'].index(swivel) if swivel in jog['names'] else 0
+            if abs(direction[index]) > 0.1:
+                direction = direction * np.sign(direction[index])
+            elif jog['null'] is not None and direction @ jog['null'] < 0:
+                direction = -direction
+            jog['null'] = direction
+            self._chain_step(tool, jog, jog['target'], null=direction * angle)
+            return
         joints = self.ik.step(tool, jog['target'], {**current, swivel: current[swivel] + angle})
         if joints is None:
             if not jog['blocked']:
