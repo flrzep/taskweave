@@ -164,7 +164,13 @@ class Bridge(Node):
         message = json.dumps({'type': kind, 'data': data})
         with self.lock:
             for listener in list(self.listeners):
-                listener.put(message)
+                try:
+                    listener.put_nowait(message)
+                except queue.Full:  # a client that stopped reading (e.g. a background tab): blocking here would
+                    self.listeners.remove(listener)  # hold the lock for good; end its stream, EventSource reconnects
+                    with listener.mutex:
+                        listener.queue.clear()
+                    listener.put_nowait(None)
 
     def _status(self, msg: TaskStatus) -> None:
         status = status_dict(msg)
@@ -500,6 +506,8 @@ class Handler(BaseHTTPRequestHandler):
             while True:
                 try:
                     message = listener.get(timeout=15)
+                    if message is None:  # dropped by _broadcast: this client fell too far behind
+                        break
                     self.wfile.write(f'data: {message}\n\n'.encode())
                 except queue.Empty:
                     self.wfile.write(b': keep-alive\n\n')
@@ -508,7 +516,8 @@ class Handler(BaseHTTPRequestHandler):
             pass
         finally:
             with self.bridge.lock:
-                self.bridge.listeners.remove(listener)
+                if listener in self.bridge.listeners:
+                    self.bridge.listeners.remove(listener)
 
     def do_GET(self):  # noqa: N802 - http.server API
         self._route('GET')
