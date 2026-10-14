@@ -497,8 +497,6 @@ class MoveObject(GoToPoint):
         obj = hold['object_in_base']
         if 'pose' in args:
             return self._held_pose(ctx, hold, args['pose'])
-        if 'at' in args:
-            args = {**args, 'by': [float(a) - float(o) for a, o in zip(args['at'], obj[:3, 3], strict=True)]}
         if 'to' in args:
             moved = self._onto(hold, args)
             if isinstance(moved, SkillResult):
@@ -506,18 +504,10 @@ class MoveObject(GoToPoint):
             label = f'{hold["object"]} {args["contact"]} to {args["to"]}' + \
                 (f' (-{args["offset_m"]:g} m)' if args.get('offset_m') else '')
         else:
-            turn = math.radians(float(args.get('turn_deg', 0.0)))
-            tilt = -math.radians(float(args.get('tilt_deg', 0.0)))  # about +y a positive angle lowers the far side
-            c, s = math.cos(turn), math.sin(turn)
-            ct, st = math.cos(tilt), math.sin(tilt)
-            rotate = np.eye(4)
-            rotate[:3, :3] = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]]) @ np.array([[ct, 0, st], [0, 1, 0],
-                                                                                     [-st, 0, ct]])
-            pivot, back = np.eye(4), np.eye(4)
-            pivot[:3, 3], back[:3, 3] = obj[:3, 3], -obj[:3, 3]
-            shift = np.eye(4)
-            shift[:3, 3] = [float(v) for v in args['by']]
-            moved = shift @ pivot @ rotate @ back @ obj
+            from .points import moved_object
+
+            moved = moved_object(obj, args.get('by'), args.get('at'), float(args.get('turn_deg', 0.0)),
+                                 float(args.get('tilt_deg', 0.0)))
             label = f'{hold["object"]} ' + (f'to {args["at"]}' if 'at' in args else
                                             f'by {[round(float(v), 3) for v in args["by"]]}') + \
                 (f', {args["turn_deg"]:g} deg' if args.get('turn_deg') else '') + \

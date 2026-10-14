@@ -59,3 +59,18 @@ def onto_pose(target, target_contact, held_contact, base_in_cell: np.ndarray, of
     back[2, 3] = -offset_m
     at = instance_matrix(target) @ rpy_matrix(target_contact.xyz, target_contact.rpy) @ back  # cell frame
     return np.linalg.inv(base_in_cell) @ at @ np.linalg.inv(rpy_matrix(held_contact.xyz, held_contact.rpy))
+
+
+def moved_object(obj: np.ndarray, by=None, at=None, turn_deg: float = 0.0, tilt_deg: float = 0.0) -> np.ndarray:
+    """A held object's pose (4x4, base frame) after move_object: turned about the vertical through its origin by
+    ``turn_deg``, tilted about the base's y axis through it by ``tilt_deg`` (far side up), then shifted ``by`` [x, y, z]
+    or so that its origin lands ``at`` [x, y, z]."""
+    turn, tilt = math.radians(turn_deg), -math.radians(tilt_deg)  # about +y a positive angle lowers the far side
+    c, s, ct, st = math.cos(turn), math.sin(turn), math.cos(tilt), math.sin(tilt)
+    rotate = np.eye(4)
+    rotate[:3, :3] = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]]) @ np.array([[ct, 0, st], [0, 1, 0], [-st, 0, ct]])
+    pivot, back = np.eye(4), np.eye(4)
+    pivot[:3, 3], back[:3, 3] = obj[:3, 3], -obj[:3, 3]
+    shift = np.eye(4)
+    shift[:3, 3] = (np.array(at, dtype=float) - obj[:3, 3]) if at is not None else np.array(by or (0, 0, 0), dtype=float)
+    return shift @ pivot @ rotate @ back @ obj

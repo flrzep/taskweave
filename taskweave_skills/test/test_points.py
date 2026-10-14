@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from taskweave_core.config.poses import ObjectInstance, Pose2D, Pose3D
-from taskweave_skills.points import onto_pose, point_targets
+from taskweave_skills.points import moved_object, onto_pose, point_targets
 
 DOWN = (0.0, math.pi, 0.0)  # canonical TCP pointing down: approach = -z, closing = +y
 
@@ -73,3 +73,14 @@ def test_a_held_frame_goes_onto_a_hook_hook_end_up():
     assert frame[:3, 2] == pytest.approx([-1, 0, 0], abs=1e-9)                 # grasped side faces the robot
     plate_in_base = frame @ np.array([0.3, 0.0, 0.065, 1.0])
     assert plate_in_base[:3] == pytest.approx([0.89, 0.0, 1.15 + 0.1 - 0.583])  # 10 cm above the hook
+
+
+def test_moving_a_held_object():
+    frame = base_at(0.85, 0.0, 0.1, 0.0)
+    assert moved_object(frame, by=[0, 0, 0.3])[:3, 3] == pytest.approx([0.85, 0, 0.4])
+    at = moved_object(frame, at=[1.0, 0.0, 0.3])
+    assert at[:3, 3] == pytest.approx([1.0, 0, 0.3]) and at[:3, :3] == pytest.approx(np.eye(3))  # orientation kept
+    up = moved_object(frame, tilt_deg=90)
+    assert up[:3, 0] == pytest.approx([0, 0, 1], abs=1e-9) and up[:3, 3] == pytest.approx([0.85, 0, 0.1])  # far end up
+    turned = moved_object(frame, turn_deg=90, by=[0.1, 0, 0])
+    assert turned[:3, 0] == pytest.approx([0, 1, 0], abs=1e-9) and turned[:3, 3] == pytest.approx([0.95, 0, 0.1])
