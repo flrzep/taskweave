@@ -116,7 +116,7 @@ def overview(store: ConfigStore, robot: str) -> dict:
             })
         objects.append({
             'object': object_type,
-            'points': object_points(store, object_type, used),
+            'points': object_points(store, object_type, used, robot),
             'variants': [{'variant': v, 'offset': pose_dict(Pose2D.from_dict(p)),
                           'used_by': used.get(('objects', object_type, v), [])} for v, p in variants.items()],
             'instances': placed,
@@ -133,15 +133,16 @@ def overview(store: ConfigStore, robot: str) -> dict:
     }
 
 
-def object_points(store: ConfigStore, object_type: str, used: dict) -> list[dict]:
-    """Points on an object type (objects/<type>.yaml): tool poses in the object's frame, approach and elbow."""
+def object_points(store: ConfigStore, object_type: str, used: dict, robot: str | None = None) -> list[dict]:
+    """Points on an object type (objects/<type>.yaml): tool poses in the object's frame, approach and (with
+    ``robot``) that robot's elbow side for it."""
     try:
         points = store.object(object_type).get('points', {})
     except ConfigError:
         return []
     result = []
     for name in points:
-        point = store.object_point(object_type, name)
+        point = store.object_point(object_type, name, robot)
         result.append({
             'name': name, 'approach_m': point.get('approach_m'), 'elbow': point.get('elbow'),
             'tools': {key[:-len(TOOL_SUFFIX)]: {'xyz': list(pose.xyz), 'rpy': list(pose.rpy)}
@@ -151,8 +152,9 @@ def object_points(store: ConfigStore, object_type: str, used: dict) -> list[dict
     return result
 
 
-def save_object_point(store: ConfigStore, object_type: str, point: str, body: Mapping) -> str:
-    """Approach (m or null = skill default), elbow (side or null = robot default) and tool poses of a point."""
+def save_object_point(store: ConfigStore, object_type: str, point: str, body: Mapping, robot: str | None = None) -> str:
+    """Approach (m or null = skill default), elbow (side or null = robot default; stored for ``robot``) and tool
+    poses of a point."""
     settings = {key: body[key] for key in ('approach_m', 'elbow') if key in body}
     if settings.get('elbow') not in (None, '', *schemas.ELBOW_SIDES):
         raise PointError(f'elbow: one of {", ".join(schemas.ELBOW_SIDES)} or the robot default')
@@ -171,7 +173,7 @@ def save_object_point(store: ConfigStore, object_type: str, point: str, body: Ma
         if any(len(v) != 3 or not all(math.isfinite(x) for x in v) for v in poses[tool].values()):
             raise PointError(f'{tool}: xyz and rpy need three numbers each')
     try:
-        path = store.save_object_point_settings(object_type, point, settings) if settings else None
+        path = store.save_object_point_settings(object_type, point, settings, robot) if settings else None
         if poses:
             path = store.save_object_point_poses(object_type, point, poses)
     except ValueError as error:

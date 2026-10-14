@@ -568,7 +568,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'PUT' and len(route) == 4 and route[0] == 'objects' and route[2] == 'points':
                 bridge.check_idle()
                 object_type, point = unquote(route[1]), unquote(route[3])
-                file = points.save_object_point(bridge.config, object_type, point, self._body())
+                file = points.save_object_point(bridge.config, object_type, point, self._body(), bridge.robot)
                 bridge.get_logger().info(f'HMI saved object point {object_type}/{point} -> {file}')
                 return self._json({'saved': f'{object_type}/{point}', 'file': file})
             if method == 'PUT' and route == ['robot', 'navigation']:

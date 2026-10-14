@@ -47,3 +47,18 @@ def test_an_object_put_down_is_saved_as_a_placed_object(config_dir):
     instances = ConfigStore(config_dir).object_instances()
     assert instances['box_floor'].pose.yaw == 3.1416 and instances['box_1'].pose.x == 1.5
     assert instances['box_1'].stack_count == 1 and instances['box_1'].top_z == 0.3
+
+
+def test_the_elbow_side_of_a_point_is_the_robots(config_dir):
+    store = placed(config_dir)
+    store.save_object_point_settings('box', 'top_grasp', {'elbow': 'up', 'approach_m': 0.05}, robot='demo_bot')
+    store = ConfigStore(config_dir)
+    assert 'elbow' not in (config_dir / 'objects' / 'box.yaml').read_text()        # the object stays robot-free
+    assert store.object('box')['points']['top_grasp']['approach_m'] == 0.05
+    assert store.object_point('box', 'top_grasp', 'demo_bot')['elbow'] == 'up'
+    assert store.object_point('box', 'top_grasp')['elbow'] is None                   # without a robot: none
+    assert store.instance_point('box_1/top_grasp', 'demo_bot')[1]['elbow'] == 'up'
+    store.rename_object_point('box', 'top_grasp', 'lid_grasp')
+    assert ConfigStore(config_dir).robot_object_points('demo_bot') == {'box': {'lid_grasp': {'elbow': 'up'}}}
+    store.save_object_point_settings('box', 'lid_grasp', {'elbow': None}, robot='demo_bot')
+    assert ConfigStore(config_dir).robot_object_points('demo_bot') == {}

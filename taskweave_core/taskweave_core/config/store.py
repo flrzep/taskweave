@@ -38,6 +38,7 @@ POINT_FILE_SCHEMAS = {  # files that teaching and the HMI may edit (a file name 
     'cell/locations.yaml': schemas.POINTS2D, 'stances.yaml': schemas.STANCES, 'poses.yaml': schemas.JOINT_POSES,
     'navigation.yaml': schemas.NAVIGATION, 'profile.yaml': schemas.ROBOT_PROFILE,  # profile: ik.choose only
     'cell/objects.yaml': schemas.OBJECT_INSTANCES,  # where an object was put down (gripper place_as)
+    'object_points.yaml': schemas.ROBOT_OBJECT_POINTS,  # a robot's settings for object points (elbow side)
 }
 
 
@@ -317,10 +318,15 @@ class ConfigStore:
                 'placed object points': placed, 'placed object contacts': contacts,
                 'placed objects': sorted(self.object_instances())}
 
-    def object_point(self, obj: str, point: str) -> dict:
+    def robot_object_points(self, robot: str) -> dict:
+        """robots/<robot>/object_points.yaml: the robot's settings per object point ({object: {point: {elbow}}})."""
+        return self._load(f'robots/{robot}/object_points.yaml', schemas.ROBOT_OBJECT_POINTS, required=False, default={})
+
+    def object_point(self, obj: str, point: str, robot: str | None = None) -> dict:
         """A named point on an object: tool poses (canonical TCP, object-relative) plus its metadata.
 
         ``{'left_tool': Pose3D, ..., 'approach': {...} | None, 'tool_type': str | None, 'grip_width_m': float | None}``
+        With ``robot``, that robot's settings for the point (object_points.yaml, e.g. ``elbow``) come on top.
         """
         points = self.object(obj).get('points', {})
         if point not in points:
@@ -328,6 +334,8 @@ class ConfigStore:
         entry = dict(points[point])
         result: dict[str, Any] = {key: entry.pop(key, None) for key in POINT_METADATA}
         result.update({tool: Pose3D.from_dict(pose, obj) for tool, pose in entry.items()})
+        if robot:
+            result.update(self.robot_object_points(robot).get(obj, {}).get(point, {}))
         return result
 
     def instance_point(self, reference: str, robot: str | None = None,
@@ -341,7 +349,7 @@ class ConfigStore:
             raise KeyError(f'unknown object point {reference!r}: expected <instance>/<point>, instances in '
                            f'cell/objects.yaml: {", ".join(sorted(instances)) or "none"}')
         instance = instances[name] if robot is None else self.handling_instance(instances[name], robot, near)
-        return instance, self.object_point(instance.object, point)
+        return instance, self.object_point(instance.object, point, robot)
 
     def object_contact(self, obj: str, contact: str) -> Pose3D:
         """A contact frame of an object type (objects/<object>.yaml contacts), relative to the object."""
@@ -457,11 +465,38 @@ class ConfigStore:
 
         return self._edit_yaml(f'objects/{instance.object}.yaml', edit), stored
 
-    def save_object_point_settings(self, obj: str, point: str, settings: dict) -> Path:
-        """Set or clear (None) an object point's ``approach_m`` and ``elbow``; its tool poses are kept."""
+    def save_object_point_settings(self, obj: str, point: str, settings: dict, robot: str | None = None) -> Path:
+        """Set or clear (None) an object point's ``approach_m`` (objects/<obj>.yaml) and ``elbow`` (the robot's:
+        robots/<robot>/object_points.yaml; without ``robot`` the object file, as before); tool poses are kept."""
         unknown = set(settings) - {'approach_m', 'elbow'}
         if unknown:
             raise ValueError(f'unknown point settings: {", ".join(sorted(unknown))}')
+        if robot and 'elbow' in settings:
+            if point not in self.object(obj).get('points', {}):
+                raise ValueError(f'object {obj!r} has no point {point!r}')
+            elbow = settings['elbow']
+            settings = {k: v for k, v in settings.items() if k != 'elbow'}
+
+            def robot_edit(document):
+                from ruamel.yaml.comments import CommentedMap
+
+                points = document.setdefault(obj, CommentedMap())
+                entry = points.get(point) if isinstance(points.get(point), dict) else CommentedMap()
+                if elbow in (None, ''):
+                    entry.pop('elbow', None)
+                else:
+                    entry['elbow'] = elbow
+                if entry:
+                    entry.fa.set_flow_style()
+                    points[point] = entry
+                else:
+                    points.pop(point, None)
+                if not points:
+                    document.pop(obj, None)
+
+            path = self._edit_yaml(f'robots/{robot}/object_points.yaml', robot_edit)
+            if not settings:
+                return path
 
         def edit(document):
             entry = document.get('points', {}).get(point)
@@ -509,7 +544,13 @@ class ConfigStore:
                 raise ValueError(f'object {obj!r} has no point {point!r}')
             self._rename_key(points, point, rename, f'points/{rename}', relative)
 
-        return self._edit_yaml(relative, edit)
+        path = self._edit_yaml(relative, edit)
+        for robot_file in sorted((self.root / 'robots').glob('*/object_points.yaml')):  # robots' settings follow
+            hints = f'robots/{robot_file.parent.name}/object_points.yaml'
+            if point in self.robot_object_points(robot_file.parent.name).get(obj, {}):
+                self._edit_yaml(hints, lambda document, h=hints: self._rename_key(document[obj], point, rename,
+                                                                                    rename, h))
+        return path
 
     def save_ik_choice(self, robot: str, choice: dict) -> Path:
         """Update the profile's ik.choose (elbow, limit_margin_deg, weights); other keys and comments are kept."""

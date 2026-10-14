@@ -329,6 +329,14 @@ OBJECT = {
     },
 }
 
+# robots/<model>/object_points.yaml: how this robot takes points of object types (object -> point -> settings), e.g.
+# the elbow side for its arm; the points themselves stay robot-independent in objects/<object>.yaml
+ROBOT_OBJECT_POINTS = {
+    'type': 'object', 'propertyNames': NAME,
+    'additionalProperties': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {
+        'type': 'object', 'additionalProperties': False, 'properties': {'elbow': {'enum': ELBOW_SIDES}}}},
+}
+
 OPERATOR = {
     'type': 'object',
     'properties': {

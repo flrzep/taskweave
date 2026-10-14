@@ -62,7 +62,7 @@ def overview(store: ConfigStore, robot_name: str, pose_args: set) -> dict:
             'used_by': pose_used.get(name, []), 'problems': pose_problems(store, robot_name, name)})
     types = object_types(store)
     for object_type in types:
-        for point in points.object_points(store, object_type, point_used):
+        for point in points.object_points(store, object_type, point_used, robot_name):
             positions.append({
                 'scope': object_type, 'name': point['name'], 'joints': {}, 'elbow': point['elbow'],
                 'approach_m': point['approach_m'], 'hands': point['tools'], 'used_by': point['used_by'], 'problems': []})
@@ -114,7 +114,7 @@ def save(store: ConfigStore, robot_name: str, scope: str, name: str, body: Mappi
     _object_type(store, scope)
     settings = {key: body[key] for key in ('approach_m', 'elbow') if key in body}
     try:
-        file = points.save_object_point(store, scope, name, {**settings, 'tools': hands})
+        file = points.save_object_point(store, scope, name, {**settings, 'tools': hands}, robot_name)
     except points.PointError as error:
         raise ArmError(str(error)) from error
     if rename:
