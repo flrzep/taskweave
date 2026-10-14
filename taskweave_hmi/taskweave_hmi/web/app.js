@@ -176,7 +176,8 @@ async function openEditor(name) {
   show($('editor'), true);
   message($('save-msg'), ''); show($('problems'), false);
   $('m-name').value = name || '';
-  $('m-name').readOnly = !isNew;
+  disarmDelete();
+  show($('btn-delete'), !isNew);
   $('m-goal').value = data.goal || '';
   $('m-loop').value = data.loop || 'once';
   $('m-max').value = data.max_cycles ?? '';
@@ -315,13 +316,36 @@ $('btn-validate').addEventListener('click', async () => {
 $('btn-save').addEventListener('click', async () => {
   const name = $('m-name').value.trim();
   if (!name) { showProblems(['Give the mission a name.']); return; }
-  const { ok, data } = await api('PUT', `/api/missions/${encodeURIComponent(name)}`, readMission());
+  const old = state.editing.isNew ? null : state.editing.name;
+  const rename = old && old !== name ? `?rename_from=${encodeURIComponent(old)}` : '';
+  const { ok, data } = await api('PUT', `/api/missions/${encodeURIComponent(name)}${rename}`, readMission());
   if (!ok) { showProblems(data.problems || [data.error || 'not saved']); message($('save-msg'), ''); return; }
   showProblems([]);
   state.dirty = false; show($('editor-dirty'), false);
   state.editing = { ...state.editing, name, isNew: false };
-  $('m-name').readOnly = true;
-  message($('save-msg'), `Saved ${name}. It is used at the next start.`);
+  show($('btn-delete'), true);
+  message($('save-msg'), rename ? `Renamed ${old} to ${name} and saved. It is used at the next start.`
+    : `Saved ${name}. It is used at the next start.`);
+  loadMissions();
+});
+let deleteArmed = null;
+function disarmDelete() {
+  clearTimeout(deleteArmed); deleteArmed = null;
+  $('btn-delete').classList.remove('confirm'); $('btn-delete').textContent = 'Delete';
+}
+$('btn-delete').addEventListener('click', async () => {
+  const button = $('btn-delete');
+  if (!deleteArmed) {  // first tap arms, the second within 3 s deletes
+    button.classList.add('confirm'); button.textContent = `Tap again to delete ${state.editing.name}`;
+    deleteArmed = setTimeout(disarmDelete, 3000);
+    return;
+  }
+  disarmDelete();
+  const name = state.editing.name;
+  const { ok, data } = await api('DELETE', `/api/missions/${encodeURIComponent(name)}`);
+  if (!ok) { showProblems(data.problems || [data.error || 'not deleted']); return; }
+  state.editing = null; state.dirty = false;
+  show($('editor'), false); show($('mission-list-card'), true);
   loadMissions();
 });
 $('btn-new').addEventListener('click', () => openEditor(null));
@@ -336,7 +360,7 @@ $('btn-back').addEventListener('click', () => {
   show($('editor'), false); show($('mission-list-card'), true);
   loadMissions();
 });
-['m-goal', 'm-loop', 'm-max', 'm-stop', 'd-timeout', 'd-retries', 'd-fail', 'd-replans'].forEach((id) => $(id).addEventListener('input', markDirty));
+['m-name', 'm-goal', 'm-loop', 'm-max', 'm-stop', 'd-timeout', 'd-retries', 'd-fail', 'd-replans'].forEach((id) => $(id).addEventListener('input', markDirty));
 
 // ---------- points ----------
 // Locations (cell frame) and stance offsets (object frame) from config; yaw is shown in degrees, stored in radians.

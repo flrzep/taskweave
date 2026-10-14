@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from taskweave_core.config import ConfigStore
-from taskweave_hmi.missions import MissionError, list_missions, save, template, validate
+from taskweave_hmi.missions import MissionError, delete, list_missions, save, template, validate
 
 FIXTURE = Path(__file__).resolve().parents[2] / 'taskweave_core' / 'test' / 'fixtures' / 'config'
 CATALOG = {
@@ -60,3 +60,31 @@ def test_schema_and_robot_problems_are_reported(store):
 def test_invalid_name_rejected(store):
     with pytest.raises(MissionError, match='invalid mission name'):
         save('../escape', template('demo_bot'), store, CATALOG, 'demo_bot')
+
+
+def test_rename_moves_the_file_and_keeps_comments(store):
+    missions_dir = store.root / 'missions'
+    (missions_dir / 'patrol.yaml').write_text('# my patrol\n' + (missions_dir / 'patrol.yaml').read_text())
+    save('night_patrol', store.mission('patrol'), store, CATALOG, 'demo_bot', rename_from='patrol')
+    assert not (missions_dir / 'patrol.yaml').exists()
+    assert (missions_dir / 'night_patrol.yaml').read_text().startswith('# my patrol')
+    assert 'patrol' not in store.mission_names() and store.mission('night_patrol')['steps']
+
+
+def test_rename_refuses_existing_target_and_missing_source(store):
+    mission = store.mission('patrol')
+    save('other', mission, store, CATALOG, 'demo_bot')
+    with pytest.raises(MissionError, match="'other' already exists"):
+        save('other', mission, store, CATALOG, 'demo_bot', rename_from='patrol')
+    with pytest.raises(MissionError, match="'ghost' does not exist"):
+        save('new_name', mission, store, CATALOG, 'demo_bot', rename_from='ghost')
+    assert (store.root / 'missions' / 'patrol.yaml').exists()
+
+
+def test_delete(store):
+    delete('patrol', store)
+    assert 'patrol' not in store.mission_names()
+    with pytest.raises(MissionError, match='does not exist'):
+        delete('patrol', store)
+    with pytest.raises(MissionError, match='invalid mission name'):
+        delete('../escape', store)

@@ -11,7 +11,9 @@ HTTP API (JSON):
   GET  /api/events                 server-sent events: status | plan | episode
   GET  /api/missions               mission list (invalid files are listed with their error)
   GET  /api/missions/<name>        mission as JSON; GET /api/template for a new one
-  PUT  /api/missions/<name>        validate and save; 422 with {problems} if invalid, nothing written
+  PUT  /api/missions/<name>        validate and save; 422 with {problems} if invalid, nothing written;
+                                   ?rename_from=<old> saves mission <old> as <name> (old file removed)
+  DELETE /api/missions/<name>      remove the mission file (a running mission keeps its plan)
   POST /api/missions/<name>/validate
   POST /api/start {mission}        start a mission; POST /api/pause | /api/resume | /api/abort
   GET  /api/skills                 skill catalog;  GET /api/points  named points for argument pickers
@@ -43,7 +45,7 @@ from collections import deque
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import rclpy
 from nav_msgs.msg import Odometry
@@ -403,9 +405,16 @@ class Handler(BaseHTTPRequestHandler):
                     bridge.config.reload()
                     return self._json(bridge.config.mission(name))
                 if method == 'PUT':
-                    path = missions.save(name, self._body(), bridge.config, bridge.schemas(), bridge.robot)
-                    bridge.get_logger().info(f'HMI saved mission {name} -> {path}')
+                    old = parse_qs(urlsplit(self.path).query).get('rename_from', [None])[0]
+                    path = missions.save(name, self._body(), bridge.config, bridge.schemas(), bridge.robot,
+                                         rename_from=old)
+                    renamed = f' (renamed from {old})' if old and old != name else ''
+                    bridge.get_logger().info(f'HMI saved mission {name}{renamed} -> {path}')
                     return self._json({'saved': name})
+                if method == 'DELETE':
+                    path = missions.delete(name, bridge.config)
+                    bridge.get_logger().info(f'HMI deleted mission {name} ({path})')
+                    return self._json({'deleted': name})
             if method == 'POST' and len(route) == 3 and route[0] == 'missions' and route[2] == 'validate':
                 problems = missions.validate(self._body(), bridge.config, bridge.schemas(), bridge.robot)
                 return self._json({'problems': problems})

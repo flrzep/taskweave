@@ -1,8 +1,10 @@
-"""Mission files for the HMI: list, load, validate and save. No ROS dependency.
+"""Mission files for the HMI: list, load, validate, save, rename and delete. No ROS dependency.
 
 Saving validates first (schema, then the plan against the skill catalog and the config) and writes nothing on
 failure. Existing files are updated in place with ruamel.yaml, so top-level comments and key order survive;
-the steps list is rewritten as a whole.
+the steps list is rewritten as a whole. A rename is a save under the new name that carries the old file's comments
+over and then removes the old file; no other config refers to a mission by name. A running mission keeps its plan
+when its file is renamed or deleted.
 """
 
 from __future__ import annotations
@@ -61,10 +63,23 @@ def validate(mission: Mapping, store: ConfigStore, catalog: Mapping[str, dict], 
     return problems + validate_plan(plan, catalog, store)
 
 
-def save(name: str, mission: Mapping, store: ConfigStore, catalog: Mapping[str, dict], robot: str) -> Path:
-    """Validate and write missions/<name>.yaml. Raises MissionError with all problems; nothing is written then."""
-    check_name(name)
-    problems = validate(mission, store, catalog, robot)
+def mission_path(store: ConfigStore, name: str) -> Path:
+    return store.root / 'missions' / f'{check_name(name)}.yaml'
+
+
+def save(name: str, mission: Mapping, store: ConfigStore, catalog: Mapping[str, dict], robot: str,
+         rename_from: str | None = None) -> Path:
+    """Validate and write missions/<name>.yaml; with ``rename_from``, the mission of that name becomes ``name``.
+    Raises MissionError with all problems; nothing is written then."""
+    path = mission_path(store, name)
+    source = mission_path(store, rename_from) if rename_from and rename_from != name else path
+    problems = []
+    if source != path:
+        if not source.is_file():
+            problems.append(f'mission {rename_from!r} does not exist')
+        if path.exists():
+            problems.append(f'a mission named {name!r} already exists')
+    problems += validate(mission, store, catalog, robot)
     if problems:
         raise MissionError(problems)
     from ruamel.yaml import YAML
@@ -73,8 +88,7 @@ def save(name: str, mission: Mapping, store: ConfigStore, catalog: Mapping[str, 
     handler = YAML()
     handler.preserve_quotes = True
     handler.width = 120
-    path = store.root / 'missions' / f'{name}.yaml'
-    document = handler.load(path.read_text(encoding='utf-8')) if path.is_file() else None
+    document = handler.load(source.read_text(encoding='utf-8')) if source.is_file() else None
     if not isinstance(document, CommentedMap):
         document = CommentedMap()
     for key in list(document):
@@ -102,6 +116,18 @@ def save(name: str, mission: Mapping, store: ConfigStore, catalog: Mapping[str, 
     buffer = io.StringIO()
     handler.dump(document, buffer)
     path.write_text(buffer.getvalue(), encoding='utf-8')
+    if source != path:
+        source.unlink()
+    store.reload()
+    return path
+
+
+def delete(name: str, store: ConfigStore) -> Path:
+    path = mission_path(store, name)
+    if not path.is_file():
+        raise MissionError([f'mission {name!r} does not exist'])
+    path.unlink()
+    store.reload()
     return path
 
 
