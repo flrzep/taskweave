@@ -219,7 +219,9 @@ details[open] summary { margin-bottom: 8px; }
 .plan-graph .state-failed .node-box, .plan-graph .state-timeout .node-box, .plan-graph .state-rejected .node-box {
   stroke: color-mix(in srgb, var(--g-bad) 60%, transparent); fill: color-mix(in srgb, var(--g-bad) 7%, var(--g-card)); }
 .plan-graph .state-pending .node-box { stroke: color-mix(in srgb, var(--k) 22%, transparent); }
-.plan-graph .state-running .node-box { stroke: var(--k); stroke-width: 2.5; animation: node-breathe 2.8s ease-in-out infinite; }  /* period = BREATHE_MS in graph.js */
+.plan-graph .state-running .node-box { stroke: var(--k); stroke-width: 2.5; animation: node-breathe 2.8s ease-in-out infinite;  /* period = BREATHE_MS in graph.js */
+  fill: color-mix(in srgb, var(--k) calc(7% + 15% * var(--breath)), var(--g-card));
+  filter: drop-shadow(0 0 9px color-mix(in srgb, var(--k) calc(60% * var(--breath)), transparent)); }
 .plan-graph .state-paused .node-box { stroke: var(--g-warn); stroke-width: 2.5; }
 .plan-graph .state-paused .node-state { fill: var(--g-warn); }
 .plan-graph .edge { fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
@@ -238,8 +240,9 @@ details[open] summary { margin-bottom: 8px; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .legend-item i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--k); }
 .legend-item i.swatch-fail { background: none; border-top: 2px dashed var(--bad); height: 0; width: 16px; border-radius: 0; }
-@keyframes node-breathe {  /* slow in and out: fill and a soft glow in the skill colour swell, then fade */
-  0%, 100% { fill: color-mix(in srgb, var(--k) 7%, var(--g-card)); filter: drop-shadow(0 0 0 transparent); }
-  50% { fill: color-mix(in srgb, var(--k) 22%, var(--g-card)); filter: drop-shadow(0 0 9px color-mix(in srgb, var(--k) 60%, transparent)); }
-}
+/* slow in and out: fill and a soft glow in the skill colour swell, then fade. Only the number --breath is animated,
+   so both colours are mixed per frame from the same skill colour: interpolating the colours themselves tinted the
+   swell and the fade differently */
+@property --breath { syntax: '<number>'; inherits: false; initial-value: 0; }
+@keyframes node-breathe { 0%, 100% { --breath: 0; } 50% { --breath: 1; } }
 @media (prefers-reduced-motion: reduce) { .plan-graph .state-running .node-box { animation: none; } }
