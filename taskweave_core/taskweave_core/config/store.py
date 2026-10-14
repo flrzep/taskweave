@@ -39,6 +39,7 @@ POINT_FILE_SCHEMAS = {  # files that teaching and the HMI may edit (a file name 
     'navigation.yaml': schemas.NAVIGATION, 'profile.yaml': schemas.ROBOT_PROFILE,  # profile: ik.choose only
     'cell/objects.yaml': schemas.OBJECT_INSTANCES,  # where an object was put down (gripper place_as)
     'object_points.yaml': schemas.ROBOT_OBJECT_POINTS,  # a robot's settings for object points (elbow side)
+    'held_poses.yaml': schemas.HELD_POSES,  # where a robot holds an object of a type (move_object pose)
 }
 
 
@@ -317,6 +318,17 @@ class ConfigStore:
                 'joint poses': sorted(self.joint_poses(robot)), 'object points': objects,
                 'placed object points': placed, 'placed object contacts': contacts,
                 'placed objects': sorted(self.object_instances())}
+
+    def held_pose(self, robot: str, obj: str, name: str) -> dict:
+        """robots/<robot>/held_poses.yaml <obj>.<name>: ``{'joints': {...}, 'path': [Pose3D, ...]}``."""
+        poses = self._load(f'robots/{robot}/held_poses.yaml', schemas.HELD_POSES, required=False, default={})
+        if name not in poses.get(obj, {}):
+            known = ', '.join(sorted(poses.get(obj, {}))) or 'none'
+            raise KeyError(f'robot {robot!r} has no held pose {name!r} for {obj!r} objects (robots/{robot}/'
+                           f'held_poses.yaml; it has: {known})')
+        entry = poses[obj][name]
+        return {'joints': dict(entry.get('joints', {})),
+                'path': [Pose3D.from_dict(p, 'base') for p in entry.get('path', [])]}
 
     def robot_object_points(self, robot: str) -> dict:
         """robots/<robot>/object_points.yaml: the robot's settings per object point ({object: {point: {elbow}}})."""

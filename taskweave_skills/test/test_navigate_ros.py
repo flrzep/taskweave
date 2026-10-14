@@ -159,3 +159,14 @@ def test_drive_straight_limits(system):
         assert result.outcome == RunSkill.Result.SUCCEEDED and sim.y == pytest.approx(0.3, abs=0.04)
     else:
         assert result.outcome == RunSkill.Result.REJECTED and 'sideways' in result.message
+
+
+def test_drive_straight_to_a_target_in_line(system):
+    sim, client, config = system
+    with open(config / 'cell' / 'locations.yaml', 'a') as f:
+        f.write('ahead: {x: 0.5, y: 0.01, yaw: 0.02}\n')
+    result = run_skill(client, 'drive_straight', {'to': 'ahead'})
+    assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
+    assert sim.x == pytest.approx(0.5, abs=0.04) and abs(sim.yaw) < 0.03   # the heading is kept, not turned
+    result = run_skill(client, 'drive_straight', {'to': 'dock'})          # faces 90 deg away, off to the side
+    assert result.outcome == RunSkill.Result.REJECTED and 'heading' in result.message

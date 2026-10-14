@@ -459,15 +459,18 @@ class MoveObject(GoToPoint):
                    'holding tool moves with it, locked in orientation and distance to the object and to each other. '
                    'The object moves on a straight line: by an offset in the robot\'s frame (x forward, y left, z up), '
                    'optionally turning about the vertical through the object and tilting it (far side up); to a '
-                   'position in the robot\'s frame (at: where its origin goes, orientation kept); or to a '
+                   'position in the robot\'s frame (at: where its origin goes, orientation kept); to a named pose '
+                   'of this robot for this kind of object (pose: e.g. carry; torso first, then straight lines); or to a '
                    'contact on a placed object: one of the held object\'s contacts goes onto it (e.g. a frame\'s hook '
                    'plate onto a hook), offset_m short of it against the contact\'s engage direction.')
     args_schema = {
         'type': 'object',
-        'oneOf': [{'required': ['by']}, {'required': ['to', 'contact']}, {'required': ['at']}],
+        'oneOf': [{'required': ['by']}, {'required': ['to', 'contact']}, {'required': ['at']}, {'required': ['pose']}],
         'properties': {
             'by': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 3, 'maxItems': 3,
                    'description': '[x, y, z] in metres, robot frame'},
+            'pose': {'type': 'string', 'description': 'a held pose of this robot for the object\'s type '
+                                                      '(robots/<robot>/held_poses.yaml), e.g. carry'},
             'at': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 3, 'maxItems': 3,
                    'description': '[x, y, z] in metres, robot frame: where the object\'s origin goes'},
             'turn_deg': {'type': 'number', 'description': 'with by: turn about the vertical through the object (deg)'},
@@ -492,6 +495,8 @@ class MoveObject(GoToPoint):
         if hold is None:
             return SkillResult.rejected('nothing is held: go_to_point to the object, then close the grippers')
         obj = hold['object_in_base']
+        if 'pose' in args:
+            return self._held_pose(ctx, hold, args['pose'])
         if 'at' in args:
             args = {**args, 'by': [float(a) - float(o) for a, o in zip(args['at'], obj[:3, 3], strict=True)]}
         if 'to' in args:
@@ -524,6 +529,44 @@ class MoveObject(GoToPoint):
         self.hold.moved(moved)
         return SkillResult.succeeded(f'moved {label} (max error {worst:.3f})',
                                      world_state={'held_object': hold['object']})
+
+    def _held_pose(self, ctx, hold: dict, name: str):
+        """move_object pose: the robot's held pose ``name`` for the held object's type: its joints (not the arms'),
+        then straight lines through its waypoints."""
+        from .ik import rpy_matrix
+
+        instance = self.config.object_instances().get(hold['object'])
+        if instance is None:
+            return SkillResult.rejected(f'the held {hold["object"]} is not a placed object: its type is unknown')
+        try:
+            pose = self.config.held_pose(self.robot.name, instance.object, name)
+        except KeyError as error:
+            return SkillResult.rejected(str(error.args[0]))
+        arm = self._arm_joints(pose['joints'])
+        if arm:
+            return SkillResult.rejected(f'held pose {name} sets arm joints {arm}: only joints the held object '
+                                        'moves with (e.g. a lift) can be set')
+        label = f'{hold["object"]} to {name}'
+        worst = 0.0
+        if pose['joints']:
+            result, worst = self._go(ctx, pose['joints'], f'{label} (joints)')
+            if result is not None:
+                return result
+            tool = hold['tools'][0]  # the arms kept their joints: the object moved with them
+            try:
+                tcp = self.hold.tcp_poses([tool])[tool]
+            except LookupError as error:
+                return SkillResult.failed(f'{label}: where is the held object now? {error}')
+            self.hold.moved(tcp @ np.linalg.inv(hold['tcp_in_object'][tool]))
+        for index, waypoint in enumerate(pose['path'], start=1):
+            hold = self.hold.held()
+            moved = rpy_matrix(waypoint.xyz, waypoint.rpy)
+            goals = {tool: moved @ tcp for tool, tcp in hold['tcp_in_object'].items()}
+            result, worst = self._linear(ctx, {}, f'{label} ({index}/{len(pose["path"])})', goals=goals)
+            if result is not None:
+                return result
+            self.hold.moved(moved)
+        return SkillResult.succeeded(f'moved {label} (max error {worst:.3f})', world_state={'held_object': hold['object']})
 
     def _onto(self, hold: dict, args: dict):
         """The held object's pose (base frame) with its contact ``args['contact']`` on the placed contact

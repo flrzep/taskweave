@@ -62,3 +62,15 @@ def test_the_elbow_side_of_a_point_is_the_robots(config_dir):
     assert ConfigStore(config_dir).robot_object_points('demo_bot') == {'box': {'lid_grasp': {'elbow': 'up'}}}
     store.save_object_point_settings('box', 'lid_grasp', {'elbow': None}, robot='demo_bot')
     assert ConfigStore(config_dir).robot_object_points('demo_bot') == {}
+
+
+def test_held_poses_are_the_robots(config_dir):
+    import pytest
+    (config_dir / 'robots' / 'demo_bot' / 'held_poses.yaml').write_text(
+        'box:\n  carry:\n    joints: {lift: 0.5}\n    path:\n    - {xyz: [0.8, 0.0, 0.1], rpy: [0.0, 0.0, 0.0]}\n'
+        '    - {xyz: [0.8, 0.0, 0.3], rpy: [0.0, -1.5708, 0.0]}\n')
+    store = ConfigStore(config_dir)
+    pose = store.held_pose('demo_bot', 'box', 'carry')
+    assert pose['joints'] == {'lift': 0.5} and [p.xyz for p in pose['path']] == [(0.8, 0.0, 0.1), (0.8, 0.0, 0.3)]
+    with pytest.raises(KeyError, match="no held pose 'stand_up'.*it has: carry"):
+        store.held_pose('demo_bot', 'box', 'stand_up')

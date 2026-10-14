@@ -337,6 +337,17 @@ ROBOT_OBJECT_POINTS = {
         'type': 'object', 'additionalProperties': False, 'properties': {'elbow': {'enum': ELBOW_SIDES}}}},
 }
 
+# robots/<model>/held_poses.yaml: where this robot holds an object of a type, by name (move_object pose): joints
+# outside the arms first (e.g. the torso lift; the object moves with the arms), then straight lines through the
+# waypoints: the object's origin in the robot's base frame (xyz m, rpy rad)
+HELD_POSES = {
+    'type': 'object', 'propertyNames': NAME,
+    'additionalProperties': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {
+        'type': 'object', 'additionalProperties': False,
+        'properties': {'joints': {'type': 'object', 'additionalProperties': FINITE},
+                       'path': {'type': 'array', 'items': POSE3D}}}},
+}
+
 OPERATOR = {
     'type': 'object',
     'properties': {
