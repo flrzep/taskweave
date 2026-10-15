@@ -35,6 +35,8 @@ class Params:
     yaw_tolerance: float = 0.03      # rad
     settle_s: float = 0.3            # s inside tolerance before success
     turn_in_place: float = 0.5       # rad, differential base: rotate first when heading error is larger
+    reverse_within_m: float = 0.5    # m, differential base: a point behind it and this close is reached backwards
+                                     # (not turned towards and back again)
     stuck_timeout_s: float = 5.0     # s without stuck_progress_m of improvement -> fail
     stuck_progress_m: float = 0.02   # m, progress = distance + yaw_weight * heading error
     yaw_weight: float = 0.2          # m per rad, how heading error counts toward progress
@@ -85,8 +87,11 @@ def command(pose: Pose2D, target: Pose2D, base_type: str, p: Params, previous: t
         speed = min(_toward(distance, p.k_linear, brake_linear), p.max_linear)
         vx, vy = (ex / distance * speed, ey / distance * speed) if distance > 1e-6 else (0.0, 0.0)
         wz = _toward(yaw_error, p.k_angular, brake_angular)
-    else:  # differential: face the target, drive, then turn to the final heading
+    else:  # differential: face the target (or, close by, turn its back to it), drive, then turn to the final heading
         heading_error = wrap_angle(math.atan2(dy, dx) - pose.yaw) if distance > 1e-6 else 0.0
+        direction = 1.0
+        if distance <= p.reverse_within_m and abs(heading_error) > math.pi / 2 - (0.3 if previous[0] < 0 else 0.0):
+            heading_error, direction = wrap_angle(heading_error + math.pi), -1.0  # hysteresis: keeps reversing
         far = distance > p.position_tolerance
         # Dead band: between half and full tolerance only creep on if already facing the point. Turning towards a
         # point a few millimetres away would fight the final-heading turn and never settle.
@@ -94,7 +99,7 @@ def command(pose: Pose2D, target: Pose2D, base_type: str, p: Params, previous: t
         if far and abs(heading_error) > p.turn_in_place:
             vx, wz = 0.0, _toward(heading_error, p.k_angular, brake_angular)
         elif far or near_but_facing:
-            speed = min(_toward(distance, p.k_linear, brake_linear), p.max_linear) * math.cos(heading_error)
+            speed = direction * min(_toward(distance, p.k_linear, brake_linear), p.max_linear) * math.cos(heading_error)
             vx, wz = speed, _toward(heading_error if far else yaw_error, p.k_angular, brake_angular)
         else:
             vx, wz = 0.0, _toward(yaw_error, p.k_angular, brake_angular)
@@ -196,6 +201,8 @@ class NavigateTo(Skill):
                 phase_travelling, best, best_time = travelling, math.inf, now
             turn = abs(wrap_angle(math.atan2(target.y - pose.y, target.x - pose.x) - pose.yaw)) if travelling \
                 else yaw_error
+            if travelling and distance <= self.p.reverse_within_m:
+                turn = min(turn, math.pi - turn)  # close by, a point behind is reached backwards
             remaining = distance + self.p.yaw_weight * turn
             if remaining < best - self.p.stuck_progress_m:
                 best, best_time = remaining, now

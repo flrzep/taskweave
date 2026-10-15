@@ -85,3 +85,21 @@ def test_lead_makes_up_for_a_late_base():
         return furthest
     assert overshoot(0.0) > 0.1
     assert overshoot(0.25) < Params().yaw_tolerance
+
+
+def test_differential_reverses_onto_a_close_point_behind():
+    """15 cm behind and facing the final heading already: back up, never turn round (it turned 180 deg and back)."""
+    p, dt = Params(), 0.05
+    pose, cmd, target, most_turned = Pose2D(0.15, 0.0, 0.0), (0.0, 0.0, 0.0), Pose2D(0.0, 0.0, 0.0), 0.0
+    for _ in range(400):
+        cmd = command(pose, target, 'differential', p, cmd, dt)
+        c, s = math.cos(pose.yaw), math.sin(pose.yaw)
+        pose = Pose2D(pose.x + c * cmd[0] * dt, pose.y + s * cmd[0] * dt, wrap_angle(pose.yaw + cmd[2] * dt))
+        most_turned = max(most_turned, abs(pose.yaw))
+    assert most_turned < 0.05
+    assert math.hypot(pose.x, pose.y) < p.position_tolerance
+
+
+def test_differential_still_turns_round_for_a_far_point_behind():
+    cmd = command(Pose2D(2.0, 0.0, 0.0), Pose2D(0.0, 0.0, 0.0), 'differential', Params(), (0.0, 0.0, 0.0), 0.05)
+    assert cmd[0] == 0.0 and cmd[2] != 0.0
