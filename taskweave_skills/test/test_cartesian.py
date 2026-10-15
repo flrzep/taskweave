@@ -99,3 +99,25 @@ def test_a_straight_line_on_the_chain_moves_joints_away_from_their_limits(tmp_pa
     assert np.allclose(chain.fk({**start_state, **end})[:3, 3], goal[:3, 3], atol=1e-3)
     assert end['j3'] < 2.45 - 0.05                           # pushed back from the limit through the null space
     assert ik.checked == len(trajectory.points) - 1          # each step checked for collisions
+
+
+def test_the_elbow_swings_toward_a_side_with_the_hand_staying(tmp_path):
+    from test_chain import NAMES, START, URDF
+
+    from taskweave_skills.cartesian import elbow_deviation_of, elbow_swing_path
+    from taskweave_skills.chain import Chain
+    path = tmp_path / 'arm.urdf'
+    path.write_text(URDF)
+    chain = Chain.from_urdf(path, 'base', 'flange')
+    ik = ChainIk(chain, NAMES)
+    arm = {n: START[n] for n in NAMES}
+    sides = [s for s in ('down', 'up', 'out', 'in') if elbow_deviation_of(chain, NAMES, START, s) > 0.6]
+    assert len(sides) >= 2                                                          # the elbow is off those sides
+    for side in sides:
+        before = elbow_deviation_of(chain, NAMES, START, side)
+        trajectory, report = elbow_swing_path(ik, ['arm'], arm, START, side, 0.6)
+        end = {**START, **dict(zip(trajectory.names, trajectory.points[-1], strict=True))}
+        assert np.allclose(chain.fk(end)[:3, 3], chain.fk(START)[:3, 3], atol=1e-3)     # the hand stays
+        assert elbow_deviation_of(chain, NAMES, end, side) < before - 0.2              # the elbow went that way
+        assert report['arm'][1] < report['arm'][0]
+        assert all(-2.5 <= end[n] <= 2.5 for n in NAMES)

@@ -485,10 +485,12 @@ class MoveObject(GoToPoint):
                    'position in the robot\'s frame (at: where its origin goes, orientation kept); to a named pose '
                    'of this robot for this kind of object (pose: e.g. carry; torso first, then straight lines); or to a '
                    'contact on a placed object: one of the held object\'s contacts goes onto it (e.g. a frame\'s hook '
-                   'plate onto a hook), offset_m short of it against the contact\'s engage direction.')
+                   'plate onto a hook), offset_m short of it against the contact\'s engage direction. With elbow '
+                   '(alone), the object stays and the holding arms swing their elbows toward that side.')
     args_schema = {
         'type': 'object',
-        'oneOf': [{'required': ['by']}, {'required': ['to', 'contact']}, {'required': ['at']}, {'required': ['pose']}],
+        'oneOf': [{'required': ['by']}, {'required': ['to', 'contact']}, {'required': ['at']}, {'required': ['pose']},
+                  {'required': ['elbow']}],
         'properties': {
             'by': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 3, 'maxItems': 3,
                    'description': '[x, y, z] in metres, robot frame'},
@@ -504,6 +506,9 @@ class MoveObject(GoToPoint):
             'contact': {'type': 'string', 'description': 'the held object\'s contact that goes there'},
             'offset_m': {'type': 'number', 'minimum': 0,
                          'description': 'with to: stop this far before the contact, against its engage direction'},
+            'elbow': {'enum': ['down', 'up', 'out', 'in', 'back', 'forward'],
+                      'description': 'the object stays; the holding arms swing their elbows toward this side (robot '
+                                     'frame, out = away from the body), as far as joint limits and collisions allow'},
         },
         'additionalProperties': False,
     }
@@ -520,6 +525,8 @@ class MoveObject(GoToPoint):
         obj = hold['object_in_base']
         if 'pose' in args:
             return self._held_pose(ctx, hold, args['pose'])
+        if 'elbow' in args:
+            return self._swing_elbows(ctx, hold, args['elbow'])
         if 'to' in args:
             moved = self._onto(hold, args)
             if isinstance(moved, SkillResult):
@@ -542,6 +549,36 @@ class MoveObject(GoToPoint):
         self.hold.moved(moved)
         return SkillResult.succeeded(f'moved {label} (max error {worst:.3f})',
                                      world_state={'held_object': hold['object']})
+
+    def _swing_elbows(self, ctx, hold: dict, side: str):
+        """move_object elbow: the holding arms' elbows toward ``side``, hands and object staying."""
+        import re
+
+        from .cartesian import PathError, elbow_swing_path
+
+        label = f'elbows of {" and ".join(hold["tools"])} {side}'
+        if self.ik is None:
+            return SkillResult.rejected(f'{label}: needs the profile\'s ik section')
+        current = self.joints.snapshot(self.p.state_timeout_s)
+        if current is None:
+            return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)')
+        patterns = [re.compile(self.ik.joint_pattern.format(tool=tool)) for tool in hold['tools']]
+        arm = {n: v for n, v in current.items() if any(p.fullmatch(n) for p in patterns)}
+        try:
+            ctx.feedback(0.0, 'elbow swing')
+            path, report = elbow_swing_path(self.ik, list(hold['tools']), arm, current, side, self.p.max_joint_speed)
+        except PathError as error:
+            return SkillResult.failed(f'{label}: {error}')
+        swung = ', '.join(f'{tool} {a} -> {b} deg off {side}' for tool, (a, b) in report.items())
+        if path is None:
+            return SkillResult.succeeded(f'{label}: already as far as they go ({swung})',
+                                         world_state={'held_object': hold['object']})
+        goal = dict(zip(path.names, path.points[-1], strict=True))
+        result, final = self._move(ctx, goal, label, path=path)
+        if result is not None:
+            return result
+        self._check_hands({tool: hold['object_in_base'] @ tcp for tool, tcp in hold['tcp_in_object'].items()}, label)
+        return SkillResult.succeeded(f'{label}: {swung}', world_state={'held_object': hold['object']})
 
     def _held_pose(self, ctx, hold: dict, name: str):
         """move_object pose: the robot's held pose ``name`` for the held object's type: its joints (not the arms'),
