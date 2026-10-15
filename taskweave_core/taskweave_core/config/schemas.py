@@ -68,6 +68,12 @@ MISSION = {
             'properties': {'description': {'type': 'string'},
                            'point': {'enum': ['base_target', 'joint_pose', 'object_point', 'instance_point',
                                               'instance_contact', 'instance']}}}},
+        # facts each cycle starts from, filled into the steps as {name} (MissionFilePlanner): fullest = the placed object
+        # of this type with the most items left, among instance names matching the glob. When a fact finds nothing
+        # (e.g. every stack is empty) the mission is complete.
+        'facts': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {
+            'type': 'object', 'required': ['fullest'], 'additionalProperties': False,
+            'properties': {'fullest': NAME, 'among': {'type': 'string', 'minLength': 1}}}},
         'defaults': {
             'type': 'object',
             'properties': {

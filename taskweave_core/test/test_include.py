@@ -80,3 +80,33 @@ def test_points_on_an_object_a_step_puts_down_are_checked_later(config_dir):
     assert validate_plan(Plan.from_mission({'goal': 'g', 'steps': steps}, 'p', robot='demo_bot'), catalog, store) == []
     before = Plan.from_mission({'goal': 'g', 'steps': steps[::-1]}, 'p', robot='demo_bot')
     assert any('on_floor' in p for p in validate_plan(before, catalog, store))  # used before it is put down
+
+
+
+def test_facts_pick_the_fullest_stack_each_cycle_and_end_the_mission(config_dir):
+    from taskweave_core.planner import MissionFilePlanner
+    (config_dir / 'cell' / 'objects.yaml').write_text("""\
+a_front: {object: box, frame: cell, x: 1.0, y: 0.0, yaw: 0.0, stack: {count: 1, pitch: 0.1}}
+b_front: {object: box, frame: cell, x: 2.0, y: 0.0, yaw: 0.0, stack: {count: 2, pitch: 0.1}}
+c_back: {object: box, frame: cell, x: 3.0, y: 0.0, yaw: 0.0, stack: {count: 9, pitch: 0.1}}
+""")
+    missions = config_dir / 'missions'
+    missions.mkdir(exist_ok=True)
+    (missions / 'cycle.yaml').write_text("""\
+goal: empty the front stacks
+loop: forever
+facts: {next: {fullest: box, among: "*_front"}}
+steps:
+- {instruction: "pick from {next}", skill: wait, args: {target: "stance:{next}"}}
+""")
+    store = ConfigStore(config_dir)
+    planner = MissionFilePlanner(store, 'cycle')
+    picked = []
+    for cycle in range(1, 6):
+        plan = planner.make_plan({}, cycle)
+        if plan is None:
+            break
+        picked.append(plan.steps[0].args['target'])
+        store.take_object(plan.steps[0].args['target'].removeprefix('stance:'))
+    assert picked == ['stance:b_front', 'stance:a_front', 'stance:b_front']   # fullest first, ties by name
+    assert plan is None and cycle == 4                                           # all front stacks empty: done

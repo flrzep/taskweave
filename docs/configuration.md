@@ -72,6 +72,11 @@ parameters stay world-state placeholders. When the plan is made, the step is rep
 `<step>_<inner step>`), with the include step's `timeout_s`, `retries`, `on_failure` and `max_replans` if set, else
 the included mission's defaults. Includes can nest (5 deep), not loop.
 
+`facts` are worked out when each cycle is planned and filled into its steps as `{name}`, so they stay fixed for the
+cycle while it changes the objects: `{fullest: <object type>, among: <glob of instance names>}` is the placed object
+with the most items left (run-time object state; ties go to the first name). When a fact finds nothing, the mission is
+complete, which ends a `loop: forever` mission once every matching stack is empty.
+
 Point references: `stance:<instance>[/<variant>]` (where this robot stands at a placed object), `location:<name>`
 or a bare name (cell location),
 `<object>.<point>` (a point of an object type) or `<instance>/<point>` (that point on one placed object). A skill

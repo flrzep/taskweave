@@ -310,6 +310,9 @@ function move(index, delta) {
 function readMission() {
   const mission = { goal: $('m-goal').value.trim(), loop: $('m-loop').value, steps: readSteps() };
   if (state.editing.mission.robot) mission.robot = state.editing.mission.robot;  // keep a robot-specific mission
+  for (const key of ['params', 'facts']) {  // not edited here (block parameters, cycle facts): kept as they are
+    if (state.editing.mission[key]) mission[key] = state.editing.mission[key];
+  }
   if ($('m-max').value) mission.max_cycles = Number($('m-max').value);
   if ($('m-stop').value.trim()) mission.stop_when = $('m-stop').value.trim();
   const defaults = {};
