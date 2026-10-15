@@ -21,6 +21,7 @@ import numpy as np
 from sensor_msgs.msg import JointState
 
 from taskweave_core.config import Pose2D
+from taskweave_core.gripper import joint_for_opening, opening_table
 from taskweave_core.skill import Skill, SkillResult
 
 
@@ -676,7 +677,8 @@ class Gripper(_JointSkill):
         grippers = {side: self.robot.role(f'grippers.{side}') for side in sides}
         key = 'open' if args['action'] == 'open' else 'closed'
         goal = {g['joint']: float(g[key]) for g in grippers.values()}
-        grip = self._point_grip(sides) if key == 'closed' else {}
+        grip_m = self._point_grip(sides) if key == 'closed' else {}
+        grip = {side: joint_for_opening(grippers[side], opening) for side, opening in grip_m.items()}
         goal.update({grippers[side]['joint']: value for side, value in grip.items()})
         result, final = self._move(ctx, goal, f'{args["side"]} gripper {args["action"]}',
                                    stall_ok=args['action'] == 'close')
@@ -690,7 +692,7 @@ class Gripper(_JointSkill):
             state[f'{side}_gripper'] = 'holding' if holding[side] else key
         message = ', '.join(f'{s}: {v}' for s, v in state.items())
         if grip:
-            message += ' (grip ' + ', '.join(f'{s} {v:.2f}' for s, v in grip.items()) + ')'
+            message += ' (grip ' + ', '.join(f'{s} {opening * 1000:.0f} mm' for s, opening in grip_m.items()) + ')'
         if args['action'] == 'close':
             grasped = self.hold.grasp(sides)  # at an object point reached by go_to_point
             if grasped:
@@ -711,8 +713,9 @@ class Gripper(_JointSkill):
         return SkillResult.succeeded(message, holding=holding, world_state=state)
 
     def _point_grip(self, sides) -> dict[str, float]:
-        """How far each of ``sides`` closes at the object point go_to_point brought it to (the robot's grip for
-        the point, robots/<robot>/object_points.yaml); sides without one close fully."""
+        """How far (m) each of ``sides`` stays open when closing at the object point go_to_point brought it to (the
+        robot's grip_m for the point, robots/<robot>/object_points.yaml); sides without one, or whose gripper has no
+        opening_m table, close fully."""
         at = self.hold.reached_at()
         if at is None:
             return {}
@@ -721,8 +724,10 @@ class Gripper(_JointSkill):
             point = self.config.object_point(instance.object, at['point'].rpartition('/')[2], self.robot.name)
         except (KeyError, ValueError):
             return {}
-        grip = point.get('grip') or {}
-        return {side: float(grip[side]) for side in sides if side in grip and side in at['tools']}
+        grip = point.get('grip_m') or {}
+        tables = {side: self.robot.role(f'grippers.{side}') for side in sides}
+        return {side: float(grip[side]) for side in sides
+                if side in grip and side in at['tools'] and opening_table(tables[side]) is not None}
 
     def _placed(self, name: str, sides) -> str:
         """Save the held object's pose (cell frame, yaw only) as the placed object ``name``; says what was done."""

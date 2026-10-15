@@ -123,7 +123,10 @@ ROBOT_PROFILE = {
             'additionalProperties': {
                 'type': 'object',
                 'properties': {'joint': {'type': 'string'}, 'open': FINITE, 'closed': FINITE,
-                               'action': {'type': 'string'}},
+                               'action': {'type': 'string'},
+                               # [joint, finger opening m] rows, measured: a point's grip_m -> joint (gripper.py)
+                               'opening_m': {'type': 'array', 'minItems': 2, 'items': {
+                                   'type': 'array', 'items': FINITE, 'minItems': 2, 'maxItems': 2}}},
             },
         },
         'tool_frames': {
@@ -349,14 +352,15 @@ OBJECT = {
 }
 
 # robots/<model>/object_points.yaml: how this robot takes points of object types (object -> point -> settings): the
-# elbow side for its arm, and where each gripper closes to at the point (its joint value, e.g. on a rail of this
-# thickness); the points themselves stay robot-independent in objects/<object>.yaml
+# elbow side for its arm, and how far each gripper stays open when it closes at the point (grip_m, finger opening in
+# m, e.g. a rail's thickness; the profile's opening_m table gives the joint); the points themselves stay
+# robot-independent in objects/<object>.yaml
 ROBOT_OBJECT_POINTS = {
     'type': 'object', 'propertyNames': NAME,
     'additionalProperties': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {
         'type': 'object', 'additionalProperties': False, 'properties': {
             'elbow': {'enum': ELBOW_SIDES},
-            'grip': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {'type': 'number'}},
+            'grip_m': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {'type': 'number', 'minimum': 0}},
         }}},
 }
 

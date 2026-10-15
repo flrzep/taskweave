@@ -86,11 +86,13 @@ def test_capture_keeps_the_form_and_joint_set(store):
 
 def test_a_capture_takes_the_closed_grippers_as_the_points_grip(store):
     profile = store.root / 'robots' / ROBOT / 'profile.yaml'
-    profile.write_text(profile.read_text().replace('left: {action: /left_gripper/command,',
-                                                   'left: {joint: left_finger, action: /left_gripper/command,'))
+    profile.write_text(profile.read_text().replace(
+        'left: {action: /left_gripper/command,',
+        'left: {joint: left_finger, opening_m: [[0.0, 0.08], [1.0, 0.0]], action: /left_gripper/command,'))
     store.reload()
-    assert arm.closed_grips(store, ROBOT, [], {'left_finger': 0.62}) == {'left': 0.62}
+    assert arm.grip_ranges(store, ROBOT) == {'left': [0.0, 0.08]}
+    assert arm.closed_grips(store, ROBOT, [], {'left_finger': 0.62}) == {'left': 0.0304}   # opening, m
     assert arm.closed_grips(store, ROBOT, [], {'left_finger': 0.05}) == {}          # open: keep the old grip
     assert arm.closed_grips(store, ROBOT, [], {'left_finger': -0.2}) == {}          # past open is open too
-    assert arm.closed_grips(store, ROBOT, [], {'left_finger': 1.3}) == {'left': 1.0}   # within open..closed
+    assert arm.closed_grips(store, ROBOT, [], {'left_finger': 1.3}) == {'left': 0.0}   # within the table
     assert arm.closed_grips(store, ROBOT, ['right'], {'left_finger': 0.62}) == {}   # another hand was taught

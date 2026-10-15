@@ -71,7 +71,7 @@ function summary(p) {
   if (!tools.length) parts.push(`${joints.length} joints`);
   if (p.elbow) parts.push(`elbow ${p.elbow}`);
   if (p.approach_m != null) parts.push(`approach ${p.approach_m} m`);
-  Object.entries(p.grip || {}).forEach(([tool, value]) => { if (value != null) parts.push(`${tool} grip ${(+value).toFixed(2)}`); });
+  Object.entries(p.grip_m || {}).forEach(([tool, value]) => { if (value != null) parts.push(`${tool} grip ${Math.round(value * 1000)} mm`); });
   return parts.join(' · ');
 }
 
@@ -138,11 +138,16 @@ function positionItem(p) {
   elbow.replaceChildren(el('option', { value: '', text: 'robot default (Robot tab)' }), ...data.elbow_sides.map((s) => el('option', { value: s, text: s })));
   elbow.value = p.elbow || '';
   const [approachField, approach] = numberInput('Straight approach (m)', p.approach_m ?? '', { min: '0', max: '1', step: '0.01', placeholder: `default ${data.approach_default}` });
-  // grip (points on objects): the gripper joint each hand closes to here (rad); empty = close fully
+  // grip (points on objects): how far each hand's fingers stay open when it closes here (mm, within this robot's
+  // range from the profile's opening_m table); empty = close fully
   const grips = {};
-  const gripFields = robotScope ? [] : Object.keys(p.hands).map((tool) => {
-    const [field, input] = numberInput(`${tool} grip (rad)`, p.grip?.[tool] ?? '', { step: '0.01', placeholder: 'close fully' });
-    grips[tool] = input;
+  const ranges = data.grip_range_m || {};
+  const gripFields = robotScope ? [] : Object.keys(p.hands).filter((tool) => ranges[tool]).map((tool) => {
+    const [low, high] = ranges[tool].map((v) => Math.round(v * 1000));
+    const value = p.grip_m?.[tool];
+    const [field, input] = numberInput(`${tool} grip (mm, ${low}–${high})`, value == null ? '' : Math.round(value * 10000) / 10,
+      { min: String(low), max: String(high), step: '1', placeholder: 'close fully' });
+    grips[tool] = { input, low, high };
     return field;
   });
   const advancedFields = [];
@@ -183,11 +188,13 @@ function positionItem(p) {
       }
     } else {
       body.approach_m = approach.value === '' ? null : Number(approach.value);
-      body.grip = {};
-      for (const [tool, input] of Object.entries(grips)) {
+      body.grip_m = {};
+      for (const [tool, { input, low, high }] of Object.entries(grips)) {
         const value = Number(input.value);
-        if (input.value.trim() !== '' && !Number.isFinite(value)) { message(msg, `${tool} grip: a number (rad), or empty to close fully.`, true); return; }
-        body.grip[tool] = input.value.trim() === '' ? null : value;
+        if (input.value.trim() !== '' && !(Number.isFinite(value) && value >= low && value <= high)) {
+          message(msg, `${tool} grip: ${low}–${high} mm, or empty to close fully.`, true); return;
+        }
+        body.grip_m[tool] = input.value.trim() === '' ? null : value / 1000;
       }
     }
     if (name !== p.name) body.rename = name;

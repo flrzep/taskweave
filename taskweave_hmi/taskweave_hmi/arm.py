@@ -65,13 +65,14 @@ def overview(store: ConfigStore, robot_name: str, pose_args: set) -> dict:
         for point in points.object_points(store, object_type, point_used, robot_name):
             positions.append({
                 'scope': object_type, 'name': point['name'], 'joints': {}, 'elbow': point['elbow'],
-                'approach_m': point['approach_m'], 'grip': point['grip'], 'hands': point['tools'],
+                'approach_m': point['approach_m'], 'grip_m': point['grip_m'], 'hands': point['tools'],
                 'used_by': point['used_by'], 'problems': []})
     instances = store.object_instances()
     return {
         'robot': robot_name,
         'positions': positions,
         'held': held.overview(store, robot_name),   # held poses (move_object pose:), edited as numbers
+        'grip_range_m': grip_ranges(store, robot_name),   # finger openings each gripper can be set to (grip_m)
         'object_types': types,
         'placed': {t: sorted(n for n, i in instances.items() if i.object == t) for t in types},
         'tools': list(profile.data.get('ik', {}).get('groups', {})),   # hands with IK
@@ -114,7 +115,7 @@ def save(store: ConfigStore, robot_name: str, scope: str, name: str, body: Mappi
         except robot.RobotSettingsError as error:
             raise ArmError(str(error)) from error
     _object_type(store, scope)
-    settings = {key: body[key] for key in ('approach_m', 'elbow', 'grip') if key in body}
+    settings = {key: body[key] for key in ('approach_m', 'elbow', 'grip_m') if key in body}
     try:
         file = points.save_object_point(store, scope, name, {**settings, 'tools': hands}, robot_name)
     except points.PointError as error:
@@ -195,19 +196,35 @@ def capture_pose(store: ConfigStore, robot_name: str, name: str, body: Mapping, 
 GRIP_CLOSED_RAD = 0.1   # a gripper this far from its open position at a capture is closed on the part
 
 
+def grip_ranges(store: ConfigStore, robot_name: str) -> dict[str, list[float]]:
+    """{tool: [smallest, largest] finger opening in m} for the grippers with an opening_m table."""
+    from taskweave_core.gripper import opening_range
+
+    ranges = {}
+    for tool, gripper in store.robot(robot_name).data.get('grippers', {}).items():
+        span = opening_range(gripper)
+        if span is not None:
+            ranges[tool] = [span[0], span[1]]
+    return ranges
+
+
 def closed_grips(store: ConfigStore, robot_name: str, tools: list[str], joints: Mapping) -> dict[str, float]:
     """The grippers of ``tools`` (all if empty) that are closed now (more than GRIP_CLOSED_RAD from open, toward
-    closed): {tool: gripper joint value, within open..closed}, the point's grip. Open grippers (also a little past
-    open) are left out, so their grip stays as it was."""
+    closed): {tool: finger opening in m (the profile's opening_m table)}, the point's grip_m. Open grippers (also a
+    little past open) and grippers without a table are left out, so their grip stays as it was."""
+    from taskweave_core.gripper import opening_for_joint, opening_table
+
     grippers = store.robot(robot_name).data.get('grippers', {})
     grip = {}
     for tool, gripper in grippers.items():
         if tools and tool not in tools or gripper.get('joint') not in joints or 'closed' not in gripper:
             continue
+        if opening_table(gripper) is None:
+            continue
         opened, closed = float(gripper.get('open', 0.0)), float(gripper['closed'])
         value = float(joints[gripper['joint']])
         if (value - opened) * (1.0 if closed >= opened else -1.0) > GRIP_CLOSED_RAD:
-            grip[tool] = round(min(max(value, min(opened, closed)), max(opened, closed)), 4)
+            grip[tool] = round(opening_for_joint(gripper, value), 4)
     return grip
 
 

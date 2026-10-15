@@ -598,19 +598,19 @@ class ConfigStore:
         return self._edit_yaml(f'objects/{instance.object}.yaml', edit), stored
 
     def save_object_point_settings(self, obj: str, point: str, settings: dict, robot: str | None = None) -> Path:
-        """Set or clear (None) an object point's ``approach_m`` (objects/<obj>.yaml), ``elbow`` and ``grip`` (the
+        """Set or clear (None) an object point's ``approach_m`` (objects/<obj>.yaml), ``elbow`` and ``grip_m`` (the
         robot's: robots/<robot>/object_points.yaml; without ``robot`` the elbow goes to the object file, as before);
-        tool poses are kept. ``grip``: {tool: gripper joint value or None (that tool closes fully)}, merged."""
-        unknown = set(settings) - {'approach_m', 'elbow', 'grip'}
+        tool poses are kept. ``grip_m``: {tool: finger opening in m or None (that tool closes fully)}, merged."""
+        unknown = set(settings) - {'approach_m', 'elbow', 'grip_m'}
         if unknown:
             raise ValueError(f'unknown point settings: {", ".join(sorted(unknown))}')
-        if 'grip' in settings and not robot:
-            raise ValueError('grip is a robot setting: name the robot')
-        if robot and {'elbow', 'grip'} & set(settings):
+        if 'grip_m' in settings and not robot:
+            raise ValueError('grip_m is a robot setting: name the robot')
+        if robot and {'elbow', 'grip_m'} & set(settings):
             if point not in self.object(obj).get('points', {}):
                 raise ValueError(f'object {obj!r} has no point {point!r}')
-            robot_settings = {k: v for k, v in settings.items() if k in ('elbow', 'grip')}
-            settings = {k: v for k, v in settings.items() if k not in ('elbow', 'grip')}
+            robot_settings = {k: v for k, v in settings.items() if k in ('elbow', 'grip_m')}
+            settings = {k: v for k, v in settings.items() if k not in ('elbow', 'grip_m')}
 
             def robot_edit(document):
                 from ruamel.yaml.comments import CommentedMap
@@ -622,18 +622,18 @@ class ConfigStore:
                         entry.pop('elbow', None)
                     else:
                         entry['elbow'] = robot_settings['elbow']
-                if 'grip' in robot_settings:
-                    grip = CommentedMap(entry.get('grip') or {})
-                    for tool, value in (robot_settings['grip'] or {}).items():
+                if 'grip_m' in robot_settings:
+                    grip = CommentedMap(entry.get('grip_m') or {})
+                    for tool, value in (robot_settings['grip_m'] or {}).items():
                         if value in (None, ''):
                             grip.pop(tool, None)
                         else:
                             grip[tool] = round(float(value), 4)
                     if grip:
                         grip.fa.set_flow_style()
-                        entry['grip'] = grip
+                        entry['grip_m'] = grip
                     else:
-                        entry.pop('grip', None)
+                        entry.pop('grip_m', None)
                 if entry:
                     entry.fa.set_flow_style()
                     points[point] = entry

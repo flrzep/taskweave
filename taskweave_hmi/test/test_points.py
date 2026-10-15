@@ -85,12 +85,21 @@ def test_object_points_are_listed_and_their_settings_saved(store):
 
 
 def test_a_points_grip_is_saved_for_the_robot(store):
-    points.save_object_point(store, 'box', 'top_grasp', {'grip': {'left': '0.8'}}, ROBOT)
+    profile = store.root / 'robots' / ROBOT / 'profile.yaml'
+    profile.write_text(profile.read_text().replace(
+        'left: {action: /left_gripper/command,',
+        'left: {joint: left_finger, opening_m: [[0.0, 0.08], [1.0, 0.0]], action: /left_gripper/command,'))
+    store.reload()
+    points.save_object_point(store, 'box', 'top_grasp', {'grip_m': {'left': '0.012'}}, ROBOT)
     top = next(p for p in points.object_points(store, 'box', {}, ROBOT) if p['name'] == 'top_grasp')
-    assert top['grip'] == {'left': 0.8}
-    points.save_object_point(store, 'box', 'top_grasp', {'grip': {'left': ''}}, ROBOT)   # empty: close fully
-    assert next(p for p in points.object_points(store, 'box', {}, ROBOT) if p['name'] == 'top_grasp')['grip'] == {}
+    assert top['grip_m'] == {'left': 0.012}
+    points.save_object_point(store, 'box', 'top_grasp', {'grip_m': {'left': ''}}, ROBOT)   # empty: close fully
+    assert next(p for p in points.object_points(store, 'box', {}, ROBOT) if p['name'] == 'top_grasp')['grip_m'] == {}
     with pytest.raises(points.PointError, match='grip left'):
-        points.save_object_point(store, 'box', 'top_grasp', {'grip': {'left': 'tight'}}, ROBOT)
+        points.save_object_point(store, 'box', 'top_grasp', {'grip_m': {'left': 'tight'}}, ROBOT)
+    with pytest.raises(points.PointError, match='outside 0..80 mm'):
+        points.save_object_point(store, 'box', 'top_grasp', {'grip_m': {'left': 0.09}}, ROBOT)
+    with pytest.raises(points.PointError, match='no opening_m table'):
+        points.save_object_point(store, 'box', 'top_grasp', {'grip_m': {'right': 0.01}}, ROBOT)
     with pytest.raises(points.PointError, match='robot'):
-        points.save_object_point(store, 'box', 'top_grasp', {'grip': {'left': 0.5}})
+        points.save_object_point(store, 'box', 'top_grasp', {'grip_m': {'left': 0.01}})

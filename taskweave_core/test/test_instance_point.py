@@ -68,15 +68,15 @@ def test_how_far_the_grippers_close_at_a_point_is_the_robots(config_dir):
     import pytest
     store = placed(config_dir)
     store.save_object_point_settings('box', 'top_grasp', {'elbow': 'up'}, robot='demo_bot')
-    store.save_object_point_settings('box', 'top_grasp', {'grip': {'left': 1.2, 'right': 1.25}}, robot='demo_bot')
-    store.save_object_point_settings('box', 'top_grasp', {'grip': {'right': None}}, robot='demo_bot')  # merged
+    store.save_object_point_settings('box', 'top_grasp', {'grip_m': {'left': 0.012, 'right': 0.0125}}, robot='demo_bot')
+    store.save_object_point_settings('box', 'top_grasp', {'grip_m': {'right': None}}, robot='demo_bot')  # merged
     store = ConfigStore(config_dir)
-    assert store.robot_object_points('demo_bot') == {'box': {'top_grasp': {'elbow': 'up', 'grip': {'left': 1.2}}}}
-    assert store.instance_point('box_1/top_grasp', 'demo_bot')[1]['grip'] == {'left': 1.2}
-    assert 'grip:' not in (config_dir / 'objects' / 'box.yaml').read_text()
+    assert store.robot_object_points('demo_bot') == {'box': {'top_grasp': {'elbow': 'up', 'grip_m': {'left': 0.012}}}}
+    assert store.instance_point('box_1/top_grasp', 'demo_bot')[1]['grip_m'] == {'left': 0.012}
+    assert 'grip_m' not in (config_dir / 'objects' / 'box.yaml').read_text()
     with pytest.raises(ValueError, match='robot setting'):
-        store.save_object_point_settings('box', 'top_grasp', {'grip': {'left': 1.0}})
-    store.save_object_point_settings('box', 'top_grasp', {'grip': {'left': None}, 'elbow': None}, robot='demo_bot')
+        store.save_object_point_settings('box', 'top_grasp', {'grip_m': {'left': 0.01}})
+    store.save_object_point_settings('box', 'top_grasp', {'grip_m': {'left': None}, 'elbow': None}, robot='demo_bot')
     assert ConfigStore(config_dir).robot_object_points('demo_bot') == {}
 
 
