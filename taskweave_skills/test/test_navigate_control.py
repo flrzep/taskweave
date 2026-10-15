@@ -53,3 +53,35 @@ def test_differential_settles_from_inside_the_tolerance_band(offset):
     pose = simulate(Pose2D(1.0 - offset, 0.0, 0.0), target, 'differential', p, steps=400)
     assert math.hypot(pose.x - target.x, pose.y - target.y) <= p.position_tolerance
     assert abs(wrap_angle(pose.yaw - target.yaw)) < p.yaw_tolerance
+
+
+@pytest.mark.parametrize('base_type', ['holonomic', 'differential'])
+def test_final_turn_does_not_overshoot(base_type):
+    """Turning on the spot at full speed: the command brakes in time (a P law at k_angular 2 and 1.5 rad/s overshot,
+    asking for 3 rad/s^2 of deceleration where 1.5 are allowed)."""
+    p, dt = Params(max_angular=1.5, angular_accel=1.5, k_angular=2.0), 0.05
+    pose, cmd, target, furthest = Pose2D(0.0, 0.0, 0.0), (0.0, 0.0, 0.0), Pose2D(0.0, 0.0, 1.57), 0.0
+    for _ in range(400):
+        cmd = command(pose, target, base_type, p, cmd, dt)
+        pose = Pose2D(pose.x, pose.y, wrap_angle(pose.yaw + cmd[2] * dt))
+        furthest = max(furthest, pose.yaw - target.yaw)
+    assert furthest < p.yaw_tolerance
+    assert abs(wrap_angle(pose.yaw - target.yaw)) < p.yaw_tolerance
+
+
+def test_lead_makes_up_for_a_late_base():
+    """The base follows commands with a 0.15 s lag and odometry arrives 0.1 s late: without lead_s the final turn runs
+    about 10 deg past the target, with it less than the yaw tolerance."""
+    def overshoot(lead_s):
+        p, dt = Params(max_angular=1.5, angular_accel=1.5, k_angular=2.0, lead_s=lead_s), 0.05
+        target, yaw, rate, cmd, seen, furthest = Pose2D(0.0, 0.0, 1.57), 0.0, 0.0, (0.0, 0.0, 0.0), [0.0, 0.0, 0.0], 0.0
+        for _ in range(600):
+            cmd = command(Pose2D(0.0, 0.0, seen[0]), target, 'differential', p, cmd, dt)
+            rate += (cmd[2] - rate) * dt / 0.15
+            yaw += rate * dt
+            seen = seen[1:] + [yaw]
+            furthest = max(furthest, yaw - target.yaw)
+        assert abs(yaw - target.yaw) < p.yaw_tolerance
+        return furthest
+    assert overshoot(0.0) > 0.1
+    assert overshoot(0.25) < Params().yaw_tolerance
