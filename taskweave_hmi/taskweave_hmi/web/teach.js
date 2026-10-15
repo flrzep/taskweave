@@ -43,6 +43,7 @@ function renderArm() {
       el('ul', { class: 'points' }, positions.map((p) => positionItem(p)))));
   });
   $('arm-list').replaceChildren(...nodes);
+  if (typeof renderHeld === 'function') renderHeld();  // held.js
   if (teach.open && !data.positions.some((p) => keyOf(p) === teach.open)) { teach.open = null; setTeachTarget(null); }
 }
 

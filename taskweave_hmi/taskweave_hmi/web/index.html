@@ -129,6 +129,13 @@
       <ul id="arm-list" class="arm-groups"></ul>
     </div>
     <div class="card">
+      <div class="label">Held poses</div>
+      <p class="muted small-text">Where move_object takes an object the robot holds: some joints first (e.g. the body),
+        then the object along straight lines through the waypoints, in the robot's base frame. Typed in here; Test
+        needs the robot holding one.</p>
+      <ul id="held-list" class="arm-groups"></ul>
+    </div>
+    <div class="card">
       <div class="label">Joints</div>
       <p class="muted small-text">Live joint values against their limits (red: within 10° of one). Set a joint here when
         the pad cannot get the arm there: it moves at once, without a collision check.</p>
@@ -236,6 +243,7 @@
 <script src="app.js"></script>
 <script src="robot.js"></script>
 <script src="teach.js"></script>
+<script src="held.js"></script>
 <script src="graph.js"></script>
 </body>
 </html>

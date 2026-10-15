@@ -20,7 +20,7 @@ from taskweave_core.config import ConfigError, ConfigStore, schemas
 from taskweave_core.config.limits import joint_limits, pose_problems
 from taskweave_skills.ik import rpy_matrix, tcp_matrix
 
-from . import points, robot
+from . import held, points, robot
 
 ROBOT = 'robot'
 
@@ -71,6 +71,7 @@ def overview(store: ConfigStore, robot_name: str, pose_args: set) -> dict:
     return {
         'robot': robot_name,
         'positions': positions,
+        'held': held.overview(store, robot_name),   # held poses (move_object pose:), edited as numbers
         'object_types': types,
         'placed': {t: sorted(n for n, i in instances.items() if i.object == t) for t in types},
         'tools': list(profile.data.get('ik', {}).get('groups', {})),   # hands with IK

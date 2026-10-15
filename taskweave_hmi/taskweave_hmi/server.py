@@ -40,6 +40,8 @@ HTTP API (JSON):
   POST /api/teach/arm/<robot|type>/<name>/capture {at, tools, form}  save the robot's current arm there (also creates)
   POST /api/teach/arm/<robot|type>/<name>/test {at}  move there now (move_to_pose / go_to_point at placed object <at>)
   PUT  /api/teach/target {scope, name, at, form} or {}   the position a pad teach press saves into
+  PUT  /api/teach/held/<type>/<name> {joints, path, rename}; DELETE the same   held poses (move_object pose:)
+  POST /api/teach/held/<type>/<name>/test   move the held object there now (move_object)
 Missions and points are edited between runs (409 while a mission runs) and are used at the next start.
 """
 
@@ -79,12 +81,12 @@ from taskweave_interfaces.srv import ListSkills, StartMission, TeachPoint
 from taskweave_skills.ik import pose_matrix, tool_target
 from taskweave_skills.nav2 import nav2_parameters
 
-from . import arm, missions, points, robot
+from . import arm, held, missions, points, robot
 
 WEB = Path(__file__).parent / 'web'
 STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
 CALL_TIMEOUT_S = 5.0
-STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'graph.js', 'style.css')
+STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'graph.js', 'style.css')
 MANUAL_SKILL_TIMEOUT_S = 120.0
 DRIVE_TIMEOUT_S = 300.0  # sim time; a drive across the cell in a slow sim
 NAV_COSTMAPS = ['/local_costmap/local_costmap', '/global_costmap/global_costmap']  # Nav2 defaults
@@ -633,12 +635,25 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({'file': file})
                 if len(route) == 5 and method == 'POST' and route[4] == 'test':
                     return self._json(bridge.test_position(scope, name, self._body()))
+            if len(route) >= 4 and route[:2] == ['teach', 'held']:
+                obj, name = unquote(route[2]), unquote(route[3])
+                if len(route) == 4 and method in ('PUT', 'DELETE'):
+                    bridge.check_idle()
+                    if method == 'PUT':
+                        file = held.save(bridge.config, bridge.robot, obj, name, self._body())
+                    else:
+                        file = held.delete(bridge.config, bridge.robot, obj, name)
+                    bridge.get_logger().info(f'HMI {"saved" if method == "PUT" else "deleted"} held pose '
+                                             f'{obj}/{name} -> {file}')
+                    return self._json({'file': file})
+                if len(route) == 5 and method == 'POST' and route[4] == 'test':
+                    return self._json(bridge.run_skill(held.SKILL, {held.ARG: name}))
             if method == 'POST' and route == ['robot', 'move']:
                 return self._json(bridge.run_skill('move_to_pose', {'pose': self._body()['pose']}))
             return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
         except missions.MissionError as error:
             return self._json({'problems': error.problems}, HTTPStatus.UNPROCESSABLE_ENTITY)
-        except (points.PointError, robot.RobotSettingsError, arm.ArmError) as error:
+        except (points.PointError, robot.RobotSettingsError, arm.ArmError, held.HeldError) as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)
         except Busy as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.CONFLICT)

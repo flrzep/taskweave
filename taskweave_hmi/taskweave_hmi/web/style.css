@@ -273,3 +273,8 @@ details[open] summary { margin-bottom: 8px; }
 .plan-graph .node.pickable:hover .node-box { stroke-width: 2; }
 .plan-graph .node.start-here .node-box { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 6 4; }
 #start-hint { margin-top: 8px; }
+
+/* Teach tab, held poses: the waypoint list */
+.waypoints { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.waypoints .icon { width: 32px; height: 32px; }
+.waypoints .icon:disabled { opacity: .35; }

@@ -408,6 +408,46 @@ class ConfigStore:
         return {'joints': dict(entry.get('joints', {})),
                 'path': [Pose3D.from_dict(p, 'base') for p in entry.get('path', [])]}
 
+    def held_poses(self, robot: str) -> dict:
+        """robots/<robot>/held_poses.yaml as written: {object type: {name: {joints, path: [{xyz, rpy}]}}}."""
+        return self._load(f'robots/{robot}/held_poses.yaml', schemas.HELD_POSES, required=False, default={})
+
+    def save_held_pose(self, robot: str, obj: str, name: str, joints: dict, path: list[dict],
+                       rename: str | None = None) -> Path:
+        """Set (or create) a held pose: ``joints`` moved first, then straight lines through ``path`` (the held
+        object's origin in the base frame, [{xyz, rpy}]); ``rename`` renames it in place. Comments are kept."""
+        from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+        self._check_name(name)
+        if rename:
+            self._check_name(rename)
+        relative = f'robots/{robot}/held_poses.yaml'
+
+        def flow_map(mapping):
+            node = CommentedMap(mapping)
+            node.fa.set_flow_style()
+            return node
+
+        def flow_list(values):
+            node = CommentedSeq(round(float(v), 4) + 0.0 for v in values)
+            node.fa.set_flow_style()
+            return node
+
+        def edit(document):
+            poses = document.setdefault(obj, CommentedMap())
+            entry = poses.get(name) if isinstance(poses.get(name), dict) else CommentedMap()
+            if joints:
+                entry['joints'] = flow_map({joint: round(float(value), 4) for joint, value in joints.items()})
+            else:
+                entry.pop('joints', None)
+            entry['path'] = CommentedSeq(flow_map({'xyz': flow_list(p['xyz']), 'rpy': flow_list(p['rpy'])})
+                                         for p in path)
+            poses[name] = entry
+            if rename and rename != name:
+                self._rename_key(poses, name, rename, rename, relative)
+
+        return self._edit_yaml(relative, edit)
+
     def robot_object_points(self, robot: str) -> dict:
         """robots/<robot>/object_points.yaml: the robot's settings per object point ({object: {point: {elbow}}})."""
         return self._load(f'robots/{robot}/object_points.yaml', schemas.ROBOT_OBJECT_POINTS, required=False, default={})
