@@ -91,4 +91,6 @@ def test_a_capture_takes_the_closed_grippers_as_the_points_grip(store):
     store.reload()
     assert arm.closed_grips(store, ROBOT, [], {'left_finger': 0.62}) == {'left': 0.62}
     assert arm.closed_grips(store, ROBOT, [], {'left_finger': 0.05}) == {}          # open: keep the old grip
+    assert arm.closed_grips(store, ROBOT, [], {'left_finger': -0.2}) == {}          # past open is open too
+    assert arm.closed_grips(store, ROBOT, [], {'left_finger': 1.3}) == {'left': 1.0}   # within open..closed
     assert arm.closed_grips(store, ROBOT, ['right'], {'left_finger': 0.62}) == {}   # another hand was taught

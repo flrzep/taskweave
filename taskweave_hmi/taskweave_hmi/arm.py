@@ -195,16 +195,18 @@ GRIP_CLOSED_RAD = 0.1   # a gripper this far from its open position at a capture
 
 
 def closed_grips(store: ConfigStore, robot_name: str, tools: list[str], joints: Mapping) -> dict[str, float]:
-    """The grippers of ``tools`` (all if empty) that are closed now (more than GRIP_CLOSED_RAD from open): {tool:
-    gripper joint value}, the point's grip. Open grippers are left out, so their grip stays as it was."""
+    """The grippers of ``tools`` (all if empty) that are closed now (more than GRIP_CLOSED_RAD from open, toward
+    closed): {tool: gripper joint value, within open..closed}, the point's grip. Open grippers (also a little past
+    open) are left out, so their grip stays as it was."""
     grippers = store.robot(robot_name).data.get('grippers', {})
     grip = {}
     for tool, gripper in grippers.items():
-        if tools and tool not in tools or gripper.get('joint') not in joints:
+        if tools and tool not in tools or gripper.get('joint') not in joints or 'closed' not in gripper:
             continue
+        opened, closed = float(gripper.get('open', 0.0)), float(gripper['closed'])
         value = float(joints[gripper['joint']])
-        if abs(value - float(gripper.get('open', 0.0))) > GRIP_CLOSED_RAD:
-            grip[tool] = round(value, 4)
+        if (value - opened) * (1.0 if closed >= opened else -1.0) > GRIP_CLOSED_RAD:
+            grip[tool] = round(min(max(value, min(opened, closed)), max(opened, closed)), 4)
     return grip
 
 
