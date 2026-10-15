@@ -6,7 +6,7 @@ const ON_FAILURE = ['', 'retry', 'replan', 'skip', 'abort'];
 const POINT_KINDS = { base_target: ['locations', 'stances'], joint_pose: ['joint poses'], object_point: ['object points'],
   instance_point: ['placed object points'], instance_contact: ['placed object contacts'], instance: ['placed objects'] };
 const INCLUDE = 'mission:';  // skill choice that includes another mission's steps
-const state = { snapshot: null, skills: [], points: {}, missions: [], editing: null, dirty: false };
+const state = { snapshot: null, skills: [], points: {}, missions: [], editing: null, dirty: false, previews: {}, startStep: null };
 
 // ---------- helpers ----------
 async function api(method, path, body) {
@@ -97,24 +97,38 @@ function renderRun() {
   $('btn-pause').textContent = s.state === 'paused' ? 'Resume' : 'Pause';
   $('btn-abort').disabled = !active;
   $('btn-start').disabled = active;
+  const { plan, live } = shownPlan();
+  const outcomes = live ? snap.outcomes : {};
+  const startIndex = plan && state.startStep ? plan.steps.findIndex((step) => step.id === state.startStep) : -1;
+  if (startIndex < 0) state.startStep = null;  // another mission, or the step is gone
+  $('btn-start').textContent = !active && startIndex >= 0 ? `Start at step ${startIndex + 1}` : 'Start';
+  const pickable = !active && !!plan?.steps.length;
+  show($('start-hint'), pickable);
+  if (pickable) {
+    $('start-hint').textContent = startIndex >= 0
+      ? `Starts at step ${startIndex + 1} (${plan.steps[startIndex].instruction}): the steps before it are left out, `
+        + 'the robot and the objects stay where they are now. Click it again to start from the beginning.'
+      : 'Click a step to start the mission there.';
+  }
   setPointsBusy(active ? `A mission is ${s.state}. Points and robot settings can be changed when it has finished or was aborted.` : '');
 
-  const plan = snap.plan;
   const list = $('plan');
   list.replaceChildren();
-  if (!plan) { list.append(el('li', { class: 'muted', text: 'No plan yet' })); }
+  if (!plan?.steps.length) { list.append(el('li', { class: 'muted', text: plan?.message || 'No plan yet' })); }
   else plan.steps.forEach((step, index) => {
-    const event = snap.outcomes[step.id];
+    const event = outcomes[step.id];
     let kind = 'pending', mark = String(index + 1), note = '';
     if (event?.event === 'step_started') { kind = 'running'; }
     if (event?.event === 'step_finished') { kind = event.outcome.toLowerCase(); mark = kind === 'succeeded' ? '✓' : '!'; note = event.message || ''; }
     if (s.step_index === index && active) kind = 'running';
-    list.append(el('li', {},
+    const item = el('li', { class: `${pickable ? 'pickable' : ''} ${index === startIndex ? 'start-here' : ''}` },
       el('span', { class: `dot ${kind}`, text: mark }),
       el('div', { class: 'step-text' },
         el('div', { text: step.instruction }),
         el('div', { class: 'muted mono', text: `${step.skill} ${argsText(step.args)}` }),
-        note ? el('div', { class: 'muted', text: note }) : '')));
+        note ? el('div', { class: 'muted', text: note }) : ''));
+    if (pickable) { item.title = 'Start the mission at this step'; item.addEventListener('click', () => pickStart(step)); }
+    list.append(item);
   });
 
   if (typeof renderGraph === 'function') renderGraph();  // graph.js
@@ -144,13 +158,47 @@ $('btn-abort').addEventListener('click', async () => {
 $('btn-start').addEventListener('click', async () => {
   const mission = $('mission-select').value;
   if (!mission) return;
-  const { ok, data } = await api('POST', '/api/start', { mission });
-  message($('start-msg'), ok ? `Started ${data.plan_id}` : (data.message || data.error || 'not started'), !ok);
+  const startStep = state.startStep;
+  const { ok, data } = await api('POST', '/api/start', startStep ? { mission, start_step: startStep } : { mission });
+  if (ok) state.startStep = null;
+  message($('start-msg'), ok ? `Started ${data.plan_id}${startStep ? ` at ${startStep}` : ''}`
+    : (data.message || data.error || 'not started'), !ok);
 });
+$('mission-select').addEventListener('change', () => { state.startStep = null; renderRun(); });
+
+// ---------- start at a step ----------
+// With no mission active, the Run tab shows the selected mission's last run (with its outcomes) or, if it has not
+// run since the task handler started, the plan a start would run now. Clicking a step there makes the next start
+// begin at it (the first cycle only; later cycles run all steps).
+function missionOf(plan) { return plan ? plan.plan_id.replace(/-(\d+|preview)$/, '') : ''; }
+function shownPlan() {
+  const snap = state.snapshot;
+  const s = snap.status;
+  const mission = $('mission-select').value;
+  if (s.state === 'running' || s.state === 'paused' || !mission || missionOf(snap.plan) === mission) {
+    return { plan: snap.plan, live: true };
+  }
+  if (!(mission in state.previews)) loadPreview(mission);
+  return { plan: state.previews[mission], live: false };
+}
+async function loadPreview(mission) {
+  state.previews[mission] = null;  // one request per mission
+  const { ok, data } = await api('GET', `/api/missions/${encodeURIComponent(mission)}/plan`);
+  state.previews[mission] = ok ? data
+    : { plan_id: `${mission}-preview`, steps: [], message: (data.problems || []).join('; ') || data.error || 'no plan' };
+  renderRun();
+}
+function pickStart(step) {
+  const s = state.snapshot?.status.state;
+  if (s === 'running' || s === 'paused') return;
+  state.startStep = state.startStep === step.id ? null : step.id;
+  renderRun();
+}
 
 async function loadMissions() {
   const { ok, data } = await api('GET', '/api/missions');
   if (!ok) return;
+  state.previews = {};  // missions may have been edited
   state.missions = data;
   const select = $('mission-select');
   const current = select.value;

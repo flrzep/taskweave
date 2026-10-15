@@ -92,13 +92,15 @@ class Executive:
         self._replans: dict[str, int] = {}
 
     # ---- operator / node API -------------------------------------------------
-    def start(self) -> Status:
-        """Plan cycle 1 and start it. Returns the status (FAILED with a reason if the plan is invalid)."""
+    def start(self, start_step: str = '') -> Status:
+        """Plan cycle 1 and start it, at step ``start_step`` (an id) if given: the earlier steps are left out, the
+        robot and objects are taken as they are. Later cycles start at their first step. Returns the status (FAILED
+        with a reason if the plan is invalid or has no such step)."""
         with self._lock:
             if self.status.state in ACTIVE:
                 raise RuntimeError('a mission is already active')
             self.status = Status(state=State.RUNNING)
-            self._begin_cycle(1)
+            self._begin_cycle(1, start_step)
             return self.status
 
     def pause(self) -> bool:
@@ -169,7 +171,7 @@ class Executive:
                 self._handle_failure(outcome, message)
 
     # ---- internals --------------------------------------------------------------
-    def _begin_cycle(self, cycle: int) -> None:
+    def _begin_cycle(self, cycle: int, start_step: str = '') -> None:
         plan = self.planner.make_plan(self.world.snapshot(), cycle)
         if plan is None:  # the status keeps showing the last cycle that ran
             self._finish(State.SUCCEEDED, 'mission complete' if cycle > 1 else 'nothing to do')
@@ -181,8 +183,14 @@ class Executive:
             return
         self.plan = plan
         self.status.plan_id, self.status.goal, self.status.step_count = plan.plan_id, plan.goal, len(plan.steps)
-        self._log(f'cycle {cycle}: plan {plan.plan_id} with {len(plan.steps)} steps')
-        self.status.step_index = 0
+        try:
+            first = plan.index_of(start_step) if start_step else 0
+        except KeyError as error:
+            self._finish(State.FAILED, str(error.args[0]))
+            return
+        self._log(f'cycle {cycle}: plan {plan.plan_id} with {len(plan.steps)} steps'
+                  + (f', starting at {start_step} (step {first + 1})' if first else ''))
+        self.status.step_index = first
         self._run_current(fresh=True)
 
     def _run_current(self, fresh: bool) -> None:

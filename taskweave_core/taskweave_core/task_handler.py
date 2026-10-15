@@ -208,11 +208,12 @@ class TaskHandler(Node):
         self.executive = Executive(planner, self.dispatcher, self.world, validate=self._validate, clock=self.now,
                                    on_status=self._on_status, on_episode=self._on_episode,
                                    timeout_grace_s=self.get_parameter('timeout_grace_s').value)
-        status = self.executive.start()
+        status = self.executive.start(request.start_step)
         response.accepted = status.state in ACTIVE or status.state.name == 'SUCCEEDED'
         response.message = status.last_error if not response.accepted else f'started {status.plan_id}'
         response.plan_id = status.plan_id
-        self.get_logger().info(f'mission {request.mission!r}: {response.message}')
+        at = f' from step {request.start_step}' if request.start_step else ''
+        self.get_logger().info(f'mission {request.mission!r}{at}: {response.message}')
         return response
 
     def _trigger(self, command: str):

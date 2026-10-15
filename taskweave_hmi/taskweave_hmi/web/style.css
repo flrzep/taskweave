@@ -263,3 +263,13 @@ details[open] summary { margin-bottom: 8px; }
   border-radius: 1px; background: var(--accent); }
 .joint-row.near-limit .limit-bar::after { background: var(--bad); }
 .joint-row.near-limit .mono, .joint-row.near-limit .joint-name { color: var(--bad); }
+
+/* Run tab, no mission active: click a step to start there */
+.steps li.pickable { cursor: pointer; }
+.steps li.pickable:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.steps li.start-here { box-shadow: inset 4px 0 0 var(--accent); padding-left: 8px; }
+.steps li.start-here .dot { border-color: var(--accent); color: var(--accent); }
+.plan-graph .node.pickable { cursor: pointer; }
+.plan-graph .node.pickable:hover .node-box { stroke-width: 2; }
+.plan-graph .node.start-here .node-box { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 6 4; }
+#start-hint { margin-top: 8px; }

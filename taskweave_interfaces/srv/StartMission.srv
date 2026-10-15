@@ -3,6 +3,7 @@
 
 string mission          # mission name in config/missions/ (without .yaml)
 string goal             # optional goal text; overrides the mission's goal (used by goal-driven planners)
+string start_step       # optional step id: the first cycle begins there (robot and objects as they are now)
 ---
 bool accepted
 string message          # reason if rejected (e.g. validation errors)

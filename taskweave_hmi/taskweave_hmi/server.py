@@ -15,7 +15,9 @@ HTTP API (JSON):
                                    ?rename_from=<old> saves mission <old> as <name> (old file removed)
   DELETE /api/missions/<name>      remove the mission file (a running mission keeps its plan)
   POST /api/missions/<name>/validate
-  POST /api/start {mission}        start a mission; POST /api/pause | /api/resume | /api/abort
+  GET  /api/missions/<name>/plan   the plan a start would run now (includes expanded, facts filled): step ids to start at
+  POST /api/start {mission[, start_step]}  start a mission (at a step id: the first cycle begins there, robot and
+                                   objects as they are); POST /api/pause | /api/resume | /api/abort
   GET  /api/skills                 skill catalog;  GET /api/points  named points for argument pickers
   GET  /api/points/all             locations, stance offsets and placed objects, with the missions using each point
   PUT  /api/points/location/<name>                          {x, y, yaw[, rename]}  create, update or rename
@@ -68,6 +70,7 @@ from std_srvs.srv import Trigger
 
 from taskweave_core import names
 from taskweave_core.config import ConfigError, ConfigStore, Pose2D
+from taskweave_core.planner import MissionFilePlanner
 from taskweave_core.teach import MAX_POSE_AGE_S, yaw_from_quaternion
 from taskweave_interfaces.action import RunSkill
 from taskweave_interfaces.msg import Plan as PlanMsg
@@ -96,6 +99,19 @@ def step_dict(step) -> dict:
     return {'id': step.step_id, 'instruction': step.instruction, 'skill': step.skill,
             'args': json.loads(step.args_json or '{}'), 'timeout_s': step.timeout_s, 'retries': step.retries,
             'on_failure': step.on_failure}
+
+
+def preview_plan(config: ConfigStore, mission: str, robot: str) -> dict:
+    """The plan a start of ``mission`` would run now, shaped like the live plan (``plan_id`` ``<mission>-preview``);
+    no steps when there is nothing to do (e.g. every stack is empty)."""
+    plan = MissionFilePlanner(config, mission, None, robot).make_plan({}, 1)
+    if plan is None:
+        return {'plan_id': f'{mission}-preview', 'goal': '', 'robot': robot, 'loop': '', 'steps': [],
+                'message': 'nothing to do now'}
+    return {'plan_id': f'{mission}-preview', 'goal': plan.goal, 'robot': plan.robot, 'loop': plan.loop,
+            'steps': [{'id': step.id, 'instruction': step.instruction, 'skill': step.skill, 'args': step.args,
+                       'timeout_s': step.timeout_s, 'retries': step.retries, 'on_failure': step.on_failure}
+                      for step in plan.steps]}
 
 
 def status_dict(msg: TaskStatus) -> dict:
@@ -516,11 +532,16 @@ class Handler(BaseHTTPRequestHandler):
                     path = missions.delete(name, bridge.config)
                     bridge.get_logger().info(f'HMI deleted mission {name} ({path})')
                     return self._json({'deleted': name})
+            if method == 'GET' and len(route) == 3 and route[0] == 'missions' and route[2] == 'plan':
+                bridge.config.reload()
+                return self._json(preview_plan(bridge.config, missions.check_name(route[1]), bridge.robot))
             if method == 'POST' and len(route) == 3 and route[0] == 'missions' and route[2] == 'validate':
                 problems = missions.validate(self._body(), bridge.config, bridge.schemas(), bridge.robot)
                 return self._json({'problems': problems})
             if method == 'POST' and route == ['start']:
-                response = bridge.call(bridge.start_client, StartMission.Request(mission=self._body()['mission']))
+                body = self._body()
+                response = bridge.call(bridge.start_client, StartMission.Request(
+                    mission=body['mission'], start_step=str(body.get('start_step') or '')))
                 status = HTTPStatus.OK if response.accepted else HTTPStatus.UNPROCESSABLE_ENTITY
                 return self._json({'accepted': response.accepted, 'message': response.message,
                                    'plan_id': response.plan_id}, status)

@@ -206,3 +206,20 @@ def test_cannot_start_twice():
     ex.start()
     with pytest.raises(RuntimeError):
         ex.start()
+
+
+def test_start_step_skips_the_earlier_steps_in_the_first_cycle_only():
+    ex, d, _, _ = make([step('a'), step('b'), step('c')], cycles=2)
+    ex.start('b')
+    assert ex.status.step_index == 1
+    for _ in range(5):
+        finish(ex, d)
+    assert [s.id for _, s, _ in d.started] == ['b', 'c', 'a', 'b', 'c']
+    assert ex.status.state == State.SUCCEEDED
+
+
+def test_unknown_start_step_fails_before_dispatch():
+    ex, d, _, _ = make([step('a')])
+    ex.start('zz')
+    assert ex.status.state == State.FAILED and 'zz' in ex.status.last_error
+    assert d.started == []

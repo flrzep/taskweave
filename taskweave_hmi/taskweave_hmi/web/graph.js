@@ -27,7 +27,7 @@ function mainArg(step) {
 }
 
 async function missionFor(plan) {
-  const name = plan.plan_id.replace(/-\d+$/, '');
+  const name = missionOf(plan);
   if (!(name in missionCache)) {
     missionCache[name] = null;  // one request per mission
     const { ok, data } = await api('GET', `/api/missions/${encodeURIComponent(name)}`);
@@ -52,11 +52,11 @@ function rules(plan, mission) {
   });
 }
 
-function stepState(snap, step, index) {
+function stepState(snap, plan, live, step, index) {
   const s = snap.status;
-  const active = (s.state === 'running' || s.state === 'paused') && s.plan_id === snap.plan.plan_id;
+  const active = (s.state === 'running' || s.state === 'paused') && s.plan_id === plan.plan_id;
   if (active && s.step_index === index) return s.state === 'paused' ? 'paused' : 'running';
-  const event = snap.outcomes[step.id];
+  const event = live ? snap.outcomes[step.id] : null;
   if (event?.event === 'step_finished') return event.outcome.toLowerCase();
   return 'pending';
 }
@@ -65,9 +65,10 @@ function renderGraph() {
   const box = $('plan-graph');
   const snap = state.snapshot;
   if (!box || box.hidden || !snap) return;
-  const plan = snap.plan;
-  if (!plan || !plan.steps.length) { box.replaceChildren(el('p', { class: 'muted', text: 'No plan yet' })); return; }
-  const mission = missionCache[plan.plan_id.replace(/-\d+$/, '')];
+  const { plan, live } = shownPlan();  // app.js: the live plan, or a preview to pick a start step in
+  if (!plan || !plan.steps.length) { box.replaceChildren(el('p', { class: 'muted', text: plan?.message || 'No plan yet' })); return; }
+  const pickable = snap.status.state !== 'running' && snap.status.state !== 'paused';
+  const mission = missionCache[missionOf(plan)];
   if (mission === undefined) missionFor(plan);
   const r = rules(plan, mission);
   const n = plan.steps.length;
@@ -99,8 +100,10 @@ function renderGraph() {
   plan.steps.forEach((step, i) => {
     const y = rowY(i);
     const kind = SKILL_KINDS[step.skill] || 'other';
-    const status = stepState(snap, step, i);
-    const group = svg('g', { class: `node kind-${kind} state-${status}` });
+    const status = stepState(snap, plan, live, step, i);
+    const group = svg('g', { class: `node kind-${kind} state-${status}${pickable ? ' pickable' : ''}`
+      + `${pickable && step.id === state.startStep ? ' start-here' : ''}` });
+    if (pickable) group.addEventListener('click', () => pickStart(step));  // app.js
     const title = svg('title', {}, `${i + 1}. ${step.instruction}\n${step.skill} ${JSON.stringify(step.args)}`);
     const nodeBox = svg('rect', { x: G.nodeX, y, width: G.nodeW, height: G.nodeH, rx: 14, class: 'node-box' });
     // the graph is rebuilt on every status update: start the breathing at the phase of a page-wide clock, so it
