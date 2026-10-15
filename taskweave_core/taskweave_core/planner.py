@@ -66,6 +66,11 @@ class MissionFilePlanner(Planner):
         """The mission's facts now: {name: value, or None if nothing fits}."""
         return {name: fact_value(self.store, spec) for name, spec in self.mission.get('facts', {}).items()}
 
+    def replan(self, plan: Plan, failed_index: int, reason: str, world: Mapping[str, Any]) -> tuple[Plan, int] | None:
+        """Continue from the failed step's ``replan_from`` step (or the failed step itself) with fresh retries."""
+        target = plan.steps[failed_index].replan_from
+        return plan, plan.index_of(target) if target else failed_index
+
 
 def fact_value(store: ConfigStore, spec: Mapping[str, Any]) -> Any:
     """One fact from the placed objects: ``fullest`` = the instance of that type with the most items left (among
@@ -74,8 +79,3 @@ def fact_value(store: ConfigStore, spec: Mapping[str, Any]) -> Any:
                         if instance.object == spec['fullest'] and fnmatch.fnmatchcase(name, spec.get('among', '*'))
                         and instance.stack_count > 0)
     return max(candidates, key=lambda c: c[1])[0] if candidates else None
-
-    def replan(self, plan: Plan, failed_index: int, reason: str, world: Mapping[str, Any]) -> tuple[Plan, int] | None:
-        """Continue from the failed step's ``replan_from`` step (or the failed step itself) with fresh retries."""
-        target = plan.steps[failed_index].replan_from
-        return plan, plan.index_of(target) if target else failed_index
