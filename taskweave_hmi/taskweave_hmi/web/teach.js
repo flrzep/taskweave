@@ -70,6 +70,7 @@ function summary(p) {
   if (!tools.length) parts.push(`${joints.length} joints`);
   if (p.elbow) parts.push(`elbow ${p.elbow}`);
   if (p.approach_m != null) parts.push(`approach ${p.approach_m} m`);
+  Object.entries(p.grip || {}).forEach(([tool, value]) => { if (value != null) parts.push(`${tool} grip ${(+value).toFixed(2)}`); });
   return parts.join(' · ');
 }
 
@@ -136,9 +137,16 @@ function positionItem(p) {
   elbow.replaceChildren(el('option', { value: '', text: 'robot default (Robot tab)' }), ...data.elbow_sides.map((s) => el('option', { value: s, text: s })));
   elbow.value = p.elbow || '';
   const [approachField, approach] = numberInput('Straight approach (m)', p.approach_m ?? '', { min: '0', max: '1', step: '0.01', placeholder: `default ${data.approach_default}` });
+  // grip (points on objects): the gripper joint each hand closes to here (rad); empty = close fully
+  const grips = {};
+  const gripFields = robotScope ? [] : Object.keys(p.hands).map((tool) => {
+    const [field, input] = numberInput(`${tool} grip (rad)`, p.grip?.[tool] ?? '', { step: '0.01', placeholder: 'close fully' });
+    grips[tool] = input;
+    return field;
+  });
   const advancedFields = [];
   if (Object.keys(p.hands).length) advancedFields.push(el('div', { class: 'field' }, el('label', { text: 'Elbow side' }), elbow));
-  if (!robotScope) advancedFields.push(approachField);
+  if (!robotScope) advancedFields.push(approachField, ...gripFields);
   const advanced = advancedFields.length
     ? el('details', {}, el('summary', { text: 'Advanced' }), el('div', { class: 'grid2' }, ...advancedFields)) : '';
 
@@ -174,6 +182,12 @@ function positionItem(p) {
       }
     } else {
       body.approach_m = approach.value === '' ? null : Number(approach.value);
+      body.grip = {};
+      for (const [tool, input] of Object.entries(grips)) {
+        const value = Number(input.value);
+        if (input.value.trim() !== '' && !Number.isFinite(value)) { message(msg, `${tool} grip: a number (rad), or empty to close fully.`, true); return; }
+        body.grip[tool] = input.value.trim() === '' ? null : value;
+      }
     }
     if (name !== p.name) body.rename = name;
     const { ok, data: result } = await api('PUT', `/api/teach/arm/${encodeURIComponent(p.scope)}/${encodeURIComponent(p.name)}`, body);

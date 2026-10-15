@@ -82,3 +82,13 @@ def test_capture_keeps_the_form_and_joint_set(store):
     targets = {'left': {'tcp': [0.55, 0.2, 0.4], 'approach': [1, 0, 0], 'closing': [0, 1, 0]}}
     arm.capture_pose(store, ROBOT, 'reach', {}, joints, targets, ARGS)
     assert store.named_pose(ROBOT, 'reach')['tools']['left']['tcp'] == [0.55, 0.2, 0.4]
+
+
+def test_a_capture_takes_the_closed_grippers_as_the_points_grip(store):
+    profile = store.root / 'robots' / ROBOT / 'profile.yaml'
+    profile.write_text(profile.read_text().replace('left: {action: /left_gripper/command,',
+                                                   'left: {joint: left_finger, action: /left_gripper/command,'))
+    store.reload()
+    assert arm.closed_grips(store, ROBOT, [], {'left_finger': 0.62}) == {'left': 0.62}
+    assert arm.closed_grips(store, ROBOT, [], {'left_finger': 0.05}) == {}          # open: keep the old grip
+    assert arm.closed_grips(store, ROBOT, ['right'], {'left_finger': 0.62}) == {}   # another hand was taught

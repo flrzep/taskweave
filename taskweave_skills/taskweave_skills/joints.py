@@ -639,16 +639,21 @@ class Gripper(_JointSkill):
         grippers = {side: self.robot.role(f'grippers.{side}') for side in sides}
         key = 'open' if args['action'] == 'open' else 'closed'
         goal = {g['joint']: float(g[key]) for g in grippers.values()}
+        grip = self._point_grip(sides) if key == 'closed' else {}
+        goal.update({grippers[side]['joint']: value for side, value in grip.items()})
         result, final = self._move(ctx, goal, f'{args["side"]} gripper {args["action"]}',
                                    stall_ok=args['action'] == 'close')
         if result is not None:
             return result
         state, holding = {}, {}
         for side, g in grippers.items():
-            stopped_short = abs(final[g['joint']] - float(g[key])) > self.p.position_tolerance
-            holding[side] = args['action'] == 'close' and stopped_short
+            stopped_short = abs(final[g['joint']] - goal[g['joint']]) > self.p.position_tolerance
+            # closed to the point's grip: on the part (the sim's parts have no colliders to stop the fingers)
+            holding[side] = args['action'] == 'close' and (stopped_short or side in grip)
             state[f'{side}_gripper'] = 'holding' if holding[side] else key
         message = ', '.join(f'{s}: {v}' for s, v in state.items())
+        if grip:
+            message += ' (grip ' + ', '.join(f'{s} {v:.2f}' for s, v in grip.items()) + ')'
         if args['action'] == 'close':
             grasped = self.hold.grasp(sides)  # at an object point reached by go_to_point
             if grasped:
@@ -667,6 +672,20 @@ class Gripper(_JointSkill):
             if placed:
                 message += f'; {placed}'
         return SkillResult.succeeded(message, holding=holding, world_state=state)
+
+    def _point_grip(self, sides) -> dict[str, float]:
+        """How far each of ``sides`` closes at the object point go_to_point brought it to (the robot's grip for
+        the point, robots/<robot>/object_points.yaml); sides without one close fully."""
+        at = self.hold.reached_at()
+        if at is None:
+            return {}
+        try:
+            instance = self.config.object_instances()[at['instance']]
+            point = self.config.object_point(instance.object, at['point'].rpartition('/')[2], self.robot.name)
+        except (KeyError, ValueError):
+            return {}
+        grip = point.get('grip') or {}
+        return {side: float(grip[side]) for side in sides if side in grip and side in at['tools']}
 
     def _placed(self, name: str, sides) -> str:
         """Save the held object's pose (cell frame, yaw only) as the placed object ``name``; says what was done."""

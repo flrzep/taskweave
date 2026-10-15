@@ -348,12 +348,16 @@ OBJECT = {
     },
 }
 
-# robots/<model>/object_points.yaml: how this robot takes points of object types (object -> point -> settings), e.g.
-# the elbow side for its arm; the points themselves stay robot-independent in objects/<object>.yaml
+# robots/<model>/object_points.yaml: how this robot takes points of object types (object -> point -> settings): the
+# elbow side for its arm, and where each gripper closes to at the point (its joint value, e.g. on a rail of this
+# thickness); the points themselves stay robot-independent in objects/<object>.yaml
 ROBOT_OBJECT_POINTS = {
     'type': 'object', 'propertyNames': NAME,
     'additionalProperties': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {
-        'type': 'object', 'additionalProperties': False, 'properties': {'elbow': {'enum': ELBOW_SIDES}}}},
+        'type': 'object', 'additionalProperties': False, 'properties': {
+            'elbow': {'enum': ELBOW_SIDES},
+            'grip': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {'type': 'number'}},
+        }}},
 }
 
 # robots/<model>/held_poses.yaml: where this robot holds an object of a type, by name (move_object pose): joints

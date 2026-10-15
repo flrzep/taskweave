@@ -393,6 +393,9 @@ class Bridge(Node):
                                                                    tools=list(body.get('tools') or [])))
         if not response.success:
             raise arm.ArmError(response.message)
+        grip = arm.closed_grips(self.config, self.robot, list(body.get('tools') or []), self.joint_positions())
+        if grip:  # grippers closed on the part when taught: they close that far at this point
+            points.save_object_point(self.config, scope, name, {'grip': grip}, self.robot)
         try:
             return str(Path(response.file).relative_to(self.config.root))
         except ValueError:

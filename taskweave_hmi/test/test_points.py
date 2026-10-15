@@ -82,3 +82,15 @@ def test_object_points_are_listed_and_their_settings_saved(store):
         points.save_object_point(store, 'box', 'top_grasp', {'elbow': 'sideways'})
     with pytest.raises(points.PointError, match='approach_m'):
         points.save_object_point(store, 'box', 'top_grasp', {'approach_m': 3})
+
+
+def test_a_points_grip_is_saved_for_the_robot(store):
+    points.save_object_point(store, 'box', 'top_grasp', {'grip': {'left': '0.8'}}, ROBOT)
+    top = next(p for p in points.object_points(store, 'box', {}, ROBOT) if p['name'] == 'top_grasp')
+    assert top['grip'] == {'left': 0.8}
+    points.save_object_point(store, 'box', 'top_grasp', {'grip': {'left': ''}}, ROBOT)   # empty: close fully
+    assert next(p for p in points.object_points(store, 'box', {}, ROBOT) if p['name'] == 'top_grasp')['grip'] == {}
+    with pytest.raises(points.PointError, match='grip left'):
+        points.save_object_point(store, 'box', 'top_grasp', {'grip': {'left': 'tight'}}, ROBOT)
+    with pytest.raises(points.PointError, match='robot'):
+        points.save_object_point(store, 'box', 'top_grasp', {'grip': {'left': 0.5}})

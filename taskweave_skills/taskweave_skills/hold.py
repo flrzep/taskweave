@@ -95,6 +95,11 @@ class HoldState:
             self.reached = None if object_in_base is None else {
                 'point': point, 'instance': instance, 'tools': list(tools), 'object_in_base': object_in_base}
 
+    def reached_at(self) -> dict | None:
+        """Where the tools are now: {point (<instance>/<point>), instance, tools}, or None."""
+        with self.lock:
+            return None if self.reached is None else {k: self.reached[k] for k in ('point', 'instance', 'tools')}
+
     def grasp(self, tools) -> str | None:
         """Grippers of ``tools`` closed: hold the object they are at. Returns its name, or None."""
         with self.lock:

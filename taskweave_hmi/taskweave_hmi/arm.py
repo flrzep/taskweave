@@ -65,7 +65,8 @@ def overview(store: ConfigStore, robot_name: str, pose_args: set) -> dict:
         for point in points.object_points(store, object_type, point_used, robot_name):
             positions.append({
                 'scope': object_type, 'name': point['name'], 'joints': {}, 'elbow': point['elbow'],
-                'approach_m': point['approach_m'], 'hands': point['tools'], 'used_by': point['used_by'], 'problems': []})
+                'approach_m': point['approach_m'], 'grip': point['grip'], 'hands': point['tools'],
+                'used_by': point['used_by'], 'problems': []})
     instances = store.object_instances()
     return {
         'robot': robot_name,
@@ -112,7 +113,7 @@ def save(store: ConfigStore, robot_name: str, scope: str, name: str, body: Mappi
         except robot.RobotSettingsError as error:
             raise ArmError(str(error)) from error
     _object_type(store, scope)
-    settings = {key: body[key] for key in ('approach_m', 'elbow') if key in body}
+    settings = {key: body[key] for key in ('approach_m', 'elbow', 'grip') if key in body}
     try:
         file = points.save_object_point(store, scope, name, {**settings, 'tools': hands}, robot_name)
     except points.PointError as error:
@@ -188,6 +189,23 @@ def capture_pose(store: ConfigStore, robot_name: str, name: str, body: Mapping, 
         return robot.save_pose(store, robot_name, name, request, pose_args)
     except robot.RobotSettingsError as error:
         raise ArmError(str(error)) from error
+
+
+GRIP_CLOSED_RAD = 0.1   # a gripper this far from its open position at a capture is closed on the part
+
+
+def closed_grips(store: ConfigStore, robot_name: str, tools: list[str], joints: Mapping) -> dict[str, float]:
+    """The grippers of ``tools`` (all if empty) that are closed now (more than GRIP_CLOSED_RAD from open): {tool:
+    gripper joint value}, the point's grip. Open grippers are left out, so their grip stays as it was."""
+    grippers = store.robot(robot_name).data.get('grippers', {})
+    grip = {}
+    for tool, gripper in grippers.items():
+        if tools and tool not in tools or gripper.get('joint') not in joints:
+            continue
+        value = float(joints[gripper['joint']])
+        if abs(value - float(gripper.get('open', 0.0))) > GRIP_CLOSED_RAD:
+            grip[tool] = round(value, 4)
+    return grip
 
 
 def nearest_placed(store: ConfigStore, object_type: str, relative: list[dict]) -> str:

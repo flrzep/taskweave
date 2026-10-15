@@ -135,7 +135,7 @@ def overview(store: ConfigStore, robot: str) -> dict:
 
 def object_points(store: ConfigStore, object_type: str, used: dict, robot: str | None = None) -> list[dict]:
     """Points on an object type (objects/<type>.yaml): tool poses in the object's frame, approach and (with
-    ``robot``) that robot's elbow side for it."""
+    ``robot``) that robot's elbow side and gripper close positions (grip) for it."""
     try:
         points = store.object(object_type).get('points', {})
     except ConfigError:
@@ -145,6 +145,7 @@ def object_points(store: ConfigStore, object_type: str, used: dict, robot: str |
         point = store.object_point(object_type, name, robot)
         result.append({
             'name': name, 'approach_m': point.get('approach_m'), 'elbow': point.get('elbow'),
+            'grip': dict(point.get('grip') or {}),
             'tools': {key[:-len(TOOL_SUFFIX)]: {'xyz': list(pose.xyz), 'rpy': list(pose.rpy)}
                       for key, pose in point.items() if key.endswith(TOOL_SUFFIX) and pose is not None},
             'used_by': used.get(('object_point', object_type, name), []),
@@ -153,9 +154,28 @@ def object_points(store: ConfigStore, object_type: str, used: dict, robot: str |
 
 
 def save_object_point(store: ConfigStore, object_type: str, point: str, body: Mapping, robot: str | None = None) -> str:
-    """Approach (m or null = skill default), elbow (side or null = robot default; stored for ``robot``) and tool
-    poses of a point."""
-    settings = {key: body[key] for key in ('approach_m', 'elbow') if key in body}
+    """Approach (m or null = skill default), elbow (side or null = robot default), grip ({tool: gripper joint value
+    or null = close fully}; elbow and grip are stored for ``robot``) and tool poses of a point."""
+    settings = {key: body[key] for key in ('approach_m', 'elbow', 'grip') if key in body}
+    if 'grip' in settings:
+        if not robot:
+            raise PointError('grip: needs the robot')
+        if settings['grip'] is None:
+            settings['grip'] = {}
+        if not isinstance(settings['grip'], Mapping):
+            raise PointError('grip: a gripper position per hand')
+        grip = {}
+        for tool, value in settings['grip'].items():
+            if value in (None, ''):
+                grip[tool] = None
+                continue
+            try:
+                grip[tool] = float(value)
+            except (TypeError, ValueError):
+                raise PointError(f'grip {tool}: a gripper joint value, or empty to close fully') from None
+            if not math.isfinite(grip[tool]):
+                raise PointError(f'grip {tool}: a gripper joint value, or empty to close fully')
+        settings['grip'] = grip
     if settings.get('elbow') not in (None, '', *schemas.ELBOW_SIDES):
         raise PointError(f'elbow: one of {", ".join(schemas.ELBOW_SIDES)} or the robot default')
     if settings.get('approach_m') not in (None, ''):
