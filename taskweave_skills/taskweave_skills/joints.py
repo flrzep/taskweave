@@ -212,6 +212,12 @@ class MoveToPose(_JointSkill):
 
             from .ik import IkClient
             self.ik = IkClient(node, robot, limits=joint_limits(config, robot.name))
+            from taskweave_core.config.limits import URDF
+            urdf = config.root / URDF.format(robot=robot.name)
+            if urdf.is_file():  # straight lines on the URDF chains, away from joint limits (cartesian.linear_path)
+                group = (robot.data.get('planning') or {}).get('group')
+                tools = self.ik.attach_chains(urdf, group)
+                node.get_logger().info(f'{self.name}: straight lines on the URDF chains of {", ".join(tools) or "no tool"}')
         if robot.data.get('planning'):
             from .motion_plan import MotionPlanner
             self.planner = MotionPlanner(node, robot)
@@ -321,14 +327,29 @@ class MoveToPose(_JointSkill):
             starts = self.hold.tcp_poses(goals)
             goals = matching_flip(goals, starts, self.robot.data.get('tool_frames', {}))
             ctx.feedback(0.0, 'straight-line path')
-            path = linear_path(self.ik, starts, goals, arm, self.tcp_speed, self.tcp_turn)
+            path = linear_path(self.ik, starts, goals, arm, self.tcp_speed, self.tcp_turn, state=current)
         except (LookupError, PathError) as error:
             return SkillResult.failed(f'{label}: {error}'), 0
         goal = dict(zip(path.names, path.points[-1], strict=True))
         result, final = self._move(ctx, goal, label, path=path)
         if result is not None:
             return result, 0
+        self._check_hands(goals, label)
         return None, max(abs(goal[n] - final[n]) for n in goal)
+
+    def _check_hands(self, goals: dict, label: str, tolerance_m: float = 0.02) -> None:
+        """Log where a hand ended more than ``tolerance_m`` from its goal (TF): joints that reached their targets but a
+        hand that did not, e.g. pushed by a contact in the simulator."""
+        try:
+            reached = self.hold.tcp_poses(goals)
+        except LookupError:
+            return
+        for tool, goal in goals.items():
+            miss = float(np.linalg.norm(reached[tool][:3, 3] - goal[:3, 3]))
+            if miss > tolerance_m:
+                self.node.get_logger().warning(
+                    f'{label}: {tool} TCP ended {miss * 100:.1f} cm from its goal: at '
+                    f'{np.round(reached[tool][:3, 3], 3).tolist()}, goal {np.round(goal[:3, 3], 3).tolist()}')
 
 
 class GoToPoint(MoveToPose):
@@ -413,7 +434,9 @@ class GoToPoint(MoveToPose):
             before = {t: flipped(v) if t in flips else v for t, v in before.items()}
             try:  # solved backwards from the point: the approach starts in the configuration that ends there
                 path = linear_path(self.ik, tcp_targets(tools), tcp_targets(before), {**lift, **solution},
-                                   self.tcp_speed, self.tcp_turn).reversed()
+                                   self.tcp_speed, self.tcp_turn,
+                                   state={**(self.joints.snapshot(self.p.state_timeout_s) or {}), **lift,
+                                          **solution}).reversed()
             except PathError as error:
                 return SkillResult.failed(f'{label}: no straight {approach:g} m approach to the point: {error}')
             first, last = ({**lift, **dict(zip(path.names, path.points[i], strict=True))} for i in (0, -1))

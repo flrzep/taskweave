@@ -60,3 +60,42 @@ def test_a_flippable_goal_is_turned_the_way_the_tcp_already_is():
     out = matching_flip({'left': goal, 'right': goal}, {'left': start, 'right': start}, {'left': {'flip': True}})
     assert np.allclose(out['left'][:3, :3], start[:3, :3]) and np.allclose(out['left'][:3, 3], goal[:3, 3])
     assert out['right'] is goal  # not flippable: unchanged
+
+
+class ChainIk:
+    """IkClient stand-in with a URDF chain (test_chain's 7-joint arm on a lift) and no collisions."""
+
+    def __init__(self, chain, names):
+        self.tools = {'arm': {'link': 'flange', 'xyz': [0, 0, 0], 'rpy': [0, 0, 0]}}
+        self.chains, self.groups, self.choose = {'arm': (chain, names)}, {'arm': 'arm'}, None
+        self.limits = {name: (-2.5, 2.5) for name in names}
+        self.checked = 0
+
+    def valid(self, joints, group):
+        self.checked += 1
+        return True
+
+
+def test_a_straight_line_on_the_chain_moves_joints_away_from_their_limits(tmp_path):
+    from test_chain import NAMES, START, URDF
+
+    from taskweave_skills.chain import Chain
+    path = tmp_path / 'arm.urdf'
+    path.write_text(URDF)
+    chain = Chain.from_urdf(path, 'base', 'flange')
+    ik = ChainIk(chain, NAMES)
+    start_state = {**START, 'j3': 2.45}                      # j3 (upper-arm roll) 0.05 rad from its limit
+    start = chain.fk(start_state)
+    goal = start.copy()
+    goal[:3, 3] += [0.0, 0.05, -0.04]
+    trajectory = linear_path(ik, {'arm': start}, {'arm': goal}, {n: start_state[n] for n in NAMES}, 0.05, 0.3,
+                             state=start_state)
+    for point in trajectory.points:                          # every step on the straight line
+        tip = chain.fk({**start_state, **dict(zip(trajectory.names, point, strict=True))})[:3, 3]
+        offset = tip - start[:3, 3]
+        along = offset @ (goal[:3, 3] - start[:3, 3]) / np.linalg.norm(goal[:3, 3] - start[:3, 3]) ** 2
+        assert np.linalg.norm(offset - along * (goal[:3, 3] - start[:3, 3])) < 1e-3
+    end = dict(zip(trajectory.names, trajectory.points[-1], strict=True))
+    assert np.allclose(chain.fk({**start_state, **end})[:3, 3], goal[:3, 3], atol=1e-3)
+    assert end['j3'] < 2.45 - 0.05                           # pushed back from the limit through the null space
+    assert ik.checked == len(trajectory.points) - 1          # each step checked for collisions

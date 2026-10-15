@@ -225,6 +225,48 @@ class IkClient:
             self.fk = self.node.create_client(GetPositionFK, choose.get('fk_service', '/compute_fk'),
                                               callback_group=ReentrantCallbackGroup())
 
+    def attach_chains(self, urdf, validity_group: str | None = None) -> list[str]:
+        """Kinematic chains (chain.py) from the URDF for straight-line moves (cartesian.linear_path): base -> each
+        tool's flange link, with the arm joints IK moves. ``validity_group``: the MoveIt group whose collisions a step
+        is checked against (default: the tool's IK group). Returns the tools that got one."""
+        from moveit_msgs.srv import GetStateValidity
+        from rclpy.callback_groups import ReentrantCallbackGroup
+
+        from .chain import Chain
+
+        self.chains = {}
+        for tool, frame in self.tools.items():
+            if tool not in self.groups:
+                continue
+            try:
+                chain = Chain.from_urdf(urdf, self.frame, frame['link'])
+            except (ValueError, OSError):
+                continue
+            pattern = re.compile(self.joint_pattern.format(tool=tool))
+            self.chains[tool] = (chain, [name for name in chain.movable if pattern.fullmatch(name)])
+        self.validity_group = validity_group
+        self.validity = self.node.create_client(GetStateValidity, '/check_state_validity',
+                                                callback_group=ReentrantCallbackGroup())
+        return sorted(self.chains)
+
+    def valid(self, joints: dict, group: str) -> bool:
+        """MoveIt's collision check of ``joints`` on top of its current state (True if the service is not there)."""
+        from moveit_msgs.msg import RobotState
+        from moveit_msgs.srv import GetStateValidity
+        from sensor_msgs.msg import JointState
+
+        if not self.validity.wait_for_service(timeout_sec=1.0):
+            return True
+        request = GetStateValidity.Request(group_name=self.validity_group or group, robot_state=RobotState(
+            joint_state=JointState(name=list(joints), position=[float(v) for v in joints.values()]), is_diff=True))
+        future = self.validity.call_async(request)
+        deadline = time.monotonic() + 2.0
+        while not future.done():
+            if time.monotonic() > deadline:
+                raise IkError('collision check (/check_state_validity) did not answer')
+            time.sleep(0.002)
+        return future.result().valid
+
     def solve(self, tools: dict, fixed: dict, should_stop=lambda: False, current: dict | None = None,
               allow_flip: bool = True, elbow=None) -> dict[str, float]:
         """Joint values for every tool target (plus nothing else); raises IkError. ``current``: the joints now, for
