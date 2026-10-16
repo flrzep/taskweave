@@ -24,6 +24,8 @@ Parameters (``skills/navigate_to.yaml``): the direct controller's (see ``navigat
   depart_margin_m: 0.1          beyond the point where the footprint comes clear
   depart_speed: 0.15            m/s backwards
   costmaps: /global_costmap/global_costmap,/local_costmap/local_costmap   nodes whose footprint follows the hold
+  speed_limit_topic: /speed_limit   Nav2 controller_server's nav2_msgs/SpeedLimit topic: the global speed override
+                                    is sent there as a percentage while Nav2 drives (nothing at 100 %)
 """
 
 from __future__ import annotations
@@ -40,7 +42,8 @@ from .navigate import NavigateTo
 
 NAV2_DEFAULTS = {'action': 'navigate_to_pose', 'frame': 'map', 'server_timeout_s': 10.0, 'handover_distance': 0.3,
                  'map_topic': '/map', 'depart_max_m': 1.0, 'depart_margin_m': 0.1, 'depart_speed': 0.15,
-                 'costmaps': '/global_costmap/global_costmap,/local_costmap/local_costmap'}
+                 'costmaps': '/global_costmap/global_costmap,/local_costmap/local_costmap',
+                 'speed_limit_topic': '/speed_limit'}
 POLL_S = 0.05
 NEUTRAL_PATH_ANGLE_WEIGHT = 2.0  # PathAngleCritic without a forward preference (follows the path, any heading)
 
@@ -94,6 +97,10 @@ class Nav2NavigateTo(NavigateTo):
         from rclpy.callback_groups import ReentrantCallbackGroup
 
         self.NavigateToPose = NavigateToPose
+        from nav2_msgs.msg import SpeedLimit
+
+        self.SpeedLimit, self._speed_sent = SpeedLimit, None
+        self.speed_limit = node.create_publisher(SpeedLimit, self.nav['speed_limit_topic'], 10)
         self.client = ActionClient(node, NavigateToPose, self.nav['action'], callback_group=ReentrantCallbackGroup())
         self.goal_handle = None
         self.goal_lock = threading.Lock()
@@ -163,7 +170,8 @@ class Nav2NavigateTo(NavigateTo):
         if distance <= 0:
             return None
         self.node.get_logger().info(f'navigate_to: footprint overlaps an obstacle, backing out {distance:.2f} m')
-        start, deadline = pose, ctx.now() + 5.0 + 3.0 * distance / self.nav['depart_speed']
+        clock = ctx.work_clock(self.p.override_slew_per_s)  # speed x override, deadline on work time
+        start, deadline = pose, clock(ctx.now()) + 5.0 + 3.0 * distance / self.nav['depart_speed']
         while True:
             if ctx.should_stop:
                 self.stop()
@@ -176,11 +184,11 @@ class Nav2NavigateTo(NavigateTo):
             if travelled >= distance:
                 self.stop()
                 return None
-            if ctx.now() > deadline:
+            if clock(ctx.now()) > deadline:
                 self.stop()
                 return SkillResult.failed(f'backing out: only {travelled:.2f} of {distance:.2f} m')
             ctx.feedback(0.0, f'backing out {distance - travelled:.2f} m')
-            self._publish(-self.nav['depart_speed'], 0.0, 0.0)
+            self._publish(-self.nav['depart_speed'] * (clock.o if clock.o < 1.0 else 1.0), 0.0, 0.0)
             time.sleep(POLL_S)
 
     def stop(self) -> None:
@@ -188,7 +196,17 @@ class Nav2NavigateTo(NavigateTo):
             handle, self.goal_handle = self.goal_handle, None
         if handle is not None:
             handle.cancel_goal_async()
+        self._limit_speed(1.0)
         super().stop()
+
+    def _limit_speed(self, override: float) -> None:
+        """Nav2's controller at the speed override (SpeedLimit as a percentage of its own limits; 0 = no limit).
+        At 100 % nothing is sent unless a limit was sent before."""
+        percent = min(100.0, round(100.0 * override, 1))
+        if percent == (self._speed_sent if self._speed_sent is not None else 100.0):
+            return
+        self.speed_limit.publish(self.SpeedLimit(percentage=True, speed_limit=percent if percent < 100.0 else 0.0))
+        self._speed_sent = percent if percent < 100.0 else None
 
     def _goal(self, target: Pose2D):
         goal = self.NavigateToPose.Goal()
@@ -225,6 +243,9 @@ class Nav2NavigateTo(NavigateTo):
         if departed is not None:
             return departed
         self.remaining = math.nan
+        clock = ctx.work_clock(self.p.override_slew_per_s)
+        clock(ctx.now())
+        self._limit_speed(clock.o)
         sent = self.client.send_goal_async(self._goal(target), feedback_callback=self._feedback)
         if not self._wait(ctx, sent):
             self.stop()
@@ -247,9 +268,12 @@ class Nav2NavigateTo(NavigateTo):
             if pose and math.hypot(target.x - pose.x, target.y - pose.y) <= self.nav['handover_distance']:
                 self.stop()  # close enough: the direct controller is faster and more precise than Nav2 here
                 return self._drive(ctx, target, args['target'])
+            clock(ctx.now())
+            self._limit_speed(clock.o)
             time.sleep(POLL_S)
         with self.goal_lock:
             self.goal_handle = None
+        self._limit_speed(1.0)
         outcome = result.result()
         pose = self._current()
         distance = math.hypot(target.x - pose.x, target.y - pose.y) if pose else math.inf
