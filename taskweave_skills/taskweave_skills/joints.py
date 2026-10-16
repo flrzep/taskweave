@@ -238,8 +238,8 @@ class MoveToPose(_JointSkill):
 
             from .ik import IkClient
             self.ik = IkClient(node, robot, limits=joint_limits(config, robot.name))
-            from taskweave_core.config.limits import URDF
-            urdf = config.root / URDF.format(robot=robot.name)
+            from taskweave_core.config.limits import urdf_path
+            urdf = urdf_path(config, robot.name)  # cell pack override, else the robot pack
             if urdf.is_file():  # straight lines on the URDF chains, away from joint limits (cartesian.linear_path)
                 group = (robot.data.get('planning') or {}).get('group')
                 tools = self.ik.attach_chains(urdf, group)
