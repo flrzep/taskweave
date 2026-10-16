@@ -16,6 +16,9 @@ Elbow: std_msgs/Float64 on /taskweave/jog/<tool>/elbow (rad/s) swings the elbow 
 along the arm's self-motion (the Jacobian's null space; a 7-joint arm has one), at about that rate, and the step keeps
 correcting the flange onto where it was. Without the URDF: the swivel joint (profile ik.swivel_joint, default the
 arm's third joint) turns and one IK descent puts the flange back.
+
+ROS parameters: config_dir, robot, rate_hz (20.0, steps per second), validity_timeout_s (0.1: a collision check
+slower than this lets the step through, so jogging never blocks on it).
 """
 
 from __future__ import annotations
@@ -34,6 +37,10 @@ from taskweave_core.config import ConfigStore
 
 NAMESPACE = '/taskweave/jog'
 FRESH_S = 0.3  # wall seconds a command stays valid
+VALIDITY_POLL_S = 0.002  # poll period of a state validity request
+MAX_STEP_S = 0.2  # longest time integrated in one step (after a stall or a sim pause the target does not jump)
+FOLLOW_M, FOLLOW_RAD = 0.005, 0.02  # a reached flange this close to the target keeps the target, else takes its place
+SWIVEL_SIGN = 0.1  # the self-motion's swivel-joint component above which its sign sets the direction
 
 
 def rotation(omega: np.ndarray, dt: float) -> np.ndarray:
@@ -55,10 +62,13 @@ def integrate(pose: np.ndarray, linear, angular, dt: float) -> np.ndarray:
 
 
 class TcpJog(Node):
+    PARAMS = {'config_dir': '', 'robot': '', 'rate_hz': 20.0, 'validity_timeout_s': 0.1}  # ROS parameters (module doc)
+
     def __init__(self, **kwargs):
         super().__init__(kwargs.pop('node_name', 'tcp_jog'), **kwargs)
-        for name, default in (('config_dir', ''), ('robot', ''), ('rate_hz', 20.0)):
+        for name, default in self.PARAMS.items():
             self.declare_parameter(name, default)
+        self.validity_timeout = float(self.get_parameter('validity_timeout_s').value)
         store = ConfigStore(self.get_parameter('config_dir').value)
         profile = store.robot(self.get_parameter('robot').value)
         self.tools = {}
@@ -143,9 +153,9 @@ class TcpJog(Node):
         request = GetStateValidity.Request(group_name=group, robot_state=RobotState(
             joint_state=self.JointState(name=list(joints), position=list(joints.values())), is_diff=True))
         future = self.validity.call_async(request)
-        deadline = time.monotonic() + 0.1
+        deadline = time.monotonic() + self.validity_timeout
         while not future.done() and time.monotonic() < deadline:
-            time.sleep(0.002)
+            time.sleep(VALIDITY_POLL_S)
         return not future.done() or future.result().valid  # too slow: do not block jogging on it
 
     def _held_notice(self, tool: str, jog: dict, held: str) -> None:
@@ -176,7 +186,8 @@ class TcpJog(Node):
         reached = jog['chain'].fk({**positions, **joints})
         # where the hand could not follow (a limit, out of reach), the target stays with the hand instead of running off
         error = pose_error(target, reached)
-        jog['target'] = target if np.linalg.norm(error[:3]) < 0.005 and np.linalg.norm(error[3:]) < 0.02 else reached
+        followed = np.linalg.norm(error[:3]) < FOLLOW_M and np.linalg.norm(error[3:]) < FOLLOW_RAD
+        jog['target'] = target if followed else reached
         jog['blocked'] = False
         self.command.publish(self.JointState(name=list(joints), position=list(joints.values())))
         return True
@@ -211,7 +222,7 @@ class TcpJog(Node):
 
     def _step(self) -> None:
         now = self.get_clock().now().nanoseconds * 1e-9
-        dt = 0.0 if self.last_time is None else min(max(now - self.last_time, 0.0), 0.2)
+        dt = 0.0 if self.last_time is None else min(max(now - self.last_time, 0.0), MAX_STEP_S)
         self.last_time = now
         for tool, jog in self.tools.items():
             with self.lock:
@@ -271,7 +282,7 @@ class TcpJog(Node):
             direction = jog['chain'].null_direction(positions, jog['names'])
             # the self-motion has no sign of its own: positive turns the swivel joint up, and it keeps its way
             index = jog['names'].index(swivel) if swivel in jog['names'] else 0
-            if abs(direction[index]) > 0.1:
+            if abs(direction[index]) > SWIVEL_SIGN:
                 direction = direction * np.sign(direction[index])
             elif jog['null'] is not None and direction @ jog['null'] < 0:
                 direction = -direction

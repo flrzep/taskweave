@@ -15,6 +15,9 @@ Profile section ``planning`` (without it, joint skills move straight in joint sp
       direct_step_rad: 0.03           # /check_state_validity every this many rad or m), the planner only otherwise
       escape_max_rad: 0.4             # start in collision: how far (largest joint change) the robot may move straight
       escape_speed: 0.2               # toward the goal while still touching (rad/s or m/s)
+      goal_tolerance_rad: 0.001       # planned goal: each joint within this (rad or m)
+      check_timeout_s: 10.0           # the straight-move collision checks give up after this
+      answer_margin_s: 10.0           # the planning service must answer within timeout_s plus this
 
 A sampling planner's path wanders (the arms swing out and back) even where the straight move is free, so the straight
 move is tried first. The planner checks the robot against itself and the planning scene; the trajectory comes back timed, and the joint
@@ -92,33 +95,43 @@ ERRORS = {-1: 'planning failed', -2: 'invalid motion plan', -4: 'control failed'
           -12: 'goal in collision', -13: 'goal violates path constraints', -14: 'goal constraints violated',
           -15: 'invalid group name', -16: 'invalid goal constraints', -17: 'invalid robot state',
           -31: 'no IK solution', 99999: 'planner failed (see the move_group log, e.g. start state outside joint limits)'}
+CHECK_POLL_S = 0.002  # poll period of the state validity requests in flight
+MIN_SPAN = 1e-3  # rad or m, the shortest span a straight move is timed for (no zero-length trajectory)
 
 
 class MotionPlanner:
+    # profile ``planning`` defaults (see the module doc)
+    DEFAULTS = {'timeout_s': 5.0, 'attempts': 3, 'velocity_scale': 1.0, 'acceleration_scale': 1.0,
+                'direct_step_rad': 0.03, 'escape_max_rad': 0.4, 'escape_speed': 0.2, 'goal_tolerance_rad': 1e-3,
+                'check_timeout_s': 10.0, 'answer_margin_s': 10.0}
+
     def __init__(self, node, robot):
         from moveit_msgs.srv import GetMotionPlan, GetStateValidity  # only needed with a planning section
         from rclpy.callback_groups import ReentrantCallbackGroup
 
-        spec = robot.data['planning']
+        spec = {**self.DEFAULTS, **robot.data['planning']}
         self.group = spec['group']
         self.service = spec.get('service', '/plan_kinematic_path')
         self.pipeline = spec.get('pipeline', 'ompl')
         self.planner = spec.get('planner', '')
-        self.timeout_s = float(spec.get('timeout_s', 5.0))
-        self.attempts = int(spec.get('attempts', 3))
-        self.velocity_scale = float(spec.get('velocity_scale', 1.0))
-        self.acceleration_scale = float(spec.get('acceleration_scale', 1.0))
+        self.timeout_s = float(spec['timeout_s'])
+        self.attempts = int(spec['attempts'])
+        self.velocity_scale = float(spec['velocity_scale'])
+        self.acceleration_scale = float(spec['acceleration_scale'])
+        self.goal_tolerance = float(spec['goal_tolerance_rad'])
+        self.check_timeout = float(spec['check_timeout_s'])
+        self.answer_margin = float(spec['answer_margin_s'])
         # the planning group's joints (regex): those not in a goal stay where they are, else the planner may move
         # them anywhere on the way (e.g. a lift or the other arm while one arm moves)
         self.joints = re.compile(spec['joints']) if spec.get('joints') else None
         self.Request = GetMotionPlan.Request
         self.client = node.create_client(GetMotionPlan, self.service, callback_group=ReentrantCallbackGroup())
         self.direct = bool(spec.get('direct', True))
-        self.direct_step = float(spec.get('direct_step_rad', 0.03))
+        self.direct_step = float(spec['direct_step_rad'])
         self.validity = node.create_client(GetStateValidity, spec.get('validity_service', '/check_state_validity'),
                                            callback_group=ReentrantCallbackGroup())
-        self.escape_max = float(spec.get('escape_max_rad', 0.4))
-        self.escape_speed = float(spec.get('escape_speed', 0.2))
+        self.escape_max = float(spec['escape_max_rad'])
+        self.escape_speed = float(spec['escape_speed'])
 
     def plan(self, start: dict[str, float], goal: dict[str, float], should_stop=lambda: False) -> Trajectory | None:
         """Trajectory from ``start`` to ``goal``, or None if the straight joint-space move is free; raises PlanError. Only the goal joints' start values are sent, on top
@@ -149,8 +162,8 @@ class MotionPlanner:
         r.start_state = RobotState(joint_state=JointState(name=list(start), position=[float(v) for v in start.values()]),
                                    is_diff=True)  # keeps what MoveIt knows besides joints, e.g. the base pose from TF
         r.goal_constraints = [Constraints(joint_constraints=[
-            JointConstraint(joint_name=name, position=float(value), tolerance_above=1e-3, tolerance_below=1e-3,
-                            weight=1.0) for name, value in goal.items()])]
+            JointConstraint(joint_name=name, position=float(value), tolerance_above=self.goal_tolerance,
+                            tolerance_below=self.goal_tolerance, weight=1.0) for name, value in goal.items()])]
         for _ in range(PLAN_TRIES):  # a sampled path can fail MoveIt's final check at finer spacing: plan again
             response = self._call(request, should_stop)
             code = response.error_code.val
@@ -169,7 +182,7 @@ class MotionPlanner:
     def _straight(self, start: dict, goal: dict) -> Trajectory:
         """The straight joint-space move from ``start`` to ``goal`` at the escape speed."""
         names = [n for n in goal if n in start]
-        duration = max([abs(goal[n] - start[n]) for n in names] + [1e-3]) / self.escape_speed
+        duration = max([abs(goal[n] - start[n]) for n in names] + [MIN_SPAN]) / self.escape_speed
         return Trajectory(names, [0.0, duration], [[start[n] for n in names], [goal[n] for n in names]])
 
     def _check(self, states: list[dict], should_stop):
@@ -179,7 +192,7 @@ class MotionPlanner:
         from moveit_msgs.srv import GetStateValidity
         from sensor_msgs.msg import JointState
 
-        deadline = time.monotonic() + 10.0
+        deadline = time.monotonic() + self.check_timeout
         responses = []
         for first in range(0, len(states), CHECK_BATCH):  # batches: the service queue drops requests beyond its depth
             futures = []
@@ -192,7 +205,7 @@ class MotionPlanner:
             while not all(f.done() for f in futures):
                 if should_stop() or time.monotonic() > deadline:
                     return None
-                time.sleep(0.002)
+                time.sleep(CHECK_POLL_S)
             responses += [f.result() for f in futures]
         return responses
 
@@ -246,7 +259,7 @@ class MotionPlanner:
         if any(n not in start for n in names) or not self.validity.wait_for_service(timeout_sec=2.0):
             return False
         count = max(1, math.ceil(max(abs(goal[n] - start[n]) for n in names) / self.direct_step))
-        deadline = time.monotonic() + 10.0
+        deadline = time.monotonic() + self.check_timeout
         for first in range(1, count + 1, CHECK_BATCH):  # batches: the service queue drops requests beyond its depth
             futures = []
             for i in range(first, min(first + CHECK_BATCH, count + 1)):
@@ -259,14 +272,14 @@ class MotionPlanner:
             while not all(f.done() for f in futures):
                 if should_stop() or time.monotonic() > deadline:
                     return False
-                time.sleep(0.002)
+                time.sleep(CHECK_POLL_S)
             if not all(f.result().valid for f in futures):
                 return False
         return True
 
     def _call(self, request, should_stop):
         future = self.client.call_async(request)
-        deadline = time.monotonic() + self.timeout_s + 10.0
+        deadline = time.monotonic() + self.timeout_s + self.answer_margin
         while not future.done():
             if should_stop():
                 raise PlanError('planning interrupted')

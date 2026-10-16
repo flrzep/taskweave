@@ -27,10 +27,15 @@ def envelope(navigation: dict, base: dict, carrying: bool = False) -> tuple[floa
     return length / 2, length / 2, width / 2, width / 2
 
 
+def padding(navigation: dict, nav2_default_m: float = 0.01) -> float:
+    """navigation.yaml ``padding`` (m), grows the envelope like Nav2's footprint_padding; unset: Nav2's default."""
+    return float(navigation.get('padding', nav2_default_m))
+
+
 def footprint_box(navigation: dict, base: dict, carrying: bool = False) -> tuple[float, float, float, float]:
     """(front, back, left, right) around the base frame, padding included: the box Nav2 checks."""
     front, back, left, right = envelope(navigation, base, carrying)
-    pad = float(navigation.get('padding', 0.01))
+    pad = padding(navigation)
     return front + pad, back + pad, left + pad, right + pad
 
 

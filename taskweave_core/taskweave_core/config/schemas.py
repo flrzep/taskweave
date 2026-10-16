@@ -202,7 +202,8 @@ ROBOT_PROFILE = {
                 'direct': {'type': 'boolean'},  # a straight joint move when it is free (taskweave_skills.motion_plan)
                 'validity_service': {'type': 'string'},
                 **{k: {'type': 'number', 'exclusiveMinimum': 0}
-                   for k in ('direct_step_rad', 'escape_max_rad', 'escape_speed')},
+                   for k in ('direct_step_rad', 'escape_max_rad', 'escape_speed', 'goal_tolerance_rad',
+                             'check_timeout_s', 'answer_margin_s')},
             },
             'additionalProperties': False,
         },

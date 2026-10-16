@@ -24,6 +24,8 @@ from taskweave_core.config import Pose2D
 from taskweave_core.gripper import joint_for_opening, opening_table
 from taskweave_core.skill import Skill, SkillResult
 
+SWING_STRAIGHT_STEPS = 20  # samples of the eased straight move that follows an elbow swing (_swing_first)
+
 
 @dataclass
 class Params:
@@ -370,7 +372,7 @@ class MoveToPose(_JointSkill):
         swung = {**start, **dict(zip(swing.names, swing.points[-1], strict=True))}
         if not self.planner.free(swung, goal, lambda: ctx.should_stop):
             return None
-        duration, steps = plan_duration(swung, goal, self.p), 20   # eased in and out like a straight move
+        duration, steps = plan_duration(swung, goal, self.p), SWING_STRAIGHT_STEPS  # eased like a straight move
         straight = Trajectory(list(goal), [duration * k / steps for k in range(steps + 1)],
                               [list(interpolate(swung, goal, k / steps).values()) for k in range(steps + 1)])
         self.node.get_logger().info(f'{self.name}: straight move blocked: elbows toward {side} first, then straight')
@@ -449,14 +451,16 @@ class GoToPoint(MoveToPose):
     needs = ["the robot stands where the point is in reach (e.g. at the object's stance)"]
     achieves = ['tools at the object point']
     default_timeout_s = 60.0
+    # skills/<skill>.yaml defaults: tcp_speed (m/s) and tcp_turn (rad/s) of straight-line TCP motions
+    param_defaults = {'tcp_speed': 0.05, 'tcp_turn': 0.3}
 
     def setup(self, node, config, robot, params):
         params = dict(params)
         self.cell_frame = params.pop('cell_frame', 'world')  # TF frame of the cell (object and location poses)
         # if the point is out of reach at the current lift: these heights of this joint are tried, in order
         self.lift_joint, self.lift_values = params.pop('lift_joint', None), list(params.pop('lift_values', []))
-        self.tcp_speed = float(params.pop('tcp_speed', 0.05))  # m/s and rad/s for straight-line motions
-        self.tcp_turn = float(params.pop('tcp_turn', 0.3))
+        self.tcp_speed = float(params.pop('tcp_speed', self.param_defaults['tcp_speed']))
+        self.tcp_turn = float(params.pop('tcp_turn', self.param_defaults['tcp_turn']))
         self.approach_m = float(params.pop('approach_m', 0.0))  # straight final approach (m) unless args say other
         super().setup(node, config, robot, params)
 
