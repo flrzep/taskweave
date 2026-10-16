@@ -4,6 +4,7 @@
 // Uses app.js ($, el, api, show, message).
 
 const rec = { open: new Set(), timer: null, missionsLoaded: false };
+const VIDEO_RE = /^(?:[A-Za-z0-9_.-]+_)?(fixed|follow)\.mp4$/;  // <id>_fixed.mp4 (older recordings: fixed.mp4)
 const recTab = document.querySelector('.tabs button[data-view="record"]');
 const recVisible = () => !$('view-record').hidden;
 
@@ -107,14 +108,15 @@ function recItem(r, key) {
   const body = el('div', { class: 'point-edit' });
   const item = el('li', { class: 'point', 'data-id': r.id, 'data-key': key }, head, body);
   const fill = () => {
-    const videos = ['fixed.mp4', 'follow.mp4'].filter((f) => r.files.includes(f));
+    const videos = r.files.filter((f) => VIDEO_RE.test(f));
     const parts = [];
     if (videos.length && !r.active) {
       parts.push(el('div', { class: 'rec-videos' }, videos.map((f) => el('figure', {},
         el('video', { src: url(f), controls: '', preload: 'metadata', playsinline: '' }),
-        el('figcaption', { text: f === 'fixed.mp4' ? 'Fixed view' : 'Following the robot' })))));
+        el('figcaption', { text: VIDEO_RE.exec(f)[1] === 'fixed' ? 'Fixed view' : 'Following the robot' })))));
     } else if (!r.active) parts.push(el('p', { class: 'muted small-text', text: 'No videos in this recording.' }));
-    const links = r.files.filter((f) => f !== 'status.json').map((f) => el('a', { href: url(f), download: `${r.id}_${f}`, text: f }));
+    const links = r.files.filter((f) => f !== 'status.json')
+      .map((f) => el('a', { href: url(f), download: f.startsWith(r.id) ? f : `${r.id}_${f}`, text: f }));
     if (r.bag) links.push(el('span', { class: 'muted mono', text: `bag/ on the box: ${r.id}/bag` }));
     parts.push(el('div', { class: 'rec-files' }, links));
     if (!r.active) {

@@ -69,20 +69,23 @@ def make(tmp_path, rec_id, meta=None, video=None, files=()):
 
 def test_list_file_and_delete(tmp_path):
     make(tmp_path, '20261016_120000_a', {'mission': 'm', 'outcome': 'mission succeeded'},
-         {'state': 'done', 'frames': 30, 'first_time': 0.0, 'last_time': 1.0}, ['fixed.mp4'])
+         {'state': 'done', 'frames': 30, 'first_time': 0.0, 'last_time': 1.0},
+         ['20261016_120000_a_follow.mp4', '20261016_120000_a_fixed.mp4', 'notes.txt'])
     make(tmp_path, '20261016_130000_b')
     (tmp_path / 'control.json').write_text('{}')
     recorder = Recorder(FakeBridge(), str(tmp_path))
-    listed = recorder.list()
+    listed = recorder.recordings()
     assert [r['id'] for r in listed] == ['20261016_130000_b', '20261016_120000_a']  # newest first, folders only
-    assert listed[1]['files'] == ['fixed.mp4', 'meta.json', 'status.json'] and listed[1]['frames'] == 30
-    assert recorder.file('20261016_120000_a', 'fixed.mp4').read_bytes() == b'x' * 10
+    assert listed[1]['files'] == ['20261016_120000_a_fixed.mp4', '20261016_120000_a_follow.mp4', 'meta.json',
+                                  'status.json'] and listed[1]['frames'] == 30
+    assert recorder.file('20261016_120000_a', '20261016_120000_a_fixed.mp4').read_bytes() == b'x' * 10
     for rec_id, name in (('20261016_120000_a', '../meta.json'), ('..', 'fixed.mp4'), ('20261016_130000_b', 'fixed.mp4'),
-                         ('20261016_120000_a', 'bag')):
+                         ('20261016_120000_a', 'bag'), ('20261016_120000_a', 'notes.txt'),
+                         ('20261016_120000_a', 'a/b_fixed.mp4')):
         with pytest.raises(RecordingError):
             recorder.file(rec_id, name)
     recorder.delete('20261016_130000_b')
-    assert [r['id'] for r in recorder.list()] == ['20261016_120000_a']
+    assert [r['id'] for r in recorder.recordings()] == ['20261016_120000_a']
     with pytest.raises(RecordingError):
         recorder.delete('20261016_130000_b')
 

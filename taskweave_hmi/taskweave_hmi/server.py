@@ -550,7 +550,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'error': 'recording is not set up (parameter recordings_dir)'}, HTTPStatus.NOT_FOUND)
         if method == 'GET' and not route:
             free = shutil.disk_usage(recorder.dir).free if recorder.dir.is_dir() else None
-            return self._json({'status': recorder.status(), 'recordings': recorder.list(), 'free_bytes': free})
+            return self._json({'status': recorder.status(), 'recordings': recorder.recordings(), 'free_bytes': free})
         if method == 'POST' and route == ['start']:
             self.bridge.config.reload()
             return self._json(recorder.start(self._body(), self.bridge.config.mission_names()))

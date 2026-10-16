@@ -2,7 +2,7 @@
 
 One recording at a time, in its own folder ``<recordings_dir>/<id>/``:
   bag/          ROS bag (mcap, sim time), bag.log
-  fixed.mp4, follow.mp4, frames.csv, status.json   from the video recorder, if one answers
+  <id>_fixed.mp4, <id>_follow.mp4, frames.csv, status.json   from the video recorder, if one answers
   meta.json     what was recorded: mission, options, outcome, times, the plan
 
 Video recorder contract (frame-sim: scripts/recorder.py): the HMI writes ``<recordings_dir>/control.json``
@@ -28,7 +28,8 @@ from datetime import datetime
 from pathlib import Path
 
 ID_RE = re.compile(r'^[A-Za-z0-9_.-]+$')
-FILES = ('fixed.mp4', 'follow.mp4', 'frames.csv', 'meta.json', 'status.json', 'bag.log')
+FILES = ('frames.csv', 'meta.json', 'status.json', 'bag.log')
+VIDEO_RE = re.compile(r'^(?:[A-Za-z0-9_.-]+_)?(fixed|follow)\.mp4$')  # <id>_fixed.mp4 (older: fixed.mp4)
 END_STATES = ('succeeded', 'failed', 'aborted', 'idle')
 QUALITY = {'ray_trace': 'RAY_TRACE', 'path_trace': 'PATH_TRACE'}
 BAG_EXCLUDE = (r'.*/_action/.*|/rosout|/parameter_events|.*/transition_event|.*/bond|.*costmap_raw.*|.*_updates'
@@ -104,6 +105,13 @@ def folder_size(path: Path) -> int:
             except OSError:
                 pass
     return total
+
+
+def files(folder: Path) -> list[str]:
+    """The recording's videos (fixed, then follow) and data files that are there."""
+    videos = sorted((p.name for p in folder.iterdir() if p.is_file() and VIDEO_RE.match(p.name)),
+                    key=lambda name: VIDEO_RE.match(name).group(1) != 'fixed')
+    return videos + [name for name in FILES if (folder / name).is_file()]
 
 
 def read_json(path: Path) -> dict | None:
@@ -183,10 +191,10 @@ class Recorder:
         data['wall_s'] = round((data['ended'] or time.time()) - data['started'], 1)
         return data
 
-    def list(self) -> list[dict]:
+    def recordings(self) -> list[dict]:
         if not self.dir.is_dir():
             return []
-        result = []
+        result, active = [], self.active['id'] if self.active else None
         for folder in sorted((p for p in self.dir.iterdir() if p.is_dir() and ID_RE.match(p.name)), reverse=True):
             meta = read_json(folder / 'meta.json') or {}
             video = read_json(folder / 'status.json') or {}
@@ -194,14 +202,12 @@ class Recorder:
                            'options': meta.get('options'), 'started': meta.get('started'), 'ended': meta.get('ended'),
                            'frames': video.get('frames'), 'first_time': video.get('first_time'),
                            'last_time': video.get('last_time'), 'bytes': folder_size(folder),
-                           'files': [name for name in FILES if (folder / name).is_file()],
-                           'bag': (folder / 'bag').is_dir(), 'active': bool(self.active and
-                                                                         self.active['id'] == folder.name)})
+                           'files': files(folder), 'bag': (folder / 'bag').is_dir(), 'active': folder.name == active})
         return result
 
     def file(self, rec_id: str, name: str) -> Path:
         check_id(rec_id)
-        if name not in FILES:
+        if name not in FILES and not VIDEO_RE.match(name):
             raise RecordingError(f'no file {name!r}')
         path = self.dir / rec_id / name
         if not path.is_file():
