@@ -77,7 +77,8 @@ class DriveStraight(NavigateTo):
         tx, ty = start.x + c * forward - s * sideways, start.y + s * forward + c * sideways
         speed = min(self.speed, self.p.max_linear)
         total = max(math.hypot(forward, sideways), 1e-6)
-        best, best_time, settled_since = math.inf, ctx.now(), None
+        clock = ctx.work_clock(self.p.override_slew_per_s)  # speed x override, stuck check on work time
+        best, best_time, settled_since = math.inf, clock(ctx.now()), None
         previous, last = (0.0, 0.0), ctx.now()
         while True:
             if ctx.should_stop:
@@ -103,13 +104,15 @@ class DriveStraight(NavigateTo):
                                                  + f' ({remaining * 1000:.0f} mm off)')
             else:
                 settled_since = None
+            work = clock(now)
             if remaining < best - self.p.stuck_progress_m:
-                best, best_time = remaining, now
-            elif now - best_time > self.p.stuck_timeout_s:
+                best, best_time = remaining, work
+            elif work - best_time > self.p.stuck_timeout_s:
                 self.stop()
                 return SkillResult.failed(f'no progress for {self.p.stuck_timeout_s:g} s, {remaining:.2f} m to go')
-            vx = max(-speed, min(speed, self.p.k_linear * ex))
-            vy = max(-speed, min(speed, self.p.k_linear * ey)) if sideways else 0.0
+            limit = speed * clock.o if clock.o < 1.0 else speed
+            vx = max(-limit, min(limit, self.p.k_linear * ex))
+            vy = max(-limit, min(limit, self.p.k_linear * ey)) if sideways else 0.0
             step = self.p.linear_accel * dt
             vx = max(previous[0] - step, min(previous[0] + step, vx))
             vy = max(previous[1] - step, min(previous[1] + step, vy))

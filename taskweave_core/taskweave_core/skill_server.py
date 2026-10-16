@@ -32,6 +32,7 @@ from . import names
 from .config import ConfigError, ConfigStore
 from .executive import Outcome
 from .skill import Skill, SkillContext, SkillResult
+from .speed import SpeedOverride
 from .validation import validate_args
 
 
@@ -74,6 +75,7 @@ class SkillServer(Node):
                 implementations[skill_name] = implementation
                 skills.append(skill)
         self.group = ReentrantCallbackGroup()
+        self.speed = SpeedOverride.for_node(self)  # the handler's global override (latched topic)
         self.skills: dict[str, Skill] = {}
         self._servers = []
         for skill in skills:
@@ -146,14 +148,16 @@ class SkillServer(Node):
             handle.publish_feedback(RunSkill.Feedback(progress=float(progress), status=status))
 
         ctx = SkillContext(self.now, timeout, lambda: handle.is_cancel_requested, publish, goal.instruction,
-                           self.get_logger())
+                           self.get_logger(), speed=self.speed)
         try:
             result = skill.execute(ctx, args)
         except Exception as error:  # a crashing skill is a failed step, not a dead server
             self.get_logger().error(f'{skill.name} raised:\n{traceback.format_exc()}')
-            return SkillResult.failed(f'{type(error).__name__}: {error}')
+            result = SkillResult.failed(f'{type(error).__name__}: {error}')
         if not isinstance(result, SkillResult):
-            return SkillResult.failed(f'{skill.name}.execute returned {type(result).__name__}, not SkillResult')
+            result = SkillResult.failed(f'{skill.name}.execute returned {type(result).__name__}, not SkillResult')
+        ctx.work_now()
+        result.data.setdefault('speed', ctx.work.stats())  # the override this step ran at (Record, smoke test)
         return result
 
 

@@ -28,6 +28,7 @@ from typing import Any
 
 from .config import ConfigStore, RobotProfile
 from .executive import Outcome
+from .speed import DEFAULT_SLEW_PER_S, SpeedOverride, WorkClock
 
 
 @dataclass
@@ -50,13 +51,19 @@ class SkillResult:
 
 
 class SkillContext:
-    """What a running skill can use: feedback, cancel and timeout checks, and a time source."""
+    """What a running skill can use: feedback, cancel and timeout checks, and a time source.
+
+    ``speed``: the node's global override (taskweave_core.speed.SpeedOverride); none = always 100 %. The timeout runs
+    on work time (``work_now``), so a step at 10 % gets ten times its nominal timeout."""
 
     def __init__(self, now: Callable[[], float], timeout_s: float, is_canceled: Callable[[], bool],
-                 publish_feedback: Callable[[float, str], None], instruction: str = '', logger=None):
+                 publish_feedback: Callable[[float, str], None], instruction: str = '', logger=None,
+                 speed: SpeedOverride | None = None):
         self.now, self.timeout_s, self.instruction, self.logger = now, timeout_s, instruction, logger
         self._is_canceled, self._publish = is_canceled, publish_feedback
+        self.speed = speed
         self.started = now()
+        self.work = WorkClock(self.started, speed.fraction if speed else None)
 
     @property
     def canceled(self) -> bool:
@@ -64,7 +71,7 @@ class SkillContext:
 
     @property
     def expired(self) -> bool:
-        return self.timeout_s > 0 and self.now() - self.started > self.timeout_s
+        return self.timeout_s > 0 and self.work_now() > self.timeout_s
 
     @property
     def should_stop(self) -> bool:
@@ -72,6 +79,14 @@ class SkillContext:
 
     def elapsed(self) -> float:
         return self.now() - self.started
+
+    def work_now(self) -> float:
+        """Work seconds since the step started: node time integrated at the effective speed override."""
+        return self.work(self.now())
+
+    def work_clock(self, slew_per_s: float = DEFAULT_SLEW_PER_S) -> WorkClock:
+        """A new work clock from now, following the override at ``slew_per_s`` (phase-clock playback of a move)."""
+        return WorkClock(self.now(), self.speed.fraction if self.speed else None, slew_per_s)
 
     def feedback(self, progress: float = -1.0, status: str = '') -> None:
         self._publish(progress, status)

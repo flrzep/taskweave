@@ -42,6 +42,7 @@ class Params:
     state_timeout_s: float = 1.0       # no joint states this long -> fail
     elbow_tolerance_deg: float = 20.0  # an elbow swing ending further than this from its side fails (move_object
                                        # elbow) or is not used (move_to_pose: planned instead)
+    override_slew_per_s: float = 2.0   # the speed override changes playback speed by at most this (fraction/s)
 
     @classmethod
     def from_config(cls, params: dict) -> Params:
@@ -157,7 +158,9 @@ class _JointSkill(Skill):
     def _move(self, ctx, goal: dict, label: str, stall_ok: bool = False, path=None):
         """Move the joints in ``goal``; returns (result or None, final positions). ``stall_ok``: stopping early
         (e.g. fingers blocked by an object) ends the move without failing. ``path``: a planned trajectory
-        (motion_plan.Trajectory) the joints follow instead of a straight joint-space move."""
+        (motion_plan.Trajectory) the joints follow instead of a straight joint-space move.
+        Playback runs on a phase clock (work time): the trajectory is timed at 100 % and ``tau`` advances at the
+        global speed override, so are the settle and stall checks after it (time / o, stall_speed x o)."""
         self._held = goal
         for name in goal:  # moving: no longer at its last goal (start())
             self.joints.reached.pop(name, None)
@@ -173,16 +176,16 @@ class _JointSkill(Skill):
             duration = max(path.duration, self.p.min_duration_s)
             rest = {n: v for n, v in goal.items() if n not in path.names}
             reference = lambda t: {**interpolate(start, rest, t / duration), **path.at(t)}  # noqa: E731
-        t0 = ctx.now()
+        clock = ctx.work_clock(self.p.override_slew_per_s)  # phase clock: tau = integral of the override
         period = 1.0 / self.p.rate_hz
         settled_since, best, best_time = None, math.inf, None
         while True:
             if ctx.should_stop:
                 self.stop()
                 return ctx.interrupted(), None
-            now = ctx.now()
-            fraction = (now - t0) / duration
-            self.joints.command(reference(now - t0))
+            now = clock(ctx.now())  # tau: work seconds since the start of the move
+            fraction = now / duration
+            self.joints.command(reference(now))
             current = self.joints.current(list(goal), self.p.state_timeout_s)
             if current is None:
                 self.stop()

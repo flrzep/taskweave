@@ -25,6 +25,7 @@ from typing import Any, Protocol
 from . import placeholders
 from .plan import Plan, Step
 from .planner import Planner
+from .speed import WorkClock
 from .world_state import WorldState
 
 
@@ -79,10 +80,12 @@ class Executive:
                  clock: Callable[[], float] = time.monotonic,
                  on_status: Callable[[Status], None] = lambda status: None,
                  on_episode: Callable[[dict], None] = lambda event: None,
-                 timeout_grace_s: float = 2.0):
+                 timeout_grace_s: float = 2.0, speed: Callable[[], float] | None = None):
         self.planner, self.dispatcher, self.world, self.validate = planner, dispatcher, world, validate
         self.clock, self.on_status, self.on_episode = clock, on_status, on_episode
         self.timeout_grace_s = timeout_grace_s
+        self.speed = speed             # the global override as a fraction: step timeouts run on work time
+        self._work: WorkClock | None = None
         self.status = Status()
         self.plan: Plan | None = None
         self._lock = threading.RLock()
@@ -142,12 +145,13 @@ class Executive:
                 self.on_status(self.status)
 
     def tick(self) -> None:
-        """Call periodically: enforces step timeouts (skill timeout plus a grace period)."""
+        """Call periodically: enforces step timeouts (skill timeout plus a grace period), on work time if ``speed``."""
         with self._lock:
             step = self.status.step
             if not (self._running and step and self._interrupt is None):
                 return
-            if self.clock() - self.status.step_started > step.timeout_s + self.timeout_grace_s:
+            elapsed = self._work(self.clock()) if self._work else self.clock() - self.status.step_started
+            if elapsed > step.timeout_s + self.timeout_grace_s:
                 self._interrupt = 'timeout'
                 self.dispatcher.cancel(self._token)
 
@@ -159,7 +163,9 @@ class Executive:
             interrupt, self._interrupt = self._interrupt, None
             if interrupt == 'timeout' and outcome == Outcome.CANCELED:
                 outcome, message = Outcome.TIMEOUT, f'no result within {self.status.step.timeout_s:g} s'
-            self._episode('step_finished', outcome=outcome.name, message=message)
+            speed = (data or {}).get('speed') or (self._work.stats() if self._work else None)
+            self._episode('step_finished', outcome=outcome.name, message=message,
+                          **({'speed': speed} if speed else {}))
             if interrupt == 'abort':
                 self._finish(State.ABORTED, self.status.last_error or 'aborted')
             elif interrupt == 'pause':
@@ -206,6 +212,7 @@ class Executive:
         self._token += 1
         self._running = True
         self.status.step, self.status.step_started = resolved, self.clock()
+        self._work = WorkClock(self.status.step_started, self.speed) if self.speed else None
         self.status.step_status, self.status.step_progress = 'dispatched', -1.0
         self._episode('step_started')
         self.on_status(self.status)

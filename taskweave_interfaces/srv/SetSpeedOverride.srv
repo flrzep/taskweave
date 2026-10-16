@@ -1,0 +1,10 @@
+# Set the global speed override: /taskweave/task_handler/set_speed_override. The single write path (the parameter
+# speed_override_percent goes through it too). Not persisted: after a handler restart it is 100 %.
+
+float32 percent         # 1-100; 0: unchanged. In test mode, values above the cap are clamped (the message says so)
+bool test_mode          # the test mode latch (send the current value to leave it)
+float32 test_percent    # 1-100 (at most the cap); 0: unchanged
+---
+bool ok
+string message          # what was set, e.g. "speed 50 %; clamped to the test mode cap 50 %", or why not
+float32 percent         # the override now

@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 import threading
 import time
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
@@ -46,6 +46,7 @@ class Params:
     yaw_weight: float = 0.2          # m per rad, how heading error counts toward progress
     odom_timeout_s: float = 1.0      # s without odometry -> fail
     rate_hz: float = 20.0
+    override_slew_per_s: float = 2.0  # the speed override changes the velocity limits by at most this (fraction/s)
 
     @classmethod
     def from_config(cls, params: dict, limits: dict) -> Params:
@@ -72,6 +73,13 @@ def _toward(error: float, gain: float, accel: float) -> float:
     at ``accel``). A pure P law asks for gain x speed of deceleration, more than ``accel`` allows near full speed, and
     the base runs past the target."""
     return math.copysign(min(gain * abs(error), math.sqrt(2.0 * accel * abs(error))), error)
+
+
+def scaled(p: Params, override: float) -> Params:
+    """``p`` with the velocity limits at the speed override (a fraction); ``p`` itself at 100 %."""
+    if override >= 1.0:
+        return p
+    return replace(p, max_linear=p.max_linear * override, max_angular=p.max_angular * override)
 
 
 def command(pose: Pose2D, target: Pose2D, base_type: str, p: Params, previous: tuple, dt: float) -> tuple:
@@ -170,12 +178,14 @@ class NavigateTo(Skill):
         return self._drive(ctx, target, args['target'])
 
     def _drive(self, ctx, target: Pose2D, label: str) -> SkillResult:
-        """Direct controller loop to ``target`` (cell frame) until settled, stuck, lost or interrupted."""
+        """Direct controller loop to ``target`` (cell frame) until settled, stuck, lost or interrupted. The velocity
+        limits follow the speed override every cycle; the stuck check runs on work time (stuck_timeout_s / o)."""
         pose = self._current()
         if pose is None:
             return SkillResult.failed(f'no odometry on {self.base["odom"]}')
         start_distance = max(math.hypot(target.x - pose.x, target.y - pose.y), 1e-6)
-        best, best_time, settled_since, phase_travelling = math.inf, ctx.now(), None, None
+        clock = ctx.work_clock(self.p.override_slew_per_s)
+        best, best_time, settled_since, phase_travelling = math.inf, clock(ctx.now()), None, None
         previous, last = (0.0, 0.0, 0.0), ctx.now()
         period = 1.0 / self.p.rate_hz
         while True:
@@ -202,19 +212,20 @@ class NavigateTo(Skill):
             # A differential base first turns towards the target: while travelling, progress counts its heading to the
             # target, not the final heading (which may get worse during that turn). A new phase restarts the check.
             travelling = self.base['type'] != 'holonomic' and distance > self.p.position_tolerance
+            work = clock(now)
             if travelling != phase_travelling:
-                phase_travelling, best, best_time = travelling, math.inf, now
+                phase_travelling, best, best_time = travelling, math.inf, work
             turn = abs(wrap_angle(math.atan2(target.y - pose.y, target.x - pose.x) - pose.yaw)) if travelling \
                 else yaw_error
             if travelling and distance <= self.p.reverse_within_m:
                 turn = min(turn, math.pi - turn)  # close by, a point behind is reached backwards
             remaining = distance + self.p.yaw_weight * turn
             if remaining < best - self.p.stuck_progress_m:
-                best, best_time = remaining, now
-            elif now - best_time > self.p.stuck_timeout_s:
+                best, best_time = remaining, work
+            elif work - best_time > self.p.stuck_timeout_s:
                 self.stop()
                 return SkillResult.failed(f'no progress for {self.p.stuck_timeout_s:g} s, {distance:.2f} m from target')
-            previous = command(pose, target, self.base['type'], self.p, previous, dt)
+            previous = command(pose, target, self.base['type'], scaled(self.p, clock.o), previous, dt)
             self._publish(*previous)
             ctx.feedback(1.0 - min(distance / start_distance, 1.0), f'{distance:.2f} m to go')
             time.sleep(period)

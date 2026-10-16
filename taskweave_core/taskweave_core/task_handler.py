@@ -5,6 +5,10 @@ Parameters:
   robot (string)             robot profile this handler drives; missions for other robots are rejected
   timeout_grace_s (double)   extra time after a step's timeout before the handler cancels it (default 2.0)
   status_rate_hz (double)    periodic status publishing while a mission is active (default 2.0)
+  speed_override_percent (double)  global speed override 1-100 (default 100; not persisted). Set through the
+                             service set_speed_override (the single write path; setting the parameter goes through it)
+  speed_test_percent, speed_cap_percent (double)  test mode: a run starts at test (default 10), cap (default 50)
+                             is the highest override while it is on
 
 Interfaces: see taskweave_core.names (start_mission, pause, resume, abort, list_skills, status, plan, episodes).
 """
@@ -15,17 +19,20 @@ import json
 import threading
 
 import rclpy
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
 from taskweave_interfaces.action import RunSkill
 from taskweave_interfaces.msg import Plan as PlanMsg
+from taskweave_interfaces.msg import SpeedOverride as SpeedOverrideMsg
 from taskweave_interfaces.msg import TaskStatus
-from taskweave_interfaces.srv import DescribeRobot, ListSkills, StartMission
+from taskweave_interfaces.srv import DescribeRobot, ListSkills, SetSpeedOverride, StartMission
 
 from . import names
 from .config import ConfigError, ConfigStore
@@ -35,6 +42,7 @@ from .executive import ACTIVE, Executive, Outcome, Status
 from .plan import Plan, Step
 from .planner import MissionFilePlanner
 from .skill_server import spin
+from .speed import MAX_PERCENT, MIN_PERCENT, OverrideState
 from .validation import validate_plan
 from .world_state import WorldState
 
@@ -113,6 +121,9 @@ class TaskHandler(Node):
         self.declare_parameter('robot', '')
         self.declare_parameter('timeout_grace_s', 2.0)
         self.declare_parameter('status_rate_hz', 2.0)
+        self.declare_parameter('speed_override_percent', MAX_PERCENT)
+        self.declare_parameter('speed_test_percent', 10.0)
+        self.declare_parameter('speed_cap_percent', 50.0)
         config_dir = self.get_parameter('config_dir').value
         self.robot = self.get_parameter('robot').value
         if not config_dir or not self.robot:
@@ -136,6 +147,7 @@ class TaskHandler(Node):
         self.create_service(Trigger, names.ABORT, self._trigger('abort'), callback_group=self.group)
         self.create_service(ListSkills, names.LIST_SKILLS, self._list_skills, callback_group=self.group)
         self.create_service(DescribeRobot, names.DESCRIBE_ROBOT, self._describe, callback_group=self.group)
+        self._setup_speed(latched)
         self.create_timer(0.1, self._tick, callback_group=self.group)
         self.create_timer(1.0 / self.get_parameter('status_rate_hz').value, self._publish_status,
                           callback_group=self.group)
@@ -182,6 +194,8 @@ class TaskHandler(Node):
 
     def _on_status(self, status: Status) -> None:
         self._publish_status(status)
+        if self._run_active and status.state not in ACTIVE:
+            self._speed_run(False)
         if self.executive and self.executive.plan and self._published_plan is not self.executive.plan:
             self._published_plan = self.executive.plan
             self.plan_pub.publish(plan_to_msg(self.executive.plan))
@@ -192,6 +206,86 @@ class TaskHandler(Node):
     def _tick(self) -> None:
         if self.executive:
             self.executive.tick()
+
+    # ---- speed override (skill API spec 4.2) -----------------------------------------
+    def _setup_speed(self, latched) -> None:
+        percent = float(self.get_parameter('speed_override_percent').value)
+        if not MIN_PERCENT <= percent <= MAX_PERCENT:
+            raise ValueError(f'speed_override_percent {percent:g} is outside {MIN_PERCENT:g}-{MAX_PERCENT:g}')
+        self.speed = OverrideState(percent, float(self.get_parameter('speed_test_percent').value),
+                                   float(self.get_parameter('speed_cap_percent').value))
+        self._speed_lock, self._speed_syncing, self._run_active = threading.RLock(), False, False
+        self.speed_pub = self.create_publisher(SpeedOverrideMsg, names.SPEED_OVERRIDE, latched)
+        self.create_service(SetSpeedOverride, names.SET_SPEED_OVERRIDE, self._set_speed, callback_group=self.group)
+        if hasattr(self, 'add_pre_set_parameters_callback'):
+            self.add_pre_set_parameters_callback(self._speed_pre_set)
+        self.add_on_set_parameters_callback(self._speed_param)
+        self._publish_speed()
+
+    def speed_request(self, percent: float = 0.0, test_mode: bool | None = None,
+                      test_percent: float = 0.0) -> tuple[bool, str, float]:
+        """The single write path of the override: the service, the parameter and run start/end go through it."""
+        with self._speed_lock:
+            result = self.speed.request(percent, test_mode, test_percent)
+            if result[0]:
+                self._speed_changed()
+            return result
+
+    def _speed_changed(self) -> None:
+        """Publish the override and keep the parameter in step (without running its callback's rules again)."""
+        if self.get_parameter('speed_override_percent').value != self.speed.percent:
+            self._speed_syncing = True
+            try:
+                self.set_parameters([Parameter('speed_override_percent', value=float(self.speed.percent))])
+            finally:
+                self._speed_syncing = False
+        self._publish_speed()
+
+    def _publish_speed(self) -> None:
+        s = self.speed
+        self.speed_pub.publish(SpeedOverrideMsg(percent=float(s.percent), test_mode=s.test_mode,
+                                                test_percent=float(s.test_percent), cap_percent=float(s.cap_percent)))
+
+    def _set_speed(self, request, response):
+        response.ok, response.message, response.percent = self.speed_request(
+            float(request.percent), bool(request.test_mode), float(request.test_percent))
+        self.get_logger().info(f'speed override: {response.message}')
+        return response
+
+    def _speed_pre_set(self, parameters: list) -> list:
+        """In test mode a parameter value above the cap is clamped, like a service request."""
+        if self._speed_syncing or not self.speed.test_mode:
+            return parameters
+        cap = self.speed.cap_percent
+        return [Parameter(p.name, value=float(cap))
+                if p.name == 'speed_override_percent' and isinstance(p.value, float) and p.value > cap else p
+                for p in parameters]
+
+    def _speed_param(self, parameters: list) -> SetParametersResult:
+        if self._speed_syncing:
+            return SetParametersResult(successful=True)
+        for p in parameters:
+            if p.name != 'speed_override_percent':
+                continue
+            if not isinstance(p.value, float) or not MIN_PERCENT <= p.value <= MAX_PERCENT:
+                return SetParametersResult(successful=False,
+                                           reason=f'speed_override_percent must be {MIN_PERCENT:g}-{MAX_PERCENT:g}')
+            if self.speed.test_mode and p.value > self.speed.cap_percent:  # no pre-set callback in this rclpy
+                return SetParametersResult(successful=False, reason=f'test mode: at most {self.speed.cap_percent:g}')
+            with self._speed_lock:
+                self.speed.request(p.value)
+                self._publish_speed()
+        return SetParametersResult(successful=True)
+
+    def _speed_run(self, started: bool) -> None:
+        """Test mode: lower the override at run start, restore it at run end if it lowered it."""
+        with self._speed_lock:
+            self._run_active = started
+            changed = self.speed.run_started() if started else self.speed.run_ended()
+            if changed:
+                self._speed_changed()
+                self.get_logger().info(f'speed override {self.speed.percent:g} % (test mode, run '
+                                       f'{"start" if started else "end"})')
 
     # ---- services ---------------------------------------------------------------
     def _start(self, request, response):
@@ -207,7 +301,9 @@ class TaskHandler(Node):
         self.refresh_catalog()
         self.executive = Executive(planner, self.dispatcher, self.world, validate=self._validate, clock=self.now,
                                    on_status=self._on_status, on_episode=self._on_episode,
-                                   timeout_grace_s=self.get_parameter('timeout_grace_s').value)
+                                   timeout_grace_s=self.get_parameter('timeout_grace_s').value,
+                                   speed=lambda: self.speed.percent / 100.0)
+        self._speed_run(True)
         status = self.executive.start(request.start_step)
         response.accepted = status.state in ACTIVE or status.state.name == 'SUCCEEDED'
         response.message = status.last_error if not response.accepted else f'started {status.plan_id}'
