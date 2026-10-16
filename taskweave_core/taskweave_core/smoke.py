@@ -1,8 +1,9 @@
 """Mission smoke test: run a mission in the simulator from a clean start, compare each step with a reference run.
 
 The run goes through the HMI's HTTP API only (no ROS here): ``POST /api/recordings/start`` resets the sim, starts the
-mission and ends it after the requested cycles; ``GET /api/state`` gives the step events (step_started /
-step_finished, time = sim time) and ``GET /api/recordings`` the recording's status (``active`` false: it ended).
+mission and ends it after the requested cycles; ``GET /api/recordings`` gives the recording's status (``active``
+false: it ended) and its ``meta.json`` all step events of the run (step_started / step_finished, time = sim time).
+``GET /api/state`` is followed during the run for progress and as the fallback for older HMIs.
 
 A run (and a reference, which is a saved run) is YAML::
 
@@ -259,6 +260,12 @@ def run(hmi: Hmi, mission: str, cycles: int = 1, reset: bool = True, bag: bool =
             break
         time.sleep(poll_s)
     _collect(hmi, seen, events)
+    try:  # exact: the recording's meta.json holds every step event of the run (HMI 9bc6a5f on); polled ones otherwise
+        recorded = hmi.get(f'/recordings/{rec_id}/meta.json').get('events')
+        if isinstance(recorded, list) and recorded:
+            events = recorded
+    except (SmokeError, AttributeError):
+        pass
     return {'mission': mission, 'recorded': datetime.now().isoformat(timespec='seconds'), 'recording': rec_id,
             'outcome': status.get('outcome', ''), 'problems': status.get('problems') or [], 'cycles': cycles,
             'reset': reset, 'steps': step_results(events, cycles)}

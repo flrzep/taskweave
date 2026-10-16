@@ -138,6 +138,7 @@ class FakeHmi:
         self.events = list(old_events)
         self.recording = {'active': False}
         self.posts = []
+        self.meta = None  # the recording's meta.json (newer HMIs), None: 404 like older ones
 
     def handle(self, method, path, body):
         if method == 'POST':
@@ -162,6 +163,8 @@ class FakeHmi:
             return 200, {'status': self.recording, 'recordings': []}
         if method == 'POST' and path in ('/api/recordings/stop', '/api/abort'):
             return 200, {}
+        if method == 'GET' and self.meta is not None and path == f'/recordings/{self.recording.get("id")}/meta.json':
+            return 200, self.meta
         return 404, {'error': 'not found'}
 
 
@@ -224,6 +227,13 @@ def test_run_follows_the_recording(fake_hmi):
     assert run['outcome'] == '1 cycle done' and run['recording'] == '20261016_120000_smoke_frame_cycle'
     assert [(s['step_id'], s['duration_s']) for s in run['steps']] == [('s1', 12.5), ('s2', 0.8), ('s3', 3.5)]
     assert '  resetting the sim' in lines and smoke.run_ok(run)
+
+
+def test_run_takes_the_recordings_own_events_when_it_has_them(fake_hmi):
+    fake = FakeHmi(SCRIPT)
+    fake.meta = {'events': STATE['events'][:2]}  # e.g. events the 50-event window lost: the recording's list wins
+    run = smoke.run(smoke.Hmi(fake_hmi(fake)), 'frame_cycle', poll_s=0.0, log=lambda line: None)
+    assert [s['step_id'] for s in run['steps']] == ['s1']
 
 
 def test_run_command_saves_reference_and_compares(fake_hmi, tmp_path, capsys):
