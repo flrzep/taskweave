@@ -28,6 +28,7 @@
   <button role="tab" data-view="missions" aria-selected="false">Missions</button>
   <button role="tab" data-view="points" aria-selected="false">Teach</button>
   <button role="tab" data-view="robot" aria-selected="false">Robot</button>
+  <button role="tab" data-view="record" aria-selected="false" hidden>Record</button>
   <button role="tab" data-view="log" aria-selected="false">Log</button>
 </nav>
 
@@ -209,6 +210,46 @@
   </section>
 
   <!-- LOG -->
+  <!-- RECORD -->
+  <section id="view-record" class="view" hidden>
+    <div class="card status rec-live">
+      <div class="row between"><span id="rec-state" class="chip">idle</span><span id="rec-id" class="muted mono"></span></div>
+      <h2 id="rec-title">Not recording</h2>
+      <div id="rec-now" class="current" hidden>
+        <div id="rec-phase" class="instruction"></div>
+        <div class="rec-stats" id="rec-stats"></div>
+        <div id="rec-problems" class="error" hidden></div>
+      </div>
+      <div class="row gap"><button id="rec-stop" class="btn danger" disabled>Stop recording</button></div>
+    </div>
+
+    <div class="card">
+      <div class="label">New recording</div>
+      <p class="muted small-text">A ROS bag of everything (sim time) and, from the simulator, two videos: the fixed view and a camera
+        following the robot. While the videos record, the sim renders every frame and runs slower than real time.</p>
+      <div class="grid2">
+        <div class="field span2"><label for="rec-mission">Mission</label><select id="rec-mission"></select></div>
+        <div class="field"><label for="rec-name">Name (optional)</label><input id="rec-name" type="text" maxlength="40" autocomplete="off" pattern="[A-Za-z0-9_.\-]*"></div>
+        <div class="field"><label for="rec-cycles">Stop after cycles (empty = mission end)</label><input id="rec-cycles" type="number" min="1" step="1" inputmode="numeric"></div>
+        <div class="field"><label for="rec-quality">Video quality</label><select id="rec-quality">
+          <option value="ray_trace">Ray traced (faster)</option><option value="path_trace">Path traced (best, much slower)</option></select></div>
+        <div class="field"><label for="rec-max">Time limit (min, wall clock)</label><input id="rec-max" type="number" min="0.5" step="1" value="120" inputmode="decimal"></div>
+        <div class="field"><label class="check"><input id="rec-reset" type="checkbox" checked> From the start (reset the sim)</label></div>
+        <div class="field"><label class="check"><input id="rec-video" type="checkbox" checked> Videos</label></div>
+        <div class="field"><label class="check"><input id="rec-bag" type="checkbox" checked> ROS bag</label></div>
+        <div class="field"><label class="check"><input id="rec-camera" type="checkbox" checked> Camera images in the bag</label>
+          <small class="muted">about 0.1 GB per sim second</small></div>
+      </div>
+      <div id="rec-msg" class="msg" hidden></div>
+      <div class="row gap"><button id="rec-start" class="btn primary">Start recording</button></div>
+    </div>
+
+    <div class="card">
+      <div class="row between"><div class="label">Recordings</div><span id="rec-free" class="muted mono"></span></div>
+      <ul id="rec-list" class="points"><li class="muted">None yet</li></ul>
+    </div>
+  </section>
+
   <section id="view-log" class="view" hidden>
     <div class="card"><div class="label">Events</div><ol id="log" class="log"></ol></div>
   </section>
@@ -245,5 +286,6 @@
 <script src="teach.js"></script>
 <script src="held.js"></script>
 <script src="graph.js"></script>
+<script src="record.js"></script>
 </body>
 </html>

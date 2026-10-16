@@ -5,6 +5,7 @@ Parameters:
   robot (string)        robot the running task handler drives
   host (string)         address to bind; bind the trusted network only (e.g. the tailnet address)
   port (int)            default 8090
+  recordings_dir (string)  where the Record tab keeps recordings (bag, sim videos); empty: no Record tab
 
 HTTP API (JSON):
   GET  /api/state                  robot, status, plan with per-step outcomes, recent events
@@ -42,6 +43,9 @@ HTTP API (JSON):
   PUT  /api/teach/target {scope, name, at, form} or {}   the position a pad teach press saves into
   PUT  /api/teach/held/<type>/<name> {joints, path, rename}; DELETE the same   held poses (move_object pose:)
   POST /api/teach/held/<type>/<name>/test   move the held object there now (move_object)
+  GET  /api/recordings              {status, recordings, free_bytes} (404 without recordings_dir; recording.py)
+  POST /api/recordings/start {mission, name, cycles, reset, bag, camera, video, quality, max_min};  POST .../stop
+  DELETE /api/recordings/<id>;  GET /recordings/<id>/<file>  a recording's video or data file (byte ranges)
 Missions and points are edited between runs (409 while a mission runs) and are used at the next start.
 """
 
@@ -49,6 +53,7 @@ from __future__ import annotations
 
 import json
 import queue
+import shutil
 import threading
 import time
 from collections import deque
@@ -81,12 +86,12 @@ from taskweave_interfaces.srv import ListSkills, StartMission, TeachPoint
 from taskweave_skills.ik import pose_matrix, tool_target
 from taskweave_skills.nav2 import nav2_parameters
 
-from . import arm, held, missions, points, robot
+from . import arm, held, missions, points, recording, robot
 
 WEB = Path(__file__).parent / 'web'
 STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
 CALL_TIMEOUT_S = 5.0
-STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'graph.js', 'style.css')
+STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'graph.js', 'record.js', 'style.css')
 MANUAL_SKILL_TIMEOUT_S = 120.0
 DRIVE_TIMEOUT_S = 300.0  # sim time; a drive across the cell in a slow sim
 NAV_COSTMAPS = ['/local_costmap/local_costmap', '/global_costmap/global_costmap']  # Nav2 defaults
@@ -94,7 +99,9 @@ NAV_CONTROLLER = '/controller_server'
 FK_SERVICE = '/compute_fk'  # MoveIt move_group
 OUTCOMES = ['succeeded', 'failed', 'timeout', 'canceled', 'rejected']
 CONTENT_TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
-                 '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml'}
+                 '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.mp4': 'video/mp4',
+                 '.csv': 'text/csv; charset=utf-8', '.json': 'application/json', '.log': 'text/plain; charset=utf-8'}
+CHUNK = 1 << 20
 
 
 def step_dict(step) -> dict:
@@ -142,7 +149,8 @@ class Bridge(Node):
     def __init__(self, **kwargs):
         super().__init__(kwargs.pop('node_name', 'hmi_server'), **kwargs)
         for name, default in (('config_dir', ''), ('robot', ''), ('host', ''), ('port', 8090),
-                              ('nav_costmaps', NAV_COSTMAPS), ('nav_controller', NAV_CONTROLLER)):
+                              ('nav_costmaps', NAV_COSTMAPS), ('nav_controller', NAV_CONTROLLER),
+                              ('recordings_dir', ''), ('recording_bag_exclude', recording.BAG_EXCLUDE)):
             self.declare_parameter(name, default)
         self.config = ConfigStore(self.get_parameter('config_dir').value)
         self.robot = self.get_parameter('robot').value
@@ -191,6 +199,9 @@ class Bridge(Node):
         self.notice_pub = self.create_publisher(String, names.OPERATOR_NOTICE, 10)
         self.create_subscription(String, names.TEACH_REQUEST, self._teach_request, 10, callback_group=self.group)
         self.joint_command = self.create_publisher(JointState, joints['command'], 10) if joints.get('command') else None
+        directory = self.get_parameter('recordings_dir').value
+        exclude = self.get_parameter('recording_bag_exclude').value
+        self.recorder = recording.Recorder(self, directory, exclude) if directory else None
 
     # ---- ROS -> state ------------------------------------------------------------
     def _broadcast(self, kind: str, data) -> None:
@@ -502,6 +513,55 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get('Content-Length') or 0)
         return json.loads(self.rfile.read(length) or b'{}')
 
+    def _file(self, file: Path) -> None:
+        """A file, streamed, with byte ranges (a video player seeks with them)."""
+        size = file.stat().st_size
+        try:
+            span = recording.byte_range(self.headers.get('Range'), size)
+        except ValueError:
+            self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+            self.send_header('Content-Range', f'bytes */{size}')
+            self.end_headers()
+            return
+        start, end = span or (0, size - 1)
+        self.send_response(HTTPStatus.PARTIAL_CONTENT if span else HTTPStatus.OK)
+        self.send_header('Content-Type', CONTENT_TYPES.get(file.suffix, 'application/octet-stream'))
+        self.send_header('Content-Length', str(max(end - start + 1, 0)))
+        self.send_header('Accept-Ranges', 'bytes')
+        if span:
+            self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+        self.end_headers()
+        try:
+            with file.open('rb') as handle:
+                handle.seek(start)
+                left = end - start + 1
+                while left > 0:
+                    chunk = handle.read(min(CHUNK, left))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    left -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _recordings(self, method: str, route: list[str]):
+        recorder = self.bridge.recorder
+        if recorder is None:
+            return self._json({'error': 'recording is not set up (parameter recordings_dir)'}, HTTPStatus.NOT_FOUND)
+        if method == 'GET' and not route:
+            free = shutil.disk_usage(recorder.dir).free if recorder.dir.is_dir() else None
+            return self._json({'status': recorder.status(), 'recordings': recorder.list(), 'free_bytes': free})
+        if method == 'POST' and route == ['start']:
+            self.bridge.config.reload()
+            return self._json(recorder.start(self._body(), self.bridge.config.mission_names()))
+        if method == 'POST' and route == ['stop']:
+            return self._json(recorder.stop())
+        if method == 'DELETE' and len(route) == 1:
+            recorder.delete(unquote(route[0]))
+            self.bridge.get_logger().info(f'HMI deleted recording {route[0]}')
+            return self._json({'deleted': route[0]})
+        return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
+
     def _route(self, method: str) -> None:
         bridge, path = self.bridge, self.path.split('?', 1)[0].rstrip('/') or '/'
         parts = [p for p in path.split('/') if p]
@@ -509,9 +569,13 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'GET' and (path == '/' or (len(parts) == 1 and parts[0] in STATIC_FILES)):
                 file = WEB / ('index.html' if path == '/' else parts[0])
                 return self._send(HTTPStatus.OK, file.read_bytes(), CONTENT_TYPES[file.suffix])
+            if method == 'GET' and len(parts) == 3 and parts[0] == 'recordings' and bridge.recorder is not None:
+                return self._file(bridge.recorder.file(unquote(parts[1]), unquote(parts[2])))
             if parts[:1] != ['api']:
                 return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
             route = parts[1:]
+            if route[:1] == ['recordings']:
+                return self._recordings(method, route[1:])
             if method == 'GET' and route == ['state']:
                 return self._json(bridge.snapshot())
             if method == 'GET' and route == ['events']:
@@ -653,7 +717,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
         except missions.MissionError as error:
             return self._json({'problems': error.problems}, HTTPStatus.UNPROCESSABLE_ENTITY)
-        except (points.PointError, robot.RobotSettingsError, arm.ArmError, held.HeldError) as error:
+        except (points.PointError, robot.RobotSettingsError, arm.ArmError, held.HeldError,
+                recording.RecordingError) as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)
         except Busy as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.CONFLICT)

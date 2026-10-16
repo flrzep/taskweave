@@ -35,7 +35,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 var(--
 .conn.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent); }
 
 /* tabs */
-.tabs { position: sticky; top: calc(57px + env(safe-area-inset-top, 0px)); z-index: 2; display: grid; grid-template-columns: repeat(5, 1fr);
+.tabs { position: sticky; top: calc(57px + env(safe-area-inset-top, 0px)); z-index: 2; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
         background: var(--card); border-bottom: 1px solid var(--line); }
 .tabs button { border: 0; background: none; color: var(--muted); font: 600 15px var(--sans); padding: 12px 0 10px;
                border-bottom: 3px solid transparent; cursor: pointer; }
@@ -278,3 +278,16 @@ details[open] summary { margin-bottom: 8px; }
 .waypoints { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .waypoints .icon { width: 32px; height: 32px; }
 .waypoints .icon:disabled { opacity: .35; }
+
+/* record tab */
+.tabs button[hidden] { display: none; }
+.card.status.rec-live:has(#rec-state.running) { --state: var(--accent); }
+.card.status.rec-live:has(#rec-state.succeeded) { --state: var(--ok); }
+.card.status.rec-live:has(#rec-state.failed) { --state: var(--bad); }
+.rec-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px 16px; }
+.rec-stats div { display: grid; } .rec-stats b { font: 600 18px var(--cond); } .rec-stats span { color: var(--muted); font-size: 13px; }
+.rec-videos { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.rec-videos figure { margin: 0; display: grid; gap: 4px; } .rec-videos figcaption { color: var(--muted); font-size: 13px; }
+.rec-videos video { width: 100%; border-radius: 4px; background: #000; aspect-ratio: 16 / 9; }
+.rec-files { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 14px; }
+.rec-files a { color: var(--accent); }

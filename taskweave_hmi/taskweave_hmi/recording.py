@@ -1,0 +1,423 @@
+"""Recordings from the HMI (Record tab): a ROS bag and, when the simulator has one, videos, optionally of a mission.
+
+One recording at a time, in its own folder ``<recordings_dir>/<id>/``:
+  bag/          ROS bag (mcap, sim time), bag.log
+  fixed.mp4, follow.mp4, frames.csv, status.json   from the video recorder, if one answers
+  meta.json     what was recorded: mission, options, outcome, times, the plan
+
+Video recorder contract (frame-sim: scripts/recorder.py): the HMI writes ``<recordings_dir>/control.json``
+``{"id", "cmd": "start"|"stop", "dir", "options"}``; the recorder answers in ``<dir>/status.json`` with ``state``
+capturing | stopping | encoding | done | error (and frames, first_time, last_time in sim seconds). It steps the sim
+itself while capturing, so the sim runs slower than real time. Without an answer the recording is a bag only.
+
+"From the start" resets the simulation (simulation_interfaces SetSimulationState stop, play) and waits for the
+navigation stack to come back before the bag and the mission start.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+
+ID_RE = re.compile(r'^[A-Za-z0-9_.-]+$')
+FILES = ('fixed.mp4', 'follow.mp4', 'frames.csv', 'meta.json', 'status.json', 'bag.log')
+END_STATES = ('succeeded', 'failed', 'aborted', 'idle')
+QUALITY = {'ray_trace': 'RAY_TRACE', 'path_trace': 'PATH_TRACE'}
+BAG_EXCLUDE = (r'.*/_action/.*|/rosout|/parameter_events|.*/transition_event|.*/bond|.*costmap_raw.*|.*_updates'
+               r'|.*static_layer.*|/diagnostics|/behavior_tree_log|.*/preview/.*')
+CAMERA_EXCLUDE = r'.*image_raw.*|.*/compressed.*|.*/points'  # camera images and point clouds: most of a bag's size
+NAV_ACTIVE = '/lifecycle_manager_navigation/is_active'
+SIM_STATE = '/set_simulation_state'
+VIDEO_ANSWER_S = 30.0
+VIDEO_FINISH_S = 1800.0  # encoding a long path-traced video
+BAG_START_S = 20.0
+NAV_BACK_S = 120.0
+NAV_DOWN_S = 20.0  # after a sim reset Nav2 goes inactive within this, or it was not reset
+
+
+class RecordingError(Exception):
+    """A recording request that cannot be done (bad options, one already running, unknown recording)."""
+
+
+def check_id(name: str) -> str:
+    if not ID_RE.match(name or '') or name.startswith('.'):
+        raise RecordingError(f'invalid recording name {name!r}')
+    return name
+
+
+def options(body: dict, missions: list[str]) -> dict:
+    """The options of a start request, checked; defaults for the rest."""
+    known = {'mission', 'name', 'cycles', 'reset', 'bag', 'camera', 'video', 'quality', 'max_min'}
+    unknown = set(body) - known
+    if unknown:
+        raise RecordingError(f'unknown options: {", ".join(sorted(unknown))}')
+    mission = str(body.get('mission') or '')
+    if mission and mission not in missions:
+        raise RecordingError(f'no mission {mission!r}')
+    name = str(body.get('name') or '').strip()
+    if name and not ID_RE.match(name):
+        raise RecordingError('name: letters, digits, _ . - only')
+    cycles = body.get('cycles')
+    if cycles in (None, '', 0):
+        cycles = None
+    else:
+        try:
+            cycles = int(cycles)
+        except (TypeError, ValueError):
+            raise RecordingError('cycles must be a whole number') from None
+        if cycles < 1:
+            raise RecordingError('cycles must be at least 1')
+        if not mission:
+            raise RecordingError('cycles needs a mission')
+    quality = str(body.get('quality') or 'ray_trace')
+    if quality not in QUALITY:
+        raise RecordingError(f'quality: one of {", ".join(QUALITY)}')
+    try:
+        max_min = float(body.get('max_min') or 60)
+    except (TypeError, ValueError):
+        raise RecordingError('time limit must be a number') from None
+    if not 0.5 <= max_min <= 24 * 60:
+        raise RecordingError('time limit: 0.5 to 1440 minutes')
+    flag = lambda key, default: bool(body.get(key, default))  # noqa: E731
+    return {'mission': mission, 'name': name, 'cycles': cycles, 'reset': flag('reset', True), 'bag': flag('bag', True),
+            'camera': flag('camera', True), 'video': flag('video', True), 'quality': quality, 'max_min': max_min}
+
+
+def recording_id(opts: dict, now: datetime) -> str:
+    return '_'.join(part for part in (now.strftime('%Y%m%d_%H%M%S'), opts['name'], opts['mission']) if part)
+
+
+def folder_size(path: Path) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for file in files:
+            try:
+                total += os.stat(os.path.join(root, file)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def read_json(path: Path) -> dict | None:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def byte_range(header: str | None, size: int) -> tuple[int, int] | None:
+    """(first, last) byte of an HTTP Range header ``bytes=a-b`` / ``bytes=a-`` / ``bytes=-n``; None: the whole file.
+    ValueError when it cannot be satisfied."""
+    if not header:
+        return None
+    match = re.fullmatch(r'bytes=(\d*)-(\d*)', header.strip())
+    if not match or match.groups() == ('', ''):
+        return None
+    first, last = match.groups()
+    if first == '':
+        start, end = max(size - int(last), 0), size - 1
+    else:
+        start, end = int(first), min(int(last), size - 1) if last else size - 1
+    if start > end or start >= size:
+        raise ValueError(f'range {header} outside {size} bytes')
+    return start, end
+
+
+class Recorder:
+    """Runs one recording at a time in a thread; ``bridge`` is the HMI's ROS node (server.Bridge)."""
+
+    def __init__(self, bridge, directory: str, bag_exclude: str = BAG_EXCLUDE):
+        self.bridge, self.dir, self.bag_exclude = bridge, Path(directory), bag_exclude
+        self.lock = threading.Lock()
+        self.active: dict | None = None
+        self.last: dict | None = None  # the latest finished recording, shown until the next one starts
+        self.sim_client = self.nav_client = None
+
+    # ---- requests ---------------------------------------------------------------------
+    def start(self, body: dict, missions: list[str]) -> dict:
+        opts = options(body, missions)
+        with self.lock:
+            if self.active:
+                raise RecordingError(f'recording {self.active["id"]} is running')
+            if opts['mission'] or opts['reset']:
+                self.bridge.check_idle()
+            rec_id = recording_id(opts, datetime.now())
+            folder = self.dir / rec_id
+            if folder.exists():
+                raise RecordingError(f'{rec_id} exists already')
+            self.dir.mkdir(parents=True, exist_ok=True)
+            folder.mkdir(mode=0o2775)
+            folder.chmod(0o2775)  # the host's group can delete it
+            self.active = {'id': rec_id, 'options': opts, 'phase': 'starting', 'started': time.time(), 'stop': False,
+                           'outcome': '', 'problems': [], 'video': None, 'bag': None}
+            self.last = None
+        threading.Thread(target=self._run, args=(self.active, folder), daemon=True).start()
+        return {'id': rec_id}
+
+    def stop(self) -> dict:
+        with self.lock:
+            if not self.active:
+                raise RecordingError('no recording is running')
+            self.active['stop'] = True
+            return {'id': self.active['id']}
+
+    def status(self) -> dict:
+        with self.lock:
+            rec = self.active or self.last
+            if rec is None:
+                return {'active': False}
+            data = {key: rec[key] for key in ('id', 'options', 'phase', 'started', 'outcome', 'problems')}
+            data['active'] = self.active is not None
+            data['ended'] = rec.get('ended')
+        folder = self.dir / data['id']
+        data['video'] = read_json(folder / 'status.json')
+        data['bytes'] = folder_size(folder)
+        data['wall_s'] = round((data['ended'] or time.time()) - data['started'], 1)
+        return data
+
+    def list(self) -> list[dict]:
+        if not self.dir.is_dir():
+            return []
+        result = []
+        for folder in sorted((p for p in self.dir.iterdir() if p.is_dir() and ID_RE.match(p.name)), reverse=True):
+            meta = read_json(folder / 'meta.json') or {}
+            video = read_json(folder / 'status.json') or {}
+            result.append({'id': folder.name, 'mission': meta.get('mission', ''), 'outcome': meta.get('outcome', ''),
+                           'options': meta.get('options'), 'started': meta.get('started'), 'ended': meta.get('ended'),
+                           'frames': video.get('frames'), 'first_time': video.get('first_time'),
+                           'last_time': video.get('last_time'), 'bytes': folder_size(folder),
+                           'files': [name for name in FILES if (folder / name).is_file()],
+                           'bag': (folder / 'bag').is_dir(), 'active': bool(self.active and
+                                                                         self.active['id'] == folder.name)})
+        return result
+
+    def file(self, rec_id: str, name: str) -> Path:
+        check_id(rec_id)
+        if name not in FILES:
+            raise RecordingError(f'no file {name!r}')
+        path = self.dir / rec_id / name
+        if not path.is_file():
+            raise RecordingError(f'{rec_id} has no {name}')
+        return path
+
+    def delete(self, rec_id: str) -> None:
+        check_id(rec_id)
+        with self.lock:
+            if self.active and self.active['id'] == rec_id:
+                raise RecordingError('stop the recording first')
+        folder = self.dir / rec_id
+        if not folder.is_dir():
+            raise RecordingError(f'no recording {rec_id}')
+        shutil.rmtree(folder)
+        with self.lock:
+            if self.last and self.last['id'] == rec_id:
+                self.last = None
+
+    # ---- the recording ------------------------------------------------------------------
+    def _phase(self, rec: dict, phase: str) -> None:
+        with self.lock:
+            rec['phase'] = phase
+        self.bridge.get_logger().info(f'recording {rec["id"]}: {phase}')
+
+    def _problem(self, rec: dict, text: str) -> None:
+        with self.lock:
+            rec['problems'].append(text)
+        self.bridge.get_logger().warning(f'recording {rec["id"]}: {text}')
+
+    def _run(self, rec: dict, folder: Path) -> None:
+        opts, bag = rec['options'], None
+        try:
+            if opts['reset']:
+                self._phase(rec, 'resetting the sim')
+                self._reset_sim()
+            if opts['bag']:
+                self._phase(rec, 'starting the bag')
+                bag = self._start_bag(folder, opts['camera'])
+                rec['bag'] = True
+            if opts['video']:
+                self._phase(rec, 'starting the video')
+                rec['video'] = self._start_video(rec, folder)
+            if opts['mission']:
+                self._phase(rec, f'starting {opts["mission"]}')
+                accepted, text = self._start_mission(opts['mission'])
+                if not accepted:
+                    raise RecordingError(f'{opts["mission"]} not started: {text}')
+            self._phase(rec, 'recording')
+            rec['outcome'] = self._wait(rec)
+        except Exception as error:  # noqa: BLE001 - whatever failed, the recording is closed below
+            rec['outcome'] = rec['outcome'] or f'error: {error}'
+            self._problem(rec, str(error))
+        finally:
+            self._finish(rec, folder, bag)
+
+    def _wait(self, rec: dict) -> str:
+        opts = rec['options']
+        end = time.monotonic() + 60.0 * opts['max_min']
+        seen_running = False
+        while time.monotonic() < end:
+            if rec['stop']:
+                return 'stopped by hand'
+            if rec['video'] and (read_json(self.dir / rec['id'] / 'status.json') or {}).get('state') == 'error':
+                return 'video recorder error'
+            if opts['mission']:
+                with self.bridge.lock:
+                    status = dict(self.bridge.status)
+                seen_running = seen_running or status['state'] in ('running', 'paused')
+                if seen_running and status['state'] in END_STATES:
+                    return f'mission {status["state"]}'
+                if seen_running and opts['cycles'] and status.get('cycle', 0) > opts['cycles']:
+                    self._abort_mission()
+                    return f'{opts["cycles"]} cycle{"s" if opts["cycles"] > 1 else ""} done'
+            time.sleep(1.0)
+        return 'time limit reached'
+
+    def _finish(self, rec: dict, folder: Path, bag: subprocess.Popen | None) -> None:
+        self._phase(rec, 'finishing')
+        if rec['video']:
+            self._stop_video(rec, folder)
+        if bag is not None:
+            self._stop_bag(bag)
+        rec['ended'] = time.time()
+        with self.bridge.lock:
+            plan = self.bridge.plan
+        meta = {'id': rec['id'], 'mission': rec['options']['mission'], 'outcome': rec['outcome'],
+                'options': rec['options'], 'problems': rec['problems'],
+                'started': datetime.fromtimestamp(rec['started']).isoformat(timespec='seconds'),
+                'ended': datetime.fromtimestamp(rec['ended']).isoformat(timespec='seconds'),
+                'video': read_json(folder / 'status.json'), 'plan': plan if rec['options']['mission'] else None}
+        try:
+            (folder / 'meta.json').write_text(json.dumps(meta, indent=1))
+        except OSError as error:
+            self._problem(rec, f'meta.json not written: {error}')
+        self._phase(rec, 'done')
+        with self.lock:
+            self.last, self.active = rec, None
+
+    # ---- sim reset ------------------------------------------------------------------------
+    def _reset_sim(self) -> None:
+        from simulation_interfaces.msg import SimulationState
+        from simulation_interfaces.srv import SetSimulationState
+        from std_srvs.srv import Trigger
+
+        node = self.bridge
+        if self.sim_client is None:
+            self.sim_client = node.create_client(SetSimulationState, SIM_STATE, callback_group=node.group)
+            self.nav_client = node.create_client(Trigger, NAV_ACTIVE, callback_group=node.group)
+        was_active = self._nav_active()
+        for state in (SimulationState.STATE_STOPPED, SimulationState.STATE_PLAYING):
+            node.call(self.sim_client, SetSimulationState.Request(state=SimulationState(state=state)))
+        if was_active is None:  # no Nav2 lifecycle manager: give the stack a moment
+            time.sleep(10.0)
+            return
+        # the sim's clock jumps back: Nav2 is reset (inactive) and brought up again on the new clock
+        start, went_down = time.monotonic(), False
+        while time.monotonic() - start < NAV_BACK_S:
+            active = self._nav_active()
+            went_down = went_down or active is False
+            if went_down and active:
+                time.sleep(5.0)  # move_group respawns with it
+                return
+            if not went_down and time.monotonic() - start > NAV_DOWN_S:
+                return  # never went down: nothing to wait for
+            time.sleep(1.0)
+        raise RecordingError(f'navigation not back {NAV_BACK_S:g} s after the sim reset')
+
+    def _nav_active(self) -> bool | None:
+        from std_srvs.srv import Trigger
+
+        if self.nav_client is None or not self.nav_client.wait_for_service(timeout_sec=1.0):
+            return None
+        try:
+            return bool(self.bridge.call(self.nav_client, Trigger.Request()).success)
+        except TimeoutError:
+            return False
+
+    # ---- bag ----------------------------------------------------------------------------
+    def _start_bag(self, folder: Path, camera: bool) -> subprocess.Popen:
+        exclude = self.bag_exclude if camera else f'{self.bag_exclude}|{CAMERA_EXCLUDE}'
+        log = open(folder / 'bag.log', 'w')  # noqa: SIM115 - kept open by the child
+        process = subprocess.Popen(
+            ['ros2', 'bag', 'record', '-a', '--exclude-regex', f'({exclude})', '--use-sim-time', '-s', 'mcap',
+             '--storage-preset-profile', 'zstd_fast', '-o', str(folder / 'bag')],
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+            preexec_fn=lambda: os.umask(0o002))
+        log.close()
+        deadline = time.monotonic() + BAG_START_S
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise RecordingError(f'ros2 bag record ended at once (bag.log): {self._tail(folder / "bag.log")}')
+            if 'Recording...' in self._tail(folder / 'bag.log', 4000):
+                return process
+            time.sleep(0.5)
+        return process  # slow to start (waiting for /clock): it records once the clock runs
+
+    def _stop_bag(self, process: subprocess.Popen) -> None:
+        try:
+            os.killpg(process.pid, signal.SIGINT)
+            process.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    @staticmethod
+    def _tail(path: Path, size: int = 400) -> str:
+        try:
+            return path.read_text(errors='replace')[-size:]
+        except OSError:
+            return ''
+
+    # ---- video --------------------------------------------------------------------------
+    def _control(self, rec: dict, folder: Path, cmd: str) -> None:
+        opts = rec['options']
+        command = {'id': f'{rec["id"]}-{cmd}', 'cmd': cmd, 'dir': str(folder),
+                   'options': {'render_preset': QUALITY[opts['quality']], 'max_minutes': opts['max_min']}}
+        temp = self.dir / '.control.tmp'
+        temp.write_text(json.dumps(command))
+        temp.replace(self.dir / 'control.json')
+
+    def _start_video(self, rec: dict, folder: Path) -> bool:
+        self._control(rec, folder, 'start')
+        deadline = time.monotonic() + VIDEO_ANSWER_S
+        while time.monotonic() < deadline:
+            status = read_json(folder / 'status.json') or {}
+            if status.get('state') == 'capturing':
+                return True
+            if status.get('state') == 'error':
+                raise RecordingError(f'video recorder: {status.get("error")}')
+            time.sleep(0.5)
+        self._problem(rec, f'no video recorder answered in {VIDEO_ANSWER_S:g} s: bag only')
+        return False
+
+    def _stop_video(self, rec: dict, folder: Path) -> None:
+        self._control(rec, folder, 'stop')
+        deadline = time.monotonic() + VIDEO_FINISH_S
+        while time.monotonic() < deadline:
+            state = (read_json(folder / 'status.json') or {}).get('state')
+            if state in ('done', 'error'):
+                return
+            time.sleep(1.0)
+        self._problem(rec, 'the video recorder did not finish')
+
+    # ---- mission ------------------------------------------------------------------------
+    def _start_mission(self, mission: str) -> tuple[bool, str]:
+        from taskweave_interfaces.srv import StartMission
+
+        response = self.bridge.call(self.bridge.start_client, StartMission.Request(mission=mission, start_step=''))
+        return response.accepted, response.message
+
+    def _abort_mission(self) -> None:
+        from std_srvs.srv import Trigger
+
+        try:
+            self.bridge.call(self.bridge.triggers['abort'], Trigger.Request())
+        except TimeoutError as error:
+            self.bridge.get_logger().warning(f'recording: abort after the last cycle failed: {error}')

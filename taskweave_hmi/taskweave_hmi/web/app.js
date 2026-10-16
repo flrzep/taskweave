@@ -38,6 +38,7 @@ document.querySelectorAll('.tabs button').forEach((button) => button.addEventLis
   if (pointsVisible) { loadPoints(); loadArm(); refreshPose(); }  // teach.js: arm positions, joints
   else if (teach.open) { teach.open = null; setTeachTarget(null); }  // the pad teaches only into an open position
   if (button.dataset.view === 'robot') loadRobot();  // robot.js
+  if (button.dataset.view === 'record') loadRecordings();  // record.js
 }));
 
 // ---------- live state ----------
