@@ -42,7 +42,6 @@ NAV2_DEFAULTS = {'action': 'navigate_to_pose', 'frame': 'map', 'server_timeout_s
                  'map_topic': '/map', 'depart_max_m': 1.0, 'depart_margin_m': 0.1, 'depart_speed': 0.15,
                  'costmaps': '/global_costmap/global_costmap,/local_costmap/local_costmap'}
 POLL_S = 0.05
-NEUTRAL_PATH_ANGLE_WEIGHT = 2.0  # PathAngleCritic without a forward preference (follows the path, any heading)
 
 
 def nav2_parameters(navigation: dict, base: dict, controller: str = 'FollowPath', carrying: bool = False) -> dict:
@@ -74,10 +73,18 @@ def nav2_parameters(navigation: dict, base: dict, controller: str = 'FollowPath'
     if 'prefer_forward' in driving:
         weight = float(driving['prefer_forward'])
         values['PathAngleCritic.mode'] = 0 if weight > 0 else 2           # 0: face along the path, 2: any heading
-        values['PathAngleCritic.cost_weight'] = weight if weight > 0 else NEUTRAL_PATH_ANGLE_WEIGHT
+        values['PathAngleCritic.cost_weight'] = weight if weight > 0 else any_heading_weight(driving)
         values['PreferForwardCritic.cost_weight'] = weight                 # penalises reversing
     return {'costmap': costmap, 'controller': {f'{controller}.{k}': v for k, v in values.items()},
             'motion_model': 'Omni' if holonomic else 'DiffDrive'}
+
+
+def any_heading_weight(driving: dict) -> float:
+    """PathAngleCritic weight without a forward preference (follows the path, any heading): navigation.yaml
+    driving.any_heading_weight, else its schema default."""
+    from taskweave_core.config.schemas import NAVIGATION, default
+
+    return float(driving.get('any_heading_weight', default(NAVIGATION, 'driving', 'any_heading_weight')))
 
 
 class Nav2NavigateTo(NavigateTo):

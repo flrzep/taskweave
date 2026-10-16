@@ -124,7 +124,7 @@ class TcpJog(Node):
             if not path.is_file():
                 continue
             try:
-                chain = Chain.from_urdf(path, self.base, self.ik.tools[tool]['link'])
+                chain = Chain.from_urdf(path, self.base, self.ik.tools[tool]['link'], tuning=self.ik.tuning['chain'])
             except (ValueError, OSError) as error:
                 self.get_logger().warning(f'jog {tool}: no URDF chain ({error}); jogging through IK')
                 continue

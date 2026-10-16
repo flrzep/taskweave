@@ -33,12 +33,11 @@ import math
 import re
 import time
 
+from taskweave_core.config.tuning import motion_tuning
+
 SUCCESS = 1
 POLL_S = 0.02
-PLAN_TRIES = 3
 CHECK_BATCH = 8  # state validity requests in flight at once
-DEEPER_M = 0.005  # an escape may not push a contact deeper than at the start by more than this
-UNKNOWN_DEPTH_M = 0.3  # FCL's depth between meshes is sometimes meters off: deeper than this says nothing
 RETRY = {-1, -2, -6, 99999}  # planning failed, invalid plan (final validation), timed out, pipeline failure
 
 
@@ -112,6 +111,7 @@ class MotionPlanner:
         # them anywhere on the way (e.g. a lift or the other arm while one arm moves)
         self.joints = re.compile(spec['joints']) if spec.get('joints') else None
         self.Request = GetMotionPlan.Request
+        self.tuning = motion_tuning(robot)['plan']  # tries, deeper_m, unknown_depth_m (profile motion_tuning.plan)
         self.client = node.create_client(GetMotionPlan, self.service, callback_group=ReentrantCallbackGroup())
         self.direct = bool(spec.get('direct', True))
         self.direct_step = float(spec.get('direct_step_rad', 0.03))
@@ -151,7 +151,7 @@ class MotionPlanner:
         r.goal_constraints = [Constraints(joint_constraints=[
             JointConstraint(joint_name=name, position=float(value), tolerance_above=1e-3, tolerance_below=1e-3,
                             weight=1.0) for name, value in goal.items()])]
-        for _ in range(PLAN_TRIES):  # a sampled path can fail MoveIt's final check at finer spacing: plan again
+        for _ in range(self.tuning['tries']):  # a sampled path can fail MoveIt's final check: plan again
             response = self._call(request, should_stop)
             code = response.error_code.val
             if code not in RETRY:
@@ -229,7 +229,7 @@ class MotionPlanner:
                 return state, self._straight({n: start[n] for n in names}, state)
             contacts = self._contacts(response)
             worse = [pair for pair, depth in contacts.items() if pair not in touching
-                     or touching[pair] + DEEPER_M < depth < UNKNOWN_DEPTH_M]
+                     or touching[pair] + self.tuning['deeper_m'] < depth < self.tuning['unknown_depth_m']]
             if worse:
                 raise PlanError(f'start state in collision ({what}); moving toward the goal touches '
                                 f'{", ".join(f"{a} - {b}" for a, b in worse)}: jog it free first')

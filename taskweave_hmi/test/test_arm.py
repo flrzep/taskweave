@@ -96,3 +96,8 @@ def test_a_capture_takes_the_closed_grippers_as_the_points_grip(store):
     assert arm.closed_grips(store, ROBOT, [], {'left_finger': -0.2}) == {}          # past open is open too
     assert arm.closed_grips(store, ROBOT, [], {'left_finger': 1.3}) == {'left': 0.0}   # within the table
     assert arm.closed_grips(store, ROBOT, ['right'], {'left_finger': 0.62}) == {}   # another hand was taught
+    profile.write_text(profile.read_text().replace('left: {joint: left_finger,', 'left: {joint: left_finger, '
+                                                   'closed_from: 0.7,'))
+    store.reload()
+    assert arm.closed_grips(store, ROBOT, [], {'left_finger': 0.62}) == {}          # the profile's closed_from: open
+    assert arm.closed_grips(store, ROBOT, [], {'left_finger': 0.75}) != {}

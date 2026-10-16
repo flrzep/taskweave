@@ -18,12 +18,9 @@ from pathlib import Path
 
 import numpy as np
 
-from .ik import rpy_matrix
+from taskweave_core.config.tuning import motion_tuning
 
-MAX_STEP_RAD = 0.08       # the largest joint change one step may make (rad or m); larger steps are scaled down
-DAMPING = 0.05            # damped least squares: lambda at a singularity
-SINGULAR = 0.04           # below this smallest singular value the damping fades in
-LIMIT_MARGIN = 1e-3       # stop this far short of a joint limit (rad or m)
+from .ik import rpy_matrix
 
 
 @dataclass
@@ -32,6 +29,7 @@ class Joint:
     kind: str              # revolute, continuous, prismatic or fixed
     origin: np.ndarray     # 4x4 parent -> joint frame at zero
     axis: np.ndarray       # unit axis in the joint frame
+    child: str = ''        # the link it moves
 
 
 def _transform(kind: str, axis: np.ndarray, value: float) -> np.ndarray:
@@ -63,12 +61,19 @@ def _axis_at_pi(rotation: np.ndarray) -> np.ndarray:
 
 
 class Chain:
-    def __init__(self, joints: list[Joint]):
+    """``tuning``: the step's motion_tuning.chain values (default: the schema's); ``elbow``: the links at the arm's
+    shoulder, elbow and wrist centres (profile arms.<tool>.elbow), None for an arm without elbow control."""
+
+    def __init__(self, joints: list[Joint], tuning: dict | None = None, elbow: tuple[str, str, str] | None = None):
         self.joints = joints
         self.movable = [j.name for j in joints if j.kind != 'fixed']
+        self.links = [j.child for j in joints]
+        self.tuning = tuning or motion_tuning()['chain']
+        self.elbow = tuple(elbow) if elbow else None
 
     @classmethod
-    def from_urdf(cls, path: Path | str, base: str, tip: str) -> Chain:
+    def from_urdf(cls, path: Path | str, base: str, tip: str, tuning: dict | None = None,
+                  elbow: tuple[str, str, str] | None = None) -> Chain:
         root = ElementTree.parse(path).getroot()
         by_child = {j.find('child').get('link'): j for j in root.iter('joint')}
         joints, link = [], tip
@@ -83,9 +88,9 @@ class Chain:
             axis = np.array([float(v) for v in (axis_element.get('xyz') if axis_element is not None else '1 0 0').split()])
             norm = np.linalg.norm(axis)
             joints.append(Joint(element.get('name'), element.get('type'), rpy_matrix(xyz, rpy),
-                                axis / norm if norm > 0 else axis))
+                                axis / norm if norm > 0 else axis, link))
             link = element.find('parent').get('link')
-        return cls(joints[::-1])
+        return cls(joints[::-1], tuning, elbow)
 
     def frames(self, positions: dict[str, float]) -> tuple[list[np.ndarray], np.ndarray]:
         """Each movable joint's frame (4x4, base frame, after its origin) and the tip pose."""
@@ -99,6 +104,16 @@ class Chain:
 
     def fk(self, positions: dict[str, float]) -> np.ndarray:
         return self.frames(positions)[1]
+
+    def link_points(self, positions: dict[str, float], links) -> list[np.ndarray]:
+        """Origins (base frame) of the named links of the chain; KeyError for a link not on it."""
+        pose, found = np.eye(4), {}
+        for joint in self.joints:
+            pose = pose @ joint.origin
+            if joint.kind != 'fixed':
+                pose = pose @ _transform(joint.kind, joint.axis, float(positions.get(joint.name, 0.0)))
+            found[joint.child] = pose[:3, 3]
+        return [found[link] for link in links]
 
     def jacobian(self, positions: dict[str, float], names: list[str]) -> tuple[np.ndarray, np.ndarray]:
         """Geometric Jacobian (6 x len(names): linear velocity of the tip origin, angular velocity; base frame) of
@@ -119,6 +134,8 @@ class Chain:
         """One damped least-squares step of the named joints toward ``target`` (tip, 4x4), plus ``null`` (a joint
         step projected so the tip stays). Joints that would pass a limit are held there and the rest re-solved.
         Returns the new joint values and '' or the joints held at a limit (a reason to show)."""
+        max_step, damping_max = self.tuning['max_step_rad'], self.tuning['damping']
+        singular, margin = self.tuning['singular'], self.tuning['limit_margin']
         q = np.array([float(positions[name]) for name in names])
         free = np.ones(len(names), bool)
         held = []
@@ -128,23 +145,23 @@ class Chain:
             error = pose_error(target, tip)
             u, sigma, vt = np.linalg.svd(jacobian, full_matrices=False)
             smallest = sigma[-1] if len(sigma) else 0.0
-            damping = 0.0 if smallest >= SINGULAR else (1 - (smallest / SINGULAR) ** 2) * DAMPING ** 2
+            damping = 0.0 if smallest >= singular else (1 - (smallest / singular) ** 2) * damping_max ** 2
             pinv = vt.T @ np.diag(sigma / (sigma ** 2 + damping)) @ u.T
             step = pinv @ error
             if null is not None:
                 step += (np.eye(len(names)) - pinv @ jacobian) @ (null * free)
             step *= free
             largest = float(np.max(np.abs(step))) if len(step) else 0.0
-            if largest > MAX_STEP_RAD:
-                step *= MAX_STEP_RAD / largest
+            if largest > max_step:
+                step *= max_step / largest
             new = q + step
             over = [i for i, name in enumerate(names) if free[i] and name in limits and not
-                    limits[name][0] + LIMIT_MARGIN <= new[i] <= limits[name][1] - LIMIT_MARGIN]
+                    limits[name][0] + margin <= new[i] <= limits[name][1] - margin]
             if not over:
                 return {name: float(v) for name, v in zip(names, new, strict=True)}, ', '.join(held)
             for i in over:  # hold it where it is (or just inside its range) and let the others do the work
                 lower, upper = limits[names[i]]
-                q[i] = min(max(q[i], lower + LIMIT_MARGIN), upper - LIMIT_MARGIN)
+                q[i] = min(max(q[i], lower + margin), upper - margin)
                 free[i] = False
                 held.append(names[i])
             positions = {**positions, **{name: float(v) for name, v in zip(names, q, strict=True)}}

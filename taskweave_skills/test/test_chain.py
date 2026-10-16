@@ -16,6 +16,7 @@ URDF = f"""<robot name="arm">
     <origin xyz="0 0 0.1" rpy="0 1.5708 0"/></joint>
 </robot>"""
 NAMES = [f'j{i}' for i in range(1, 8)]
+ELBOW = ('l2', 'l4', 'l6')  # shoulder, elbow and wrist centres (the frames of j2, j4, j6)
 LIMITS = {name: (-2.5, 2.5) for name in NAMES}
 START = {'lift': 0.2, 'j1': 0.1, 'j2': 0.5, 'j3': -0.2, 'j4': 1.0, 'j5': 0.3, 'j6': 0.6, 'j7': -0.1}
 
@@ -24,7 +25,7 @@ START = {'lift': 0.2, 'j1': 0.1, 'j2': 0.5, 'j3': -0.2, 'j4': 1.0, 'j5': 0.3, 'j
 def chain(tmp_path):
     path = tmp_path / 'arm.urdf'
     path.write_text(URDF)
-    return Chain.from_urdf(path, 'base', 'flange')
+    return Chain.from_urdf(path, 'base', 'flange', elbow=ELBOW)
 
 
 def test_chain_follows_the_urdf_and_its_jacobian_matches_finite_differences(chain):
@@ -70,3 +71,24 @@ def test_the_elbow_swings_while_the_tip_stays(chain):
         positions = {**positions, **joints}
     assert abs(positions['j3'] - START['j3']) > 0.05 or abs(positions['j1'] - START['j1']) > 0.05
     assert np.linalg.norm(pose_error(tip, chain.fk(positions))) < 2e-3
+
+
+def test_link_points_are_where_the_joint_frames_are(chain):
+    frames = dict(zip(chain.movable, chain.frames(START)[0], strict=True))
+    points = chain.link_points(START, ('l2', 'l4', 'l6', 'flange'))
+    assert all(np.array_equal(p, frames[j][:3, 3]) for p, j in zip(points, ('j2', 'j4', 'j6'), strict=False))
+    assert np.array_equal(points[3], chain.fk(START)[:3, 3])
+    with pytest.raises(KeyError):
+        chain.link_points(START, ('nowhere',))
+
+
+def test_the_step_uses_the_chains_tuning(tmp_path):
+    from taskweave_core.config.tuning import motion_tuning
+
+    path = tmp_path / 'arm.urdf'
+    path.write_text(URDF)
+    small = Chain.from_urdf(path, 'base', 'flange', tuning={**motion_tuning()['chain'], 'max_step_rad': 0.01})
+    target = small.fk(START)
+    target[:3, 3] += [0.05, 0.0, 0.0]
+    joints, _ = small.solve_step(START, target, NAMES, LIMITS)
+    assert max(abs(joints[n] - START[n]) for n in NAMES) == pytest.approx(0.01)   # the step is capped there

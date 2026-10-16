@@ -64,7 +64,8 @@ def robot(choose=None, flip=False):
     if choose is not None:
         ik['choose'] = choose
     return SimpleNamespace(base={'frame': 'base_link'}, data={
-        'ik': ik, 'tool_frames': {'left': {'link': 'left_link7', 'xyz': [0, 0, 0], 'rpy': [0, 0, 0], 'flip': flip}}})
+        'ik': ik, 'tool_frames': {'left': {'link': 'left_link7', 'xyz': [0, 0, 0], 'rpy': [0, 0, 0], 'flip': flip}},
+        'arms': {'left': {'elbow': {'shoulder': 'left_link2', 'elbow': 'left_link4', 'wrist': 'left_link6'}}}})
 
 
 @pytest.fixture
@@ -141,6 +142,8 @@ def test_a_mirroring_arm_starts_from_and_prefers_the_mirror_image(moveit):
     profile.data['ik']['mirror'] = {'right': 'left'}
     profile.data['ik']['groups']['right'] = 'right_arm'
     profile.data['tool_frames']['right'] = {'link': 'right_link7', 'xyz': [0, 0, 0], 'rpy': [0, 0, 0]}
+    profile.data['arms']['right'] = {'elbow': {'shoulder': 'right_link2', 'elbow': 'right_link4',
+                                               'wrist': 'right_link6'}}
     ik = IkClient(node, profile)
     right = {**TARGET, 'tcp': [0.8, -0.3, 0.1]}
     solution = ik.solve({'right': right, 'left': TARGET}, {})  # right listed first: still solved after left
@@ -165,8 +168,8 @@ def test_the_choice_can_change_after_start(moveit):
     assert ik.solve({'left': TARGET}, {})['left_joint1'] == pytest.approx(-0.5)
 
 
-def chain_robot(tmp_path, node, choose=None):
-    """IkClient for test_chain's 7-joint arm on a lift, with its URDF chain attached."""
+def chain_robot(tmp_path, node, choose=None, **data):
+    """IkClient for test_chain's 7-joint arm on a lift, with its URDF chain attached (``data``: more profile keys)."""
     from test_chain import NAMES, URDF
 
     path = tmp_path / 'arm.urdf'
@@ -174,7 +177,8 @@ def chain_robot(tmp_path, node, choose=None):
     profile = SimpleNamespace(base={'frame': 'base'}, data={
         'ik': {'groups': {'arm': 'arm'}, 'joints': 'j[1-7]', 'timeout_s': 0.1, 'seeds': [{'j1': 0.0}],
                **({'choose': choose} if choose is not None else {})},
-        'tool_frames': {'arm': {'link': 'flange', 'xyz': [0, 0, 0], 'rpy': [0, 0, 0]}}})
+        'tool_frames': {'arm': {'link': 'flange', 'xyz': [0, 0, 0], 'rpy': [0, 0, 0]}},
+        'arms': {'arm': {'elbow': {'shoulder': 'l2', 'elbow': 'l4', 'wrist': 'l6'}}}, **data})
     ik = IkClient(node, profile, limits={name: (-2.5, 2.5) for name in NAMES})
     assert ik.attach_chains(path) == ['arm']
     return ik
@@ -227,3 +231,29 @@ def test_a_configuration_jump_without_a_continuation_is_logged(moveit, tmp_path)
     ik.node = SimpleNamespace(get_logger=lambda: SimpleNamespace(warning=warnings.append))
     assert ik.solve({'arm': tool_target(flange, {})}, {}, current=dict(START))['j5'] == pytest.approx(START['j5'] + 3)
     assert len(warnings) == 1 and 'configuration jump, j5 turns 172 deg' in warnings[0]
+
+
+def test_the_profile_gives_the_chains_their_elbow_and_tuning(moveit, tmp_path):
+    from taskweave_core.config.tuning import motion_tuning
+
+    _, node = moveit
+    chain = chain_robot(tmp_path, node).chains['arm'][0]
+    assert chain.elbow == ('l2', 'l4', 'l6') and chain.tuning == motion_tuning()['chain']
+    ik = chain_robot(tmp_path, node, motion_tuning={'chain': {'max_step_rad': 0.02}, 'continuation': {'max_m': 0.1}})
+    assert ik.chains['arm'][0].tuning['max_step_rad'] == 0.02 and ik.tuning['continuation']['max_m'] == 0.1
+    ik = chain_robot(tmp_path, node, arms={'arm': {'elbow': {'shoulder': 'l2', 'elbow': 'l4', 'wrist': 'nowhere'}}})
+    assert ik.chains['arm'][0].elbow is None                                       # not on the chain: no elbow control
+    assert chain_robot(tmp_path, node, arms={}).chains['arm'][0].elbow is None
+
+
+def test_without_an_elbow_description_the_elbow_side_is_ignored_with_a_warning(moveit):
+    _, node = moveit
+    profile = robot({'elbow': 'down'})
+    del profile.data['arms']
+    ik = IkClient(node, profile)
+    warnings = []
+    ik.node = SimpleNamespace(get_logger=lambda: SimpleNamespace(warning=warnings.append))
+    assert ik.elbow_links('left') is None
+    assert ik.solve({'left': TARGET}, {})['left_joint1'] == pytest.approx(0.5)    # no elbow cost: the first seed
+    ik.solve({'left': TARGET}, {})
+    assert len(warnings) == 1 and 'no arms.left.elbow' in warnings[0]               # said once

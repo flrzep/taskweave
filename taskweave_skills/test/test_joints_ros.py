@@ -105,7 +105,7 @@ def test_a_blocked_move_swings_the_elbows_first_then_goes_straight(tmp_path):
 
     import numpy as np
     from test_cartesian import ChainIk
-    from test_chain import NAMES, START, URDF
+    from test_chain import ELBOW, NAMES, START, URDF
 
     from taskweave_skills.cartesian import elbow_deviation_of, elbow_swing_path
     from taskweave_skills.chain import Chain
@@ -113,7 +113,7 @@ def test_a_blocked_move_swings_the_elbows_first_then_goes_straight(tmp_path):
 
     path = tmp_path / 'arm.urdf'
     path.write_text(URDF)
-    chain = Chain.from_urdf(path, 'base', 'flange')
+    chain = Chain.from_urdf(path, 'base', 'flange', elbow=ELBOW)
     ik = ChainIk(chain, NAMES)
     ik.joint_pattern = 'j[1-7]'
     swung, _ = elbow_swing_path(ik, ['arm'], {n: START[n] for n in NAMES}, START, 'down', 0.6)
@@ -123,7 +123,7 @@ def test_a_blocked_move_swings_the_elbows_first_then_goes_straight(tmp_path):
 
     def free(start, end, stop):  # blocked unless the elbow is already near the down side
         blocked_from.append(start)
-        return elbow_deviation_of(chain, NAMES, start, 'down') < math.radians(120)
+        return elbow_deviation_of(chain, start, 'down') < math.radians(120)
 
     skill = MoveToPose.__new__(MoveToPose)
     skill.ik, skill.p, skill.name = ik, Params(max_joint_speed=1.0, elbow_tolerance_deg=20.0), 'move_to_pose'
@@ -136,7 +136,7 @@ def test_a_blocked_move_swings_the_elbows_first_then_goes_straight(tmp_path):
     assert all(abs(states[-1][n] - goal[n]) < 1e-9 for n in goal)                # ends on the goal
     hand = [np.linalg.norm(chain.fk(s)[:3, 3] - chain.fk(START)[:3, 3]) for s in states]
     turn = next(i for i, h in enumerate(hand) if h > 1e-3)                     # the hands stay while the elbows swing
-    assert elbow_deviation_of(chain, NAMES, states[turn - 1], 'down') < math.radians(120)
+    assert elbow_deviation_of(chain, states[turn - 1], 'down') < math.radians(120)
     assert all(b >= a - 1e-9 for a, b in zip(trajectory.times, trajectory.times[1:]))
     skill.planner = SimpleNamespace(free=lambda start, end, stop: False)      # blocked from there too: planner's turn
     assert skill._swing_first(ctx, dict(START), goal, 'down') is None
@@ -152,14 +152,14 @@ def test_an_elbow_swing_that_stops_short_fails_before_moving(tmp_path):
     from types import SimpleNamespace
 
     from test_cartesian import ChainIk
-    from test_chain import NAMES, START, URDF
+    from test_chain import ELBOW, NAMES, START, URDF
 
     from taskweave_skills.chain import Chain
     from taskweave_skills.joints import MoveObject
 
     path = tmp_path / 'arm.urdf'
     path.write_text(URDF)
-    ik = ChainIk(Chain.from_urdf(path, 'base', 'flange'), NAMES)
+    ik = ChainIk(Chain.from_urdf(path, 'base', 'flange', elbow=ELBOW), NAMES)
     ik.joint_pattern = 'j[1-7]'
     moved = []
     skill = MoveObject.__new__(MoveObject)

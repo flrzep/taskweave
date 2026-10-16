@@ -18,11 +18,15 @@ flange link, so the IK target for the flange is TCP * (flange -> TCP)^-1. Profil
                                       # (names with the tool prefix swapped); a mirrored target then solves the same
       choose:                         # optional: pick the best of several solutions instead of the first
         elbow: down                   # preferred elbow side: down | up | out | in | [x, y, z] (y = away from the body)
-        elbow_links: ['{tool}_link2', '{tool}_link4', '{tool}_link6']   # shoulder, elbow, wrist centres
         limit_margin_deg: 25          # joints closer than this to a limit cost (more the closer)
         weights: {limits: 2.0, elbow: 1.0, motion: 0.2, symmetry: 0.5}
         starts: 0                     # extra start postures (fixed pseudo-random, so repeatable) for more candidates
         start_timeout_s: 0.05         # per extra start
+
+The elbow (its side when choosing, continuation, straight lines and swings) needs the profile's description of the arm:
+``arms: {left: {elbow: {shoulder: left_link2, elbow: left_link4, wrist: left_link6}}}``, the links at the shoulder,
+elbow and wrist centres. An arm without it has no elbow control (deprecated: ``choose.elbow_links`` with {tool}).
+Step sizes and thresholds of the chain stepping and the continuation: profile ``motion_tuning`` (schemas.py).
 
 A redundant arm (7 joints) reaches a TCP pose in a whole family of configurations, and which one a solver returns
 depends on where it starts. IK starts from each seed posture in turn, then from the current state; the pose's fixed
@@ -58,10 +62,13 @@ import re
 import time
 
 import numpy as np
+from taskweave_core.config.schemas import IK_WEIGHTS, ROBOT_PROFILE, default
+from taskweave_core.config.tuning import motion_tuning
 
 SUCCESS = 1
 FRAME_TRANSFORM_FAILURE = -21
 POLL_S = 0.02
+VALIDITY_POLL_S = 0.002  # poll period of a collision check
 
 
 class IkError(RuntimeError):
@@ -134,12 +141,13 @@ def quaternion(rotation: np.ndarray) -> tuple[float, float, float, float]:
     return (m[k, j] - m[j, k]) / s, *q
 
 
-def target_warnings(target: dict) -> list[str]:
-    """Likely mistakes in a tool target that IK alone reports only as 'no solution'."""
+def target_warnings(target: dict, near_m: float = 0.2, back_cos: float = 0.3) -> list[str]:
+    """Likely mistakes in a tool target that IK alone reports only as 'no solution': a TCP more than ``near_m`` out
+    whose approach points back toward the robot (cosine below -``back_cos``, seen from above)."""
     warnings = []
     tcp, approach = np.asarray(target['tcp'], float), np.asarray(target['approach'], float)
-    if np.linalg.norm(tcp[:2]) > 0.2 and approach[:2] @ tcp[:2] < -0.3 * np.linalg.norm(approach[:2]) * np.linalg.norm(
-            tcp[:2]):
+    if np.linalg.norm(tcp[:2]) > near_m and approach[:2] @ tcp[:2] < -back_cos * np.linalg.norm(
+            approach[:2]) * np.linalg.norm(tcp[:2]):
         warnings.append('approach points back toward the robot: it is the direction the gripper moves into the object '
                         '(forward = [1, 0, 0]); the wrist sits behind the TCP along it')
     return warnings
@@ -196,8 +204,9 @@ def limit_cost(values: dict, limits: dict, margin: float) -> float:
     return cost
 
 
-WEIGHTS = {'limits': 2.0, 'elbow': 1.0, 'motion': 0.2, 'symmetry': 0.5}  # ik.choose.weights defaults
-LIMIT_MARGIN_DEG = 25.0                                                    # ik.choose.limit_margin_deg default
+WEIGHTS = IK_WEIGHTS                                                       # ik.choose.weights defaults
+LIMIT_MARGIN_DEG = default(ROBOT_PROFILE, 'ik', 'choose', 'limit_margin_deg')   # ik.choose.limit_margin_deg default
+START_TIMEOUT_S = default(ROBOT_PROFILE, 'ik', 'choose', 'start_timeout_s')     # ik.choose.start_timeout_s default
 
 
 class IkClient:
@@ -222,6 +231,9 @@ class IkClient:
         self.limits = limits or {}
         self.last: dict[str, dict] = {}   # per tool: how the last solve() chose (for messages)
         self.elbow_side = None             # the preferred elbow of the solve() running
+        self.tuning = motion_tuning(robot)  # profile motion_tuning, defaults filled in (cartesian.py, chain.py)
+        self.arms = robot.data.get('arms') or {}
+        self.warned: set = set()           # tools told once that they have no elbow description
         self.set_choice(spec.get('choose'))
 
     def set_choice(self, choose: dict | None) -> None:
@@ -234,6 +246,15 @@ class IkClient:
 
             self.fk = self.node.create_client(GetPositionFK, choose.get('fk_service', '/compute_fk'),
                                               callback_group=ReentrantCallbackGroup())
+
+    def elbow_links(self, tool: str) -> tuple[str, str, str] | None:
+        """The links at the shoulder, elbow and wrist centres of the tool's arm (profile arms.<tool>.elbow; deprecated:
+        ik.choose.elbow_links with {tool}), or None: the arm has no elbow control."""
+        elbow = (self.arms.get(tool) or {}).get('elbow')
+        if elbow:
+            return elbow['shoulder'], elbow['elbow'], elbow['wrist']
+        links = (self.choose or {}).get('elbow_links')
+        return tuple(link.format(tool=tool) for link in links) if links else None
 
     def attach_chains(self, urdf, validity_group: str | None = None) -> list[str]:
         """Kinematic chains (chain.py) from the URDF for straight-line moves (cartesian.linear_path): base -> each
@@ -249,9 +270,15 @@ class IkClient:
             if tool not in self.groups:
                 continue
             try:
-                chain = Chain.from_urdf(urdf, self.frame, frame['link'])
+                chain = Chain.from_urdf(urdf, self.frame, frame['link'], tuning=self.tuning['chain'])
             except (ValueError, OSError):
                 continue
+            elbow = self.elbow_links(tool)
+            if elbow and any(link not in chain.links for link in elbow):
+                self.node.get_logger().warning(f'IK for {tool}: elbow links {list(elbow)} (profile arms.{tool}.elbow) '
+                                               f'are not all on the chain to {frame["link"]}: no elbow control')
+                elbow = None
+            chain.elbow = elbow
             pattern = re.compile(self.joint_pattern.format(tool=tool))
             self.chains[tool] = (chain, [name for name in chain.movable if pattern.fullmatch(name)])
         self.validity_group = validity_group
@@ -274,7 +301,7 @@ class IkClient:
         while not future.done():
             if time.monotonic() > deadline:
                 raise IkError('collision check (/check_state_validity) did not answer')
-            time.sleep(0.002)
+            time.sleep(VALIDITY_POLL_S)
         return future.result().valid
 
     def solve(self, tools: dict, fixed: dict, should_stop=lambda: False, current: dict | None = None,
@@ -285,6 +312,11 @@ class IkClient:
         if not self.client.wait_for_service(timeout_sec=2.0):
             raise IkError(f'no IK service {self.service} (is MoveIt running?)')
         self.elbow_side = elbow or (self.choose or {}).get('elbow')
+        for tool in tools:
+            if self.elbow_side and tool not in self.warned and self.elbow_links(tool) is None:
+                self.warned.add(tool)
+                self.node.get_logger().warning(f'IK for {tool}: elbow {self.elbow_side} asked for, but the robot '
+                                               f'profile has no arms.{tool}.elbow: no elbow control, side ignored')
         result: dict[str, float] = {}
         self.last = {}
         here = self._here(current or {})  # the current state start: the joints as given ({}: MoveIt's own state)
@@ -307,7 +339,7 @@ class IkClient:
             if image:
                 local.insert(0, (self.groups[tool], image, self.timeout_s))
             if self.choose is not None:
-                local += [(self.groups[tool], start, float(self.choose.get('start_timeout_s', 0.05)))
+                local += [(self.groups[tool], start, float(self.choose.get('start_timeout_s', START_TIMEOUT_S)))
                           for start in self._starts(tool)]
             fallback = [(self.fallback_groups[tool], {}, self.fallback_timeout_s)] if tool in self.fallback_groups \
                 else []
@@ -343,16 +375,18 @@ class IkClient:
             result.update(arm)
         return result
 
-    def _continue(self, tool: str, variants: list, positions: dict, max_m: float = 0.25, max_deg: float = 45.0,
-                  elbow_deg: float = 90.0):
-        """The continuation of the arm's configuration to a target a short move away (at most ``max_m`` and ``max_deg``
-        from the flange now): the flange walked there in a straight line on the URDF chain (cartesian.walk_to), the
-        joints moving continuously from ``positions`` (every chain joint now). It wins over seed and search solutions,
-        which may be another branch of a 7-joint arm (a wrist turned over: joint 5 or 7 half a turn round for a few cm
-        of TCP), unless it ends in collision or with the elbow more than ``elbow_deg`` off the preferred side.
-        Returns (arm joints or None, why not; None if no continuation applies: no chain, no current joints, too far)."""
+    def _continue(self, tool: str, variants: list, positions: dict):
+        """The continuation of the arm's configuration to a target a short move away (at most motion_tuning
+        continuation max_m and max_deg from the flange now): the flange walked there in a straight line on the URDF
+        chain (cartesian.walk_to), the joints moving continuously from ``positions`` (every chain joint now). It wins
+        over seed and search solutions, which may be another branch of a 7-joint arm (a wrist turned over: joint 5 or 7
+        half a turn round for a few cm of TCP), unless it ends in collision or with the elbow more than elbow_deg off
+        the preferred side. Returns (arm joints or None, why not; None if no continuation applies: no chain, no current
+        joints, too far)."""
         from .cartesian import elbow_deviation_of, rotation_angle, walk_to
 
+        tuning = self.tuning['continuation']
+        max_m, max_deg, elbow_deg = tuning['max_m'], tuning['max_deg'], tuning['elbow_deg']
         chains = getattr(self, 'chains', {})
         if tool not in chains or any(n not in positions for n in chains[tool][0].movable):
             return None, None
@@ -368,10 +402,7 @@ class IkClient:
                 whys.append(why)
                 continue
             state = {**positions, **joints}
-            try:
-                elbow = elbow_deviation_of(chain, arm, state, self.elbow_side) if self.elbow_side else 0.0
-            except IndexError:  # an arm without shoulder, elbow and wrist joints: no elbow side
-                elbow = 0.0
+            elbow = elbow_deviation_of(chain, state, self.elbow_side) if self.elbow_side and chain.elbow else 0.0
             if elbow > math.radians(elbow_deg):
                 whys.append(f'elbow {math.degrees(elbow):.0f} deg off {self.elbow_side}')
                 continue
@@ -390,9 +421,10 @@ class IkClient:
             return joints, ''
         return None, ('; '.join(whys) or None)
 
-    def _jump_warning(self, tool: str, arm: dict, positions: dict, why: str, jump_deg: float = 120.0) -> None:
-        """Log a solution that turns a joint more than ``jump_deg`` for a short move (another branch of the arm),
-        chosen because no continuation got there (``why``)."""
+    def _jump_warning(self, tool: str, arm: dict, positions: dict, why: str) -> None:
+        """Log a solution that turns a joint more than motion_tuning continuation.jump_deg for a short move (another
+        branch of the arm), chosen because no continuation got there (``why``)."""
+        jump_deg = self.tuning['continuation']['jump_deg']
         turns = {n: abs(v - positions[n]) for n, v in arm.items() if n in positions}
         joint = max(turns, key=turns.get, default=None)
         if joint is not None and turns[joint] > math.radians(jump_deg):
@@ -445,11 +477,13 @@ class IkClient:
         return {name: float(value) for name, value in zip(state.name, state.position, strict=False)
                 if pattern.fullmatch(name)}
 
-    def _best(self, tool: str, candidates: list, fixed: dict, current: dict, image: dict | None = None):
-        """The candidate (variant index, arm joints) with the lowest cost; records the choice in self.last."""
+    def _best(self, tool: str, candidates: list, fixed: dict, current: dict, image: dict | None = None,
+              same_rad: float = 1e-3):
+        """The candidate (variant index, arm joints) with the lowest cost (candidates whose joints are all within
+        ``same_rad`` count once); records the choice in self.last."""
         unique = []
         for index, arm in candidates:
-            if not any(i == index and all(abs(arm[n] - other[n]) < 1e-3 for n in arm) for i, other in unique):
+            if not any(i == index and all(abs(arm[n] - other[n]) < same_rad for n in arm) for i, other in unique):
                 unique.append((index, arm))
         if self.choose is None:
             self.last[tool] = {'flipped': False, 'candidates': len(unique)}
@@ -470,23 +504,25 @@ class IkClient:
                            'limit_cost': round(limits, 3)}
         return index, arm
 
-    def _elbow(self, tool: str, joints: dict) -> float:
-        """Elbow deviation (rad) from the preferred side for these joints (FK through MoveIt)."""
+    def _elbow(self, tool: str, joints: dict, timeout_s: float = 5.0) -> float:
+        """Elbow deviation (rad) from the preferred side for these joints (FK through MoveIt); 0 for an arm without an
+        elbow description."""
         from moveit_msgs.msg import RobotState
         from moveit_msgs.srv import GetPositionFK
         from sensor_msgs.msg import JointState
 
-        links = [link.format(tool=tool) for link in self.choose.get(
-            'elbow_links', ['{tool}_link2', '{tool}_link4', '{tool}_link6'])]
+        links = self.elbow_links(tool)
+        if links is None:
+            return 0.0
         request = GetPositionFK.Request()
         request.header.frame_id = self.frame
-        request.fk_link_names = links
+        request.fk_link_names = list(links)
         request.robot_state = RobotState(joint_state=JointState(
             name=list(joints), position=[float(v) for v in joints.values()]), is_diff=True)
         if not self.fk.wait_for_service(timeout_sec=2.0):
             raise IkError('no FK service /compute_fk (is MoveIt running?)')
         future = self.fk.call_async(request)
-        deadline = time.monotonic() + 5.0
+        deadline = time.monotonic() + timeout_s
         while not future.done():
             if time.monotonic() > deadline:
                 raise IkError(f'FK service timed out for {tool}')
@@ -551,9 +587,10 @@ class IkClient:
         ik.timeout.sec, ik.timeout.nanosec = int(timeout_s), int((timeout_s % 1) * 1e9)
         return request
 
-    def _call(self, request, tool: str, timeout_s: float, should_stop):
+    def _call(self, request, tool: str, timeout_s: float, should_stop, margin_s: float = 5.0):
+        """The service's answer to ``request``; it must come within ``timeout_s`` (the solver's) plus ``margin_s``."""
         future = self.client.call_async(request)
-        deadline = time.monotonic() + timeout_s + 5.0
+        deadline = time.monotonic() + timeout_s + margin_s
         while not future.done():
             if should_stop() or time.monotonic() > deadline:
                 raise IkError(f'IK for {tool} interrupted' if should_stop() else f'IK service timed out for {tool}')

@@ -19,7 +19,6 @@ import threading
 import numpy as np
 
 TOPIC = '/taskweave/holding'
-RESET_JUMP_S = 0.5  # sim time going back by more than this is a simulator reset
 
 
 class HoldState:
@@ -31,7 +30,8 @@ class HoldState:
             cls._instances[id(node)] = cls(node, robot)
         return cls._instances[id(node)]
 
-    def __init__(self, node, robot):
+    def __init__(self, node, robot, reset_jump_s: float = 0.5):
+        """``reset_jump_s``: sim time going back by more than this is a simulator reset."""
         from rclpy.qos import DurabilityPolicy, QoSProfile
         from std_msgs.msg import String
 
@@ -50,7 +50,7 @@ class HoldState:
         self._publish()
         from rclpy.clock import JumpThreshold
         from rclpy.duration import Duration
-        threshold = JumpThreshold(min_forward=None, min_backward=Duration(seconds=-RESET_JUMP_S), on_clock_change=True)
+        threshold = JumpThreshold(min_forward=None, min_backward=Duration(seconds=-reset_jump_s), on_clock_change=True)
         self.jump_handle = node.get_clock().create_jump_callback(threshold, post_callback=self._on_reset)
 
     def _on_reset(self, _jump) -> None:

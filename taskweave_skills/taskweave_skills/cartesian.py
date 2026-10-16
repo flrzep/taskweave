@@ -15,6 +15,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+from taskweave_core.config.tuning import motion_tuning
 
 from .ik import rpy_matrix, tcp_matrix
 from .motion_plan import Trajectory
@@ -76,79 +77,77 @@ def matching_flip(goals: dict, starts: dict, tool_frames: dict) -> dict:
     return out
 
 
-LIMIT_PUSH_RAD = 0.02       # the most a step moves a joint back from a limit through the null space
-ON_LINE_M, ON_LINE_RAD = 5e-4, 5e-3   # a chain step is done when the flange is this close to the line point
-STEP_ITERATIONS = 8
-PUSH_ITERATIONS = 3         # while a joint is within the margin, at least this many iterations per step (null-space push)
+def tuning_of(ik) -> dict:
+    """The motion_tuning (profile, schema defaults filled in) the IkClient was set up with; the defaults for a stand-in
+    without one."""
+    return getattr(ik, 'tuning', None) or motion_tuning()
 
 
-def limit_push(positions: dict, names: list[str], limits: dict, margin: float) -> np.ndarray:
-    """Joint step toward mid-range for the joints within ``margin`` of a limit (more the closer), 0 for the others."""
+def limit_push(positions: dict, names: list[str], limits: dict, margin: float, rate: float) -> np.ndarray:
+    """Joint step toward mid-range for the joints within ``margin`` of a limit (up to ``rate``, more the closer), 0 for
+    the others."""
     push = []
     for name in names:
         lower, upper = limits.get(name, (-math.inf, math.inf))
         value = positions[name]
         if value - lower < margin:
-            push.append(LIMIT_PUSH_RAD * (1 - max(value - lower, 0.0) / margin))
+            push.append(rate * (1 - max(value - lower, 0.0) / margin))
         elif upper - value < margin:
-            push.append(-LIMIT_PUSH_RAD * (1 - max(upper - value, 0.0) / margin))
+            push.append(-rate * (1 - max(upper - value, 0.0) / margin))
         else:
             push.append(0.0)
     return np.array(push)
 
 
-ELBOW_RATE_RAD = 0.03      # the most a step swings the elbow toward the preferred side (null space)
-ELBOW_SETTLED_RAD = 0.1    # the elbow is on its side when it is this close (deviation, rad)
-
-
-def elbow_joints(names: list[str]) -> list[str]:
-    """Shoulder, elbow and wrist centres of a 7-joint arm: the frames of its joints 2, 4 and 6."""
-    return [names[1], names[3], names[5]]
-
-
-def elbow_deviation_of(chain, names: list[str], positions: dict, side) -> float:
-    """How far (rad) the elbow is from ``side`` (ik.preferred_elbow), seen along the shoulder-wrist line."""
+def elbow_deviation_of(chain, positions: dict, side) -> float:
+    """How far (rad) the elbow is from ``side`` (ik.preferred_elbow), seen along the shoulder-wrist line (the chain's
+    elbow links, profile arms.<tool>.elbow). Raises PathError for an arm without them."""
     from .ik import elbow_deviation, preferred_elbow
 
-    frames = dict(zip(chain.movable, chain.frames(positions)[0], strict=True))
-    shoulder, elbow, wrist = (frames[name][:3, 3] for name in elbow_joints(names))
+    if chain.elbow is None:
+        raise PathError('the arm has no elbow description (robot profile arms.<tool>.elbow): no elbow control')
+    shoulder, elbow, wrist = chain.link_points(positions, chain.elbow)
     return elbow_deviation(shoulder, elbow, wrist, preferred_elbow(side, shoulder))
 
 
-def elbow_push(chain, names: list[str], positions: dict, side) -> np.ndarray:
+def elbow_push(chain, names: list[str], positions: dict, side, tuning: dict) -> np.ndarray:
     """Joint step swinging the elbow toward ``side`` without moving the tip (along the arm's self-motion), more the
-    further it is off; 0 once it is there or where the arm has no elbow freedom."""
-    if len(names) < 7:
+    further it is off (``tuning``: motion_tuning.elbow); 0 once it is there, for an arm without an elbow description
+    and for joints without spare freedom (no more joints than the tip has degrees of freedom)."""
+    jacobian, _ = chain.jacobian(positions, names)
+    if chain.elbow is None or jacobian.shape[1] <= jacobian.shape[0]:
         return np.zeros(len(names))
-    deviation = elbow_deviation_of(chain, names, positions, side)
-    if deviation < ELBOW_SETTLED_RAD:
+    deviation = elbow_deviation_of(chain, positions, side)
+    if deviation < tuning['settled_rad']:
         return np.zeros(len(names))
-    direction = chain.null_direction(positions, names)
-    probe = {**positions, **{n: positions[n] + 0.01 * d for n, d in zip(names, direction, strict=True)}}
-    slope = (elbow_deviation_of(chain, names, probe, side) - deviation) / 0.01
+    direction, probe_rad = chain.null_direction(positions, names), tuning['probe_rad']
+    probe = {**positions, **{n: positions[n] + probe_rad * d for n, d in zip(names, direction, strict=True)}}
+    slope = (elbow_deviation_of(chain, probe, side) - deviation) / probe_rad
     if abs(slope) < 1e-6:
         return np.zeros(len(names))
-    return -math.copysign(ELBOW_RATE_RAD * min(1.0, deviation / 0.5), slope) * direction
+    return -math.copysign(tuning['rate_rad'] * min(1.0, deviation / 0.5), slope) * direction
 
 
 def chain_step(chain, names: list[str], positions: dict, flange: np.ndarray, limits: dict, margin: float,
-               elbow=None):
+               elbow=None, tuning: dict | None = None):
     """The arm joints that put the chain's tip on ``flange`` (4x4) from ``positions`` (every chain joint), pushed away
     from limits through the null space and, with ``elbow`` (a side, ik.preferred_elbow), swung toward that side;
-    (joints, '') or (None, why not)."""
+    (joints, '') or (None, why not). ``tuning``: motion_tuning (default: the schema's)."""
     from .chain import pose_error
 
+    tuning = tuning or motion_tuning()
+    line = tuning['line']
     state = dict(positions)
     held = ''
-    for iteration in range(1, STEP_ITERATIONS + 1):
-        push = limit_push(state, names, limits, margin)
+    for iteration in range(1, line['step_iterations'] + 1):
+        push = limit_push(state, names, limits, margin, line['limit_push_rad'])
         if elbow is not None and iteration == 1:
-            push = push + elbow_push(chain, names, state, elbow)
+            push = push + elbow_push(chain, names, state, elbow, tuning['elbow'])
         new, held = chain.solve_step(state, flange, names, limits, null=push)
         state.update(new)
         error = pose_error(flange, chain.fk(state))
-        on_line = np.linalg.norm(error[:3]) < ON_LINE_M and np.linalg.norm(error[3:]) < ON_LINE_RAD
-        if on_line and (iteration >= PUSH_ITERATIONS or not np.any(push)):
+        on_line = np.linalg.norm(error[:3]) < line['on_line_m'] and np.linalg.norm(error[3:]) < line['on_line_rad']
+        if on_line and (iteration >= line['push_iterations'] or not np.any(push)):
             return {name: state[name] for name in names}, ''
     return None, f'{held} at its limit' if held else 'out of reach'
 
@@ -165,7 +164,8 @@ def walk_to(ik, tool: str, positions: dict, flange: np.ndarray, step_m: float = 
     start, state = chain.fk(positions), dict(positions)
     count = steps_needed({tool: start}, {tool: flange}, step_m, step_rad)
     for i in range(1, count + 1):
-        solved, why = chain_step(chain, arm, state, interpolate(start, flange, i / count), ik.limits, margin)
+        solved, why = chain_step(chain, arm, state, interpolate(start, flange, i / count), ik.limits, margin,
+                                 tuning=tuning_of(ik))
         if solved is None:
             return None, f'step {i} of {count}: {why}'
         state.update(solved)
@@ -181,6 +181,7 @@ def linear_path(ik, starts: dict, goals: dict, current: dict, speed: float, turn
     chains = getattr(ik, 'chains', {})
     if state is not None and chains and all(tool in chains for tool in starts):
         return _chain_path(ik, starts, goals, current, state, speed, turn, step_m, step_rad, elbow)
+    min_step_s = tuning_of(ik)['line']['min_step_s']
     count = steps_needed(starts, goals, step_m, step_rad)
     joints = dict(current)
     names = sorted(current)
@@ -199,7 +200,7 @@ def linear_path(ik, starts: dict, goals: dict, current: dict, speed: float, turn
             joints.update(solved)
         duration = max(max(np.linalg.norm(step[t][:3, 3] - previous[t][:3, 3]) / speed,
                            rotation_angle(previous[t][:3, :3].T @ step[t][:3, :3]) / turn) for t in step)
-        elapsed += max(duration, 1e-3)
+        elapsed += max(duration, min_step_s)
         times.append(elapsed)
         points.append([joints[n] for n in names])
         previous = step
@@ -212,6 +213,7 @@ def _chain_path(ik, starts: dict, goals: dict, current: dict, state: dict, speed
     from .ik import IkError, LIMIT_MARGIN_DEG
 
     margin = math.radians(float((getattr(ik, 'choose', None) or {}).get('limit_margin_deg', LIMIT_MARGIN_DEG)))
+    tuning = tuning_of(ik)
     count = steps_needed(starts, goals, step_m, step_rad)
     positions = {**state, **current}
     names = sorted(current)
@@ -223,7 +225,8 @@ def _chain_path(ik, starts: dict, goals: dict, current: dict, state: dict, speed
         step = {tool: interpolate(starts[tool], goals[tool], i / count) for tool in starts}
         for tool, tcp in step.items():
             chain, arm = ik.chains[tool]
-            solved, why = chain_step(chain, arm, positions, tcp @ tcp_to_flange[tool], ik.limits, margin, elbow)
+            solved, why = chain_step(chain, arm, positions, tcp @ tcp_to_flange[tool], ik.limits, margin, elbow,
+                                     tuning)
             if solved is None:
                 raise PathError(f'no straight-line path for {tool}: step {i} of {count} '
                                 f'(TCP {np.round(tcp[:3, 3], 3).tolist()}): {why}')
@@ -237,61 +240,64 @@ def _chain_path(ik, starts: dict, goals: dict, current: dict, state: dict, speed
             raise PathError(f'no straight-line path: step {i} of {count} is in collision')
         duration = max(max(np.linalg.norm(step[t][:3, 3] - previous[t][:3, 3]) / speed,
                            rotation_angle(previous[t][:3, :3].T @ step[t][:3, :3]) / turn) for t in step)
-        elapsed += max(duration, 1e-3)
+        elapsed += max(duration, tuning['line']['min_step_s'])
         times.append(elapsed)
         points.append([positions[n] for n in names])
         previous = step
     return Trajectory(names, times, points)
 
 
-SWING_MAX_STEPS = 200
-VIA_OUT_RAD = math.radians(150)   # an elbow this far off its side (nearly opposite: neither way round is shorter) swings
-VIA_OUT_UNTIL_RAD = math.radians(120)   # toward out first, until it is this close (never through the body)
-
-
 def elbow_swing_path(ik, tools: list[str], current: dict, state: dict, side, joint_speed: float,
                      settled: dict | None = None):
     """Joint trajectory swinging the elbows of ``tools`` toward ``side`` (ik.preferred_elbow) along each arm's
     self-motion, the hands staying where they are (chains only). An elbow nearly opposite its side goes round the
-    outside. It stops when every elbow is there (``settled``: {tool: rad} this close, default ELBOW_SETTLED_RAD), or
-    before a step that would put a joint at its limit (margin) or the robot in collision. Returns (Trajectory or None
-    if nothing moved, {tool: (deviation before, after in degrees, why it stopped short or '' if it got there)}).
-    Raises PathError without chains."""
+    outside (motion_tuning.elbow.via_out_deg: an elbow this far off, nearly opposite so neither way round is shorter,
+    swings toward out first until via_out_until_deg; never through the body). It stops when every elbow is there
+    (``settled``: {tool: rad} this close, at least motion_tuning.elbow.settled_rad), or before a step that would put a
+    joint at its limit (margin) or the robot in collision. Returns (Trajectory or None if nothing moved, {tool:
+    (deviation before, after in degrees, why it stopped short or '' if it got there)}). Raises PathError without
+    chains or for an arm without an elbow description (profile arms.<tool>.elbow)."""
     from .ik import IkError, LIMIT_MARGIN_DEG
 
     chains = getattr(ik, 'chains', {})
     if not all(tool in chains for tool in tools):
         raise PathError('swinging the elbow needs the URDF chains (IkClient.attach_chains)')
+    missing = [tool for tool in tools if chains[tool][0].elbow is None]
+    if missing:
+        raise PathError(f'no elbow control for {", ".join(missing)}: the robot profile has no arms.<tool>.elbow')
     margin = math.radians(float((getattr(ik, 'choose', None) or {}).get('limit_margin_deg', LIMIT_MARGIN_DEG)))
+    tuning = tuning_of(ik)
+    swing, min_step_s = tuning['elbow'], tuning['line']['min_step_s']
     positions = {**state, **current}
     names = sorted(current)
     flanges = {tool: chains[tool][0].fk(positions) for tool in tools}
-    before = {tool: elbow_deviation_of(chains[tool][0], chains[tool][1], positions, side) for tool in tools}
-    done = {tool: max(ELBOW_SETTLED_RAD, (settled or {}).get(tool, 0.0)) for tool in tools}
+    before = {tool: elbow_deviation_of(chains[tool][0], positions, side) for tool in tools}
+    done = {tool: max(swing['settled_rad'], (settled or {}).get(tool, 0.0)) for tool in tools}
+    via_out, via_out_until = math.radians(swing['via_out_deg']), math.radians(swing['via_out_until_deg'])
     legs = [side]
-    if isinstance(side, str) and side not in ('out', 'in') and max(before.values()) > VIA_OUT_RAD:
+    if isinstance(side, str) and side not in ('out', 'in') and max(before.values()) > via_out:
         legs = ['out', side]
     times, points, elapsed = [0.0], [[current[n] for n in names]], 0.0
     why = {tool: '' for tool in tools}
     for leg in legs:
-        for _ in range(SWING_MAX_STEPS):
+        for _ in range(swing['swing_max_steps']):
             trial, moving = dict(positions), []
             for tool in tools:
                 chain, arm = chains[tool]
-                if elbow_deviation_of(chain, arm, trial, side) < (VIA_OUT_UNTIL_RAD if leg != side else done[tool]):
+                if elbow_deviation_of(chain, trial, side) < (via_out_until if leg != side else done[tool]):
                     continue
-                solved, reason = chain_step(chain, arm, trial, flanges[tool], {}, margin, leg)
+                solved, reason = chain_step(chain, arm, trial, flanges[tool], {}, margin, leg, tuning)
                 if solved is None:
                     why[tool] = f'no step with the hand staying ({reason})'
                     continue
-                edge = margin / 5   # closer than this to a limit, a joint may only move away from it
+                edge = margin / swing['limit_edge_parts']   # closer than this to a limit, a joint only moves away
                 limited = [n for n, v in solved.items() if n in ik.limits and (
                     (v < ik.limits[n][0] + edge and v < trial[n]) or (v > ik.limits[n][1] - edge and v > trial[n]))]
                 if limited:
                     why[tool] = f'{limited[0]} at its limit'
                     continue
-                if elbow_deviation_of(chain, arm, {**trial, **solved}, leg) > \
-                        elbow_deviation_of(chain, arm, trial, leg) - 1e-4:
+                if elbow_deviation_of(chain, {**trial, **solved}, leg) > \
+                        elbow_deviation_of(chain, trial, leg) - swing['progress_rad']:
                     why[tool] = f'no closer to {leg} along the arm\'s self-motion'
                     continue
                 trial.update(solved)
@@ -307,12 +313,12 @@ def elbow_swing_path(ik, tools: list[str], current: dict, state: dict, side, joi
                 raise PathError(str(error)) from error
             step = max(abs(trial[n] - positions[n]) for n in names)
             positions = trial
-            elapsed += max(step / joint_speed, 1e-3)
+            elapsed += max(step / joint_speed, min_step_s)
             times.append(elapsed)
             points.append([positions[n] for n in names])
         else:
-            why.update({tool: f'all {SWING_MAX_STEPS} steps used' for tool in tools if not why[tool]})
-    after = {tool: elbow_deviation_of(chains[tool][0], chains[tool][1], positions, side) for tool in tools}
+            why.update({tool: f'all {swing["swing_max_steps"]} steps used' for tool in tools if not why[tool]})
+    after = {tool: elbow_deviation_of(chains[tool][0], positions, side) for tool in tools}
     report = {tool: (round(math.degrees(before[tool])), round(math.degrees(after[tool])),
                      '' if after[tool] < done[tool] else why[tool] or 'stopped') for tool in tools}
     return (Trajectory(names, times, points) if len(points) > 1 else None), report

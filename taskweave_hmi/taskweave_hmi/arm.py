@@ -194,9 +194,6 @@ def capture_pose(store: ConfigStore, robot_name: str, name: str, body: Mapping, 
         raise ArmError(str(error)) from error
 
 
-GRIP_CLOSED_RAD = 0.1   # a gripper this far from its open position at a capture is closed on the part
-
-
 def grip_ranges(store: ConfigStore, robot_name: str) -> dict[str, list[float]]:
     """{tool: [smallest, largest] finger opening in m} for the grippers with an opening_m table."""
     from taskweave_core.gripper import opening_range
@@ -210,9 +207,10 @@ def grip_ranges(store: ConfigStore, robot_name: str) -> dict[str, list[float]]:
 
 
 def closed_grips(store: ConfigStore, robot_name: str, tools: list[str], joints: Mapping) -> dict[str, float]:
-    """The grippers of ``tools`` (all if empty) that are closed now (more than GRIP_CLOSED_RAD from open, toward
-    closed): {tool: finger opening in m (the profile's opening_m table)}, the point's grip_m. Open grippers (also a
-    little past open) and grippers without a table are left out, so their grip stays as it was."""
+    """The grippers of ``tools`` (all if empty) that are closed now (further from open toward closed than the
+    profile's grippers.<tool>.closed_from): {tool: finger opening in m (the profile's opening_m table)}, the
+    point's grip_m. Open grippers (also a little past open) and grippers without a table are left out, so their grip
+    stays as it was."""
     from taskweave_core.gripper import opening_for_joint, opening_table
 
     grippers = store.robot(robot_name).data.get('grippers', {})
@@ -224,7 +222,9 @@ def closed_grips(store: ConfigStore, robot_name: str, tools: list[str], joints: 
             continue
         opened, closed = float(gripper.get('open', 0.0)), float(gripper['closed'])
         value = float(joints[gripper['joint']])
-        if (value - opened) * (1.0 if closed >= opened else -1.0) > GRIP_CLOSED_RAD:
+        closed_from = float(gripper.get('closed_from', schemas.default(schemas.ROBOT_PROFILE, 'grippers', '*',
+                                                                       'closed_from')))
+        if (value - opened) * (1.0 if closed >= opened else -1.0) > closed_from:
             grip[tool] = round(opening_for_joint(gripper, value), 4)
     return grip
 

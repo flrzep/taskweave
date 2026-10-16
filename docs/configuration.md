@@ -123,8 +123,8 @@ base:
   footprint: [0.60, 0.45]     # length, width in metres
   limits: {linear: 1.0, angular: 1.5}
 arms:
-  left:  {group: left_arm,  tool_frame: left_tool}
-  right: {group: right_arm, tool_frame: right_tool}
+  left:  {group: left_arm,  tool_frame: left_tool, elbow: {shoulder: left_link2, elbow: left_link4, wrist: left_link6}}
+  right: {group: right_arm, tool_frame: right_tool, elbow: {shoulder: right_link2, elbow: right_link4, wrist: right_link6}}
   both:  {group: both_arms_lift}
 grippers:
   left:  {action: /left_gripper/command,  open: 0.0, closed: 1.0}
@@ -133,9 +133,18 @@ cameras:
   head: {color: /head_camera/color/image_raw, depth: /head_camera/aligned_depth_to_color/image_raw}
 teleop:
   deadman_required: true
+motion_tuning:                # optional, every key defaults (schemas.MOTION_TUNING_DEFAULTS)
+  elbow: {rate_rad: 0.03}
 ```
 
 Skills ask for roles (`base`, `arms.both`, `grippers.left`, `cameras.head`); only this file knows the hardware names.
+
+`arms.<tool>.elbow` names the links at an IK arm's shoulder, elbow and wrist centres: the elbow side (`ik.choose.elbow`,
+a point's `elbow`), straight lines and elbow swings use it. An arm without it has no elbow control (an elbow side is
+ignored with a warning, an elbow swing fails with a message). `motion_tuning` holds the step sizes and thresholds of
+the arm motion code, grouped as `chain` (damped least-squares step), `line` (straight-line steps), `elbow` (elbow side
+and swing), `continuation` (short moves continue the arm's configuration) and `plan` (planner retries, contact depth);
+the schema documents each key and its default. They are read when the skills start (restart frame-ros after a change).
 
 ## Robot description (embodiment)
 

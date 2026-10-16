@@ -77,12 +77,12 @@ class ChainIk:
 
 
 def test_a_straight_line_on_the_chain_moves_joints_away_from_their_limits(tmp_path):
-    from test_chain import NAMES, START, URDF
+    from test_chain import ELBOW, NAMES, START, URDF
 
     from taskweave_skills.chain import Chain
     path = tmp_path / 'arm.urdf'
     path.write_text(URDF)
-    chain = Chain.from_urdf(path, 'base', 'flange')
+    chain = Chain.from_urdf(path, 'base', 'flange', elbow=ELBOW)
     ik = ChainIk(chain, NAMES)
     start_state = {**START, 'j3': 2.45}                      # j3 (upper-arm roll) 0.05 rad from its limit
     start = chain.fk(start_state)
@@ -102,42 +102,42 @@ def test_a_straight_line_on_the_chain_moves_joints_away_from_their_limits(tmp_pa
 
 
 def test_the_elbow_swings_toward_a_side_with_the_hand_staying(tmp_path):
-    from test_chain import NAMES, START, URDF
+    from test_chain import ELBOW, NAMES, START, URDF
 
     from taskweave_skills.cartesian import elbow_deviation_of, elbow_swing_path
     from taskweave_skills.chain import Chain
     path = tmp_path / 'arm.urdf'
     path.write_text(URDF)
-    chain = Chain.from_urdf(path, 'base', 'flange')
+    chain = Chain.from_urdf(path, 'base', 'flange', elbow=ELBOW)
     ik = ChainIk(chain, NAMES)
     arm = {n: START[n] for n in NAMES}
-    sides = [s for s in ('down', 'up', 'out', 'in') if elbow_deviation_of(chain, NAMES, START, s) > 0.6]
+    sides = [s for s in ('down', 'up', 'out', 'in') if elbow_deviation_of(chain, START, s) > 0.6]
     assert len(sides) >= 2                                                          # the elbow is off those sides
     for side in sides:
-        before = elbow_deviation_of(chain, NAMES, START, side)
+        before = elbow_deviation_of(chain, START, side)
         trajectory, report = elbow_swing_path(ik, ['arm'], arm, START, side, 0.6)
         end = {**START, **dict(zip(trajectory.names, trajectory.points[-1], strict=True))}
         assert np.allclose(chain.fk(end)[:3, 3], chain.fk(START)[:3, 3], atol=1e-3)     # the hand stays
-        assert elbow_deviation_of(chain, NAMES, end, side) < before - 0.2              # the elbow went that way
+        assert elbow_deviation_of(chain, end, side) < before - 0.2              # the elbow went that way
         assert report['arm'][1] < report['arm'][0]
         assert all(-2.5 <= end[n] <= 2.5 for n in NAMES)
 
 
 def test_an_elbow_opposite_its_side_swings_round_the_outside_and_stops_where_asked(tmp_path):
-    from test_chain import NAMES, START, URDF
+    from test_chain import ELBOW, NAMES, START, URDF
 
     from taskweave_skills.cartesian import elbow_deviation_of, elbow_swing_path
     from taskweave_skills.chain import Chain
     path = tmp_path / 'arm.urdf'
     path.write_text(URDF)
-    chain = Chain.from_urdf(path, 'base', 'flange')
+    chain = Chain.from_urdf(path, 'base', 'flange', elbow=ELBOW)
     ik = ChainIk(chain, NAMES)
     arm = {n: START[n] for n in NAMES}
-    assert elbow_deviation_of(chain, NAMES, START, 'down') > math.radians(150)    # elbow up: nearly opposite down
+    assert elbow_deviation_of(chain, START, 'down') > math.radians(150)    # elbow up: nearly opposite down
     trajectory, report = elbow_swing_path(ik, ['arm'], arm, START, 'down', 0.6)
     states = [{**START, **dict(zip(trajectory.names, p, strict=True))} for p in trajectory.points]
-    assert min(elbow_deviation_of(chain, NAMES, s, 'out') for s in states) < math.radians(20)   # past the outside
-    assert min(elbow_deviation_of(chain, NAMES, s, 'in') for s in states) > math.radians(80)    # never the inside
+    assert min(elbow_deviation_of(chain, s, 'out') for s in states) < math.radians(20)   # past the outside
+    assert min(elbow_deviation_of(chain, s, 'in') for s in states) > math.radians(80)    # never the inside
     assert all(np.allclose(chain.fk(s)[:3, 3], chain.fk(START)[:3, 3], atol=1e-3) for s in states)
     assert report['arm'][1] < 90
     trajectory, report = elbow_swing_path(ik, ['arm'], arm, START, 'down', 0.6, settled={'arm': math.radians(110)})
@@ -145,13 +145,13 @@ def test_an_elbow_opposite_its_side_swings_round_the_outside_and_stops_where_ask
 
 
 def test_a_swing_that_stops_short_says_where_and_why(tmp_path):
-    from test_chain import NAMES, START, URDF
+    from test_chain import ELBOW, NAMES, START, URDF
 
     from taskweave_skills.cartesian import elbow_swing_path, swing_short
     from taskweave_skills.chain import Chain
     path = tmp_path / 'arm.urdf'
     path.write_text(URDF)
-    chain = Chain.from_urdf(path, 'base', 'flange')
+    chain = Chain.from_urdf(path, 'base', 'flange', elbow=ELBOW)
     ik = ChainIk(chain, NAMES)
     arm = {n: START[n] for n in NAMES}
     _, report = elbow_swing_path(ik, ['arm'], arm, START, 'out', 0.6)
@@ -163,3 +163,58 @@ def test_a_swing_that_stops_short_says_where_and_why(tmp_path):
     ik.valid = lambda joints, group: False                                # every step collides
     trajectory, report = elbow_swing_path(ik, ['arm'], arm, START, 'out', 0.6)
     assert trajectory is None and report['arm'] == (83, 83, 'the next step would collide')
+
+
+def test_an_arm_without_an_elbow_description_has_no_elbow_control(tmp_path):
+    from test_chain import NAMES, START, URDF
+
+    from taskweave_core.config.tuning import motion_tuning
+    from taskweave_skills.cartesian import elbow_push, elbow_swing_path
+    from taskweave_skills.chain import Chain
+    path = tmp_path / 'arm.urdf'
+    path.write_text(URDF)
+    chain = Chain.from_urdf(path, 'base', 'flange')                                 # no elbow links
+    ik = ChainIk(chain, NAMES)
+    assert not np.any(elbow_push(chain, NAMES, START, 'down', motion_tuning()['elbow']))
+    with pytest.raises(PathError, match='no elbow control for arm: the robot profile has no arms.<tool>.elbow'):
+        elbow_swing_path(ik, ['arm'], {n: START[n] for n in NAMES}, START, 'down', 0.6)
+    start = chain.fk(START)
+    goal = start.copy()
+    goal[:3, 3] += [0.0, 0.0, -0.03]
+    arm = {n: START[n] for n in NAMES}
+    with_side = linear_path(ik, {'arm': start}, {'arm': goal}, arm, 0.05, 0.3, state=START, elbow='down')
+    plain = linear_path(ik, {'arm': start}, {'arm': goal}, arm, 0.05, 0.3, state=START)
+    assert with_side.points == plain.points                                         # the side is simply not used
+
+
+def test_no_spare_freedom_no_elbow_push(tmp_path):
+    from test_chain import ELBOW, NAMES, START, URDF
+
+    from taskweave_core.config.tuning import motion_tuning
+    from taskweave_skills.cartesian import elbow_push
+    from taskweave_skills.chain import Chain
+    path = tmp_path / 'arm.urdf'
+    path.write_text(URDF)
+    chain = Chain.from_urdf(path, 'base', 'flange', elbow=ELBOW)
+    tuning = motion_tuning()['elbow']
+    assert np.any(elbow_push(chain, NAMES, START, 'down', tuning))                 # 7 joints: one self-motion
+    assert not np.any(elbow_push(chain, NAMES[:6], START, 'down', tuning))         # 6: none
+
+
+def test_the_profiles_elbow_rate_reaches_the_swing(tmp_path):
+    from test_chain import ELBOW, NAMES, START, URDF
+
+    from taskweave_core.config.tuning import motion_tuning
+    from taskweave_skills.cartesian import elbow_swing_path
+    from taskweave_skills.chain import Chain
+    path = tmp_path / 'arm.urdf'
+    path.write_text(URDF)
+    ik = ChainIk(Chain.from_urdf(path, 'base', 'flange', elbow=ELBOW), NAMES)
+    arm = {n: START[n] for n in NAMES}
+    usual, _ = elbow_swing_path(ik, ['arm'], arm, START, 'out', 0.6)
+    ik.tuning = motion_tuning({'motion_tuning': {'elbow': {'rate_rad': 0.015}}})   # as IkClient has it from a profile
+    slow, report = elbow_swing_path(ik, ['arm'], arm, START, 'out', 0.6)
+    assert report['arm'][2] == '' and len(slow.points) > 1.5 * len(usual.points)  # half the rate: about twice the steps
+    ik.tuning = motion_tuning({'motion_tuning': {'elbow': {'swing_max_steps': 3}}})
+    _, report = elbow_swing_path(ik, ['arm'], arm, START, 'out', 0.6)
+    assert report['arm'][2] == 'all 3 steps used'

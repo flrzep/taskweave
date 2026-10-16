@@ -352,10 +352,10 @@ class MoveToPose(_JointSkill):
         chains = getattr(self.ik, 'chains', None) or {}
         patterns = {tool: re.compile(self.ik.joint_pattern.format(tool=tool)) for tool in chains}
         tools = [tool for tool, p in patterns.items() if any(p.fullmatch(n) for n in goal)]
-        if not tools or any(n not in start for n in goal):
-            return None
+        if not tools or any(n not in start for n in goal) or any(chains[tool][0].elbow is None for tool in tools):
+            return None  # nothing to swing, or an arm without elbow control (profile arms.<tool>.elbow)
         arm = {n: v for n, v in start.items() if any(patterns[tool].fullmatch(n) for tool in tools)}
-        settled = {tool: elbow_deviation_of(*chains[tool], {**start, **goal}, side) for tool in tools}
+        settled = {tool: elbow_deviation_of(chains[tool][0], {**start, **goal}, side) for tool in tools}
         try:
             swing, report = elbow_swing_path(self.ik, tools, arm, start, side, self.p.max_joint_speed, settled)
         except PathError:

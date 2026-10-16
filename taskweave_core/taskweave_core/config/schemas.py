@@ -10,6 +10,70 @@ FINITE = {'type': 'number'}
 ELBOW_SIDES = ['down', 'up', 'out', 'in', 'back', 'forward']  # preferred elbow side, in the robot's frame (ik.py)
 NAME = {'type': 'string', 'pattern': r'^[A-Za-z_][A-Za-z0-9_\-]*$'}
 
+
+def default(schema: dict, *path: str):
+    """The documented default of a setting: the ``default`` annotation at ``path`` in ``schema`` (property names, '*'
+    for any name: additionalProperties), e.g. ``default(ROBOT_PROFILE, 'ik', 'choose', 'limit_margin_deg')``."""
+    for key in path:
+        schema = schema['additionalProperties'] if key == '*' else schema['properties'][key]
+    return schema['default']
+
+
+# robot profile motion_tuning: how the arm motion code steps (taskweave_skills chain.py, cartesian.py, ik.py,
+# motion_plan.py). Every key is optional; these defaults are the values the motion code was tuned with (Oct 2026).
+MOTION_TUNING_DEFAULTS = {
+    'chain': {                    # one damped least-squares step on a URDF chain (chain.Chain.solve_step)
+        'max_step_rad': 0.08,     # the largest joint change one step may make (rad or m); larger steps are scaled down
+        'damping': 0.05,          # lambda at a singularity
+        'singular': 0.04,         # below this smallest singular value the damping fades in
+        'limit_margin': 1e-3,     # stop this far short of a joint limit (rad or m)
+    },
+    'line': {                     # a straight-line step on the chain (cartesian.chain_step)
+        'limit_push_rad': 0.02,   # the most a step moves a joint back from a limit through the null space
+        'on_line_m': 5e-4,        # a step is done when the flange is this close to the line point (position)
+        'on_line_rad': 5e-3,      # ... and orientation
+        'step_iterations': 8,     # solver iterations per step at most
+        'push_iterations': 3,     # while a joint is within the limit margin, at least this many (null-space push)
+        'min_step_s': 1e-3,       # waypoints of straight lines and elbow swings at least this far apart (s)
+    },
+    'elbow': {                    # elbow side and swing (cartesian.elbow_push, elbow_swing_path; profile arms.*.elbow)
+        'rate_rad': 0.03,         # the most a step swings the elbow toward the preferred side (null space)
+        'settled_rad': 0.1,       # the elbow is on its side when it is this close (deviation)
+        'swing_max_steps': 200,   # steps per leg of an elbow swing at most
+        'via_out_deg': 150.0,     # an elbow this far off its side (nearly opposite) swings toward out first ...
+        'via_out_until_deg': 120.0,   # ... until it is this close (never through the body)
+        'probe_rad': 0.01,        # step along the self-motion that tells which way round the elbow swings
+        'progress_rad': 1e-4,     # a swing step must bring the elbow at least this much closer to its side
+        'limit_edge_parts': 5,    # closer than limit_margin_deg / this to a limit, a swing moves a joint only away
+    },
+    'continuation': {             # a short move continues the arm's configuration (ik.IkClient._continue)
+        'max_m': 0.25,            # targets at most this far from the flange now ...
+        'max_deg': 45.0,          # ... and turned at most this much are walked to on the chain first
+        'elbow_deg': 90.0,        # a continuation ending with the elbow further off its side loses to the IK search
+        'jump_deg': 120.0,        # a joint turning more than this for a short move (no continuation) is logged
+    },
+    'plan': {                     # collision-free joint motion (motion_plan.MotionPlanner)
+        'tries': 3,               # planning requests when MoveIt's answer is worth a retry
+        'deeper_m': 0.005,        # an escape from a start in contact may push a contact no deeper than this more
+        'unknown_depth_m': 0.3,   # FCL's depth between meshes is sometimes meters off: deeper than this says nothing
+    },
+}
+
+
+def _tuning_schema(defaults: dict) -> dict:
+    return {'type': 'object', 'additionalProperties': False, 'properties': {
+        key: _tuning_schema(value) if isinstance(value, dict)
+        else {'type': 'integer', 'minimum': 1, 'default': value} if isinstance(value, int)
+        else {'type': 'number', 'minimum': 0, 'default': value} for key, value in defaults.items()}}
+
+
+MOTION_TUNING = _tuning_schema(MOTION_TUNING_DEFAULTS)
+IK_WEIGHTS = {'limits': 2.0, 'elbow': 1.0, 'motion': 0.2, 'symmetry': 0.5}   # ik.choose.weights defaults
+# profile arms.<tool>.elbow: the links at the arm's shoulder, elbow and wrist centres (the elbow side is the swivel of
+# the elbow about the shoulder-wrist line); an arm without it has no elbow control
+ELBOW = {'type': 'object', 'required': ['shoulder', 'elbow', 'wrist'], 'additionalProperties': False,
+         'properties': {key: {'type': 'string', 'minLength': 1} for key in ('shoulder', 'elbow', 'wrist')}}
+
 POSE2D = {
     'type': 'object',
     'required': ['x', 'y', 'yaw'],
@@ -124,6 +188,8 @@ ROBOT_PROFILE = {
                 'type': 'object',
                 'properties': {'joint': {'type': 'string'}, 'open': FINITE, 'closed': FINITE,
                                'action': {'type': 'string'},
+                               # joint distance from open beyond which the gripper is closed on a part (HMI capture)
+                               'closed_from': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.1},
                                # [joint, finger opening m] rows, measured: a point's grip_m -> joint (gripper.py)
                                'opening_m': {'type': 'array', 'minItems': 2, 'items': {
                                    'type': 'array', 'items': FINITE, 'minItems': 2, 'maxItems': 2}}},
@@ -170,15 +236,16 @@ ROBOT_PROFILE = {
                     'properties': {
                         'elbow': {'oneOf': [{'enum': ELBOW_SIDES},
                                             {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3}]},
+                        # deprecated (use arms.<tool>.elbow): shoulder, elbow, wrist links, {tool} = tool name
                         'elbow_links': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 3, 'maxItems': 3},
-                        'limit_margin_deg': {'type': 'number', 'minimum': 0},
+                        'limit_margin_deg': {'type': 'number', 'minimum': 0, 'default': 25.0},
                         'weights': {'type': 'object',
-                                    'properties': {k: {'type': 'number', 'minimum': 0}
-                                                   for k in ('limits', 'elbow', 'motion', 'symmetry')},
+                                    'properties': {k: {'type': 'number', 'minimum': 0, 'default': v}
+                                                   for k, v in IK_WEIGHTS.items()},
                                     'additionalProperties': False},
                         'fk_service': {'type': 'string'},
                         'starts': {'type': 'integer', 'minimum': 0},
-                        'start_timeout_s': {'type': 'number', 'exclusiveMinimum': 0},
+                        'start_timeout_s': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.05},
                     },
                     'additionalProperties': False,
                 },
@@ -206,7 +273,10 @@ ROBOT_PROFILE = {
             },
             'additionalProperties': False,
         },
-        'arms': {'type': 'object'},
+        # arm roles by name (e.g. group, tool_frame); per IK tool the links of its elbow (ELBOW)
+        'arms': {'type': 'object', 'propertyNames': NAME,
+                 'additionalProperties': {'type': 'object', 'properties': {'elbow': ELBOW}}},
+        'motion_tuning': MOTION_TUNING,
         'torso': {'type': 'object'},
         'cameras': {'type': 'object'},
         'teleop': {'type': 'object'},
@@ -271,6 +341,8 @@ NAVIGATION = {
                 'sideways': {'type': 'boolean'},
                 'max_sideways': {'type': 'number', 'minimum': 0},
                 'prefer_forward': {'type': 'number', 'minimum': 0},
+                # the path angle weight with prefer_forward 0: follow the path, any heading (Nav2 PathAngleCritic)
+                'any_heading_weight': {'type': 'number', 'minimum': 0, 'default': 2.0},
             },
             'additionalProperties': False,
         },

@@ -26,7 +26,7 @@ FORBIDDEN = ['galbot', 's1', 'g1', 'a2d', 'agibot', 'adient', 'frame_type', 'rai
              'bay_', 'stack_2']
 
 # counts on 16 Oct 2026; strict mode (=1) fails above these
-BASELINE = {'names_code': 0, 'names_comments': 13, 'numbers': 49, 'constants': 24, 'arm_structure': 4}
+BASELINE = {'names_code': 0, 'names_comments': 13, 'numbers': 34, 'constants': 0, 'arm_structure': 0}
 
 ALLOWED_NUMBERS = {0, 1, 2, 3, 4, 0.5, 100, 1000, 1e6, 1e9, 180, 360}  # by abs value; plus epsilons <= 1e-6
 PROTOCOL_ARGS = {'create_publisher': 2, 'create_subscription': 3, 'round': 1}  # from this arg on: QoS depth, digits

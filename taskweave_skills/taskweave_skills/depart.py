@@ -13,9 +13,6 @@ import math
 
 import numpy as np
 
-OCCUPIED = 50       # occupancy (0-100) from which a map cell counts as an obstacle
-SAMPLE = 0.5        # footprint sample spacing, in map cells
-
 
 def envelope(navigation: dict, base: dict, carrying: bool = False) -> tuple[float, float, float, float]:
     """(front, back, left, right) around the base frame, without padding: the navigation envelope, the carry envelope
@@ -34,17 +31,18 @@ def footprint_box(navigation: dict, base: dict, carrying: bool = False) -> tuple
     return front + pad, back + pad, left + pad, right + pad
 
 
-def occupied(grid: np.ndarray, info, pose, x_range, y_range) -> int:
-    """Occupied cells of ``grid`` (rows = y) in the rectangle x_range x y_range of the robot frame at ``pose``
-    (x, y, yaw in the map frame). Cells outside the map count as free."""
+def occupied(grid: np.ndarray, info, pose, x_range, y_range, occupied_from: int = 50, sample: float = 0.5) -> int:
+    """Occupied cells of ``grid`` (rows = y, occupancy 0-100, a cell from ``occupied_from`` on is an obstacle) in the
+    rectangle x_range x y_range of the robot frame at ``pose`` (x, y, yaw in the map frame), sampled ``sample`` map
+    cells apart. Cells outside the map count as free."""
     res = info.resolution
-    step = res * SAMPLE
+    step = res * sample
     xs, ys = np.meshgrid(np.arange(x_range[0], x_range[1] + 1e-9, step), np.arange(y_range[0], y_range[1] + 1e-9, step))
     c, s = math.cos(pose[2]), math.sin(pose[2])
     col = np.floor((pose[0] + xs * c - ys * s - info.origin_x) / res).astype(int)
     row = np.floor((pose[1] + xs * s + ys * c - info.origin_y) / res).astype(int)
     inside = (col >= 0) & (col < grid.shape[1]) & (row >= 0) & (row < grid.shape[0])
-    return int((grid[row[inside], col[inside]] >= OCCUPIED).sum())
+    return int((grid[row[inside], col[inside]] >= occupied_from).sum())
 
 
 def departure(grid: np.ndarray, info, pose, box, max_m: float, margin_m: float, step_m: float = 0.05):
