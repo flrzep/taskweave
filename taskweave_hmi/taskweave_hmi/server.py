@@ -6,6 +6,9 @@ Parameters:
   host (string)         address to bind; bind the trusted network only (e.g. the tailnet address)
   port (int)            default 8090
   recordings_dir (string)  where the Record tab keeps recordings (bag, sim videos); empty: no Record tab
+  recordings_keep (int)    recordings kept (default 1: each new one replaces the last; 0: all), besides marked ones
+  recording_min_free_gb (double)  free disk a recording needs to start (default 30)
+  recording_post (string)  command run after each recording, {dir} = its folder (e.g. camera videos from the bag)
 
 HTTP API (JSON):
   GET  /api/state                  robot, status, plan with per-step outcomes, recent events
@@ -45,7 +48,8 @@ HTTP API (JSON):
   POST /api/teach/held/<type>/<name>/test   move the held object there now (move_object)
   GET  /api/recordings              {status, recordings, free_bytes} (404 without recordings_dir; recording.py)
   POST /api/recordings/start {mission, name, cycles, reset, bag, camera, video, quality, max_min};  POST .../stop
-  DELETE /api/recordings/<id>;  GET /recordings/<id>/<file>  a recording's video or data file (byte ranges)
+  DELETE /api/recordings/<id>;  PUT /api/recordings/<id>/keep {keep}  exempt it from replacement
+  GET  /recordings/<id>/<file>     a recording's video or data file (byte ranges)
 Missions and points are edited between runs (409 while a mission runs) and are used at the next start.
 """
 
@@ -100,7 +104,8 @@ FK_SERVICE = '/compute_fk'  # MoveIt move_group
 OUTCOMES = ['succeeded', 'failed', 'timeout', 'canceled', 'rejected']
 CONTENT_TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
                  '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.mp4': 'video/mp4',
-                 '.csv': 'text/csv; charset=utf-8', '.json': 'application/json', '.log': 'text/plain; charset=utf-8'}
+                 '.csv': 'text/csv; charset=utf-8', '.json': 'application/json', '.log': 'text/plain; charset=utf-8',
+                 '.yaml': 'text/plain; charset=utf-8'}
 CHUNK = 1 << 20
 
 
@@ -150,7 +155,8 @@ class Bridge(Node):
         super().__init__(kwargs.pop('node_name', 'hmi_server'), **kwargs)
         for name, default in (('config_dir', ''), ('robot', ''), ('host', ''), ('port', 8090),
                               ('nav_costmaps', NAV_COSTMAPS), ('nav_controller', NAV_CONTROLLER),
-                              ('recordings_dir', ''), ('recording_bag_exclude', recording.BAG_EXCLUDE)):
+                              ('recordings_dir', ''), ('recording_bag_exclude', recording.BAG_EXCLUDE),
+                              ('recordings_keep', 1), ('recording_min_free_gb', 30.0), ('recording_post', '')):
             self.declare_parameter(name, default)
         self.config = ConfigStore(self.get_parameter('config_dir').value)
         self.robot = self.get_parameter('robot').value
@@ -200,8 +206,11 @@ class Bridge(Node):
         self.create_subscription(String, names.TEACH_REQUEST, self._teach_request, 10, callback_group=self.group)
         self.joint_command = self.create_publisher(JointState, joints['command'], 10) if joints.get('command') else None
         directory = self.get_parameter('recordings_dir').value
-        exclude = self.get_parameter('recording_bag_exclude').value
-        self.recorder = recording.Recorder(self, directory, exclude) if directory else None
+        self.recorder = recording.Recorder(
+            self, directory, self.get_parameter('recording_bag_exclude').value,
+            keep=self.get_parameter('recordings_keep').value,
+            min_free_gb=self.get_parameter('recording_min_free_gb').value,
+            post=self.get_parameter('recording_post').value) if directory else None
 
     # ---- ROS -> state ------------------------------------------------------------
     def _broadcast(self, kind: str, data) -> None:
@@ -550,12 +559,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'error': 'recording is not set up (parameter recordings_dir)'}, HTTPStatus.NOT_FOUND)
         if method == 'GET' and not route:
             free = shutil.disk_usage(recorder.dir).free if recorder.dir.is_dir() else None
-            return self._json({'status': recorder.status(), 'recordings': recorder.recordings(), 'free_bytes': free})
+            return self._json({'status': recorder.status(), 'recordings': recorder.recordings(), 'free_bytes': free,
+                               'keep': recorder.keep, 'min_free_gb': recorder.min_free_gb})
         if method == 'POST' and route == ['start']:
             self.bridge.config.reload()
             return self._json(recorder.start(self._body(), self.bridge.config.mission_names()))
         if method == 'POST' and route == ['stop']:
             return self._json(recorder.stop())
+        if method == 'PUT' and len(route) == 2 and route[1] == 'keep':
+            return self._json({'keep': recorder.set_keep(unquote(route[0]), bool(self._body().get('keep')))})
         if method == 'DELETE' and len(route) == 1:
             recorder.delete(unquote(route[0]))
             self.bridge.get_logger().info(f'HMI deleted recording {route[0]}')

@@ -10,11 +10,21 @@ from taskweave_hmi import recording
 from taskweave_hmi.recording import Recorder, RecordingError, byte_range, options, recording_id
 
 
+class FakeLogger:
+    def info(self, _text):
+        pass
+
+    warning = info
+
+
 class FakeBridge:
     def __init__(self, state='idle'):
         self.lock = threading.Lock()
         self.status = {'state': state, 'cycle': 0}
         self.plan = None
+
+    def get_logger(self):
+        return FakeLogger()
 
     def check_idle(self):
         if self.status['state'] in ('running', 'paused'):
@@ -118,3 +128,52 @@ def test_wait_stops_after_the_cycles(tmp_path, monkeypatch):
     bridge.status = {'state': 'running', 'cycle': 1}
     monkeypatch.setattr(recording.time, 'sleep', lambda _s: bridge.status.update(state='failed'))
     assert recorder._wait({**rec, 'options': {**rec['options'], 'cycles': None}}) == 'mission failed'
+
+
+def test_a_new_recording_replaces_the_old_ones_except_kept(tmp_path, monkeypatch):
+    monkeypatch.setattr(Recorder, '_run', lambda self, rec, folder: None)
+    for rec_id in ('20251016_100000_a', '20251016_110000_b', '20251016_120000_c'):
+        make(tmp_path, rec_id, files=['x_fixed.mp4'])
+    recorder = Recorder(FakeBridge(), str(tmp_path), keep=2)
+    assert recorder.set_keep('20251016_100000_a', True) is True
+    started = recorder.start({'reset': False}, [])
+    assert started['deleted'] == ['20251016_110000_b']  # newest kept (keep 2 = it and the new one), marked one stays
+    names = [r['id'] for r in recorder.recordings()]
+    assert names == [started['id'], '20251016_120000_c', '20251016_100000_a']
+    assert [r['keep'] for r in recorder.recordings()] == [False, False, True]
+    recorder.active = None
+    recorder.keep = 1
+    started = recorder.start({'reset': False, 'name': 'z'}, [])
+    assert set(started['deleted']) == {'20251016_120000_c', names[0]}
+    recorder.active = None
+    recorder.set_keep('20251016_100000_a', False)
+    recorder.keep = 0  # keep all
+    assert recorder.start({'reset': False, 'name': 'y'}, [])['deleted'] == []
+
+
+def test_no_start_without_free_disk(tmp_path, monkeypatch):
+    monkeypatch.setattr(Recorder, '_run', lambda self, rec, folder: None)
+    recorder = Recorder(FakeBridge(), str(tmp_path), min_free_gb=1e9)
+    with pytest.raises(RecordingError, match='GB free'):
+        recorder.start({'reset': False}, [])
+    assert recorder.active is None
+
+
+def test_files_lists_videos_first_and_only_known_kinds(tmp_path):
+    names = ['20261016_120000_a_head_camera_color.mp4', '20261016_120000_a_follow.mp4', '20261016_120000_a_fixed.mp4',
+             'cam.yaml', 'post.log', 'raw.bin', '.keep']
+    folder = make(tmp_path, '20261016_120000_a', {}, {}, names)
+    assert recording.files(folder) == ['20261016_120000_a_fixed.mp4', '20261016_120000_a_follow.mp4',
+                                       '20261016_120000_a_head_camera_color.mp4', 'cam.yaml', 'meta.json',
+                                       'post.log', 'status.json']
+
+
+def test_post_processing_runs_on_the_folder(tmp_path):
+    folder = make(tmp_path, '20261016_120000_a')
+    recorder = Recorder(FakeBridge(), str(tmp_path), post='sh -c "echo done > {dir}/out.csv"')
+    rec = {'id': folder.name, 'problems': []}
+    recorder._post_process(rec, folder)
+    assert (folder / 'out.csv').read_text() == 'done\n' and rec['problems'] == []
+    recorder.post = 'sh -c "exit 3"'
+    recorder._post_process(rec, folder)
+    assert 'exit 3' in rec['problems'][0]

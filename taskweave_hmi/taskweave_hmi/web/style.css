@@ -291,3 +291,5 @@ details[open] summary { margin-bottom: 8px; }
 .rec-videos video { width: 100%; border-radius: 4px; background: #000; aspect-ratio: 16 / 9; }
 .rec-files { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 14px; }
 .rec-files a { color: var(--accent); }
+.point-edit label.check { display: flex; gap: 8px; align-items: center; min-height: 44px; }
+.point-edit label.check input { width: auto; accent-color: var(--accent); }

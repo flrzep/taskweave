@@ -4,7 +4,12 @@
 // Uses app.js ($, el, api, show, message).
 
 const rec = { open: new Set(), timer: null, missionsLoaded: false };
-const VIDEO_RE = /^(?:[A-Za-z0-9_.-]+_)?(fixed|follow)\.mp4$/;  // <id>_fixed.mp4 (older recordings: fixed.mp4)
+const VIEW_NAMES = { fixed: 'Fixed view', follow: 'Following the robot', head_camera_color: 'Head camera',
+  head_camera_depth: 'Head camera depth (red near, blue far)' };
+function videoName(file, id) {  // <id>_fixed.mp4 -> Fixed view; <id>_left_camera_color.mp4 -> left camera color
+  const view = file.replace(/\.mp4$/, '').replace(`${id}_`, '');
+  return VIEW_NAMES[view] || view.replace(/_/g, ' ');
+}
 const recTab = document.querySelector('.tabs button[data-view="record"]');
 const recVisible = () => !$('view-record').hidden;
 
@@ -46,6 +51,10 @@ async function refreshRecordings() {
     renderRecStatus(r.data.status);
     renderRecList(r.data.recordings);
     $('rec-free').textContent = r.data.free_bytes != null ? `${gb(r.data.free_bytes)} free` : '';
+    const keep = r.data.keep;
+    $('rec-keep-note').textContent = keep === 0 ? 'Every recording is kept: delete old ones here.'
+      : `Starting a recording deletes the older ones${keep > 1 ? ` beyond the newest ${keep - 1}` : ''}, except those marked Keep. `
+        + `It needs ${r.data.min_free_gb} GB free.`;
   }
   const active = r.ok && r.data.status?.active;
   recTab.textContent = active ? 'Record ●' : 'Record';
@@ -89,7 +98,7 @@ function renderRecList(list) {
   // keep open players (and their position) over refreshes: rebuild only what changed
   const old = new Map([...$('rec-list').children].filter((li) => li.dataset.id).map((li) => [li.dataset.id, li]));
   $('rec-list').replaceChildren(...list.map((r) => {
-    const key = JSON.stringify([r.files, r.outcome, r.bytes, r.active]);
+    const key = JSON.stringify([r.files, r.outcome, r.bytes, r.active, r.keep]);
     const keep = old.get(r.id);
     if (keep && keep.dataset.key === key) return keep;
     if (keep && rec.open.has(r.id) && !r.active && keep.querySelector('video')) return keep;  // don't stop playback
@@ -103,23 +112,31 @@ function recItem(r, key) {
   const when = r.started ? r.started.replace('T', ' ') : r.id.slice(0, 15).replace(/^(\d{4})(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)$/, '$1-$2-$3 $4:$5:$6');
   const summary = [when, span != null ? `${clock(span)} sim` : '', gb(r.bytes)].filter(Boolean).join(' · ');
   const head = el('button', { class: 'point-head', 'aria-expanded': String(rec.open.has(r.id)) },
-    el('b', { text: r.active ? `${r.id} (recording)` : r.id }), el('span', { class: 'mono', text: summary }),
+    el('b', { text: `${r.keep ? '★ ' : ''}${r.id}${r.active ? ' (recording)' : ''}` }), el('span', { class: 'mono', text: summary }),
     r.outcome ? el('span', { class: /error|failed/.test(r.outcome) ? 'bad' : 'used', text: r.outcome }) : '');
   const body = el('div', { class: 'point-edit' });
   const item = el('li', { class: 'point', 'data-id': r.id, 'data-key': key }, head, body);
   const fill = () => {
-    const videos = r.files.filter((f) => VIDEO_RE.test(f));
+    const videos = r.files.filter((f) => f.endsWith('.mp4'));
     const parts = [];
     if (videos.length && !r.active) {
       parts.push(el('div', { class: 'rec-videos' }, videos.map((f) => el('figure', {},
         el('video', { src: url(f), controls: '', preload: 'metadata', playsinline: '' }),
-        el('figcaption', { text: VIDEO_RE.exec(f)[1] === 'fixed' ? 'Fixed view' : 'Following the robot' })))));
+        el('figcaption', { text: videoName(f, r.id) })))));
     } else if (!r.active) parts.push(el('p', { class: 'muted small-text', text: 'No videos in this recording.' }));
     const links = r.files.filter((f) => f !== 'status.json')
       .map((f) => el('a', { href: url(f), download: f.startsWith(r.id) ? f : `${r.id}_${f}`, text: f }));
     if (r.bag) links.push(el('span', { class: 'muted mono', text: `bag/ on the box: ${r.id}/bag` }));
     parts.push(el('div', { class: 'rec-files' }, links));
     if (!r.active) {
+      const keepBox = el('input', { type: 'checkbox' });
+      keepBox.checked = !!r.keep;
+      keepBox.addEventListener('change', async () => {
+        const res = await api('PUT', `/api/recordings/${encodeURIComponent(r.id)}/keep`, { keep: keepBox.checked });
+        if (!res.ok) { keepBox.checked = !keepBox.checked; message(msg, res.data.error || (res.data.problems || []).join('\n'), true); }
+        refreshRecordings();
+      });
+      parts.push(el('label', { class: 'check' }, keepBox, ' Keep (a new recording does not replace it)'));
       const del = el('button', { class: 'btn danger small', text: 'Delete recording' });
       const msg = el('div', { class: 'msg', hidden: '' });
       let armed = false;
@@ -150,7 +167,8 @@ $('rec-start').addEventListener('click', async () => {
   };
   $('rec-start').disabled = true;
   const r = await api('POST', '/api/recordings/start', body);
-  message($('rec-msg'), r.ok ? `started ${r.data.id}` : (r.data.error || (r.data.problems || []).join('\n')), !r.ok);
+  const replaced = r.ok && r.data.deleted?.length ? ` (replaced ${r.data.deleted.join(', ')})` : '';
+  message($('rec-msg'), r.ok ? `started ${r.data.id}${replaced}` : (r.data.error || (r.data.problems || []).join('\n')), !r.ok);
   refreshRecordings();
 });
 

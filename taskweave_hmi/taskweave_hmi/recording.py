@@ -4,6 +4,11 @@ One recording at a time, in its own folder ``<recordings_dir>/<id>/``:
   bag/          ROS bag (mcap, sim time), bag.log
   <id>_fixed.mp4, <id>_follow.mp4, frames.csv, status.json   from the video recorder, if one answers
   meta.json     what was recorded: mission, options, outcome, times, the plan
+  ...           whatever the post-processing command writes (e.g. camera videos from the bag), post.log
+
+Recordings are big (camera images: ~0.15 GB per sim second), so they do not pile up: starting one deletes the older
+ones beyond the newest ``keep - 1`` (keep 1: each recording replaces the last), except those marked keep (a ``.keep``
+file in the folder). It does not start with less than ``min_free_gb`` free.
 
 Video recorder contract (frame-sim: scripts/recorder.py): the HMI writes ``<recordings_dir>/control.json``
 ``{"id", "cmd": "start"|"stop", "dir", "options"}``; the recorder answers in ``<dir>/status.json`` with ``state``
@@ -19,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -28,8 +34,10 @@ from datetime import datetime
 from pathlib import Path
 
 ID_RE = re.compile(r'^[A-Za-z0-9_.-]+$')
-FILES = ('frames.csv', 'meta.json', 'status.json', 'bag.log')
-VIDEO_RE = re.compile(r'^(?:[A-Za-z0-9_.-]+_)?(fixed|follow)\.mp4$')  # <id>_fixed.mp4 (older: fixed.mp4)
+SUFFIXES = ('.mp4', '.csv', '.json', '.yaml', '.log')  # files of a recording the HMI lists and serves
+VIEWS = ('fixed', 'follow')  # the simulator's videos (<id>_fixed.mp4), listed first
+KEEP_FILE = '.keep'
+POST_TIMEOUT_S = 3600.0
 END_STATES = ('succeeded', 'failed', 'aborted', 'idle')
 QUALITY = {'ray_trace': 'RAY_TRACE', 'path_trace': 'PATH_TRACE'}
 BAG_EXCLUDE = (r'.*/_action/.*|/rosout|/parameter_events|.*/transition_event|.*/bond|.*costmap_raw.*|.*_updates'
@@ -108,10 +116,13 @@ def folder_size(path: Path) -> int:
 
 
 def files(folder: Path) -> list[str]:
-    """The recording's videos (fixed, then follow) and data files that are there."""
-    videos = sorted((p.name for p in folder.iterdir() if p.is_file() and VIDEO_RE.match(p.name)),
-                    key=lambda name: VIDEO_RE.match(name).group(1) != 'fixed')
-    return videos + [name for name in FILES if (folder / name).is_file()]
+    """The recording's videos (the simulator's fixed and follow views first) and data files."""
+    def order(name: str):
+        stem = name.rsplit('.', 1)[0]
+        view = next((i for i, v in enumerate(VIEWS) if stem == v or stem.endswith(f'_{v}')), len(VIEWS))
+        return (not name.endswith('.mp4'), view, name)
+    return sorted((p.name for p in folder.iterdir() if p.is_file() and p.suffix in SUFFIXES and ID_RE.match(p.name)),
+                  key=order)
 
 
 def read_json(path: Path) -> dict | None:
@@ -142,8 +153,10 @@ def byte_range(header: str | None, size: int) -> tuple[int, int] | None:
 class Recorder:
     """Runs one recording at a time in a thread; ``bridge`` is the HMI's ROS node (server.Bridge)."""
 
-    def __init__(self, bridge, directory: str, bag_exclude: str = BAG_EXCLUDE):
+    def __init__(self, bridge, directory: str, bag_exclude: str = BAG_EXCLUDE, keep: int = 1,
+                 min_free_gb: float = 30.0, post: str = ''):
         self.bridge, self.dir, self.bag_exclude = bridge, Path(directory), bag_exclude
+        self.keep, self.min_free_gb, self.post = int(keep), float(min_free_gb), post
         self.lock = threading.Lock()
         self.active: dict | None = None
         self.last: dict | None = None  # the latest finished recording, shown until the next one starts
@@ -162,13 +175,52 @@ class Recorder:
             if folder.exists():
                 raise RecordingError(f'{rec_id} exists already')
             self.dir.mkdir(parents=True, exist_ok=True)
+            deleted = self._prune()
+            free = shutil.disk_usage(self.dir).free / 1e9
+            if free < self.min_free_gb:
+                raise RecordingError(f'only {free:.0f} GB free (at least {self.min_free_gb:g} GB needed): delete '
+                                     f'recordings marked keep')
             folder.mkdir(mode=0o2775)
             folder.chmod(0o2775)  # the host's group can delete it
             self.active = {'id': rec_id, 'options': opts, 'phase': 'starting', 'started': time.time(), 'stop': False,
                            'outcome': '', 'problems': [], 'video': None, 'bag': None}
             self.last = None
         threading.Thread(target=self._run, args=(self.active, folder), daemon=True).start()
-        return {'id': rec_id}
+        return {'id': rec_id, 'deleted': deleted}
+
+    def _prune(self) -> list[str]:
+        """Make room for a new recording: delete the older ones beyond the newest keep - 1, except marked ones."""
+        if self.keep <= 0:
+            return []
+        folders = [folder for folder in self._folders() if not (folder / KEEP_FILE).exists()]
+        deleted = []
+        for folder in folders[self.keep - 1:]:
+            try:
+                shutil.rmtree(folder)
+                deleted.append(folder.name)
+            except OSError as error:
+                self.bridge.get_logger().warning(f'recording {folder.name} not deleted: {error}')
+        if deleted:
+            self.bridge.get_logger().info(f'recordings deleted to make room: {", ".join(deleted)}')
+        return deleted
+
+    def _folders(self) -> list[Path]:
+        """Recording folders, newest first."""
+        if not self.dir.is_dir():
+            return []
+        return sorted((p for p in self.dir.iterdir()
+                       if p.is_dir() and ID_RE.match(p.name) and not p.name.startswith('.')), reverse=True)
+
+    def set_keep(self, rec_id: str, keep: bool) -> bool:
+        folder = self.dir / check_id(rec_id)
+        if not folder.is_dir():
+            raise RecordingError(f'no recording {rec_id}')
+        marker = folder / KEEP_FILE
+        if keep:
+            marker.touch()
+        elif marker.exists():
+            marker.unlink()
+        return keep
 
     def stop(self) -> dict:
         with self.lock:
@@ -192,22 +244,21 @@ class Recorder:
         return data
 
     def recordings(self) -> list[dict]:
-        if not self.dir.is_dir():
-            return []
         result, active = [], self.active['id'] if self.active else None
-        for folder in sorted((p for p in self.dir.iterdir() if p.is_dir() and ID_RE.match(p.name)), reverse=True):
+        for folder in self._folders():
             meta = read_json(folder / 'meta.json') or {}
             video = read_json(folder / 'status.json') or {}
             result.append({'id': folder.name, 'mission': meta.get('mission', ''), 'outcome': meta.get('outcome', ''),
                            'options': meta.get('options'), 'started': meta.get('started'), 'ended': meta.get('ended'),
                            'frames': video.get('frames'), 'first_time': video.get('first_time'),
                            'last_time': video.get('last_time'), 'bytes': folder_size(folder),
-                           'files': files(folder), 'bag': (folder / 'bag').is_dir(), 'active': folder.name == active})
+                           'files': files(folder), 'bag': (folder / 'bag').is_dir(), 'active': folder.name == active,
+                           'keep': (folder / KEEP_FILE).exists()})
         return result
 
     def file(self, rec_id: str, name: str) -> Path:
         check_id(rec_id)
-        if name not in FILES and not VIDEO_RE.match(name):
+        if not ID_RE.match(name) or Path(name).suffix not in SUFFIXES:
             raise RecordingError(f'no file {name!r}')
         path = self.dir / rec_id / name
         if not path.is_file():
@@ -291,6 +342,9 @@ class Recorder:
             self._stop_video(rec, folder)
         if bag is not None:
             self._stop_bag(bag)
+            if self.post:
+                self._phase(rec, 'post-processing')
+                self._post_process(rec, folder)
         rec['ended'] = time.time()
         with self.bridge.lock:
             plan = self.bridge.plan
@@ -306,6 +360,18 @@ class Recorder:
         self._phase(rec, 'done')
         with self.lock:
             self.last, self.active = rec, None
+
+    def _post_process(self, rec: dict, folder: Path) -> None:
+        """The post-processing command (parameter recording_post, ``{dir}`` = the folder), e.g. camera videos."""
+        command = shlex.split(self.post.replace('{dir}', str(folder)))
+        try:
+            with open(folder / 'post.log', 'w') as log:
+                result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                                        timeout=POST_TIMEOUT_S, preexec_fn=lambda: os.umask(0o002), check=False)
+            if result.returncode:
+                self._problem(rec, f'post-processing failed (exit {result.returncode}, post.log)')
+        except (OSError, subprocess.TimeoutExpired) as error:
+            self._problem(rec, f'post-processing: {error}')
 
     # ---- sim reset ------------------------------------------------------------------------
     def _reset_sim(self) -> None:
