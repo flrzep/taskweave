@@ -102,6 +102,7 @@ def robot_files(config_dir: str, robot: str | None) -> int:
     """Each robot file: where it is read from and where an edit goes."""
     from .config import ConfigStore
     from .config.packs import CELL_ROBOT_FILES, ROBOT_PACK_FILES
+    from .config.store import POINT_FILE_SCHEMAS
 
     store = ConfigStore(config_dir)
     for name in [robot] if robot else store.robot_names():
@@ -111,7 +112,8 @@ def robot_files(config_dir: str, robot: str | None) -> int:
         for file in ROBOT_PACK_FILES + CELL_ROBOT_FILES + tuple(extra):
             source = store.robot_file_source(name, file)
             if source['source'] != 'missing':
-                saves = '' if source['save_path'] == source['path'] else                     f'  (edits -> {store.display_path(source["save_path"])})'
+                edited = file in POINT_FILE_SCHEMAS and source['save_path'] != source['path']  # HMI, teaching
+                saves = f'  (edits -> {store.display_path(source["save_path"])})' if edited else ''
                 print(f'  {file:<20} {source["source"]:<11} {store.display_path(source["path"])}{saves}')
     return 0
 

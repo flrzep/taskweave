@@ -40,7 +40,9 @@ def _same(a: Path, b: Path) -> bool:
 
 def _system_robot_packs(cell: Path) -> list[str]:
     path = cell / 'system.yaml'
-    return list((yaml.safe_load(path.read_text(encoding='utf-8')) or {}).get('robot_packs', [])) if path.is_file() else []
+    if not path.is_file():
+        return []
+    return list((yaml.safe_load(path.read_text(encoding='utf-8')) or {}).get('robot_packs', []))
 
 
 def _add_robot_packs(cell: Path, entry: str) -> None:
@@ -139,7 +141,7 @@ def migrate(cell: str | Path, robot_packs: str | Path | None = None, name: str |
     if version == packs.CELL_SCHEMA:
         say(f'{cell}: cell pack schema {version}, nothing to do')
         return 0
-    say(f'{cell}: cell pack schema {version} -> {packs.CELL_SCHEMA}{" (dry run: nothing is changed)" if dry_run else ""}')
+    say(f'{cell}: cell pack schema {version} -> {packs.CELL_SCHEMA}' + (' (dry run: nothing is changed)' if dry_run else ''))
     for step in range(version, packs.CELL_SCHEMA):
         MIGRATIONS[step](cell, Path(robot_packs) if robot_packs else None, dry_run, say)
         write_cell_pack(cell, name or cell.name, step + 1, dry_run, say)

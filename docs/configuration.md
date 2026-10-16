@@ -1,10 +1,12 @@
 # Configuration
 
-An application hands taskweave one config directory. Every file is YAML and is validated against a JSON schema shipped
-with `taskweave_core` when it is loaded; errors name the file, the key and what was expected.
+An application hands taskweave one config directory, the cell pack. Every file is YAML and is validated against a JSON
+schema shipped with `taskweave_core` when it is loaded; errors name the file, the key and what was expected.
 
 ```
-config/
+config/                  cell pack: everything about one cell
+  pack.yaml              name, version, schema_version (2); without it: run `taskweave config migrate config/`
+  system.yaml            optional robot_packs: [paths relative to the cell pack]
   cell/
     layout.yaml          fixtures and zones of the work cell (application-specific content)
     locations.yaml       named poses in the cell frame
@@ -12,16 +14,36 @@ config/
   objects/
     <object>.yaml        object frame, mesh reference, taught tool poses (grasp, place, hang ...)
   robots/
-    <model>/
-      profile.yaml       how the hardware is reached: roles -> topics, joints, frames, controllers
-      embodiment.yaml    what the robot is and can do: capabilities, tools, reach, cameras, action spaces
-      poses.yaml         named joint-space poses (home, carry); robot-specific by nature
+    <model>/             the robot's cell-specific files, and whole-file overrides of its robot pack's files
       stances.yaml       where this robot stands relative to an object (per object type, per instance)
+      held_poses.yaml    where this robot holds an object of a type (move_object pose)
+      object_points.yaml this robot's settings per object point (elbow side, grip opening)
   skills/
     <skill>.yaml         implementations of one skill (first match is served) and its parameters
   missions/
     <mission>.yaml       goal, robot, loop mode, defaults, steps
 ```
+
+A robot pack holds one robot model, nothing about a cell (taskweave ships `taskweave_robots`, one folder per robot,
+installed to `share/taskweave_robots/<model>/`):
+
+```
+<model>/
+  pack.yaml              name (= the model), version, schema_version (1), description
+  profile.yaml           how the hardware is reached: roles -> topics, joints, frames, controllers
+  embodiment.yaml        what the robot is and can do: capabilities, tools, reach, cameras, action spaces
+  poses.yaml             named poses (home, carry); robot-specific by nature
+  navigation.yaml        room kept around the robot while driving
+  moveit/                URDF, SRDF, kinematics, joint limits, collision meshes
+  sim.yaml, pose_targets.yaml   simulator and pose-solver inputs of the application
+```
+
+`robots/<model>/<file>` is read from the cell pack if it has the file, else from the first robot pack that has it:
+env `TASKWEAVE_ROBOT_PACKS` (paths separated by `os.pathsep`), `system.yaml` `robot_packs`, the installed
+`taskweave_robots`. Each location is a robot pack or a folder of robot packs. Edits from the HMI and teaching go to
+the cell pack for cell-specific files and files the cell pack already has, else to the robot pack the file came
+from; the installed share is read-only (a rebuild overwrites it), so an edit of one of its files creates a cell
+override, starting as a copy. `taskweave config files config/` lists each robot file's source.
 
 Frames: poses are `{frame, xyz: [x, y, z], rpy: [r, p, y]}` (metres, radians) or `{frame, x, y, yaw}` for planar base
 poses. `frame` is `cell` or a named object or fixture frame.
