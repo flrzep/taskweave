@@ -12,6 +12,10 @@
     taskweave teach point INSTANCE/POINT [--tool TOOL ...]
                                           save the tools' current TCP poses as a point on the object type
     taskweave describe [CONFIG_DIR ROBOT]  robot card + skills (running system, or offline from config)
+    taskweave smoke run MISSION [--reference FILE] [--save-reference FILE] [--hmi URL] [--cycles N]
+                                          run a mission in the sim from a clean start (HMI recording API), check
+                                          each step against a reference run (smoke.py)
+    taskweave smoke compare REFERENCE RUN  the same check for a saved run, offline
 """
 
 from __future__ import annotations
@@ -230,7 +234,12 @@ def main(argv=None) -> int:
     describe_parser = sub.add_parser('describe')
     describe_parser.add_argument('config_dir', nargs='?')
     describe_parser.add_argument('robot', nargs='?')
+    from . import smoke
+
+    smoke.add_arguments(sub.add_parser('smoke', help='mission smoke test against a reference run'))
     options = parser.parse_args(argv)
+    if options.command == 'smoke':
+        return smoke.main(options)
     if options.command == 'check':
         return check(options.config_dir)
     if options.command == 'skills':
