@@ -10,10 +10,12 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Plan.msg"
   "msg/TaskStatus.msg"
   "msg/SkillInfo.msg"
+  "msg/SpeedOverride.msg"
   "srv/ListSkills.srv"
   "srv/StartMission.srv"
   "srv/TeachPoint.srv"
   "srv/DescribeRobot.srv"
+  "srv/SetSpeedOverride.srv"
   "action/RunSkill.action"
   DEPENDENCIES builtin_interfaces
 )
