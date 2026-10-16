@@ -33,6 +33,7 @@ class JointSim(Node):
         self.position = {'j1': 0.0, 'j2': 0.0, 'lift': 0.0, 'grip': 1.0}
         self.target = dict(self.position)
         self.object_at = None  # grip stops here when closing on an object
+        self.creep = 0.0       # units/s the object gives way while pushed (a sim finger grinding through a collider)
         self.pub = self.create_publisher(JointState, '/arm/joint_states', 10)
         self.create_subscription(JointState, '/arm/joint_command', self.command, 10)
         self.create_timer(0.02, self.step)
@@ -47,6 +48,8 @@ class JointSim(Node):
             if name == 'j1':
                 new = min(new, J1_LIMIT)
             if name == 'grip' and self.object_at is not None:
+                if target < self.object_at:
+                    self.object_at = max(target, self.object_at - self.creep * 0.02)
                 new = max(new, self.object_at)
             self.position[name] = new
         self.pub.publish(JointState(name=list(self.position), position=list(self.position.values())))
@@ -126,6 +129,17 @@ def test_gripper_close_open_and_holding(system):
     data = json.loads(result.data_json)
     assert result.outcome == RunSkill.Result.SUCCEEDED and data['holding'] == {'left': True}
     assert data['world_state'] == {'left_gripper': 'holding'}
+
+
+def test_gripper_close_on_a_creeping_object_stops_soon(system):
+    sim, client = system
+    sim.object_at, sim.creep = 0.6, 0.02  # blocked, giving way slower than stall_speed: no progress either
+    start = time.monotonic()
+    result = run(client, 'gripper', {'side': 'left', 'action': 'close'})
+    took = time.monotonic() - start
+    assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
+    assert json.loads(result.data_json)['holding'] == {'left': True}
+    assert took < 4.0 and sim.position['grip'] > 0.5  # planned 0.5 s + stall 1 s, not 30 s of creeping
 
 
 def test_while_holding_a_pose_with_arm_joints_is_refused(system):

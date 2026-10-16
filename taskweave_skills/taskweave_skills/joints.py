@@ -33,6 +33,8 @@ class Params:
     position_tolerance: float = 0.02   # rad or m
     settle_s: float = 0.3              # within tolerance this long before success
     stall_timeout_s: float = 3.0       # after the planned move: no progress this long -> fail / holding
+    stall_speed: float = 0.05          # stall_ok moves (closing fingers): creeping slower than this (rad/s, m/s) is
+                                       # no progress either (a sim finger grinding through a collider)
     min_duration_s: float = 0.5
     rate_hz: float = 50.0
     state_timeout_s: float = 1.0       # no joint states this long -> fail
@@ -175,7 +177,10 @@ class _JointSkill(Skill):
                 else:
                     settled_since = None
                     total = sum(errors.values())
-                    if best_time is None or total < best - self.p.position_tolerance / 4:
+                    need = self.p.position_tolerance / 4
+                    if stall_ok and best_time is not None:
+                        need = max(need, self.p.stall_speed * (now - best_time))
+                    if best_time is None or total < best - need:
                         best, best_time = total, now
                     elif now - best_time > self.p.stall_timeout_s:
                         if stall_ok:
