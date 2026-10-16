@@ -328,6 +328,9 @@ OBJECT = {
         # the object is handled the same when turned by this angle about its vertical axis (e.g. 180: a frame lying
         # the other way round is approached and grasped as if it lay the usual way); 360 / angle turns are equivalent
         'yaw_symmetry_deg': {'enum': [90, 120, 180]},
+        # a placed object of this type is a place the next one comes to (e.g. a hanger waiting on a conveyor): taking
+        # it, or gripping it to work it, leaves the placed object where it is
+        'replenished': {'type': 'boolean'},
         'points': {
             'type': 'object',
             'propertyNames': NAME,

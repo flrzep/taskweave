@@ -112,3 +112,11 @@ def test_object_state_takes_items_off_stacks_and_puts_objects_down(config_dir):
     assert 'on_floor' not in store.object_instances()
     store.clear_object_state()
     assert store.object_instances()['pile'].stack_count == 2 and 'single' in store.object_instances()
+
+
+def test_a_replenished_object_stays_when_taken(config_dir):
+    (config_dir / 'objects' / 'hanger.yaml').write_text('name: hanger\nreplenished: true\n')
+    (config_dir / 'cell' / 'objects.yaml').write_text('waiting: {object: hanger, frame: cell, x: 1.0, y: 0.0, yaw: 0.0}\n')
+    store = ConfigStore(config_dir)
+    assert store.take_object('waiting') == 'waiting stays (the next hanger takes its place)'
+    assert 'waiting' in store.object_instances()

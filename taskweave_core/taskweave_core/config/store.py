@@ -237,10 +237,13 @@ class ConfigStore:
 
     def take_object(self, name: str) -> str:
         """One item of ``name`` was taken: a stack has one less (an empty stack stays, count 0), a single object is
-        gone. Returns what happened, for a log."""
+        gone; an object of a ``replenished`` type stays (the next one takes its place). Returns what happened, for a
+        log."""
         instance = self.object_instances().get(name)
         if instance is None:
             raise KeyError(f'no placed object {name!r}')
+        if self.object(instance.object).get('replenished'):
+            return f'{name} stays (the next {instance.object} takes its place)'
         configured = name in self._load('cell/objects.yaml', schemas.OBJECT_INSTANCES, required=False, default={})
 
         def edit(state):
