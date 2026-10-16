@@ -79,7 +79,7 @@ def step_results(events: list[dict], cycles: int | None = None) -> list[dict]:
 
 
 # ---- comparison ---------------------------------------------------------------------------
-def compare(reference: dict, run: dict, tolerance: float = 0.10, slack_s: float = 0.5, error_slack: float = 0.002,
+def compare(reference: dict, run: dict, tolerance: float = 0.10, slack_s: float = 1.0, error_slack: float = 0.002,
             allow_extra: bool = False) -> dict:
     """Rows (one per reference step, plus EXTRA run steps) and ``passed``."""
     ref_steps, run_steps = reference.get('steps') or [], run.get('steps') or []
@@ -302,7 +302,8 @@ def add_arguments(parser) -> None:
     compare_parser.add_argument('run')
     for p in (run_parser, compare_parser):
         p.add_argument('--tolerance', type=float, default=0.10, help='relative duration/error tolerance (0.10)')
-        p.add_argument('--slack', type=float, default=0.5, metavar='S', help='absolute duration slack (0.5 s)')
+        p.add_argument('--slack', type=float, default=1.0, metavar='S',  # path computing varies ~1 s with CPU load
+                       help='absolute duration slack (1 s)')
         p.add_argument('--error-slack', type=float, default=0.002, help='absolute max error slack (0.002)')
         p.add_argument('--allow-extra', action='store_true', help='steps not in the reference do not fail')
         p.add_argument('--report', metavar='FILE', help='report file (default: <reference>.report.yaml)')

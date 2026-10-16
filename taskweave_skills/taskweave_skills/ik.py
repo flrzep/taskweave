@@ -34,6 +34,13 @@ not MoveIt's measured state: a descent from a start a milliradian off may conver
 all, so identical runs would not choose the same. If nothing converges, the fallback group (a global solver) searches
 from the current state; its answer is not repeatable (logged).
 
+A target a short move from where the arm is (IkClient._continue: within 25 cm and 45 degrees of the flange) is first
+reached by continuation: the flange walked there in a straight line on the URDF chain (cartesian.walk_to), the joints
+moving continuously, no IK search. That solution wins unless it collides or puts the elbow far off its side: a seed
+can converge to another branch of a 7-joint arm (the wrist turned over, joint 5 or 7 half a turn round) for a few cm
+of TCP, and whether a descent from the current state converges can hang on a milliradian. A jump like that, chosen
+because no continuation got there, is logged.
+
 With ``choose``, every start that converges is a candidate, for the target and, if the tool frame says
 ``flip: true`` (a grasp that is the same turned 180 degrees about the approach), for the flipped target too. The
 candidate with the lowest cost wins: joints near their limits (an arm at a limit cannot move on, e.g. lift a held
@@ -289,6 +296,12 @@ class IkClient:
                 raise IkError(f'tool {tool!r} has no IK group or tool frame in the robot profile')
             flip = allow_flip and self.choose is not None and self.tools[tool].get('flip')
             variants = [target, flipped(target)] if flip else [target]
+            positions = {**(current or {}), **fixed, **result}
+            continued, why = self._continue(tool, variants, positions)
+            if continued is not None:  # the arm can get there as it is: no seed or search decides
+                chosen[tool] = continued
+                result.update(continued)
+                continue
             local = [(self.groups[tool], seed, self.timeout_s) for seed in [*self.seeds, here]]
             image = self._mirrored(tool, chosen)
             if image:
@@ -324,9 +337,68 @@ class IkClient:
                               f'{list(target["approach"])} needs the flange at ({flange}) in {self.frame}: out of '
                               f'reach, too close to the body, or in collision (code {code})')
             _, arm = self._best(tool, candidates, {**fixed, **result}, current or {}, image)
+            if why:
+                self._jump_warning(tool, arm, positions, why)
             chosen[tool] = arm
             result.update(arm)
         return result
+
+    def _continue(self, tool: str, variants: list, positions: dict, max_m: float = 0.25, max_deg: float = 45.0,
+                  elbow_deg: float = 90.0):
+        """The continuation of the arm's configuration to a target a short move away (at most ``max_m`` and ``max_deg``
+        from the flange now): the flange walked there in a straight line on the URDF chain (cartesian.walk_to), the
+        joints moving continuously from ``positions`` (every chain joint now). It wins over seed and search solutions,
+        which may be another branch of a 7-joint arm (a wrist turned over: joint 5 or 7 half a turn round for a few cm
+        of TCP), unless it ends in collision or with the elbow more than ``elbow_deg`` off the preferred side.
+        Returns (arm joints or None, why not; None if no continuation applies: no chain, no current joints, too far)."""
+        from .cartesian import elbow_deviation_of, rotation_angle, walk_to
+
+        chains = getattr(self, 'chains', {})
+        if tool not in chains or any(n not in positions for n in chains[tool][0].movable):
+            return None, None
+        chain, arm = chains[tool]
+        now, whys = chain.fk(positions), []
+        for index, variant in enumerate(variants):
+            goal = flange_target(variant, self.tools[tool])
+            distance, turn = np.linalg.norm(goal[:3, 3] - now[:3, 3]), rotation_angle(now[:3, :3].T @ goal[:3, :3])
+            if distance > max_m or turn > math.radians(max_deg):
+                continue
+            joints, why = walk_to(self, tool, positions, goal)
+            if joints is None:
+                whys.append(why)
+                continue
+            state = {**positions, **joints}
+            try:
+                elbow = elbow_deviation_of(chain, arm, state, self.elbow_side) if self.elbow_side else 0.0
+            except IndexError:  # an arm without shoulder, elbow and wrist joints: no elbow side
+                elbow = 0.0
+            if elbow > math.radians(elbow_deg):
+                whys.append(f'elbow {math.degrees(elbow):.0f} deg off {self.elbow_side}')
+                continue
+            try:
+                free = not self.avoid_collisions or self.valid({n: state[n] for n in chain.movable}, self.groups[tool])
+            except IkError as error:  # no answer: the IK search decides
+                whys.append(str(error))
+                continue
+            if not free:
+                whys.append('in collision')
+                continue
+            margin = math.radians(float((self.choose or {}).get('limit_margin_deg', LIMIT_MARGIN_DEG)))
+            self.last[tool] = {'flipped': bool(index), 'candidates': 1, 'continued': True,
+                               'elbow_deg': round(math.degrees(elbow)), 'limit_cost': round(limit_cost(
+                                   joints, self.limits, margin), 3)}
+            return joints, ''
+        return None, ('; '.join(whys) or None)
+
+    def _jump_warning(self, tool: str, arm: dict, positions: dict, why: str, jump_deg: float = 120.0) -> None:
+        """Log a solution that turns a joint more than ``jump_deg`` for a short move (another branch of the arm),
+        chosen because no continuation got there (``why``)."""
+        turns = {n: abs(v - positions[n]) for n, v in arm.items() if n in positions}
+        joint = max(turns, key=turns.get, default=None)
+        if joint is not None and turns[joint] > math.radians(jump_deg):
+            self.node.get_logger().warning(
+                f'IK for {tool}: configuration jump, {joint} turns {math.degrees(turns[joint]):.0f} deg for a short '
+                f'move: no continuous way there ({why})')
 
     def _here(self, current: dict) -> dict:
         """The joints of ``current`` an IK start sets: every arm's and, with chains, the joints between base and arm

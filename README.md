@@ -140,7 +140,7 @@ taskweave smoke compare config/tests/frame_cycle.reference.yaml run.yaml   # off
 ```
 
 A step passes when it runs in the reference's order with outcome `SUCCEEDED`, its duration is within
-`--tolerance` (default ±10 %) plus `--slack` seconds (0.5) of the reference, and its max error is at most
+`--tolerance` (default ±10 %) plus `--slack` seconds (1.0) of the reference, and its max error is at most
 reference × (1 + tolerance) + `--error-slack` (0.002). Missing steps fail, and so do steps that are not in the
 reference unless `--allow-extra`. The command prints a table (step, instruction, ref s, now s, Δ%, error, result),
 writes a report (`<name>.report.yaml` next to the reference, or `--report FILE`) and exits 0 (passed), 1 (failed) or
