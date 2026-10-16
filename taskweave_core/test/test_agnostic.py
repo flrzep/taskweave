@@ -26,10 +26,11 @@ FORBIDDEN = ['galbot', 's1', 'g1', 'a2d', 'agibot', 'adient', 'frame_type', 'rai
              'bay_', 'stack_2']
 
 # counts on 16 Oct 2026; strict mode (=1) fails above these
-BASELINE = {'names_code': 0, 'names_comments': 13, 'numbers': 34, 'constants': 0, 'arm_structure': 0}
+BASELINE = {'names_code': 0, 'names_comments': 13, 'numbers': 0, 'constants': 8, 'arm_structure': 0}
 
 ALLOWED_NUMBERS = {0, 1, 2, 3, 4, 0.5, 100, 1000, 1e6, 1e9, 180, 360}  # by abs value; plus epsilons <= 1e-6
 PROTOCOL_ARGS = {'create_publisher': 2, 'create_subscription': 3, 'round': 1}  # from this arg on: QoS depth, digits
+PROTOCOL_KEYWORDS = {'throttle_duration_sec'}  # keyword arguments that are not behaviour: log throttling
 SCHEMA_KEYS = {'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minItems', 'maxItems', 'multipleOf'}
 
 # module UPPER_CASE numbers that are protocol, not tuning
@@ -174,6 +175,7 @@ def named_nodes(tree) -> set[int]:
         elif isinstance(node, ast.Call):
             func = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, 'id', '')
             roots += node.args[PROTOCOL_ARGS[func]:] if func in PROTOCOL_ARGS else []
+            roots += [k.value for k in node.keywords if k.arg in PROTOCOL_KEYWORDS]
     return {id(n) for root in roots for n in ast.walk(root)}
 
 

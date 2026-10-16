@@ -24,7 +24,7 @@ import time
 from taskweave_core.config import wrap_angle
 from taskweave_core.skill import SkillResult
 
-from .navigate import NavigateTo
+from .navigate import MIN_DT_S, NavigateTo
 
 
 class DriveStraight(NavigateTo):
@@ -46,13 +46,13 @@ class DriveStraight(NavigateTo):
     needs = ['the strip the base drives over is free']
     achieves = ['robot base moved by the distance']
     default_timeout_s = 60.0
+    param_defaults = {'speed': 0.15, 'max_distance_m': 1.0, 'to_offset_m': 0.05, 'to_turn_deg': 5.0}  # module doc
 
     def setup(self, node, config, robot, params):
         params = dict(params)
-        self.speed = float(params.pop('speed', 0.15))
-        self.max_distance = float(params.pop('max_distance_m', 1.0))
-        self.to_offset = float(params.pop('to_offset_m', 0.05))
-        self.to_turn = math.radians(float(params.pop('to_turn_deg', 5.0)))
+        own = {key: float(params.pop(key, default)) for key, default in self.param_defaults.items()}
+        self.speed, self.max_distance, self.to_offset = own['speed'], own['max_distance_m'], own['to_offset_m']
+        self.to_turn = math.radians(own['to_turn_deg'])
         super().setup(node, config, robot, params)
 
     def execute(self, ctx, args):
@@ -88,7 +88,7 @@ class DriveStraight(NavigateTo):
                 self.stop()
                 return SkillResult.failed(f'odometry lost on {self.base["odom"]}')
             now = ctx.now()
-            dt, last = max(now - last, 1e-3), now
+            dt, last = max(now - last, MIN_DT_S), now
             dx, dy = tx - pose.x, ty - pose.y
             ex = math.cos(pose.yaw) * dx + math.sin(pose.yaw) * dy      # remaining, in the base frame
             ey = -math.sin(pose.yaw) * dx + math.cos(pose.yaw) * dy

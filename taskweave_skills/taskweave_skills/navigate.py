@@ -19,6 +19,10 @@ from nav_msgs.msg import Odometry
 from taskweave_core.config import Pose2D, wrap_angle
 from taskweave_core.skill import Skill, SkillResult
 
+MIN_DT_S = 1e-3           # s, floor of a control step (first tick, coarse clock): keeps the accel limits finite
+REVERSE_HYSTERESIS = 0.3  # rad, differential base: once reversing, keep reversing until the target is this much
+                          # further in front than straight across
+
 
 @dataclass
 class Params:
@@ -90,7 +94,8 @@ def command(pose: Pose2D, target: Pose2D, base_type: str, p: Params, previous: t
     else:  # differential: face the target (or, close by, turn its back to it), drive, then turn to the final heading
         heading_error = wrap_angle(math.atan2(dy, dx) - pose.yaw) if distance > 1e-6 else 0.0
         direction = 1.0
-        if distance <= p.reverse_within_m and abs(heading_error) > math.pi / 2 - (0.3 if previous[0] < 0 else 0.0):
+        across = math.pi / 2 - (REVERSE_HYSTERESIS if previous[0] < 0 else 0.0)
+        if distance <= p.reverse_within_m and abs(heading_error) > across:
             heading_error, direction = wrap_angle(heading_error + math.pi), -1.0  # hysteresis: keeps reversing
         far = distance > p.position_tolerance
         # Dead band: between half and full tolerance only creep on if already facing the point. Turning towards a
@@ -182,7 +187,7 @@ class NavigateTo(Skill):
                 self.stop()
                 return SkillResult.failed(f'odometry lost on {self.base["odom"]}')
             now = ctx.now()
-            dt, last = max(now - last, 1e-3), now
+            dt, last = max(now - last, MIN_DT_S), now
             distance = math.hypot(target.x - pose.x, target.y - pose.y)
             yaw_error = abs(wrap_angle(target.yaw - pose.yaw))
             if distance <= self.p.position_tolerance and yaw_error <= self.p.yaw_tolerance:

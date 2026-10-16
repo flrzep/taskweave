@@ -2,6 +2,8 @@
 
 from taskweave_core.skill import Skill, SkillResult
 
+WAIT_POLL_S = 0.1  # how often wait checks for a stop
+
 
 class Wait(Skill):
     name = 'wait'
@@ -18,7 +20,7 @@ class Wait(Skill):
         seconds = float(args['seconds'])
         end = ctx.elapsed() + seconds
         while ctx.elapsed() < end:
-            if not ctx.sleep(min(0.1, end - ctx.elapsed())):
+            if not ctx.sleep(min(WAIT_POLL_S, end - ctx.elapsed())):
                 return ctx.interrupted()
             ctx.feedback(min(1.0, ctx.elapsed() / seconds) if seconds else 1.0, 'waiting')
         return SkillResult.succeeded()

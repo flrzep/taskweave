@@ -23,6 +23,7 @@ Parameters (``skills/navigate_to.yaml``): the direct controller's (see ``navigat
   depart_max_m: 1.0             back out at most this far (0: never)
   depart_margin_m: 0.1          beyond the point where the footprint comes clear
   depart_speed: 0.15            m/s backwards
+  depart_slack_s: 5.0           backing out fails after this plus 3x the time it takes at depart_speed
   costmaps: /global_costmap/global_costmap,/local_costmap/local_costmap   nodes whose footprint follows the hold
 """
 
@@ -51,11 +52,11 @@ def nav2_parameters(navigation: dict, base: dict, controller: str = 'FollowPath'
     for the controller plugin ``controller`` (prefixed), and the MPPI motion model (set at start-up only). A base that
     is not holonomic never drives sideways, whatever the settings say. ``carrying``: the footprint of the carry
     envelope, if there is one."""
-    from .depart import envelope
+    from .depart import envelope, padding
 
     front, back, left, right = envelope(navigation, base, carrying)
     polygon = [[front, left], [front, -right], [-back, -right], [-back, left]]
-    costmap = {'footprint': str(polygon), 'footprint_padding': float(navigation.get('padding', 0.01))}
+    costmap = {'footprint': str(polygon), 'footprint_padding': padding(navigation)}
     if 'inflation_radius' in navigation:
         costmap['inflation_layer.inflation_radius'] = float(navigation['inflation_radius'])
     holonomic = base.get('type') == 'holonomic'
@@ -91,10 +92,12 @@ class Nav2NavigateTo(NavigateTo):
     description = ('Drive the robot base to a named location or stance along a collision-free path (Nav2, avoids '
                    'mapped and seen obstacles) and stop there precisely, facing the stored heading.')
     needs = ['a free path to the target exists']
+    param_defaults = {**NAV2_DEFAULTS, 'depart_slack_s': 5.0}  # see the module doc
+    NAV2_SHARE = 0.9  # of the step's progress feedback reported while Nav2 drives (the direct controller the rest)
 
     def setup(self, node, config, robot, params):
         params = dict(params)
-        self.nav = {key: type(default)(params.pop(key, default)) for key, default in NAV2_DEFAULTS.items()}
+        self.nav = {key: type(default)(params.pop(key, default)) for key, default in self.param_defaults.items()}
         super().setup(node, config, robot, params)
         from nav2_msgs.action import NavigateToPose  # only needed by this implementation
         from rclpy.action import ActionClient
@@ -170,7 +173,7 @@ class Nav2NavigateTo(NavigateTo):
         if distance <= 0:
             return None
         self.node.get_logger().info(f'navigate_to: footprint overlaps an obstacle, backing out {distance:.2f} m')
-        start, deadline = pose, ctx.now() + 5.0 + 3.0 * distance / self.nav['depart_speed']
+        start, deadline = pose, ctx.now() + self.nav['depart_slack_s'] + 3.0 * distance / self.nav['depart_speed']
         while True:
             if ctx.should_stop:
                 self.stop()
@@ -249,7 +252,8 @@ class Nav2NavigateTo(NavigateTo):
                 return ctx.interrupted()
             if not math.isnan(self.remaining):
                 start = start or max(self.remaining, 1e-6)
-                ctx.feedback(0.9 * (1.0 - min(self.remaining / start, 1.0)), f'Nav2: {self.remaining:.2f} m to go')
+                ctx.feedback(self.NAV2_SHARE * (1.0 - min(self.remaining / start, 1.0)),
+                             f'Nav2: {self.remaining:.2f} m to go')
             pose = self._current()
             if pose and math.hypot(target.x - pose.x, target.y - pose.y) <= self.nav['handover_distance']:
                 self.stop()  # close enough: the direct controller is faster and more precise than Nav2 here
