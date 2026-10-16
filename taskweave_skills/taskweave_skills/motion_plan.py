@@ -162,6 +162,10 @@ class MotionPlanner:
         times = [p.time_from_start.sec + p.time_from_start.nanosec * 1e-9 for p in trajectory.points]
         return Trajectory(list(trajectory.joint_names), times, [list(p.positions) for p in trajectory.points])
 
+    def free(self, start: dict, goal: dict, should_stop=lambda: False) -> bool:
+        """True if the straight joint-space move from ``start`` to ``goal`` is collision-free (as plan() checks it)."""
+        return self._free(start, goal, should_stop)
+
     def _straight(self, start: dict, goal: dict) -> Trajectory:
         """The straight joint-space move from ``start`` to ``goal`` at the escape speed."""
         names = [n for n in goal if n in start]

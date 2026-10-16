@@ -121,3 +121,24 @@ def test_the_elbow_swings_toward_a_side_with_the_hand_staying(tmp_path):
         assert elbow_deviation_of(chain, NAMES, end, side) < before - 0.2              # the elbow went that way
         assert report['arm'][1] < report['arm'][0]
         assert all(-2.5 <= end[n] <= 2.5 for n in NAMES)
+
+
+def test_an_elbow_opposite_its_side_swings_round_the_outside_and_stops_where_asked(tmp_path):
+    from test_chain import NAMES, START, URDF
+
+    from taskweave_skills.cartesian import elbow_deviation_of, elbow_swing_path
+    from taskweave_skills.chain import Chain
+    path = tmp_path / 'arm.urdf'
+    path.write_text(URDF)
+    chain = Chain.from_urdf(path, 'base', 'flange')
+    ik = ChainIk(chain, NAMES)
+    arm = {n: START[n] for n in NAMES}
+    assert elbow_deviation_of(chain, NAMES, START, 'down') > math.radians(150)    # elbow up: nearly opposite down
+    trajectory, report = elbow_swing_path(ik, ['arm'], arm, START, 'down', 0.6)
+    states = [{**START, **dict(zip(trajectory.names, p, strict=True))} for p in trajectory.points]
+    assert min(elbow_deviation_of(chain, NAMES, s, 'out') for s in states) < math.radians(20)   # past the outside
+    assert min(elbow_deviation_of(chain, NAMES, s, 'in') for s in states) > math.radians(80)    # never the inside
+    assert all(np.allclose(chain.fk(s)[:3, 3], chain.fk(START)[:3, 3], atol=1e-3) for s in states)
+    assert report['arm'][1] < 90
+    trajectory, report = elbow_swing_path(ik, ['arm'], arm, START, 'down', 0.6, settled={'arm': math.radians(110)})
+    assert 100 <= report['arm'][1] <= 110                                           # as far as asked, no further

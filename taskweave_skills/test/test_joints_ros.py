@@ -1,6 +1,7 @@
 """move_to_pose and gripper against a small joint simulator (targets in, states out)."""
 
 import json
+import math
 import shutil
 import threading
 import time
@@ -94,6 +95,50 @@ def test_plan_duration_uses_the_slowest_joint():
     p = Params(max_joint_speed=1.0, max_linear_speed=0.1, linear_joints=('lift',))
     assert plan_duration({'j1': 0.0, 'lift': 0.0}, {'j1': 0.5, 'lift': 0.2}, p) == pytest.approx(2.0)
     assert interpolate({'a': 0.0}, {'a': 2.0}, 0.5) == {'a': 1.0}
+
+
+def test_a_blocked_move_swings_the_elbows_first_then_goes_straight(tmp_path):
+    """move_to_pose / go_to_point to an IK goal with the elbows on the other side: the straight joint move is blocked
+    (the hands would swing through each other) and a planner's path wanders, so the elbows swing over first, the hands
+    staying, then the arms move straight to the goal (instead of planning), if that is free."""
+    from types import SimpleNamespace
+
+    import numpy as np
+    from test_cartesian import ChainIk
+    from test_chain import NAMES, START, URDF
+
+    from taskweave_skills.cartesian import elbow_deviation_of, elbow_swing_path
+    from taskweave_skills.chain import Chain
+    from taskweave_skills.joints import MoveToPose
+
+    path = tmp_path / 'arm.urdf'
+    path.write_text(URDF)
+    chain = Chain.from_urdf(path, 'base', 'flange')
+    ik = ChainIk(chain, NAMES)
+    ik.joint_pattern = 'j[1-7]'
+    swung, _ = elbow_swing_path(ik, ['arm'], {n: START[n] for n in NAMES}, START, 'down', 0.6)
+    goal = dict(zip(swung.names, swung.points[-1], strict=True))           # same hand, elbow over on the down side
+    goal['j1'] += 0.05                                                     # and the hand moved a little
+    blocked_from = []
+
+    def free(start, end, stop):  # blocked unless the elbow is already near the down side
+        blocked_from.append(start)
+        return elbow_deviation_of(chain, NAMES, start, 'down') < math.radians(120)
+
+    skill = MoveToPose.__new__(MoveToPose)
+    skill.ik, skill.p, skill.name = ik, Params(max_joint_speed=1.0), 'move_to_pose'
+    skill.planner = SimpleNamespace(free=free)
+    skill.node = SimpleNamespace(get_logger=lambda: SimpleNamespace(info=lambda message: None))
+    ctx = SimpleNamespace(should_stop=False)
+    trajectory = skill._swing_first(ctx, dict(START), goal, 'down')
+    states = [{**START, **dict(zip(trajectory.names, p, strict=True))} for p in trajectory.points]
+    assert all(abs(states[-1][n] - goal[n]) < 1e-9 for n in goal)                # ends on the goal
+    hand = [np.linalg.norm(chain.fk(s)[:3, 3] - chain.fk(START)[:3, 3]) for s in states]
+    turn = next(i for i, h in enumerate(hand) if h > 1e-3)                     # the hands stay while the elbows swing
+    assert elbow_deviation_of(chain, NAMES, states[turn - 1], 'down') < math.radians(120)
+    assert all(b >= a - 1e-9 for a, b in zip(trajectory.times, trajectory.times[1:]))
+    skill.planner = SimpleNamespace(free=lambda start, end, stop: False)      # blocked from there too: planner's turn
+    assert skill._swing_first(ctx, dict(START), goal, 'down') is None
 
 
 def test_move_to_named_pose(system):

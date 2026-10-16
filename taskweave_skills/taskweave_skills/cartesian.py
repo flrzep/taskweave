@@ -226,13 +226,17 @@ def _chain_path(ik, starts: dict, goals: dict, current: dict, state: dict, speed
 
 
 SWING_MAX_STEPS = 200
+VIA_OUT_RAD = math.radians(150)   # an elbow this far off its side (nearly opposite: neither way round is shorter) swings
+VIA_OUT_UNTIL_RAD = math.radians(120)   # toward out first, until it is this close (never through the body)
 
 
-def elbow_swing_path(ik, tools: list[str], current: dict, state: dict, side, joint_speed: float):
+def elbow_swing_path(ik, tools: list[str], current: dict, state: dict, side, joint_speed: float,
+                     settled: dict | None = None):
     """Joint trajectory swinging the elbows of ``tools`` toward ``side`` (ik.preferred_elbow) along each arm's
-    self-motion, the hands staying where they are (chains only). It stops when every elbow is there, or before a step
-    that would put a joint at its limit (margin) or the robot in collision. Returns (Trajectory or None if nothing
-    moved, {tool: (deviation before, after) in degrees}). Raises PathError without chains."""
+    self-motion, the hands staying where they are (chains only). An elbow nearly opposite its side goes round the
+    outside. It stops when every elbow is there (``settled``: {tool: rad} this close, default ELBOW_SETTLED_RAD), or
+    before a step that would put a joint at its limit (margin) or the robot in collision. Returns (Trajectory or None
+    if nothing moved, {tool: (deviation before, after) in degrees}). Raises PathError without chains."""
     from .ik import IkError, LIMIT_MARGIN_DEG
 
     chains = getattr(ik, 'chains', {})
@@ -243,37 +247,43 @@ def elbow_swing_path(ik, tools: list[str], current: dict, state: dict, side, joi
     names = sorted(current)
     flanges = {tool: chains[tool][0].fk(positions) for tool in tools}
     before = {tool: elbow_deviation_of(chains[tool][0], chains[tool][1], positions, side) for tool in tools}
+    done = {tool: max(ELBOW_SETTLED_RAD, (settled or {}).get(tool, 0.0)) for tool in tools}
+    legs = [side]
+    if isinstance(side, str) and side not in ('out', 'in') and max(before.values()) > VIA_OUT_RAD:
+        legs = ['out', side]
     times, points, elapsed = [0.0], [[current[n] for n in names]], 0.0
-    for _ in range(SWING_MAX_STEPS):
-        trial, moving = dict(positions), False
-        for tool in tools:
-            chain, arm = chains[tool]
-            if elbow_deviation_of(chain, arm, trial, side) < ELBOW_SETTLED_RAD:
-                continue
-            solved, _ = chain_step(chain, arm, trial, flanges[tool], {}, margin, side)
-            if solved is None:
-                continue
-            edge = margin / 5   # closer than this to a limit, a joint may only move away from it
-            near_limit = any((v < ik.limits[n][0] + edge and v < trial[n]) or (v > ik.limits[n][1] - edge and v > trial[n])
-                             for n, v in solved.items() if n in ik.limits)
-            if near_limit or elbow_deviation_of(chain, arm, {**trial, **solved}, side) > \
-                    elbow_deviation_of(chain, arm, trial, side) - 1e-4:
-                continue  # at a limit, or no longer getting closer: this elbow stays
-            trial.update(solved)
-            moving = True
-        if not moving:
-            break
-        moved = {name: trial[name] for name in names}
-        try:
-            if not ik.valid(moved, ik.groups[tools[0]]):
+    for leg in legs:
+        for _ in range(SWING_MAX_STEPS):
+            trial, moving = dict(positions), False
+            for tool in tools:
+                chain, arm = chains[tool]
+                if elbow_deviation_of(chain, arm, trial, side) < (VIA_OUT_UNTIL_RAD if leg != side else done[tool]):
+                    continue
+                solved, _ = chain_step(chain, arm, trial, flanges[tool], {}, margin, leg)
+                if solved is None:
+                    continue
+                edge = margin / 5   # closer than this to a limit, a joint may only move away from it
+                near_limit = any((v < ik.limits[n][0] + edge and v < trial[n])
+                                 or (v > ik.limits[n][1] - edge and v > trial[n])
+                                 for n, v in solved.items() if n in ik.limits)
+                if near_limit or elbow_deviation_of(chain, arm, {**trial, **solved}, leg) > \
+                        elbow_deviation_of(chain, arm, trial, leg) - 1e-4:
+                    continue  # at a limit, or no longer getting closer: this elbow stays
+                trial.update(solved)
+                moving = True
+            if not moving:
                 break
-        except IkError as error:
-            raise PathError(str(error)) from error
-        step = max(abs(trial[n] - positions[n]) for n in names)
-        positions = trial
-        elapsed += max(step / joint_speed, 1e-3)
-        times.append(elapsed)
-        points.append([positions[n] for n in names])
+            moved = {name: trial[name] for name in names}
+            try:
+                if not ik.valid(moved, ik.groups[tools[0]]):
+                    break
+            except IkError as error:
+                raise PathError(str(error)) from error
+            step = max(abs(trial[n] - positions[n]) for n in names)
+            positions = trial
+            elapsed += max(step / joint_speed, 1e-3)
+            times.append(elapsed)
+            points.append([positions[n] for n in names])
     after = {tool: elbow_deviation_of(chains[tool][0], chains[tool][1], positions, side) for tool in tools}
     report = {tool: (round(math.degrees(before[tool])), round(math.degrees(after[tool]))) for tool in tools}
     return (Trajectory(names, times, points) if len(points) > 1 else None), report

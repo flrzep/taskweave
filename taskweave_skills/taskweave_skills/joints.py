@@ -291,11 +291,12 @@ class MoveToPose(_JointSkill):
             else:
                 tried = f' (also tried {", ".join(str(a) for a in fallback_joints)})' if fallback_joints else ''
                 return SkillResult.failed(f'{first_error}{tried}'), 0
-        return self._go(ctx, goal, label)
+        return self._go(ctx, goal, label, elbow=self.ik.elbow_side if tools else None)
 
-    def _go(self, ctx, goal: dict, label: str):
-        """Move to the joint ``goal`` along a planned path if there is a planner. Returns (failure or None, worst
-        joint error at the end)."""
+    def _go(self, ctx, goal: dict, label: str, elbow=None):
+        """Move to the joint ``goal`` along a planned path if there is a planner. ``elbow``: the side IK solved the
+        arms for; if the straight move is blocked, the elbows swing there first (_swing_first). Returns (failure or
+        None, worst joint error at the end)."""
         from .motion_plan import PlanError
 
         path = None
@@ -304,14 +305,50 @@ class MoveToPose(_JointSkill):
             start = self.joints.snapshot(self.p.state_timeout_s)
             if start is None:
                 return SkillResult.failed(f'no joint states on {self.joints.state_topic}'), 0
+            stop = lambda: ctx.should_stop  # noqa: E731
             try:
-                path = self.planner.plan(start, goal, lambda: ctx.should_stop)
+                if elbow is None or not self.planner.direct:
+                    path = self.planner.plan(start, goal, stop)
+                elif not self.planner.free(start, goal, stop):
+                    path = self._swing_first(ctx, start, goal, elbow) or self.planner.plan(start, goal, stop)
             except PlanError as error:
                 return SkillResult.failed(f'{label}: {error}'), 0
         result, final = self._move(ctx, goal, label, path=path)
         if result is not None:
             return result, 0
         return None, max(abs(goal[n] - final[n]) for n in goal)
+
+    def _swing_first(self, ctx, start: dict, goal: dict, side):
+        """A goal IK solved with the elbows toward ``side`` whose straight move is blocked, typically from elbows on
+        the other side (halfway the hands swing through each other, and a planner's path wanders, hands and elbows
+        flailing): the elbows swing toward ``side`` first, as far as the goal has them, the hands staying, then the
+        arms move straight to ``goal``. That Trajectory, or None if the straight move from there is blocked too."""
+        import re
+
+        from .cartesian import PathError, elbow_deviation_of, elbow_swing_path
+        from .motion_plan import Trajectory
+
+        chains = getattr(self.ik, 'chains', None) or {}
+        patterns = {tool: re.compile(self.ik.joint_pattern.format(tool=tool)) for tool in chains}
+        tools = [tool for tool, p in patterns.items() if any(p.fullmatch(n) for n in goal)]
+        if not tools or any(n not in start for n in goal):
+            return None
+        arm = {n: v for n, v in start.items() if any(patterns[tool].fullmatch(n) for tool in tools)}
+        settled = {tool: elbow_deviation_of(*chains[tool], {**start, **goal}, side) for tool in tools}
+        try:
+            swing, _ = elbow_swing_path(self.ik, tools, arm, start, side, self.p.max_joint_speed, settled)
+        except PathError:
+            return None
+        if swing is None:
+            return None
+        swung = {**start, **dict(zip(swing.names, swing.points[-1], strict=True))}
+        if not self.planner.free(swung, goal, lambda: ctx.should_stop):
+            return None
+        duration, steps = plan_duration(swung, goal, self.p), 20   # eased in and out like a straight move
+        straight = Trajectory(list(goal), [duration * k / steps for k in range(steps + 1)],
+                              [list(interpolate(swung, goal, k / steps).values()) for k in range(steps + 1)])
+        self.node.get_logger().info(f'{self.name}: straight move blocked: elbows toward {side} first, then straight')
+        return swing.then(straight)
 
 
     def _linear(self, ctx, tools: dict, label: str, goals=None):
@@ -446,7 +483,7 @@ class GoToPoint(MoveToPose):
             except PathError as error:
                 return SkillResult.failed(f'{label}: no straight {approach:g} m approach to the point: {error}')
             first, last = ({**lift, **dict(zip(path.names, path.points[i], strict=True))} for i in (0, -1))
-            result, _ = self._go(ctx, first, f'{label} (-{approach:g} m approach)')
+            result, _ = self._go(ctx, first, f'{label} (-{approach:g} m approach)', elbow=self.ik.elbow_side)
             if result is not None:
                 return result
             label += f' ({approach:g} m straight)'
