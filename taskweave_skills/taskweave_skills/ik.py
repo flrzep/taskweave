@@ -29,7 +29,10 @@ depends on where it starts. IK starts from each seed posture in turn, then from 
 joints (e.g. the torso lift) are applied on top, so the arms are solved for the torso height the pose sets. With a
 deterministic local solver (pick_ik mode local: gradient descent from the start), a named pose then always solves
 to the same configuration, whatever pose the robot comes from; only targets no seed reaches depend on the current
-state. If nothing converges, the fallback group (a global solver) searches from the current state.
+state. The current state is the joints the skill passes (a joint at the goal of its last move exactly at that goal),
+not MoveIt's measured state: a descent from a start a milliradian off may converge to another configuration or not at
+all, so identical runs would not choose the same. If nothing converges, the fallback group (a global solver) searches
+from the current state; its answer is not repeatable (logged).
 
 With ``choose``, every start that converges is a candidate, for the target and, if the tool frame says
 ``flip: true`` (a grasp that is the same turned 180 degrees about the approach), for the flipped target too. The
@@ -277,6 +280,7 @@ class IkClient:
         self.elbow_side = elbow or (self.choose or {}).get('elbow')
         result: dict[str, float] = {}
         self.last = {}
+        here = self._here(current or {})  # the current state start: the joints as given ({}: MoveIt's own state)
         chosen: dict[str, dict] = {}  # per tool: its arm joints, for the arm that mirrors it
         order = sorted(tools, key=lambda t: self.mirror.get(t) in tools)  # mirror sources first
         for tool in order:
@@ -285,7 +289,7 @@ class IkClient:
                 raise IkError(f'tool {tool!r} has no IK group or tool frame in the robot profile')
             flip = allow_flip and self.choose is not None and self.tools[tool].get('flip')
             variants = [target, flipped(target)] if flip else [target]
-            local = [(self.groups[tool], seed, self.timeout_s) for seed in [*self.seeds, {}]]  # {}: current state
+            local = [(self.groups[tool], seed, self.timeout_s) for seed in [*self.seeds, here]]
             image = self._mirrored(tool, chosen)
             if image:
                 local.insert(0, (self.groups[tool], image, self.timeout_s))
@@ -296,6 +300,9 @@ class IkClient:
                 else []
             candidates, response = [], None
             for attempts in (local, fallback):  # the global search only if no local descent converged
+                if attempts is fallback and fallback:
+                    self.node.get_logger().warning(f'IK for {tool}: no local descent converged, global search '
+                                                   f'({fallback[0][0]}): its answer is not repeatable')
                 for index, variant in enumerate(variants):
                     for group, seed, timeout_s in attempts:
                         response = self._attempt(tool, group, variant, {**seed, **fixed, **result}, timeout_s,
@@ -320,6 +327,14 @@ class IkClient:
             chosen[tool] = arm
             result.update(arm)
         return result
+
+    def _here(self, current: dict) -> dict:
+        """The joints of ``current`` an IK start sets: every arm's and, with chains, the joints between base and arm
+        (e.g. a lift). Sent explicitly, not left to MoveIt's state (the measured one, noisy while settling): a local
+        descent from a start a milliradian off can converge, or not, to another configuration."""
+        patterns = [re.compile(self.joint_pattern.format(tool=tool)) for tool in self.groups]
+        chained = {name for chain, _ in getattr(self, 'chains', {}).values() for name in chain.movable}
+        return {n: float(v) for n, v in current.items() if n in chained or any(p.fullmatch(n) for p in patterns)}
 
     def _mirrored(self, tool: str, chosen: dict) -> dict:
         """The mirror image of the solution of the arm this tool mirrors (same values, names renamed), or {}."""

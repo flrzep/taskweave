@@ -236,7 +236,8 @@ def elbow_swing_path(ik, tools: list[str], current: dict, state: dict, side, joi
     self-motion, the hands staying where they are (chains only). An elbow nearly opposite its side goes round the
     outside. It stops when every elbow is there (``settled``: {tool: rad} this close, default ELBOW_SETTLED_RAD), or
     before a step that would put a joint at its limit (margin) or the robot in collision. Returns (Trajectory or None
-    if nothing moved, {tool: (deviation before, after) in degrees}). Raises PathError without chains."""
+    if nothing moved, {tool: (deviation before, after in degrees, why it stopped short or '' if it got there)}).
+    Raises PathError without chains."""
     from .ik import IkError, LIMIT_MARGIN_DEG
 
     chains = getattr(ik, 'chains', {})
@@ -252,30 +253,36 @@ def elbow_swing_path(ik, tools: list[str], current: dict, state: dict, side, joi
     if isinstance(side, str) and side not in ('out', 'in') and max(before.values()) > VIA_OUT_RAD:
         legs = ['out', side]
     times, points, elapsed = [0.0], [[current[n] for n in names]], 0.0
+    why = {tool: '' for tool in tools}
     for leg in legs:
         for _ in range(SWING_MAX_STEPS):
-            trial, moving = dict(positions), False
+            trial, moving = dict(positions), []
             for tool in tools:
                 chain, arm = chains[tool]
                 if elbow_deviation_of(chain, arm, trial, side) < (VIA_OUT_UNTIL_RAD if leg != side else done[tool]):
                     continue
-                solved, _ = chain_step(chain, arm, trial, flanges[tool], {}, margin, leg)
+                solved, reason = chain_step(chain, arm, trial, flanges[tool], {}, margin, leg)
                 if solved is None:
+                    why[tool] = f'no step with the hand staying ({reason})'
                     continue
                 edge = margin / 5   # closer than this to a limit, a joint may only move away from it
-                near_limit = any((v < ik.limits[n][0] + edge and v < trial[n])
-                                 or (v > ik.limits[n][1] - edge and v > trial[n])
-                                 for n, v in solved.items() if n in ik.limits)
-                if near_limit or elbow_deviation_of(chain, arm, {**trial, **solved}, leg) > \
+                limited = [n for n, v in solved.items() if n in ik.limits and (
+                    (v < ik.limits[n][0] + edge and v < trial[n]) or (v > ik.limits[n][1] - edge and v > trial[n]))]
+                if limited:
+                    why[tool] = f'{limited[0]} at its limit'
+                    continue
+                if elbow_deviation_of(chain, arm, {**trial, **solved}, leg) > \
                         elbow_deviation_of(chain, arm, trial, leg) - 1e-4:
-                    continue  # at a limit, or no longer getting closer: this elbow stays
+                    why[tool] = f'no closer to {leg} along the arm\'s self-motion'
+                    continue
                 trial.update(solved)
-                moving = True
+                moving.append(tool)
             if not moving:
                 break
             moved = {name: trial[name] for name in names}
             try:
                 if not ik.valid(moved, ik.groups[tools[0]]):
+                    why.update({tool: 'the next step would collide' for tool in moving})
                     break
             except IkError as error:
                 raise PathError(str(error)) from error
@@ -284,6 +291,17 @@ def elbow_swing_path(ik, tools: list[str], current: dict, state: dict, side, joi
             elapsed += max(step / joint_speed, 1e-3)
             times.append(elapsed)
             points.append([positions[n] for n in names])
+        else:
+            why.update({tool: f'all {SWING_MAX_STEPS} steps used' for tool in tools if not why[tool]})
     after = {tool: elbow_deviation_of(chains[tool][0], chains[tool][1], positions, side) for tool in tools}
-    report = {tool: (round(math.degrees(before[tool])), round(math.degrees(after[tool]))) for tool in tools}
+    report = {tool: (round(math.degrees(before[tool])), round(math.degrees(after[tool])),
+                     '' if after[tool] < done[tool] else why[tool] or 'stopped') for tool in tools}
     return (Trajectory(names, times, points) if len(points) > 1 else None), report
+
+
+def swing_short(report: dict, tolerance_deg: float, settled_deg: dict | None = None) -> str:
+    """The elbows of an elbow_swing_path report that stopped more than ``tolerance_deg`` short of their side (of
+    ``settled_deg``: {tool: deg} where they were to stop, default 0), where and why, e.g. 'left 131 -> 89 deg off
+    (left_joint5 at its limit)'; '' if every elbow got there."""
+    return ', '.join(f'{tool} {a} -> {b} deg off ({why or "stopped"})' for tool, (a, b, why) in report.items()
+                     if b > (settled_deg or {}).get(tool, 0.0) + tolerance_deg)

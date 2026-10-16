@@ -126,9 +126,10 @@ def test_a_blocked_move_swings_the_elbows_first_then_goes_straight(tmp_path):
         return elbow_deviation_of(chain, NAMES, start, 'down') < math.radians(120)
 
     skill = MoveToPose.__new__(MoveToPose)
-    skill.ik, skill.p, skill.name = ik, Params(max_joint_speed=1.0), 'move_to_pose'
+    skill.ik, skill.p, skill.name = ik, Params(max_joint_speed=1.0, elbow_tolerance_deg=20.0), 'move_to_pose'
     skill.planner = SimpleNamespace(free=free)
-    skill.node = SimpleNamespace(get_logger=lambda: SimpleNamespace(info=lambda message: None))
+    logged = []
+    skill.node = SimpleNamespace(get_logger=lambda: SimpleNamespace(info=logged.append))
     ctx = SimpleNamespace(should_stop=False)
     trajectory = skill._swing_first(ctx, dict(START), goal, 'down')
     states = [{**START, **dict(zip(trajectory.names, p, strict=True))} for p in trajectory.points]
@@ -139,6 +140,61 @@ def test_a_blocked_move_swings_the_elbows_first_then_goes_straight(tmp_path):
     assert all(b >= a - 1e-9 for a, b in zip(trajectory.times, trajectory.times[1:]))
     skill.planner = SimpleNamespace(free=lambda start, end, stop: False)      # blocked from there too: planner's turn
     assert skill._swing_first(ctx, dict(START), goal, 'down') is None
+    skill.planner = SimpleNamespace(free=lambda start, end, stop: True)
+    ik.valid = lambda joints, group: False                                   # the swing collides at once: stops short
+    assert skill._swing_first(ctx, dict(START), goal, 'down') is None and 'stops short' in logged[-1]
+    assert 'the next step would collide' in logged[-1]
+
+
+def test_an_elbow_swing_that_stops_short_fails_before_moving(tmp_path):
+    """move_object elbow: elbows that would end further than elbow_tolerance_deg from the side fail the step (where they
+    stop and why), instead of a partial swing reported as success."""
+    from types import SimpleNamespace
+
+    from test_cartesian import ChainIk
+    from test_chain import NAMES, START, URDF
+
+    from taskweave_skills.chain import Chain
+    from taskweave_skills.joints import MoveObject
+
+    path = tmp_path / 'arm.urdf'
+    path.write_text(URDF)
+    ik = ChainIk(Chain.from_urdf(path, 'base', 'flange'), NAMES)
+    ik.joint_pattern = 'j[1-7]'
+    moved = []
+    skill = MoveObject.__new__(MoveObject)
+    skill.ik, skill.p = ik, Params(max_joint_speed=1.0, elbow_tolerance_deg=20.0)
+    skill.joints = SimpleNamespace(start=lambda max_age, tolerance: dict(START))
+    skill._move = lambda ctx, goal, label, path=None: moved.append(goal) or (None, goal)
+    skill._check_hands = lambda goals, label: None
+    ctx = SimpleNamespace(should_stop=False, feedback=lambda fraction, text: None)
+    hold = {'tools': ['arm'], 'object': 'box', 'object_in_base': None, 'tcp_in_object': {}}
+    result = skill._swing_elbows(ctx, hold, 'down')                          # the wrist reaches its limit halfway
+    assert result.outcome.name == 'FAILED' and not moved
+    assert result.message == ('elbows of arm down: the elbows would stop more than 20 deg off down: arm 173 -> 53 deg '
+                              'off (j5 at its limit); not moved')
+    ik.valid = lambda joints, group: False                                   # every step collides
+    result = skill._swing_elbows(ctx, hold, 'out')
+    assert result.outcome.name == 'FAILED' and not moved and 'the next step would collide' in result.message
+    ik.valid = lambda joints, group: True
+    result = skill._swing_elbows(ctx, hold, 'out')
+    assert result.outcome.name == 'SUCCEEDED' and len(moved) == 1, result.message
+    assert result.message == 'elbows of arm out: arm 83 -> 6 deg off out'
+
+
+def test_the_start_of_a_move_is_the_last_goal_while_the_joints_are_within_tolerance():
+    """Joint states settle with noise; IK, planning and paths start from the goal the last move reached, so identical
+    runs start from identical joints."""
+    from types import SimpleNamespace
+
+    from taskweave_skills.joints import JointInterface
+
+    node = SimpleNamespace(create_publisher=lambda *args: None, create_subscription=lambda *args: None)
+    joints = JointInterface(node, {'command': '/c', 'state': '/s'})
+    joints._state(JointState(name=['a', 'b', 'c'], position=[1.0004, 2.05, 3.0]))
+    joints.reached.update({'a': 1.0, 'b': 2.0})
+    assert joints.start(1.0, 0.02) == {'a': 1.0, 'b': 2.05, 'c': 3.0}   # b is 0.05 off its goal: as measured
+    assert joints.snapshot(1.0)['a'] == pytest.approx(1.0004)
 
 
 def test_move_to_named_pose(system):

@@ -142,3 +142,24 @@ def test_an_elbow_opposite_its_side_swings_round_the_outside_and_stops_where_ask
     assert report['arm'][1] < 90
     trajectory, report = elbow_swing_path(ik, ['arm'], arm, START, 'down', 0.6, settled={'arm': math.radians(110)})
     assert 100 <= report['arm'][1] <= 110                                           # as far as asked, no further
+
+
+def test_a_swing_that_stops_short_says_where_and_why(tmp_path):
+    from test_chain import NAMES, START, URDF
+
+    from taskweave_skills.cartesian import elbow_swing_path, swing_short
+    from taskweave_skills.chain import Chain
+    path = tmp_path / 'arm.urdf'
+    path.write_text(URDF)
+    chain = Chain.from_urdf(path, 'base', 'flange')
+    ik = ChainIk(chain, NAMES)
+    arm = {n: START[n] for n in NAMES}
+    _, report = elbow_swing_path(ik, ['arm'], arm, START, 'out', 0.6)
+    assert report['arm'][1] < 20 and report['arm'][2] == '' and swing_short(report, 20) == ''   # got there
+    _, report = elbow_swing_path(ik, ['arm'], arm, START, 'down', 0.6)                          # the wrist cannot
+    assert report['arm'] == (173, 53, 'j5 at its limit')
+    assert swing_short(report, 20) == 'arm 173 -> 53 deg off (j5 at its limit)'
+    assert swing_short(report, 20, {'arm': 40}) == ''                     # within 20 deg of where it was to stop
+    ik.valid = lambda joints, group: False                                # every step collides
+    trajectory, report = elbow_swing_path(ik, ['arm'], arm, START, 'out', 0.6)
+    assert trajectory is None and report['arm'] == (83, 83, 'the next step would collide')

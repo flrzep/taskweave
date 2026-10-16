@@ -19,12 +19,14 @@ TARGET = {'tcp': [0.8, 0.3, 0.1], 'approach': [0, 0, -1], 'closing': [0, 1, 0]}
 
 
 class FakeMoveIt(Node):
-    """IK converges to wherever it starts (<side>_joint1 = the start's value, 0 from the current state); FK puts the
-    elbow above the shoulder-wrist line for <side>_joint1 > 0 and below it for < 0 (right arm: mirrored in y)."""
+    """IK converges to wherever it starts (<side>_joint1 = the start's value, ``measured()`` from MoveIt's own current
+    state, default 0); FK puts the elbow above the shoulder-wrist line for <side>_joint1 > 0 and below it for < 0 (right
+    arm: mirrored in y)."""
 
     def __init__(self):
         super().__init__('fake_moveit')
         self.ik_requests = []
+        self.measured = lambda: 0.0
         self.create_service(GetPositionIK, '/compute_ik', self.ik)
         self.create_service(GetPositionFK, '/compute_fk', self.fk)
 
@@ -34,7 +36,7 @@ class FakeMoveIt(Node):
                          request.ik_request.robot_state.joint_state.position, strict=True))
         side = 'right' if request.ik_request.group_name.startswith('right') else 'left'
         response.solution.joint_state.name = [f'{side}_joint1', f'{side}_joint2']
-        response.solution.joint_state.position = [start.get(f'{side}_joint1', 0.0), 0.0]
+        response.solution.joint_state.position = [start.get(f'{side}_joint1', self.measured()), 0.0]
         response.error_code.val = 1
         return response
 
@@ -99,8 +101,26 @@ def test_room_to_the_joint_limits_can_outweigh_the_elbow(moveit):
 def test_the_size_of_the_move_breaks_ties(moveit):
     _, node = moveit
     ik = IkClient(node, robot({}))  # no elbow preference: only limits (none) and the move from the current joints
-    assert ik.solve({'left': TARGET}, {}, current={'left_joint1': -0.4, 'left_joint2': 0.0})['left_joint1'] == \
-        pytest.approx(-0.5)
+    assert ik.solve({'left': TARGET}, {})['left_joint1'] == pytest.approx(0.5)      # no current joints: the first
+    fake, _ = moveit
+    fake.measured = lambda: 2.0   # a descent from MoveIt's own state would end far away
+    current = {'left_joint1': -0.4, 'left_joint2': 0.0}
+    assert ik.solve({'left': TARGET}, {}, current=current)['left_joint1'] == pytest.approx(-0.4)  # from those joints
+
+def test_identical_inputs_give_the_same_solution_whatever_moveit_measures(moveit):
+    """The current state start is the joints the skill passes, not MoveIt's measured state (noisy while the arm
+    settles): a local descent from a start a milliradian off can end in another configuration, or fail."""
+    import random
+
+    fake, node = moveit
+    fake.measured = lambda: random.uniform(-1.0, 1.0)   # a descent from MoveIt's own state ends anywhere
+    ik = IkClient(node, robot({}))
+    current = {'left_joint1': -0.4, 'left_joint2': 0.1, 'other_joint': 3.0}
+    solutions = [ik.solve({'left': TARGET}, {}, current=current) for _ in range(5)]
+    assert all(s == solutions[0] for s in solutions) and solutions[0]['left_joint1'] == pytest.approx(-0.4)
+    starts = [dict(zip(r.robot_state.joint_state.name, r.robot_state.joint_state.position, strict=True))
+              for r in fake.ik_requests]
+    assert starts[2] == {'left_joint1': -0.4, 'left_joint2': pytest.approx(0.1)}  # after the 2 seeds: the arm as given
 
 
 def test_a_flippable_grasp_is_also_solved_turned_about_the_approach(moveit):

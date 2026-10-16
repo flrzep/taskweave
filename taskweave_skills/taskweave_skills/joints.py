@@ -38,6 +38,8 @@ class Params:
     min_duration_s: float = 0.5
     rate_hz: float = 50.0
     state_timeout_s: float = 1.0       # no joint states this long -> fail
+    elbow_tolerance_deg: float = 20.0  # an elbow swing ending further than this from its side fails (move_object
+                                       # elbow) or is not used (move_to_pose: planned instead)
 
     @classmethod
     def from_config(cls, params: dict) -> Params:
@@ -84,6 +86,7 @@ class JointInterface:
         self.positions: dict[str, float] = {}
         self.velocities: dict[str, float] = {}
         self.stamp = -math.inf
+        self.reached: dict[str, float] = {}   # the goal values of the last move each joint reached (start())
         self.publisher = node.create_publisher(JointState, topics['command'], 10)
         node.create_subscription(JointState, topics['state'], self._state, 10)
         self.state_topic = topics['state']
@@ -99,6 +102,16 @@ class JointInterface:
         """Every joint seen on the state topic (a planner's start state)."""
         with self.lock:
             return dict(self.positions) if time.monotonic() - self.stamp <= max_age else None
+
+    def start(self, max_age: float, tolerance: float) -> dict | None:
+        """snapshot(), with each joint within ``tolerance`` of the goal its last move reached set to that goal: the
+        start of an IK solve, plan or path is then the same in identical runs, not the settling noise of the joint
+        states (an IK descent or a choice between solutions can turn a milliradian into another arm configuration)."""
+        state = self.snapshot(max_age)
+        if state is None:
+            return None
+        with self.lock:
+            return {**state, **{n: v for n, v in self.reached.items() if n in state and abs(state[n] - v) <= tolerance}}
 
     def current(self, names, max_age: float) -> dict | None:
         with self.lock:
@@ -128,6 +141,10 @@ class _JointSkill(Skill):
         return SkillResult.rejected(f'holding {hold["object"]} with {" and ".join(hold["tools"])}: move it with '
                                     'move_object, or open the gripper first')
 
+    def _start(self) -> dict | None:
+        """Every joint now, a joint at the goal its last move reached at exactly that goal (JointInterface.start)."""
+        return self.joints.start(self.p.state_timeout_s, self.p.position_tolerance)
+
     def stop(self) -> None:
         """Hold where the joints are now."""
         if self._held:
@@ -140,6 +157,8 @@ class _JointSkill(Skill):
         (e.g. fingers blocked by an object) ends the move without failing. ``path``: a planned trajectory
         (motion_plan.Trajectory) the joints follow instead of a straight joint-space move."""
         self._held = goal
+        for name in goal:  # moving: no longer at its last goal (start())
+            self.joints.reached.pop(name, None)
         start = self.joints.current(list(goal), self.p.state_timeout_s)
         if start is None:
             missing = [n for n in goal if n not in self.joints.positions]
@@ -173,6 +192,7 @@ class _JointSkill(Skill):
                 if errors[worst] <= self.p.position_tolerance:
                     settled_since = settled_since if settled_since is not None else now
                     if now - settled_since >= self.p.settle_s:
+                        self.joints.reached.update(goal)
                         return None, current
                 else:
                     settled_since = None
@@ -273,7 +293,7 @@ class MoveToPose(_JointSkill):
         if linear:
             return self._linear(ctx, tools, label)
         goal = dict(joints)
-        if (self.ik or self.planner) and self.joints.snapshot(self.p.state_timeout_s) is None:
+        if (self.ik or self.planner) and self._start() is None:
             return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)'), 0
         if tools:
             if self.ik is None:
@@ -283,7 +303,7 @@ class MoveToPose(_JointSkill):
             for attempt in [joints, *fallback_joints]:
                 try:
                     goal = {**attempt, **self.ik.solve(tools, attempt, lambda: ctx.should_stop,
-                                                       current=self.joints.snapshot(self.p.state_timeout_s),
+                                                       current=self._start(),
                                                        allow_flip=flip, elbow=elbow)}
                     break
                 except IkError as error:
@@ -302,7 +322,7 @@ class MoveToPose(_JointSkill):
         path = None
         if self.planner is not None:
             ctx.feedback(0.0, 'planning')
-            start = self.joints.snapshot(self.p.state_timeout_s)
+            start = self._start()
             if start is None:
                 return SkillResult.failed(f'no joint states on {self.joints.state_topic}'), 0
             stop = lambda: ctx.should_stop  # noqa: E731
@@ -322,10 +342,11 @@ class MoveToPose(_JointSkill):
         """A goal IK solved with the elbows toward ``side`` whose straight move is blocked, typically from elbows on
         the other side (halfway the hands swing through each other, and a planner's path wanders, hands and elbows
         flailing): the elbows swing toward ``side`` first, as far as the goal has them, the hands staying, then the
-        arms move straight to ``goal``. That Trajectory, or None if the straight move from there is blocked too."""
+        arms move straight to ``goal``. That Trajectory, or None if the swing stops more than p.elbow_tolerance_deg
+        short or the straight move from there is blocked too."""
         import re
 
-        from .cartesian import PathError, elbow_deviation_of, elbow_swing_path
+        from .cartesian import PathError, elbow_deviation_of, elbow_swing_path, swing_short
         from .motion_plan import Trajectory
 
         chains = getattr(self.ik, 'chains', None) or {}
@@ -336,8 +357,13 @@ class MoveToPose(_JointSkill):
         arm = {n: v for n, v in start.items() if any(patterns[tool].fullmatch(n) for tool in tools)}
         settled = {tool: elbow_deviation_of(*chains[tool], {**start, **goal}, side) for tool in tools}
         try:
-            swing, _ = elbow_swing_path(self.ik, tools, arm, start, side, self.p.max_joint_speed, settled)
+            swing, report = elbow_swing_path(self.ik, tools, arm, start, side, self.p.max_joint_speed, settled)
         except PathError:
+            return None
+        short = swing_short(report, self.p.elbow_tolerance_deg, {t: math.degrees(v) for t, v in settled.items()})
+        if short:
+            self.node.get_logger().info(f'{self.name}: straight move blocked, elbow swing toward {side} stops short: '
+                                        f'{short}; planning instead')
             return None
         if swing is None:
             return None
@@ -360,7 +386,7 @@ class MoveToPose(_JointSkill):
 
         if self.ik is None:
             return SkillResult.rejected(f'{label}: a straight-line motion needs the profile\'s ik section'), 0
-        current = self.joints.snapshot(self.p.state_timeout_s)
+        current = self._start()
         if current is None:
             return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)'), 0
         goals = goals if goals is not None else tcp_targets(tools)
@@ -478,8 +504,7 @@ class GoToPoint(MoveToPose):
             try:  # solved backwards from the point: the approach starts in the configuration that ends there
                 path = linear_path(self.ik, tcp_targets(tools), tcp_targets(before), {**lift, **solution},
                                    self.tcp_speed, self.tcp_turn,
-                                   state={**(self.joints.snapshot(self.p.state_timeout_s) or {}), **lift,
-                                          **solution}).reversed()
+                                   state={**(self._start() or {}), **lift, **solution}).reversed()
             except PathError as error:
                 return SkillResult.failed(f'{label}: no straight {approach:g} m approach to the point: {error}')
             first, last = ({**lift, **dict(zip(path.names, path.points[i], strict=True))} for i in (0, -1))
@@ -511,7 +536,7 @@ class GoToPoint(MoveToPose):
         for attempt in [{}, *lifts]:
             try:
                 solution = self.ik.solve(tools, attempt, lambda: ctx.should_stop,
-                                         current=self.joints.snapshot(self.p.state_timeout_s), elbow=elbow)
+                                         current=self._start(), elbow=elbow)
             except IkError as error:
                 first_error = first_error or error
                 continue
@@ -597,12 +622,12 @@ class MoveObject(GoToPoint):
         """move_object elbow: the holding arms' elbows toward ``side``, hands and object staying."""
         import re
 
-        from .cartesian import PathError, elbow_swing_path
+        from .cartesian import PathError, elbow_swing_path, swing_short
 
         label = f'elbows of {" and ".join(hold["tools"])} {side}'
         if self.ik is None:
             return SkillResult.rejected(f'{label}: needs the profile\'s ik section')
-        current = self.joints.snapshot(self.p.state_timeout_s)
+        current = self._start()
         if current is None:
             return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)')
         patterns = [re.compile(self.ik.joint_pattern.format(tool=tool)) for tool in hold['tools']]
@@ -612,7 +637,11 @@ class MoveObject(GoToPoint):
             path, report = elbow_swing_path(self.ik, list(hold['tools']), arm, current, side, self.p.max_joint_speed)
         except PathError as error:
             return SkillResult.failed(f'{label}: {error}')
-        swung = ', '.join(f'{tool} {a} -> {b} deg off {side}' for tool, (a, b) in report.items())
+        swung = ', '.join(f'{tool} {a} -> {b} deg off {side}' for tool, (a, b, _) in report.items())
+        short = swing_short(report, self.p.elbow_tolerance_deg)
+        if short:  # a partial swing is not what the mission asked for: fail before moving
+            return SkillResult.failed(f'{label}: the elbows would stop more than {self.p.elbow_tolerance_deg:g} deg '
+                                      f'off {side}: {short}; not moved')
         if path is None:
             return SkillResult.succeeded(f'{label}: already as far as they go ({swung})',
                                          world_state={'held_object': hold['object']})
