@@ -81,7 +81,8 @@ def overview(store: ConfigStore, robot_name: str, pose_args: set) -> dict:
                          for joint, bounds in joint_limits(store, robot_name).items()},
         'elbow_sides': schemas.ELBOW_SIDES,
         'approach_default': float(store.skill_params('go_to_point').get('approach_m', 0.0)),
-        'files': {'poses': f'robots/{robot_name}/poses.yaml', 'objects': 'objects/<type>.yaml'},
+        'files': {'poses': store.display_path(store.robot_save_path(robot_name, 'poses.yaml')),
+                  'objects': 'objects/<type>.yaml'},
     }
 
 

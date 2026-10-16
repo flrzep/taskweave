@@ -1,12 +1,15 @@
-"""Loading, validating and querying a taskweave config directory.
+"""Loading, validating and querying a taskweave cell pack (a config directory) and the robot packs it uses.
 
-Layout (all files YAML; files marked optional may be absent):
+Layout (all files YAML; files marked optional may be absent). robots/<model>/<file> is looked up in the cell pack
+first, then in the robot packs (packs.py); the cell pack holds the robot's cell-specific files:
 
+    pack.yaml                      required: name, version, schema_version (packs.CELL_SCHEMA)
+    system.yaml                    optional, robot_packs: robot pack locations (relative to the cell pack)
     missions/<name>.yaml           required per mission
-    robots/<model>/profile.yaml    required per robot: how the hardware is reached (topics, names)
-    robots/<model>/embodiment.yaml required per robot: what the robot is and can do
-    robots/<model>/stances.yaml    optional, robot-specific base poses relative to objects (per type, per instance)
-    robots/<model>/poses.yaml      optional, named joint-space poses (used by move_to_pose)
+    robots/<model>/profile.yaml    required per robot (robot pack): how the hardware is reached (topics, names)
+    robots/<model>/embodiment.yaml required per robot (robot pack): what the robot is and can do
+    robots/<model>/stances.yaml    optional (cell), robot-specific base poses relative to objects (per type, instance)
+    robots/<model>/poses.yaml      optional (robot pack), named joint-space poses (used by move_to_pose)
     cell/locations.yaml            optional, named base poses in the cell frame
     cell/objects.yaml              optional, placed object instances: object type and pose in the cell frame
     objects/<name>.yaml            optional per object, taught tool poses
@@ -21,13 +24,13 @@ import math
 import os
 import threading
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
 from jsonschema import Draft202012Validator
 
-from . import schemas
+from . import packs, schemas
 from .poses import ObjectInstance, Pose2D, Pose3D, wrap_angle
 
 STANCE_PREFIX = 'stance:'
@@ -86,13 +89,16 @@ class ConfigStore:
         self.root = Path(root).expanduser().resolve()
         if not self.root.is_dir():
             raise ConfigError(self.root, 'config directory does not exist')
+        packs.check_cell_schema(self.root)
         self._cache: dict[Path, Any] = {}
         self._lock = threading.Lock()
 
     # ---- generic loading -------------------------------------------------
     def _load(self, relative: str, schema: dict, required: bool = True, default: Any = None) -> Any:
-        """Load and validate a file. Cached per modification time, so edits by other processes are picked up."""
-        path = self.root / relative
+        """Load and validate a file. Cached per modification time, so edits by other processes are picked up.
+        robots/<robot>/<file> is found through the robot file search path (robot_file)."""
+        robot_file = self._robot_relative(relative)
+        path = self.robot_file(*robot_file) if robot_file else self.root / relative
         try:
             stamp = path.stat().st_mtime_ns
         except OSError:
@@ -103,7 +109,8 @@ class ConfigStore:
                 return cached[1]
         if stamp is None:
             if required:
-                raise ConfigError(path, 'file not found')
+                raise ConfigError(path, 'file not found' + (f' (looked in {self.robot_search(robot_file[0])})'
+                                                            if robot_file else ''))
             return default
         try:
             data = yaml.safe_load(path.read_text(encoding='utf-8'))
@@ -126,6 +133,76 @@ class ConfigStore:
         with self._lock:
             self._cache.clear()
 
+    # ---- robot files: the cell pack first, then the robot packs (packs.py) ------
+    def system(self) -> dict:
+        """system.yaml: the installation (robot_packs; other keys are the application's); {} if absent."""
+        return self._load('system.yaml', schemas.SYSTEM, required=False, default={})
+
+    def robot_packs(self, robot: str) -> list[packs.RobotPack]:
+        """The robot's packs in search order: env TASKWEAVE_ROBOT_PACKS, system.yaml robot_packs, installed."""
+        return packs.robot_packs(self.root, self.system().get('robot_packs'), robot)
+
+    def robot_names(self) -> list[str]:
+        """Robots this cell has files for (robots/<robot>/), plus system.yaml robot."""
+        names = {p.name for p in (self.root / 'robots').glob('*') if p.is_dir()}
+        return sorted(names | ({self.system()['robot']} if self.system().get('robot') else set()))
+
+    def robot_file(self, robot: str, file: str) -> Path:
+        """Where robots/<robot>/<file> (a file or a folder, e.g. moveit) is read from: the cell pack's copy if it
+        has one, else the first robot pack that has it; found nowhere, its place in the cell pack (not existing)."""
+        cell = self.root / 'robots' / robot / file
+        if cell.exists():
+            return cell
+        return next((p.path / file for p in self.robot_packs(robot) if (p.path / file).exists()), cell)
+
+    def robot_file_source(self, robot: str, file: str) -> dict:
+        """Where a robot file comes from and where an edit of it goes (HMI, error messages):
+        ``{'path', 'source': 'cell' | 'override' | 'robot pack' | 'missing', 'pack': robot pack label or None,
+        'save_path'}``. override: the cell pack's own copy of a file a robot pack has too (whole file)."""
+        cell = self.root / 'robots' / robot / file
+        found = [p for p in self.robot_packs(robot) if (p.path / file).exists()]
+        if cell.exists():
+            source, path = 'override' if found else 'cell', cell
+        else:
+            source, path = ('robot pack', found[0].path / file) if found else ('missing', cell)
+        return {'path': path, 'source': source, 'pack': found[0].label if found else None,
+                'save_path': self.robot_save_path(robot, file)}
+
+    def robot_save_path(self, robot: str, file: str) -> Path:
+        """Where an edit of a robot file is written. Cell-specific files (packs.CELL_ROBOT_FILES) and files the cell
+        pack has: the cell pack. Robot pack files: the robot pack they come from, but a read-only one (the
+        installed share, overwritten by every build) gets a cell pack override, which starts as a copy."""
+        cell = self.root / 'robots' / robot / file
+        if file in packs.CELL_ROBOT_FILES or cell.exists():
+            return cell
+        robot_packs = self.robot_packs(robot)
+        found = [p for p in robot_packs if (p.path / file).exists()]
+        if found:
+            return found[0].path / file if found[0].location.writable else cell
+        writable = [p for p in robot_packs if p.location.writable]
+        return writable[0].path / file if writable else cell
+
+    def robot_search(self, robot: str) -> str:
+        """The places a robot's files are looked for, for error messages."""
+        return ', '.join([f'cell pack {self.root / "robots" / robot}'] + [p.label for p in self.robot_packs(robot)])
+
+    @staticmethod
+    def _robot_relative(relative: str) -> tuple[str, str] | None:
+        """robots/<robot>/<file> -> (robot, file); None for any other path."""
+        parts = PurePosixPath(relative).parts
+        return (parts[1], '/'.join(parts[2:])) if len(parts) > 2 and parts[0] == 'robots' else None
+
+    def display_path(self, path: Path | str) -> str:
+        """A file for the operator: relative to the cell pack, or '<robot> robot pack: <file>'."""
+        path = Path(path)
+        if path.is_relative_to(self.root):
+            return str(path.relative_to(self.root))
+        for robot in self.robot_names():
+            for pack in self.robot_packs(robot):
+                if path.is_relative_to(pack.path):
+                    return f'{pack.name} robot pack: {path.relative_to(pack.path)}'
+        return str(path)
+
     # ---- missions, robots, skills, operator ------------------------------
     def mission_names(self) -> list[str]:
         return sorted(p.stem for p in (self.root / 'missions').glob('*.yaml'))
@@ -147,7 +224,7 @@ class ConfigStore:
     def robot(self, name: str) -> RobotProfile:
         data = self._load(f'robots/{name}/profile.yaml', schemas.ROBOT_PROFILE)
         if data['name'] != name:
-            raise ConfigError(self.root / f'robots/{name}/profile.yaml', f'name is {data["name"]!r}, expected {name!r}',
+            raise ConfigError(self.robot_file(name, 'profile.yaml'), f'name is {data["name"]!r}, expected {name!r}',
                               'name')
         return RobotProfile(name, data)
 
@@ -165,7 +242,7 @@ class ConfigStore:
         """robots/<robot>/embodiment.yaml: what the robot is and can do."""
         data = self._load(f'robots/{robot}/embodiment.yaml', schemas.EMBODIMENT)
         if data['name'] != robot:
-            raise ConfigError(self.root / f'robots/{robot}/embodiment.yaml',
+            raise ConfigError(self.robot_file(robot, 'embodiment.yaml'),
                               f'name is {data["name"]!r}, expected {robot!r}', 'name')
         return data
 
@@ -885,11 +962,13 @@ class ConfigStore:
                   or (schemas.OBJECT if Path(relative).parent == Path('objects') else None))
         if schema is None:
             raise ValueError(f'{relative} is not a point file')
-        path = self.root / relative
+        robot_file = self._robot_relative(relative)
+        path = self.robot_save_path(*robot_file) if robot_file else self.root / relative
+        start = path if path.is_file() or not robot_file else self.robot_file(*robot_file)  # a new override: a copy
         handler = YAML()
         handler.preserve_quotes = True
         handler.width = 4096  # one line per entry, as written by hand and by tools (joint poses are long)
-        document = handler.load(path.read_text(encoding='utf-8')) if path.is_file() else None
+        document = handler.load(start.read_text(encoding='utf-8')) if start.is_file() else None
         if document is None:
             document = CommentedMap()
         edit(document)

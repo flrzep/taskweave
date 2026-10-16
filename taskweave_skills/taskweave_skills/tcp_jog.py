@@ -110,7 +110,7 @@ class TcpJog(Node):
         from std_msgs.msg import String
 
         from taskweave_core import names
-        from taskweave_core.config.limits import URDF, joint_limits
+        from taskweave_core.config.limits import joint_limits, urdf_path
 
         from .chain import Chain
 
@@ -118,7 +118,7 @@ class TcpJog(Node):
         self.notice = self.create_publisher(String, names.OPERATOR_NOTICE, 10)
         self.limits = joint_limits(store, profile.name)
         self.validity = self.create_client(GetStateValidity, '/check_state_validity')
-        path = store.root / URDF.format(robot=profile.name)
+        path = urdf_path(store, profile.name)
         for tool, jog in self.tools.items():
             jog['chain'], jog['names'], jog['held'], jog['null'] = None, [], '', None
             if not path.is_file():

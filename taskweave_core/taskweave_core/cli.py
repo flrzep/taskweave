@@ -16,6 +16,11 @@
                                           run a mission in the sim from a clean start (HMI recording API), check
                                           each step against a reference run (smoke.py)
     taskweave smoke compare REFERENCE RUN  the same check for a saved run, offline
+    taskweave config migrate CELL_DIR [--robot-packs DIR] [--name NAME] [--dry-run]
+                                          bring a cell pack (config directory) up to this taskweave's schema, e.g.
+                                          split robot-intrinsic files out into robot packs (config/migrate.py)
+    taskweave config files CELL_DIR [ROBOT]
+                                          where each robot file comes from (cell pack, override, robot pack)
 """
 
 from __future__ import annotations
@@ -77,8 +82,7 @@ def check(config_dir: str) -> int:
             problems += 1
             print(f'  FAIL  {label}: {error}')
 
-    robots = sorted(p.name for p in (store.root / 'robots').glob('*') if p.is_dir())
-    for robot in robots:
+    for robot in store.robot_names():
         attempt(f'robots/{robot}', lambda r=robot: (store.robot(r), store.stances(r)))
         attempt(f'robots/{robot}/embodiment.yaml', lambda r=robot: _consistent(store, r))
     attempt('cell/locations.yaml', store.locations)
@@ -92,6 +96,24 @@ def check(config_dir: str) -> int:
         attempt(f'missions/{name}.yaml', lambda n=name: Plan.from_mission(store.expanded_mission(n), 'check'))
     print(f'{problems} problem(s)' if problems else 'config ok (skill arguments are checked against a running catalog)')
     return 1 if problems else 0
+
+
+def robot_files(config_dir: str, robot: str | None) -> int:
+    """Each robot file: where it is read from and where an edit goes."""
+    from .config import ConfigStore
+    from .config.packs import CELL_ROBOT_FILES, ROBOT_PACK_FILES
+
+    store = ConfigStore(config_dir)
+    for name in [robot] if robot else store.robot_names():
+        print(f'{name}: ' + ('; '.join(p.label for p in store.robot_packs(name)) or 'no robot pack'))
+        cell = store.root / 'robots' / name
+        extra = sorted(p.name for p in cell.glob('*') if p.name not in ROBOT_PACK_FILES + CELL_ROBOT_FILES)
+        for file in ROBOT_PACK_FILES + CELL_ROBOT_FILES + tuple(extra):
+            source = store.robot_file_source(name, file)
+            if source['source'] != 'missing':
+                saves = '' if source['save_path'] == source['path'] else                     f'  (edits -> {store.display_path(source["save_path"])})'
+                print(f'  {file:<20} {source["source"]:<11} {store.display_path(source["path"])}{saves}')
+    return 0
 
 
 def _consistent(store, robot: str) -> None:
@@ -237,9 +259,24 @@ def main(argv=None) -> int:
     from . import smoke
 
     smoke.add_arguments(sub.add_parser('smoke', help='mission smoke test against a reference run'))
+    config_sub = sub.add_parser('config', help='cell pack maintenance').add_subparsers(dest='action', required=True)
+    migrate_parser = config_sub.add_parser('migrate', help='bring a cell pack up to the schema of this taskweave')
+    migrate_parser.add_argument('cell_dir')
+    migrate_parser.add_argument('--robot-packs', help='folder for robot packs of robot files no pack has yet')
+    migrate_parser.add_argument('--name', help='cell pack name (default: the folder name)')
+    migrate_parser.add_argument('--dry-run', action='store_true', help='only print what would be done')
+    files_parser = config_sub.add_parser('files', help='where each robot file comes from')
+    files_parser.add_argument('cell_dir')
+    files_parser.add_argument('robot', nargs='?')
     options = parser.parse_args(argv)
     if options.command == 'smoke':
         return smoke.main(options)
+    if options.command == 'config':
+        if options.action == 'files':
+            return robot_files(options.cell_dir, options.robot)
+        from .config.migrate import migrate
+
+        return migrate(options.cell_dir, options.robot_packs, options.name, options.dry_run)
     if options.command == 'check':
         return check(options.config_dir)
     if options.command == 'skills':

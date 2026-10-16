@@ -1,7 +1,7 @@
 """Joint limits of a robot, and the checks that keep named poses inside them.
 
-Limits come from the robot's URDF (``robots/<robot>/moveit/robot.urdf``: revolute and prismatic joints with a
-``<limit>``) and can be added or overridden in the profile:
+Limits come from the robot's URDF (``robots/<robot>/moveit/robot.urdf``, usually in its robot pack: revolute and
+prismatic joints with a ``<limit>``) and can be added or overridden in the profile:
 
     joints:
       limits: {body_joint: [0.0, 0.75]}     # joint -> [lower, upper] in rad or m
@@ -19,7 +19,8 @@ from pathlib import Path
 
 from .store import ConfigStore
 
-URDF = 'robots/{robot}/moveit/robot.urdf'
+URDF_FILE = 'moveit/robot.urdf'           # a robot file (ConfigStore.robot_file): cell pack, then robot packs
+URDF = 'robots/{robot}/' + URDF_FILE       # the cell pack's copy only; use urdf_path()
 TOLERANCE = 1e-6  # values written with 4 decimals may sit a hair past a limit given with more
 
 
@@ -34,9 +35,14 @@ def _urdf_limits(path: Path) -> dict[str, tuple[float, float]]:
     return limits
 
 
+def urdf_path(store: ConfigStore, robot: str) -> Path:
+    """The robot's URDF (may not exist)."""
+    return store.robot_file(robot, URDF_FILE)
+
+
 def joint_limits(store: ConfigStore, robot: str) -> dict[str, tuple[float, float]]:
     """Joint -> (lower, upper) for the robot: its URDF, then the profile's joints.limits on top. {} if none known."""
-    path = store.root / URDF.format(robot=robot)
+    path = urdf_path(store, robot)
     limits = _urdf_limits(path) if path.is_file() else {}
     for joint, (lower, upper) in store.robot(robot).data.get('joints', {}).get('limits', {}).items():
         limits[joint] = (float(lower), float(upper))

@@ -531,3 +531,26 @@ EMBODIMENT = {
     },
     'additionalProperties': False,
 }
+
+# pack.yaml at the root of a cell pack or a robot pack (packs.py); a robot pack's name is the robot
+PACK = {
+    'type': 'object',
+    'required': ['name', 'version', 'schema_version'],
+    'properties': {
+        'name': NAME,
+        'version': {'type': ['string', 'integer']},             # the pack's own version, e.g. 0.1.0
+        'schema_version': {'type': 'integer', 'minimum': 1},    # its layout, checked against packs.py
+        'description': {'type': 'string'},
+    },
+    'additionalProperties': False,
+}
+
+# system.yaml: the installation. taskweave reads robot_packs (robot pack locations, relative to the cell pack, searched
+# after env TASKWEAVE_ROBOT_PACKS); other keys belong to the application (e.g. robot: the robot it drives)
+SYSTEM = {
+    'type': 'object',
+    'properties': {
+        'robot': NAME,
+        'robot_packs': {'type': 'array', 'items': {'type': 'string', 'minLength': 1}},
+    },
+}

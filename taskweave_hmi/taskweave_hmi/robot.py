@@ -54,7 +54,8 @@ def overview(store: ConfigStore, robot: str, args: set[tuple[str, str]]) -> dict
     used = pose_usage(store, args)
     return {
         'robot': robot,
-        'files': {'poses': f'robots/{robot}/poses.yaml', 'navigation': f'robots/{robot}/navigation.yaml'},
+        'files': {name: store.display_path(store.robot_save_path(robot, f'{name}.yaml'))  # where edits go
+                  for name in ('poses', 'navigation')},
         'linear_joints': list(joints.get('linear', [])),
         'poses': [{'name': name, **store.named_pose(robot, name), 'used_by': used.get(name, []),
                    'problems': pose_problems(store, robot, name)}    # e.g. copied from another robot
@@ -105,7 +106,7 @@ def save_ik_choice(store: ConfigStore, robot: str, body: Mapping) -> str:
         path = store.save_ik_choice(robot, choice)
     except ValueError as error:
         raise RobotSettingsError(str(error)) from error
-    return str(path.relative_to(store.root))
+    return store.display_path(path)
 
 
 def _number(value, name: str, low: float, high: float) -> float:
@@ -186,7 +187,7 @@ def save_pose(store: ConfigStore, robot: str, name: str, body: Mapping, args: se
             path = store.set_named_pose(robot, name, joints, rename=rename, note=HMI_NOTE)
     except ValueError as error:
         raise RobotSettingsError(str(error)) from error
-    return str(path.relative_to(store.root))
+    return store.display_path(path)
 
 
 def delete_pose(store: ConfigStore, robot: str, name: str, args: set[tuple[str, str]]) -> str:
@@ -198,7 +199,7 @@ def delete_pose(store: ConfigStore, robot: str, name: str, args: set[tuple[str, 
         path = store.delete_point(f'robots/{robot}/poses.yaml', [name])
     except ValueError as error:
         raise RobotSettingsError(str(error)) from error
-    return str(path.relative_to(store.root))
+    return store.display_path(path)
 
 
 def check_navigation(settings: Mapping, base: Mapping) -> dict:
@@ -223,5 +224,5 @@ def save_navigation(store: ConfigStore, robot: str, settings: Mapping) -> str:
         path = store.save_navigation(robot, check_navigation(settings, store.robot(robot).base))
     except ValueError as error:
         raise RobotSettingsError(str(error)) from error
-    return str(path.relative_to(store.root))
+    return store.display_path(path)
 
