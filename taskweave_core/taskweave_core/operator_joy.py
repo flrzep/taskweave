@@ -36,7 +36,7 @@ being jogged (in drive mode: of every tool) as ``point`` (``<instance>/<point>``
 read from operator.yaml at each press, so it can be changed while the system runs:
 
     joy:
-      teach: {button: 10, point: bay_2_stack_1/rails_top}
+      teach: {button: 10, point: bin_2/top_grasp}
 
 When the HMI has an arm position open (names.TEACH_TARGET, latched), a teach press saves into that position instead:
 the press goes to the HMI on names.TEACH_REQUEST ({tools}) and the HMI captures and saves it; ``point`` is then not

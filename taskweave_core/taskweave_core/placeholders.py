@@ -1,7 +1,7 @@
 """``{name}`` placeholders in step arguments, filled from the world state when a step starts.
 
-A string that is exactly one placeholder takes the world-state value with its type (``"{bay}"`` -> ``2``);
-placeholders inside longer strings are formatted in (``"stance:{stack}"`` -> ``"stance:bay_2_stack_1"``).
+A string that is exactly one placeholder takes the world-state value with its type (``"{lane}"`` -> ``2``);
+placeholders inside longer strings are formatted in (``"stance:{stack}"`` -> ``"stance:lane_2_stack_a"``).
 """
 
 from __future__ import annotations

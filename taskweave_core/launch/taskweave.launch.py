@@ -1,6 +1,6 @@
 """Start taskweave for one robot: task handler, a skill server with the given skills, operator buttons.
 
-ros2 launch taskweave_core taskweave.launch.py config_dir:=/path/to/config robot:=a2d \
+ros2 launch taskweave_core taskweave.launch.py config_dir:=/path/to/config robot:=my_robot \
     skills:="taskweave_skills.basic:Wait,taskweave_skills.navigate:NavigateTo"
 
 Applications with their own skills either list them here or start additional skill servers.
