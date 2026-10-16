@@ -11,7 +11,9 @@ Parameters:
   recording_post (string)  command run after each recording, {dir} = its folder (e.g. camera videos from the bag)
 
 HTTP API (JSON):
-  GET  /api/state                  robot, status, plan with per-step outcomes, recent events
+  GET  /api/state[?since=<seq>]    robot, status, plan with per-step outcomes, the latest 50 events; with since: the
+                                   events after that seq (each event has a seq; event_seq = the latest, events_from =
+                                   the oldest still held, 200 are)
   GET  /api/events                 server-sent events: status | plan | episode
   GET  /api/missions               mission list (invalid files are listed with their error)
   GET  /api/missions/<name>        mission as JSON; GET /api/template for a new one
@@ -168,6 +170,7 @@ class Bridge(Node):
         self.plan: dict | None = None
         self.outcomes: dict[str, dict] = {}   # step id -> latest step event for the current plan and cycle
         self.events: deque = deque(maxlen=200)
+        self.event_seq = 0
         self.listeners: list[queue.Queue] = []
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(TaskStatus, names.STATUS, self._status, latched, callback_group=self.group)
@@ -461,8 +464,12 @@ class Bridge(Node):
             if event.get('event') == 'step_started' and event.get('step_id') in self.outcomes \
                     and self.outcomes[event['step_id']].get('cycle') != event.get('cycle'):
                 self.outcomes = {}  # a new cycle starts over
+            self.event_seq += 1
+            event['seq'] = self.event_seq
             self.outcomes[event.get('step_id')] = event
             self.events.append(event)
+        if getattr(self, 'recorder', None) is not None:
+            self.recorder.episode(event)
         self._broadcast('episode', event)
 
     def _pad_mode(self, msg: String) -> None:
@@ -473,10 +480,13 @@ class Bridge(Node):
     def _notice(self, msg: String) -> None:
         self._broadcast('notice', json.loads(msg.data))
 
-    def snapshot(self) -> dict:
+    def snapshot(self, since: int | None = None) -> dict:
         with self.lock:
+            events = list(self.events)
             return {'robot': self.robot, 'status': self.status, 'plan': self.plan, 'outcomes': dict(self.outcomes),
-                    'events': list(self.events)[-50:], 'pad_mode': self.pad_mode}
+                    'events': events[-50:] if since is None else [e for e in events if e['seq'] > since],
+                    'event_seq': self.event_seq, 'events_from': events[0]['seq'] if events else self.event_seq + 1,
+                    'pad_mode': self.pad_mode}
 
     # ---- service calls -------------------------------------------------------------
     def call(self, client, request):
@@ -589,7 +599,10 @@ class Handler(BaseHTTPRequestHandler):
             if route[:1] == ['recordings']:
                 return self._recordings(method, route[1:])
             if method == 'GET' and route == ['state']:
-                return self._json(bridge.snapshot())
+                since = parse_qs(urlsplit(self.path).query).get('since', [''])[0]
+                if since and not since.isdigit():
+                    return self._json({'error': 'since: an event seq (whole number)'}, HTTPStatus.BAD_REQUEST)
+                return self._json(bridge.snapshot(int(since) if since else None))
             if method == 'GET' and route == ['events']:
                 return self._events()
             if method == 'GET' and route == ['missions']:

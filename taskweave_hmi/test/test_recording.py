@@ -177,3 +177,30 @@ def test_post_processing_runs_on_the_folder(tmp_path):
     recorder.post = 'sh -c "exit 3"'
     recorder._post_process(rec, folder)
     assert 'exit 3' in rec['problems'][0]
+
+
+def test_a_light_recording_deletes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(Recorder, '_run', lambda self, rec, folder: None)
+    make(tmp_path, '20251016_100000_a', files=['x_fixed.mp4'])
+    recorder = Recorder(FakeBridge(), str(tmp_path), keep=1)
+    assert recorder.start({'reset': False, 'bag': False, 'video': False}, [])['deleted'] == []
+    assert len(recorder.recordings()) == 2
+
+
+def test_step_events_and_plan_ids_go_into_the_status_and_meta(tmp_path, monkeypatch):
+    monkeypatch.setattr(Recorder, '_run', lambda self, rec, folder: None)
+    recorder = Recorder(FakeBridge(), str(tmp_path))
+    recorder.episode({'event': 'step_started', 'plan_id': 'm-0000'})  # before the recording: not kept
+    rec_id = recorder.start({'reset': False, 'bag': False, 'video': False, 'mission': 'm'}, ['m'])['id']
+    events = [{'event': 'step_started', 'plan_id': 'm-0001', 'step_id': 's1', 'seq': 7},
+              {'event': 'step_finished', 'plan_id': 'm-0001', 'step_id': 's1', 'seq': 8},
+              {'event': 'step_started', 'plan_id': 'm-0002', 'step_id': 's1', 'seq': 9}]
+    for event in events:
+        recorder.episode(event)
+    status = recorder.status()
+    assert status['plan_ids'] == ['m-0001', 'm-0002'] and status['events'] == 3
+    recorder._finish(recorder.active, tmp_path / rec_id, None)
+    meta = json.loads((tmp_path / rec_id / 'meta.json').read_text())
+    assert meta['plan_ids'] == ['m-0001', 'm-0002'] and meta['events'] == events
+    recorder.episode({'event': 'step_started', 'plan_id': 'm-0003'})  # after it: not kept
+    assert recorder.status()['plan_ids'] == ['m-0001', 'm-0002']

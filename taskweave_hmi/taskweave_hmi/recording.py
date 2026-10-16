@@ -3,12 +3,14 @@
 One recording at a time, in its own folder ``<recordings_dir>/<id>/``:
   bag/          ROS bag (mcap, sim time), bag.log
   <id>_fixed.mp4, <id>_follow.mp4, frames.csv, status.json   from the video recorder, if one answers
-  meta.json     what was recorded: mission, options, outcome, times, the plan
+  meta.json     what was recorded: mission, options, outcome, times, the plan, plan_ids and the step events
+                (step_started / step_finished, as on /api/state) from the recording's start to its end
   ...           whatever the post-processing command writes (e.g. camera videos from the bag), post.log
 
 Recordings are big (camera images: ~0.15 GB per sim second), so they do not pile up: starting one deletes the older
 ones beyond the newest ``keep - 1`` (keep 1: each recording replaces the last), except those marked keep (a ``.keep``
-file in the folder). It does not start with less than ``min_free_gb`` free.
+file in the folder). It does not start with less than ``min_free_gb`` free. A light recording (no bag, no video: only
+meta.json) deletes nothing.
 
 Video recorder contract (frame-sim: scripts/recorder.py): the HMI writes ``<recordings_dir>/control.json``
 ``{"id", "cmd": "start"|"stop", "dir", "options"}``; the recorder answers in ``<dir>/status.json`` with ``state``
@@ -175,7 +177,7 @@ class Recorder:
             if folder.exists():
                 raise RecordingError(f'{rec_id} exists already')
             self.dir.mkdir(parents=True, exist_ok=True)
-            deleted = self._prune()
+            deleted = self._prune() if opts['bag'] or opts['video'] else []
             free = shutil.disk_usage(self.dir).free / 1e9
             if free < self.min_free_gb:
                 raise RecordingError(f'only {free:.0f} GB free (at least {self.min_free_gb:g} GB needed): delete '
@@ -183,10 +185,21 @@ class Recorder:
             folder.mkdir(mode=0o2775)
             folder.chmod(0o2775)  # the host's group can delete it
             self.active = {'id': rec_id, 'options': opts, 'phase': 'starting', 'started': time.time(), 'stop': False,
-                           'outcome': '', 'problems': [], 'video': None, 'bag': None}
+                           'outcome': '', 'problems': [], 'video': None, 'bag': None, 'plan_ids': [], 'events': []}
             self.last = None
         threading.Thread(target=self._run, args=(self.active, folder), daemon=True).start()
         return {'id': rec_id, 'deleted': deleted}
+
+    def episode(self, event: dict) -> None:
+        """A step event of the task handler (server.Bridge): kept with the running recording."""
+        with self.lock:
+            rec = self.active
+            if rec is None:
+                return
+            rec['events'].append(event)
+            plan_id = event.get('plan_id')
+            if plan_id and plan_id not in rec['plan_ids']:
+                rec['plan_ids'].append(plan_id)
 
     def _prune(self) -> list[str]:
         """Make room for a new recording: delete the older ones beyond the newest keep - 1, except marked ones."""
@@ -235,6 +248,7 @@ class Recorder:
             if rec is None:
                 return {'active': False}
             data = {key: rec[key] for key in ('id', 'options', 'phase', 'started', 'outcome', 'problems')}
+            data['plan_ids'], data['events'] = list(rec['plan_ids']), len(rec['events'])
             data['active'] = self.active is not None
             data['ended'] = rec.get('ended')
         folder = self.dir / data['id']
@@ -353,6 +367,8 @@ class Recorder:
                 'started': datetime.fromtimestamp(rec['started']).isoformat(timespec='seconds'),
                 'ended': datetime.fromtimestamp(rec['ended']).isoformat(timespec='seconds'),
                 'video': read_json(folder / 'status.json'), 'plan': plan if rec['options']['mission'] else None}
+        with self.lock:
+            meta['plan_ids'], meta['events'] = list(rec['plan_ids']), list(rec['events'])
         try:
             (folder / 'meta.json').write_text(json.dumps(meta, indent=1))
         except OSError as error:

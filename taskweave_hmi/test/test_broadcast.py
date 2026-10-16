@@ -1,7 +1,9 @@
-"""Live events: a client that stops reading must not block the others (no ROS graph needed)."""
+"""Live events: a client that stops reading must not block the others; numbered step events (no ROS graph needed)."""
 
+import json
 import queue
 import threading
+from collections import deque
 
 import pytest
 
@@ -24,3 +26,15 @@ def test_a_full_listener_is_dropped_and_told_to_end_its_stream():
     assert bridge.listeners == [reading] and reading.qsize() == 3
     assert stalled.get_nowait() is None and stalled.empty()  # the stream ends; EventSource reconnects
     assert bridge.lock.acquire(blocking=False)  # and nothing kept the lock
+
+
+def test_step_events_are_numbered_and_read_since_a_number():
+    bridge = bridge_with()
+    bridge.events, bridge.event_seq, bridge.outcomes = deque(maxlen=3), 0, {}
+    bridge.robot, bridge.status, bridge.plan, bridge.pad_mode, bridge.recorder = 'r', {}, None, '', None
+    for n in range(5):
+        bridge._episode(type('Msg', (), {'data': json.dumps({'event': 'step_started', 'step_id': f's{n}'})}))
+    state = bridge.snapshot()
+    assert [e['seq'] for e in state['events']] == [3, 4, 5] and state['event_seq'] == 5 and state['events_from'] == 3
+    assert [e['step_id'] for e in bridge.snapshot(since=4)['events']] == ['s4']
+    assert bridge.snapshot(since=5)['events'] == []
