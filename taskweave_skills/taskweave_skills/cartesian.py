@@ -153,6 +153,25 @@ def chain_step(chain, names: list[str], positions: dict, flange: np.ndarray, lim
     return None, f'{held} at its limit' if held else 'out of reach'
 
 
+def walk_to(ik, tool: str, positions: dict, flange: np.ndarray, step_m: float = 0.01, step_rad: float = 0.05):
+    """The arm joints that put ``tool``'s flange on ``flange`` (4x4, base frame) by walking it there in a straight line
+    from where ``positions`` (every chain joint) have it, a chain step at a time (chain_step, as linear_path): the
+    continuation of the configuration the arm is in, without a branch flip and without an IK search, so the same start
+    gives the same joints. (joints, '') or (None, why not)."""
+    from .ik import LIMIT_MARGIN_DEG
+
+    chain, arm = ik.chains[tool]
+    margin = math.radians(float((getattr(ik, 'choose', None) or {}).get('limit_margin_deg', LIMIT_MARGIN_DEG)))
+    start, state = chain.fk(positions), dict(positions)
+    count = steps_needed({tool: start}, {tool: flange}, step_m, step_rad)
+    for i in range(1, count + 1):
+        solved, why = chain_step(chain, arm, state, interpolate(start, flange, i / count), ik.limits, margin)
+        if solved is None:
+            return None, f'step {i} of {count}: {why}'
+        state.update(solved)
+    return {name: state[name] for name in arm}, ''
+
+
 def linear_path(ik, starts: dict, goals: dict, current: dict, speed: float, turn: float,
                 step_m: float = 0.01, step_rad: float = 0.05, state: dict | None = None, elbow=None) -> Trajectory:
     """Joint trajectory moving each tool's TCP from ``starts`` to ``goals`` (4x4 TCP poses in the base frame) in

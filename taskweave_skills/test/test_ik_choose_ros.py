@@ -27,6 +27,7 @@ class FakeMoveIt(Node):
         super().__init__('fake_moveit')
         self.ik_requests = []
         self.measured = lambda: 0.0
+        self.solution = None
         self.create_service(GetPositionIK, '/compute_ik', self.ik)
         self.create_service(GetPositionFK, '/compute_fk', self.fk)
 
@@ -37,6 +38,9 @@ class FakeMoveIt(Node):
         side = 'right' if request.ik_request.group_name.startswith('right') else 'left'
         response.solution.joint_state.name = [f'{side}_joint1', f'{side}_joint2']
         response.solution.joint_state.position = [start.get(f'{side}_joint1', self.measured()), 0.0]
+        if self.solution:  # a fixed answer, whatever the start
+            response.solution.joint_state.name = list(self.solution)
+            response.solution.joint_state.position = list(self.solution.values())
         response.error_code.val = 1
         return response
 
@@ -159,3 +163,67 @@ def test_the_choice_can_change_after_start(moveit):
     ik = IkClient(node, robot())  # no choose: the first seed wins
     ik.set_choice({'elbow': 'down'})
     assert ik.solve({'left': TARGET}, {})['left_joint1'] == pytest.approx(-0.5)
+
+
+def chain_robot(tmp_path, node, choose=None):
+    """IkClient for test_chain's 7-joint arm on a lift, with its URDF chain attached."""
+    from test_chain import NAMES, URDF
+
+    path = tmp_path / 'arm.urdf'
+    path.write_text(URDF)
+    profile = SimpleNamespace(base={'frame': 'base'}, data={
+        'ik': {'groups': {'arm': 'arm'}, 'joints': 'j[1-7]', 'timeout_s': 0.1, 'seeds': [{'j1': 0.0}],
+               **({'choose': choose} if choose is not None else {})},
+        'tool_frames': {'arm': {'link': 'flange', 'xyz': [0, 0, 0], 'rpy': [0, 0, 0]}}})
+    ik = IkClient(node, profile, limits={name: (-2.5, 2.5) for name in NAMES})
+    assert ik.attach_chains(path) == ['arm']
+    return ik
+
+
+def test_a_short_move_continues_the_arm_configuration_instead_of_a_seed_branch(moveit, tmp_path):
+    """s1_s5-like: the target is 5 cm from the flange; a seed answers with the wrist turned over (another branch of the
+    7-joint arm). The continuation (the flange walked there on the chain from the joints now) wins, whatever the
+    seeds say, and the same start within 5 mrad of noise gives the same configuration."""
+    import numpy as np
+    from test_chain import NAMES, START
+
+    from taskweave_skills.ik import tool_target
+
+    fake, node = moveit
+    ik = chain_robot(tmp_path, node)                          # no choose: the first seed would win
+    chain = ik.chains['arm'][0]
+    flange = chain.fk(START)
+    flange[:3, 3] += [0.0, 0.03, -0.04]
+    target = tool_target(flange, {})
+    fake.solution = {**{n: START[n] for n in NAMES}, 'j5': START['j5'] + 3.0, 'j7': START['j7'] - 3.0}  # turned over
+    solution = ik.solve({'arm': target}, {}, current=dict(START))
+    assert not fake.ik_requests and ik.last['arm']['continued']                     # no IK search needed
+    assert np.allclose(chain.fk({**START, **solution})[:3, 3], flange[:3, 3], atol=1e-3)
+    assert max(abs(solution[n] - START[n]) for n in NAMES) < 0.3                   # continuous: no branch flip
+    rng = np.random.default_rng(0)
+    for _ in range(10):
+        noisy = {n: v + rng.normal(0, 0.005) for n, v in START.items()}
+        other = ik.solve({'arm': target}, {}, current=noisy)
+        assert max(abs(other[n] - solution[n]) for n in NAMES) < 0.05              # the same configuration
+    far = chain.fk(START)
+    far[:3, 3] += [0.4, 0.0, 0.0]
+    assert ik.solve({'arm': tool_target(far, {})}, {}, current=dict(START))['j5'] == \
+        pytest.approx(fake.solution['j5'])                                         # too far to continue: IK decides
+    assert 'continued' not in ik.last['arm']
+
+
+def test_a_configuration_jump_without_a_continuation_is_logged(moveit, tmp_path):
+    from test_chain import NAMES, START
+
+    from taskweave_skills.ik import tool_target
+
+    fake, node = moveit
+    ik = chain_robot(tmp_path, node)
+    flange = ik.chains['arm'][0].fk(START)
+    flange[:3, 3] += [0.0, 0.0, -0.04]
+    ik.limits = {name: (START[name] - 1e-3, START[name] + 1e-3) for name in NAMES}  # the arm cannot walk there
+    fake.solution = {**{n: START[n] for n in NAMES}, 'j5': START['j5'] + 3.0}
+    warnings = []
+    ik.node = SimpleNamespace(get_logger=lambda: SimpleNamespace(warning=warnings.append))
+    assert ik.solve({'arm': tool_target(flange, {})}, {}, current=dict(START))['j5'] == pytest.approx(START['j5'] + 3)
+    assert len(warnings) == 1 and 'configuration jump, j5 turns 172 deg' in warnings[0]
