@@ -1,0 +1,134 @@
+{
+ "/Arms/Gripper_Ge103In/base_link": [
+  "meshes/Arms_Gripper_Ge103In_base_link_0.stl",
+  "meshes/Arms_Gripper_Ge103In_base_link_1.stl"
+ ],
+ "/Arms/Gripper_Ge103In/left_active_link1": [
+  "meshes/Arms_Gripper_Ge103In_left_active_link1_0.stl"
+ ],
+ "/Arms/Gripper_Ge103In/left_active_link2": [
+  "meshes/Arms_Gripper_Ge103In_left_active_link2_0.stl"
+ ],
+ "/Arms/Gripper_Ge103In/left_passive_link": [
+  "meshes/Arms_Gripper_Ge103In_left_passive_link_0.stl"
+ ],
+ "/Arms/Gripper_Ge103In_Right/base_link": [
+  "meshes/Arms_Gripper_Ge103In_Right_base_link_0.stl",
+  "meshes/Arms_Gripper_Ge103In_Right_base_link_1.stl"
+ ],
+ "/Arms/Gripper_Ge103In_Right/left_active_link1": [
+  "meshes/Arms_Gripper_Ge103In_Right_left_active_link1_0.stl"
+ ],
+ "/Arms/Gripper_Ge103In_Right/left_active_link2": [
+  "meshes/Arms_Gripper_Ge103In_Right_left_active_link2_0.stl"
+ ],
+ "/Arms/Gripper_Ge103In_Right/left_passive_link": [
+  "meshes/Arms_Gripper_Ge103In_Right_left_passive_link_0.stl"
+ ],
+ "/Arms/base_link": [
+  "meshes/Arms_base_link_0.stl"
+ ],
+ "/Arms/left_link1": [
+  "meshes/Arms_left_link1_0.stl",
+  "meshes/Arms_left_link1_1.stl",
+  "meshes/Arms_left_link1_2.stl",
+  "meshes/Arms_left_link1_3.stl"
+ ],
+ "/Arms/left_link2": [
+  "meshes/Arms_left_link2_0.stl",
+  "meshes/Arms_left_link2_1.stl",
+  "meshes/Arms_left_link2_2.stl"
+ ],
+ "/Arms/left_link3": [
+  "meshes/Arms_left_link3_0.stl"
+ ],
+ "/Arms/left_link4": [
+  "meshes/Arms_left_link4_0.stl",
+  "meshes/Arms_left_link4_1.stl"
+ ],
+ "/Arms/left_link5": [
+  "meshes/Arms_left_link5_0.stl"
+ ],
+ "/Arms/left_link6": [
+  "meshes/Arms_left_link6_0.stl",
+  "meshes/Arms_left_link6_1.stl",
+  "meshes/Arms_left_link6_2.stl"
+ ],
+ "/Arms/left_link7": [
+  "meshes/Arms_left_link7_0.stl"
+ ],
+ "/Arms/right_link1": [
+  "meshes/Arms_right_link1_0.stl",
+  "meshes/Arms_right_link1_1.stl",
+  "meshes/Arms_right_link1_2.stl",
+  "meshes/Arms_right_link1_3.stl"
+ ],
+ "/Arms/right_link2": [
+  "meshes/Arms_right_link2_0.stl",
+  "meshes/Arms_right_link2_1.stl",
+  "meshes/Arms_right_link2_2.stl"
+ ],
+ "/Arms/right_link3": [
+  "meshes/Arms_right_link3_0.stl"
+ ],
+ "/Arms/right_link4": [
+  "meshes/Arms_right_link4_0.stl",
+  "meshes/Arms_right_link4_1.stl"
+ ],
+ "/Arms/right_link5": [
+  "meshes/Arms_right_link5_0.stl"
+ ],
+ "/Arms/right_link6": [
+  "meshes/Arms_right_link6_0.stl",
+  "meshes/Arms_right_link6_1.stl",
+  "meshes/Arms_right_link6_2.stl"
+ ],
+ "/Arms/right_link7": [
+  "meshes/Arms_right_link7_0.stl"
+ ],
+ "/SteeringChassis/base_link": [
+  "meshes/SteeringChassis_base_link_0.stl",
+  "meshes/SteeringChassis_base_link_1.stl",
+  "meshes/SteeringChassis_base_link_2.stl",
+  "meshes/SteeringChassis_base_link_3.stl"
+ ],
+ "/SteeringChassis/wheel_driving_link1": [
+  "meshes/SteeringChassis_wheel_driving_link1_0.stl"
+ ],
+ "/SteeringChassis/wheel_driving_link2": [
+  "meshes/SteeringChassis_wheel_driving_link2_0.stl"
+ ],
+ "/SteeringChassis/wheel_driving_link3": [
+  "meshes/SteeringChassis_wheel_driving_link3_0.stl"
+ ],
+ "/SteeringChassis/wheel_driving_link4": [
+  "meshes/SteeringChassis_wheel_driving_link4_0.stl"
+ ],
+ "/SteeringChassis/wheel_steering_link1": [
+  "meshes/SteeringChassis_wheel_steering_link1_0.stl"
+ ],
+ "/SteeringChassis/wheel_steering_link2": [
+  "meshes/SteeringChassis_wheel_steering_link2_0.stl"
+ ],
+ "/SteeringChassis/wheel_steering_link3": [
+  "meshes/SteeringChassis_wheel_steering_link3_0.stl"
+ ],
+ "/SteeringChassis/wheel_steering_link4": [
+  "meshes/SteeringChassis_wheel_steering_link4_0.stl"
+ ],
+ "/base_link": [
+  "meshes/base_link_0.stl"
+ ],
+ "/head_link1": [
+  "meshes/head_link1_0.stl",
+  "meshes/head_link1_1.stl"
+ ],
+ "/head_link2": [
+  "meshes/head_link2_0.stl",
+  "meshes/head_link2_1.stl",
+  "meshes/head_link2_2.stl"
+ ],
+ "/torso_lift_link1": [
+  "meshes/torso_lift_link1_0.stl"
+ ]
+}

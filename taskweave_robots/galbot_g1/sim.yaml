@@ -1,0 +1,29 @@
+# How the Galbot G1 is built into the Isaac Sim scene (sim only; scripts/build_cell.py).
+# Links are named by prim name and must be unique rigid bodies in the asset (gripper links repeat per arm).
+asset: /Isaac/Robots/Galbot/galbot_g1/galbot_g1.usda   # relative to scene.yaml assets.root; default variants
+prim: Galbot_G1                 # referenced at /World/Robot/<prim>
+root_joint: root_joint          # not in the asset (floating base): created, and the articulation root moved onto it
+create_root_joint: true
+base_link: base_link            # chassis centre, on the floor plane; carried by the hidden planar base joints
+spawn_height: 0.035             # the wheel meshes reach 0.033 m below base_link: lift them clear of the floor
+deactivate:                     # the asset's own ROS graphs (odometry, TF, clock, wheel controller on /cmd_vel,
+  - Graph                       # joint states) would duplicate ours: ros_graphs.py and base_controller.py
+  - OmniChassis/Graph
+drives:                         # drive overrides by joint name (USD units: angular per degree). The asset's
+  left_gripper_joint:  {stiffness: 100.0, damping: 10.0, max_force: 50.0}   # gripper drives (k 10, 5 Nm)
+  right_gripper_joint: {stiffness: 100.0, damping: 10.0, max_force: 50.0}   # reach 0.87 of 1.7 rad in 4 s
+cameras:                        # mount = pose of the camera body in the parent link frame (USD camera: -z forward).
+                                # Zero-pose frames (reference/galbot_g1_model.json): head_link2 x = world X,
+                                # y = -world Z, z = world Y; left/right_arm_link7 -x = approach, y = closing.
+  head_camera:                  # front face of the head, looking forward and 20 deg down
+    model: d435
+    parent: head_link2
+    mount: {xyz: [0.08, -0.05, 0.0], axes: [[0, 0, -1], [0.342, -0.940, 0], [-0.940, -0.342, 0]]}
+  left_wrist_camera:            # on the gripper body, ahead of the flange, tilted toward the fingertips
+    model: d405
+    parent: left_arm_link7
+    wrist: {approach: -x, side: +z, offset: 0.09, forward: 0.14, tilt_deg: 25.0}
+  right_wrist_camera:
+    model: d405
+    parent: right_arm_link7
+    wrist: {approach: -x, side: +z, offset: 0.09, forward: 0.14, tilt_deg: 25.0}

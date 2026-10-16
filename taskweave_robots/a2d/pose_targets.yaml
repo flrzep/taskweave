@@ -1,0 +1,19 @@
+# Input for tools/solve_poses.py a2d -> poses.yaml. TCP targets in base_link coordinates (x forward, z up);
+# approach = TCP z, closing = TCP y. "fixed" joints (lift, torso pitch) are set, not solved.
+model: reference/a2d_6.1_model.json
+base_link: base_link
+arm_joints: '{side}_arm_joint[1-7]'
+targets:
+  home:                           # asset zero pose, arms sideways
+    fixed: {joint_lift_body: 0.0, joint_body_pitch: 0.0}
+  ready:
+    fixed: {joint_lift_body: 0.2, joint_body_pitch: 0.0}
+    left:  {tcp: [0.50, 0.20, 1.05], approach: [1, 0, 0], closing: [0, 1, 0]}
+    right: {tcp: [0.50, -0.20, 1.05], approach: [1, 0, 0], closing: [0, 1, 0]}
+  tucked:
+    fixed: {joint_lift_body: 0.0, joint_body_pitch: 0.0}
+    left:  {tcp: [0.30, 0.25, 0.85], approach: [1, 0, 0], closing: [0, 0, 1]}
+    right: {tcp: [0.30, -0.25, 0.85], approach: [1, 0, 0], closing: [0, 0, 1]}
+partial:
+  lift_high: {joint_lift_body: 0.4}
+  lift_low: {joint_lift_body: 0.0}

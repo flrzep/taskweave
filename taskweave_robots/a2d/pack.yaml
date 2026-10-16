@@ -1,0 +1,4 @@
+name: a2d
+version: 0.1.0
+schema_version: 1
+description: "Agibot A2D: two arms with grippers (no MoveIt config yet)"

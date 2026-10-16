@@ -1,0 +1,21 @@
+# How the Agibot A2D is built into the Isaac Sim scene (sim only; scripts/build_cell.py).
+# Links are named by prim name and must be unique rigid bodies in the asset.
+asset: /Isaac/Robots/Agibot/A2D/A2D.usd   # relative to scene.yaml assets.root
+prim: A2D                       # referenced at /World/Robot/<prim>
+root_joint: root_joint          # the asset's fixed world joint; it carries the articulation root
+base_link: base_link            # carried by the hidden planar base joints
+cameras:                        # mount = pose of the camera body in the parent link frame (USD camera: -z forward).
+                                # Link frames at zero pose (reference/a2d_6.1_model.json): link_pitch_head x = -world X,
+                                # y = +world Z, z = +world Y (robot faces +X); Link7_l/_r z = approach, x = closing.
+  head_camera:
+    model: d435
+    parent: link_pitch_head
+    mount: {xyz: [-0.09, 0.05, 0.0], axes: [[0, 0, -1], [0, 1, 0], [1, 0, 0]]}
+  left_wrist_camera:            # beside the gripper body, ahead of the flange, tilted toward the fingertips
+    model: d405
+    parent: Link7_l
+    wrist: {approach: +z, side: +y, offset: 0.09, forward: 0.10, tilt_deg: 20.0}
+  right_wrist_camera:
+    model: d405
+    parent: Link7_r
+    wrist: {approach: +z, side: +y, offset: 0.09, forward: 0.10, tilt_deg: 20.0}

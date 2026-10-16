@@ -1,0 +1,26 @@
+# Input for tools/solve_poses.py galbot_g1 -> poses.yaml. TCP targets in base_link coordinates (x forward, z up);
+# approach = TCP z, closing = TCP y. "fixed" joints are set, not solved: the leg values keep the torso upright
+# (leg_joint2 = leg_joint1 + leg_joint3) with the shoulders at a given height above base_link.
+model: reference/galbot_g1_model.json
+base_link: base_link
+arm_joints: '{side}_arm_joint[1-7]'
+legs:                             # shoulder height above base_link -> leg joints (FK on the model, torso upright)
+  low:  &legs_low  {leg_joint1: 0.0492, leg_joint2: 0.2615, leg_joint3: 0.2123, leg_joint4: 0.0, leg_joint5: 0.0}  # 0.80 m
+  mid:  &legs_mid  {leg_joint1: 0.1969, leg_joint2: 0.6599, leg_joint3: 0.4630, leg_joint4: 0.0, leg_joint5: 0.0}  # 0.95 m
+  work: &legs_work {leg_joint1: 0.3914, leg_joint2: 1.1081, leg_joint3: 0.7167, leg_joint4: 0.0, leg_joint5: 0.0}  # 1.10 m
+  high: &legs_high {leg_joint1: 0.6530, leg_joint2: 1.6807, leg_joint3: 1.0276, leg_joint4: 0.0, leg_joint5: 0.0}  # 1.25 m
+targets:
+  home:                           # asset zero pose: crouched, arms sideways
+    fixed: {leg_joint1: 0.0, leg_joint2: 0.0, leg_joint3: 0.0, leg_joint4: 0.0, leg_joint5: 0.0}
+  ready:                          # grippers in front of the body at working height, fingers closing sideways
+    fixed: *legs_work
+    left:  {tcp: [0.55, 0.20, 1.05], approach: [1, 0, 0], closing: [0, 1, 0]}
+    right: {tcp: [0.55, -0.20, 1.05], approach: [1, 0, 0], closing: [0, 1, 0]}
+  tucked:                         # driving pose: torso mid height, forearms folded (the long upper arm needs
+                                  # the grippers about 0.45 m ahead of base_link)
+    fixed: *legs_mid
+    left:  {tcp: [0.45, 0.25, 0.75], approach: [1, 0, 0], closing: [0, 0, 1]}
+    right: {tcp: [0.45, -0.25, 0.75], approach: [1, 0, 0], closing: [0, 0, 1]}
+partial:                          # move only the listed joints (d-pad lift buttons)
+  lift_high: *legs_high
+  lift_low: *legs_low

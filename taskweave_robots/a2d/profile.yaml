@@ -1,0 +1,29 @@
+# How the A2D's hardware is reached in this setup (Isaac Sim 6.1). Topics and names only; capabilities live in
+# embodiment.yaml. A real A2D gets its own profile with the same roles.
+name: a2d
+base:
+  type: holonomic           # planar virtual joints in the sim (no wheels in the asset)
+  cmd_vel: /cmd_vel
+  odom: /odom               # ground truth, in the cell frame
+  frame: base_link
+  footprint: [0.60, 0.45]   # from the asset: 0.323 front + 0.277 back, 0.211 left + 0.238 right
+  limits: {linear: 1.0, angular: 1.5}
+joints:                     # joint position targets in, joint states out (Isaac articulation controller)
+  command: /joint_command
+  state: /joint_states
+  linear: [joint_lift_body]   # prismatic (m); all others revolute (rad)
+grippers:                   # one driven joint per hand, the other finger joints are PhysX mimic joints
+  left:  {joint: left_hand_joint1,  open: 1.0, closed: 0.0}   # measured: 0 = fingers closed, 1 = fully open
+  right: {joint: right_hand_joint1, open: 1.0, closed: 0.0}
+tool_frames:                # flange -> canonical TCP (grasp centre between fingertips, z approach, y closing)
+  left:  {link: Link7_l, xyz: [0.0, 0.0, 0.16], rpy: [0.0, 0.0, -1.5708]}   # measured in the sim, about 1 cm
+  right: {link: Link7_r, xyz: [0.0, 0.0, 0.16], rpy: [0.0, 0.0, -1.5708]}
+cameras:
+  head:        {color: /head_camera/color/image_raw, depth: /head_camera/aligned_depth_to_color/image_raw,
+                info: /head_camera/color/camera_info, frame: head_camera_optical_frame}
+  left_wrist:  {color: /left_wrist_camera/color/image_raw, depth: /left_wrist_camera/aligned_depth_to_color/image_raw,
+                info: /left_wrist_camera/color/camera_info, frame: left_wrist_camera_optical_frame}
+  right_wrist: {color: /right_wrist_camera/color/image_raw, depth: /right_wrist_camera/aligned_depth_to_color/image_raw,
+                info: /right_wrist_camera/color/camera_info, frame: right_wrist_camera_optical_frame}
+teleop:
+  joy: /joy

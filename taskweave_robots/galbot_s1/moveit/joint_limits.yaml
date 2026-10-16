@@ -1,0 +1,31 @@
+# Joint speed and acceleration limits for MoveIt's trajectory timing (robot_description_planning). Speeds are the
+# ones the direct joint moves use (taskweave joint skills: 1.2 rad/s, lift 0.25 m/s; 15 Oct, was 0.6 and 0.1); the URDF
+# limits (2.0 rad/s, 0.5 m/s) are the ceiling.
+joint_limits:
+  right_gripper_joint: {has_velocity_limits: true, max_velocity: 0.6, has_acceleration_limits: true, max_acceleration: 1.5}
+  left_gripper_joint: {has_velocity_limits: true, max_velocity: 0.6, has_acceleration_limits: true, max_acceleration: 1.5}
+  left_joint1: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  left_joint2: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  left_joint3: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  left_joint4: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  left_joint5: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  left_joint6: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  left_joint7: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  right_joint1: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  right_joint2: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  right_joint3: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  right_joint4: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  right_joint5: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  right_joint6: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  right_joint7: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  wheel_steering_joint1: {has_velocity_limits: true, max_velocity: 0.6, has_acceleration_limits: true, max_acceleration: 1.5}
+  wheel_steering_joint2: {has_velocity_limits: true, max_velocity: 0.6, has_acceleration_limits: true, max_acceleration: 1.5}
+  wheel_steering_joint3: {has_velocity_limits: true, max_velocity: 0.6, has_acceleration_limits: true, max_acceleration: 1.5}
+  wheel_steering_joint4: {has_velocity_limits: true, max_velocity: 0.6, has_acceleration_limits: true, max_acceleration: 1.5}
+  wheel_driving_joint1: {has_velocity_limits: true, max_velocity: 0.6, has_acceleration_limits: true, max_acceleration: 1.5}
+  wheel_driving_joint2: {has_velocity_limits: true, max_velocity: 0.6, has_acceleration_limits: true, max_acceleration: 1.5}
+  wheel_driving_joint3: {has_velocity_limits: true, max_velocity: 0.6, has_acceleration_limits: true, max_acceleration: 1.5}
+  wheel_driving_joint4: {has_velocity_limits: true, max_velocity: 0.6, has_acceleration_limits: true, max_acceleration: 1.5}
+  head_joint1: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  head_joint2: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
+  body_joint: {has_velocity_limits: true, max_velocity: 0.25, has_acceleration_limits: true, max_acceleration: 0.5}

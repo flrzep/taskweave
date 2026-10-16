@@ -1,0 +1,56 @@
+# How the Galbot S1's hardware is reached in this setup (Isaac Sim 6.1). Topics and names only; capabilities live in
+# embodiment.yaml. A real S1 gets its own profile with the same roles.
+name: galbot_s1
+base:
+  type: differential        # four-wheel steering chassis: forward/backward and turning on the spot, no sideways
+  cmd_vel: /cmd_vel         # motion (real S1). Planar virtual joints in the sim; the sim drops sideways commands
+  odom: /odom               # ground truth, in the cell frame
+  frame: base_link          # column base, 0.583 m above the floor
+  footprint: [0.88, 0.74]   # chassis meshes: x -0.29..+0.44, y +-0.37 around base_link (symmetric box around it)
+  limits: {linear: 2.0, angular: 1.5}   # 15 Oct, was 1.0 m/s: the sim drives faster than the S1 datasheet is known to
+joints:                     # joint position targets in, joint states out (Isaac articulation controller)
+  command: /joint_command
+  state: /joint_states
+  linear: [body_joint]      # prismatic: torso lift 0-0.75 m
+grippers:                   # Ge103In: one driven joint per hand, a finger linkage closing toward the +z side of link7
+  left: {joint: left_gripper_joint, open: 0.0, closed: 1.63, opening_m: &opening [[0.0, 0.077], [0.2, 0.068], [0.4, 0.058], [0.6, 0.048], [0.8, 0.037], [1.0, 0.026], [1.2, 0.016], [1.4, 0.006], [1.55, 0.0]]}
+  right: {joint: right_gripper_joint, open: 0.0, closed: 1.63, opening_m: *opening}
+                            # limit 0-1.636 rad; 15 Oct (user + gripper meshes): 1.63 = finger on the fixed jaw, 0 = swung
+                            # 8 cm away. opening_m: [joint, gap finger-jaw at the tips in m], from the left gripper's
+                            # collision hulls (+-3 mm); a point's grip_m turns into the joint through it
+tool_frames:                # flange -> canonical TCP (grasp centre, z approach, y closing). Fingertips 0.27-0.32 m
+  left: {link: left_link7, xyz: [-0.26, 0.0, 0.095], rpy: [1.5708, 0.0, -1.5708]}    # along -x of link7, y = +z of link7
+  right: {link: right_link7, xyz: [-0.26, 0.0, 0.095], rpy: [1.5708, 0.0, -1.5708]}  # (finger towards the fixed jaw)
+                            # 15 Oct: the Ge103In is one finger against a fixed jaw 0.14 m beside the wrist axis (both
+                            # hands on link7 +z): TCP in the gap (jaw 0.14, open finger 0.04), 2 cm behind the tips.
+                            # No flip: turned 180 deg about the approach the jaw is on the other side (was 9 cm off-gap
+                            # on the wrist axis with flip: true before)
+ik:                         # tool targets in poses.yaml: solved by MoveIt (ros/moveit.launch.py, moveit/ config)
+  groups: {left: left_arm, right: right_arm}
+  joints: '{tool}_joint[1-7]'   # the arm joints IK may move
+  timeout_s: 0.3              # per attempt (each seed, then the current state, then the fallback)
+  fallback_groups: {left: left_arm_global, right: right_arm_global}   # global search if no descent converges
+  fallback_timeout_s: 2.0
+  avoid_collisions: true      # collision hulls: moveit/meshes (tools/export_collision.py), pairs: tools/collision_matrix.py
+  mirror: {right: left}       # the S1's right arm mirrors the left with the same joint values (URDF FK, 13 Oct)
+  choose:                     # best of several solutions (taskweave_skills/ik.py), not the first
+    elbow: down               # 13 Oct: top-down grasps keep the most joint-limit room elbow out/up, not down
+    limit_margin_deg: 25.0
+    weights: {limits: 2.0, elbow: 1.0, motion: 0.2, symmetry: 0.5}
+  seeds:                      # known-good arm postures (the joint-space poses checked in the sim, 9 Oct): IK descends
+                              # from each in order, so a named pose always gets the same arm configuration. 15 Oct:
+                              # in the user's branch (joint 4 <= 0 on both arms; URDF limits keep it there)
+  - {left_joint1: -1.5481, left_joint2: -1.9870, left_joint3: 2.4899, left_joint4: -2.5980, left_joint5: -1.8854, left_joint6: 0.5760, left_joint7: -1.5682, right_joint1: 0.6543, right_joint2: -1.5605, right_joint3: -0.1695, right_joint4: -2.5980, right_joint5: -1.2841, right_joint6: 0.4362, right_joint7: -1.4843} # ready
+  - {left_joint1: 0.0420, left_joint2: -0.5573, left_joint3: 0.8674, left_joint4: -2.4990, left_joint5: 1.9584, left_joint6: -0.2105, left_joint7: 1.4453, right_joint1: -0.4545, right_joint2: -0.5866, right_joint3: 1.4398, right_joint4: -2.4990, right_joint5: 1.9613, right_joint6: -0.4938, right_joint7: 1.5682} # tucked
+  - {left_joint1: -1.3504, left_joint2: 0.8535, left_joint3: 2.9440, left_joint4: -2.5980, left_joint5: 1.1528, left_joint6: 0.7654, left_joint7: 1.5498, right_joint1: -1.3471, right_joint2: 0.8589, right_joint3: 2.9296, right_joint4: -2.5980, right_joint5: 1.1496, right_joint6: 0.7654, right_joint7: 1.5525} # home
+planning:                   # collision-free arm, lift and head motion (MoveIt OMPL, moveit/joint_limits.yaml speeds)
+  group: whole_body
+  joints: '(left|right)_joint[1-7]|body_joint|head_joint[12]'   # whole_body's joints: those a move does not set stay put
+  timeout_s: 5.0
+  attempts: 3
+cameras:
+  head: {color: /head_camera/color/image_raw, depth: /head_camera/aligned_depth_to_color/image_raw, info: /head_camera/color/camera_info, frame: head_camera_optical_frame}
+  left_wrist: {color: /left_wrist_camera/color/image_raw, depth: /left_wrist_camera/aligned_depth_to_color/image_raw, info: /left_wrist_camera/color/camera_info, frame: left_wrist_camera_optical_frame}
+  right_wrist: {color: /right_wrist_camera/color/image_raw, depth: /right_wrist_camera/aligned_depth_to_color/image_raw, info: /right_wrist_camera/color/camera_info, frame: right_wrist_camera_optical_frame}
+teleop:
+  joy: /joy

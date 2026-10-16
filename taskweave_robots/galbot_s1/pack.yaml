@@ -1,0 +1,4 @@
+name: galbot_s1
+version: 0.1.0
+schema_version: 1
+description: "Galbot S1: differential steering chassis, lifting torso, two 7-joint arms with Ge103In grippers; MoveIt config (URDF, SRDF, collision meshes)"

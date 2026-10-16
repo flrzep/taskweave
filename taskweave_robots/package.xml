@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypelocation="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>taskweave_robots</name>
+  <version>0.1.0</version>
+  <description>taskweave robot packs (data only): per robot model its profile, embodiment, MoveIt config, navigation, sim asset section and named poses, nothing about a cell. Installed to share/taskweave_robots/&lt;robot&gt;/.</description>
+  <maintainer email="f.rzepczyk@gmail.com">Florian Rzepczyk</maintainer>
+  <!-- TBD: parts are derived from vendor robot models (meshes and URDF from the Galbot S1 USD asset); check their
+       licences before this package is made public -->
+  <license>TBD</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

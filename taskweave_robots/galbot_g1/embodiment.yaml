@@ -1,0 +1,23 @@
+# What the Galbot G1 is and can do. No topics or joint names (see profile.yaml).
+# "~" = not measured yet (never guessed). Geometry from the Isaac 6.1 asset (reference/galbot_g1_model.json, 8 Oct),
+# about +-1 cm; payload needs the datasheet.
+name: galbot_g1
+summary: >-
+  Wheeled bimanual humanoid: omni-wheel holonomic base, 5-DoF leg that raises and pitches the torso, two 7-DoF
+  arms with parallel grippers, pan-tilt head with an RGB-D camera and one RGB-D camera per wrist.
+capabilities: [base.holonomic, torso.lift, torso.pitch, head.pan_tilt, arms.bimanual, gripper.parallel,
+               camera.head.rgbd, camera.wrist.rgbd]
+base:  {footprint: [0.60, 0.60], max_speed: {linear: 1.0, angular: 1.5}}
+torso: {lift_range_m: [0.0, 0.65], pitch_range_rad: [-1.59, 1.59]}   # shoulders 0.70-1.35 m above the floor (upright torso)
+arms:
+  left:  {dof: 7, reach_m: 0.95, payload_kg: ~, tool: left}     # shoulder to TCP, straight arm
+  right: {dof: 7, reach_m: 0.95, payload_kg: ~, tool: right}
+tools:
+  left:  {type: parallel_gripper, stroke_m: 0.12, finger_length_m: 0.075}   # finger travel measured in the sim
+  right: {type: parallel_gripper, stroke_m: 0.12, finger_length_m: 0.075}
+cameras:
+  head:        {type: rgbd, hfov_deg: 69, range_m: [0.1, 10.0]}
+  left_wrist:  {type: rgbd, hfov_deg: 87, range_m: [0.07, 1.0], mounted_on: tools.left}
+  right_wrist: {type: rgbd, hfov_deg: 87, range_m: [0.07, 1.0], mounted_on: tools.right}
+action_spaces:
+  joint_pos_bimanual: {dims: 21, rate_hz: 30, description: "2x7 arm joints, 2 grippers, 5 leg joints"}

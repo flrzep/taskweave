@@ -1,0 +1,29 @@
+# How the Galbot G1's hardware is reached in this setup (Isaac Sim 6.1). Topics and names only; capabilities live in
+# embodiment.yaml. A real G1 gets its own profile with the same roles.
+name: galbot_g1
+base:
+  type: holonomic           # omni-wheel chassis; planar virtual joints in the sim (wheels are not driven)
+  cmd_vel: /cmd_vel
+  odom: /odom               # ground truth, in the cell frame
+  frame: base_link
+  footprint: [0.60, 0.60]   # chassis meshes: +-0.30 m around base_link
+  limits: {linear: 1.0, angular: 1.5}
+joints:                     # joint position targets in, joint states out (Isaac articulation controller)
+  command: /joint_command
+  state: /joint_states
+grippers:                   # one driven joint per hand, the knuckle/finger joints are PhysX mimic joints
+  left:  {joint: left_gripper_joint,  open: 0.0, closed: 1.70}   # measured: 0 = open (finger links 0.137 m apart),
+  right: {joint: right_gripper_joint, open: 0.0, closed: 1.70}   # 1.70 = closed (0.013 m), limit 1.703 rad
+tool_frames:                # flange -> canonical TCP (grasp centre between fingertips, z approach, y closing)
+  # link7 -> gripper_flange 0.11 m along -x, fingertip pads 0.20-0.275 m: TCP 0.24 m. From the asset, about 1 cm.
+  left:  {link: left_arm_link7,  xyz: [-0.24, 0.0, 0.0], rpy: [3.1416, 1.5708, 0.0]}
+  right: {link: right_arm_link7, xyz: [-0.24, 0.0, 0.0], rpy: [0.0, -1.5708, 0.0]}
+cameras:
+  head:        {color: /head_camera/color/image_raw, depth: /head_camera/aligned_depth_to_color/image_raw,
+                info: /head_camera/color/camera_info, frame: head_camera_optical_frame}
+  left_wrist:  {color: /left_wrist_camera/color/image_raw, depth: /left_wrist_camera/aligned_depth_to_color/image_raw,
+                info: /left_wrist_camera/color/camera_info, frame: left_wrist_camera_optical_frame}
+  right_wrist: {color: /right_wrist_camera/color/image_raw, depth: /right_wrist_camera/aligned_depth_to_color/image_raw,
+                info: /right_wrist_camera/color/camera_info, frame: right_wrist_camera_optical_frame}
+teleop:
+  joy: /joy

@@ -1,0 +1,66 @@
+# How the Galbot S1 is built into the Isaac Sim scene (sim only; scripts/build_cell.py). Asset: galbot-usds repo,
+# copied to assets/galbot/Galbot_S1 (default variants: SteeringChassis, Arms with Ge103In grippers, PhysX).
+# Its sensor layer references FaSim sensor files that are not in the repo (mid360, d435), so those mounts are empty
+# and the cameras below are added instead.
+asset_file: assets/galbot/Galbot_S1/Galbot_S1.usda   # relative to the frame-sim workspace
+prim: Galbot_S1                 # referenced at /World/Robot/<prim>
+root_joint: root_joint          # floating base: created, and the articulation root moved onto it
+create_root_joint: true
+base_link: base_link            # column base (articulation root, a direct child); the chassis hangs 0.55 m below it
+spawn_height: 0.588             # wheels reach 0.583 m below base_link: base_link this high puts them 5 mm clear
+start_joints:                   # the robot starts in poses.yaml home on every Play (rad, m; build_cell.py start_joints).
+                                # home is hand targets: these are its IK solution on the URDF chains, from the arm shape
+                                # the live IK chose (15 Oct, the home saved in the HMI, new TCP), inside the real S1
+                                # limits with 24 deg room; 15 Oct: in the user's branch (joint 4 <= 0 on both arms: the right is the left's mirror). Re-solve if home changes.
+  body_joint: 0.494
+  head_joint1: 0.0
+  head_joint2: 0.0
+  left_joint1: 0.2208
+  left_joint2: -1.0837
+  left_joint3: 0.628
+  left_joint4: -1.7516
+  left_joint5: -1.0601
+  left_joint6: 0.1144
+  left_joint7: -1.0851
+  right_joint1: 0.5431
+  right_joint2: -1.3238
+  right_joint3: 0.13
+  right_joint4: -1.7516
+  right_joint5: -0.7267
+  right_joint6: -0.2286
+  right_joint7: -0.8119
+joint_limits:                   # 15 Oct (user): arm joints opened to +-180 deg for now, to try motions the real S1
+                                # cannot do (e.g. joint 6 is +-45 deg). Same in moveit/robot.urdf; the real
+                                # limits are in the vendor asset (reference/galbot_s1_model.json). Remove both to undo.
+  left_joint1: [-3.1416, 3.1416]
+  left_joint2: [-3.1416, 3.1416]
+  left_joint3: [-3.1416, 3.1416]
+  left_joint4: [-3.1416, 3.1416]
+  left_joint5: [-3.1416, 3.1416]
+  left_joint6: [-3.1416, 3.1416]
+  left_joint7: [-3.1416, 3.1416]
+  right_joint1: [-3.1416, 3.1416]
+  right_joint2: [-3.1416, 3.1416]
+  right_joint3: [-3.1416, 3.1416]
+  right_joint4: [-3.1416, 3.1416]
+  right_joint5: [-3.1416, 3.1416]
+  right_joint6: [-3.1416, 3.1416]
+  right_joint7: [-3.1416, 3.1416]
+deactivate:                  # the asset's own ROS graphs (joint states, odometry, steering wheel controller on
+  - Graph                       # /cmd_vel) would duplicate ours: ros_graphs.py and base_controller.py
+  - SteeringChassis/Graph
+cameras:                        # mount = pose of the camera body in the parent link frame (USD camera: -z forward).
+                                # Zero-pose frames (reference/galbot_s1_model.json): head_link2 x = world X,
+                                # y = world Z, z = -world Y; left/right_link7 -x = approach, +z = finger side.
+  head_camera:                  # in front of the face plate (head meshes end 0.16 m ahead), forward and 20 deg down
+    model: d435
+    parent: head_link2
+    mount: {xyz: [0.17, 0.06, 0.0], axes: [[0, 0, 1], [0.342, 0.940, 0], [-0.940, 0.342, 0]]}
+  left_wrist_camera:            # on the asset's camera stand (link7 +y side, 0.08-0.15 m ahead of the flange)
+    model: d405
+    parent: left_link7
+    wrist: {approach: -x, side: +y, offset: 0.06, forward: 0.12, tilt_deg: 20.0}
+  right_wrist_camera:           # mirrored stand on the -y side
+    model: d405
+    parent: right_link7
+    wrist: {approach: -x, side: -y, offset: 0.06, forward: 0.12, tilt_deg: 20.0}
