@@ -14,8 +14,9 @@ not jogged.
 
 Elbow: std_msgs/Float64 on /taskweave/jog/<tool>/elbow (rad/s) swings the elbow while the flange stays: the joints move
 along the arm's self-motion (the Jacobian's null space; a 7-joint arm has one), at about that rate, and the step keeps
-correcting the flange onto where it was. Without the URDF: the swivel joint (profile ik.swivel_joint, default the
-arm's third joint) turns and one IK descent puts the flange back.
+correcting the flange onto where it was; the swivel joint (profile arms.<tool>.swivel), if given, sets which way is
+positive (it turns up). Without the URDF: the swivel joint turns and one IK descent puts the flange back; an arm without
+arms.<tool>.swivel then has no elbow swing.
 
 ROS parameters: config_dir, robot, rate_hz (20.0, steps per second), validity_timeout_s (0.1: a collision check
 slower than this lets the step through, so jogging never blocks on it).
@@ -41,6 +42,13 @@ VALIDITY_POLL_S = 0.002  # poll period of a state validity request
 MAX_STEP_S = 0.2  # longest time integrated in one step (after a stall or a sim pause the target does not jump)
 FOLLOW_M, FOLLOW_RAD = 0.005, 0.02  # a reached flange this close to the target keeps the target, else takes its place
 SWIVEL_SIGN = 0.1  # the self-motion's swivel-joint component above which its sign sets the direction
+
+
+def swivel_joint(profile: dict, tool: str) -> str | None:
+    """The joint the elbow swing turns: profile arms.<tool>.swivel (deprecated: ik.swivel_joint, {tool} = tool
+    name); None if the profile names none (no arm structure is assumed)."""
+    arm = (profile.get('arms') or {}).get(tool) or {}
+    return arm.get('swivel') or (profile.get('ik') or {}).get('swivel_joint', '').format(tool=tool) or None
 
 
 def rotation(omega: np.ndarray, dt: float) -> np.ndarray:
@@ -98,7 +106,7 @@ class TcpJog(Node):
                 self.tools[tool] = {'twist': None, 'received': -math.inf, 'target': None, 'blocked': False,
                                     'joints': re.compile(self.ik.joint_pattern.format(tool=tool)),
                                     'elbow': 0.0, 'elbow_received': -math.inf,
-                                    'swivel': profile.data['ik'].get('swivel_joint', '').format(tool=tool) or None}
+                                    'swivel': swivel_joint(profile.data, tool)}
                 self.create_subscription(TwistStamped, f'{NAMESPACE}/{tool}', lambda m, t=tool: self._twist(t, m), 10)
                 self.create_subscription(Float64, f'{NAMESPACE}/{tool}/elbow', lambda m, t=tool: self._elbow(t, m), 10)
         self._setup_chains(store, profile)
@@ -266,9 +274,12 @@ class TcpJog(Node):
         """Turn the swivel joint by ``angle`` and put the flange back where it is (the elbow moves, the TCP not)."""
         if tool in self.held_tools or not current:
             return
-        swivel = jog['swivel'] or (sorted(current)[2] if len(current) > 2 else None)
-        if swivel not in current:
-            self.get_logger().warning(f'jog {tool}: no swivel joint {swivel!r}', throttle_duration_sec=5)
+        swivel = jog['swivel']
+        if jog.get('chain') is None and swivel not in current:
+            reason = (f'swivel joint {swivel!r} (profile arms.{tool}.swivel) is not one of its joints' if swivel else
+                      f'the robot profile has no arms.{tool}.swivel (the joint the swing turns)')
+            self.get_logger().warning(f'jog {tool}: no elbow swing without the URDF chain: {reason}',
+                                      throttle_duration_sec=5)
             return
         if jog['target'] is None:
             jog['target'] = self._flange(tool)
@@ -280,9 +291,10 @@ class TcpJog(Node):
             if any(name not in positions for name in jog['names']):
                 return
             direction = jog['chain'].null_direction(positions, jog['names'])
-            # the self-motion has no sign of its own: positive turns the swivel joint up, and it keeps its way
-            index = jog['names'].index(swivel) if swivel in jog['names'] else 0
-            if abs(direction[index]) > SWIVEL_SIGN:
+            # the self-motion has no sign of its own: positive turns the swivel joint up (without one: the way it
+            # started), and it keeps its way
+            index = jog['names'].index(swivel) if swivel in jog['names'] else None
+            if index is not None and abs(direction[index]) > SWIVEL_SIGN:
                 direction = direction * np.sign(direction[index])
             elif jog['null'] is not None and direction @ jog['null'] < 0:
                 direction = -direction

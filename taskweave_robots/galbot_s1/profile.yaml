@@ -27,9 +27,10 @@ tool_frames:                # flange -> canonical TCP (grasp centre, z approach,
                             # No flip: turned 180 deg about the approach the jaw is on the other side (was 9 cm off-gap
                             # on the wrist axis with flip: true before)
 arms:                       # elbow: the links at the shoulder, elbow and wrist centres (frames of joints 2, 4, 6): the
-                            # elbow side (ik.choose.elbow, points), straight lines and elbow swings
-  left: {elbow: {shoulder: left_link2, elbow: left_link4, wrist: left_link6}}
-  right: {elbow: {shoulder: right_link2, elbow: right_link4, wrist: right_link6}}
+                            # elbow side (ik.choose.elbow, points), straight lines and elbow swings. swivel: the joint
+                            # the pad's elbow jog turns (upper-arm roll; its positive way on the URDF chain)
+  left: {elbow: {shoulder: left_link2, elbow: left_link4, wrist: left_link6}, swivel: left_joint3}
+  right: {elbow: {shoulder: right_link2, elbow: right_link4, wrist: right_link6}, swivel: right_joint3}
 ik:                         # tool targets in poses.yaml: solved by MoveIt (ros/moveit.launch.py, moveit/ config)
   groups: {left: left_arm, right: right_arm}
   joints: '{tool}_joint[1-7]'   # the arm joints IK may move

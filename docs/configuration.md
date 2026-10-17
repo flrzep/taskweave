@@ -141,7 +141,9 @@ Skills ask for roles (`base`, `arms.both`, `grippers.left`, `cameras.head`); onl
 
 `arms.<tool>.elbow` names the links at an IK arm's shoulder, elbow and wrist centres: the elbow side (`ik.choose.elbow`,
 a point's `elbow`), straight lines and elbow swings use it. An arm without it has no elbow control (an elbow side is
-ignored with a warning, an elbow swing fails with a message). `motion_tuning` holds the step sizes and thresholds of
+ignored with a warning, an elbow swing fails with a message). `arms.<tool>.swivel` names the joint the pad's elbow
+jog turns (e.g. the upper-arm roll): without a URDF the jog turns it and IK puts the TCP back (an arm without it has no
+elbow jog then); with a URDF it only sets which way is positive. `motion_tuning` holds the step sizes and thresholds of
 the arm motion code, grouped as `chain` (damped least-squares step), `line` (straight-line steps), `elbow` (elbow side
 and swing), `continuation` (short moves continue the arm's configuration) and `plan` (planner retries, contact depth);
 the schema documents each key and its default. They are read when the skills start (restart frame-ros after a change).

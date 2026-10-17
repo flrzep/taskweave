@@ -2,10 +2,8 @@
 # envelope: the robot in its driving pose (home, measured 13 Oct from the collision meshes in the sim: grippers 0.90 m
 # ahead, chassis 0.30 m back, 0.50 m left, 0.57 m right), from base_link (m).
 envelope: {front: 0.9, back: 0.3, left: 0.5, right: 0.6}
-# carry_envelope: while the robot holds a frame (navigate_to switches the footprint): a Type 2 frame (0.69 x 0.52 m)
-# held top-down at its side rails, pulled in to TCP x 0.67 m, reaches 1.19 m ahead and 0.26 m to
-# either side (front 1.2 + padding: backing out of a stance stays within depart_max_m 1.0)
-carry_envelope: {front: 1.2,  back: 0.3, left: 0.5, right: 0.6}
+# carry_envelope (the robot plus a carried object, while it holds one) is about the objects of a cell: it comes from
+# the cell pack (robots/galbot_s1/navigation.yaml), not from here.
 padding: 0.1              # added around the envelope
 inflation_radius: 0.65    # cost gradient beyond the envelope: paths keep away from obstacles where there is room
 # driving: speed limits (m/s, rad/s); sideways only for a holonomic base (the S1 is differential); prefer_forward =
