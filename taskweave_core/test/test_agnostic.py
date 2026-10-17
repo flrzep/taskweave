@@ -26,7 +26,7 @@ FORBIDDEN = ['galbot', 's1', 'g1', 'a2d', 'agibot', 'adient', 'frame_type', 'rai
              'bay_', 'stack_2']
 
 # counts on 16 Oct 2026; strict mode (=1) fails above these
-BASELINE = {'names_code': 0, 'names_comments': 0, 'numbers': 0, 'constants': 8, 'arm_structure': 0}
+BASELINE = {'names_code': 0, 'names_comments': 0, 'numbers': 0, 'constants': 0, 'arm_structure': 0}
 
 ALLOWED_NUMBERS = {0, 1, 2, 3, 4, 0.5, 100, 1000, 1e6, 1e9, 180, 360}  # by abs value; plus epsilons <= 1e-6
 PROTOCOL_ARGS = {'create_publisher': 2, 'create_subscription': 3, 'round': 1}  # from this arg on: QoS depth, digits
@@ -43,6 +43,18 @@ PROTOCOL = {
     'ELBOW_WORDS': 'word -> unit direction vocabulary of ik.preferred_elbow',
 }
 PROTOCOL_SUFFIXES = ('POLL_S',)  # service/action poll periods
+# algorithm constants kept in code on purpose (P1 review): numerical guards and fixed conventions of an algorithm,
+# nothing a robot or cell would tune
+ALGORITHM = {
+    'MIN_DT_S': 'smallest time step a controller divides by',
+    'REVERSE_HYSTERESIS': 'drive direction switch hysteresis of the base controller',
+    'SWING_STRAIGHT_STEPS': 'interpolation steps of the straight leg after an elbow swing',
+    'MIN_SPAN': 'smallest joint span a plan check divides by',
+    'MAX_STEP_S': 'largest jog integration step',
+    'FOLLOW_M': 'jog target follow tolerance (m)',
+    'FOLLOW_RAD': 'jog target follow tolerance (rad)',
+    'SWIVEL_SIGN': 'direction convention of the jog swivel axis',
+}
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = ['taskweave_core', 'taskweave_skills', 'taskweave_hmi']
@@ -236,7 +248,7 @@ def test_module_constants():
             pairs = zip(target.elts, node.value.elts, strict=False) \
                 if isinstance(target, ast.Tuple) and isinstance(node.value, ast.Tuple) else [(target, node.value)]
             for name, value in pairs:
-                if isinstance(name, ast.Name) and numeric(value) and name.id not in PROTOCOL \
+                if isinstance(name, ast.Name) and numeric(value) and name.id not in {**PROTOCOL, **ALGORITHM} \
                         and not name.id.endswith(PROTOCOL_SUFFIXES):
                     findings.append(f'{rel(path)}:{node.lineno} {name.id} = {ast.unparse(value)}')
     report('constants', findings)
