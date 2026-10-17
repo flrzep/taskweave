@@ -45,6 +45,15 @@ def _system_robot_packs(cell: Path) -> list[str]:
     return list((yaml.safe_load(path.read_text(encoding='utf-8')) or {}).get('robot_packs', []))
 
 
+def _entry(target: Path, cell: Path) -> str:
+    """The system.yaml robot_packs entry for ``target``: relative to the cell pack, absolute where there is no
+    relative path (another Windows drive)."""
+    try:
+        return os.path.relpath(target, cell).replace(os.sep, '/')
+    except ValueError:
+        return target.as_posix()
+
+
 def _add_robot_packs(cell: Path, entry: str) -> None:
     """Append ``entry`` to system.yaml robot_packs, comments kept."""
     from ruamel.yaml import YAML
@@ -67,11 +76,12 @@ def split_robot_packs(cell: Path, robot_packs: Path | None, dry_run: bool, say) 
     configured = _system_robot_packs(cell)
     target = robot_packs.expanduser().resolve() if robot_packs else None
     on_path = target is not None and any(loc.path == target for loc in packs.locations(cell, configured))
-    entry = os.path.relpath(target, cell).replace(os.sep, '/') if target is not None else None
+    entry = _entry(target, cell) if target is not None else None
     moved = False
     for folder in sorted(p for p in (cell / 'robots').glob('*') if p.is_dir()):
         robot = folder.name
-        search = packs.locations(cell, configured + ([entry] if target is not None and not on_path else []))
+        adding = [entry] if target is not None and not on_path else []
+        search = packs.locations(cell, configured + adding, tuple(adding))
         robot_packs_found = [p for p in (packs.robot_pack(loc, robot) for loc in search) if p is not None]
         gone = set()    # entries removed or moved out of the folder
         for name in packs.ROBOT_PACK_FILES:

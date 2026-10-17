@@ -102,15 +102,27 @@ class Location:
     writable: bool
 
 
-def locations(cell: Path, configured: list[str] | None) -> list[Location]:
-    """Robot pack locations in search order: env, system.yaml robot_packs (``configured``), installed share."""
-    found = [Location(Path(p).expanduser().resolve(), 'env', True)
-             for p in os.environ.get(ROBOT_PACKS_ENV, '').split(os.pathsep) if p.strip()]
-    found += [Location((Path(cell) / p).expanduser().resolve(), 'system.yaml', True) for p in configured or []]
+def locations(cell: Path, configured: list[str] | None, planned: tuple[str, ...] = ()) -> list[Location]:
+    """Robot pack locations in search order: env, system.yaml robot_packs (``configured``), installed share. A
+    configured location that does not exist is an error (a typo would silently hide a robot pack, and the files
+    would come from an older one further down); ``planned`` system.yaml entries may not exist yet (migrate)."""
+    found = []
+    for entry in os.environ.get(ROBOT_PACKS_ENV, '').split(os.pathsep):
+        if entry.strip():
+            found.append(_location(Path(entry).expanduser().resolve(), 'env', f'env {ROBOT_PACKS_ENV}', cell))
+    for entry in configured or []:
+        path = (Path(cell) / entry).expanduser().resolve()
+        found.append(_location(path, 'system.yaml', 'system.yaml robot_packs', cell, entry in planned))
     installed = installed_location()
     if installed is not None:
         found.append(Location(installed, 'installed', False))
     return found
+
+
+def _location(path: Path, origin: str, where: str, cell: Path, may_not_exist: bool = False) -> Location:
+    if not path.exists() and not may_not_exist:
+        raise _error(path, f'robot pack location does not exist (configured in {where}; cell pack {cell})')
+    return Location(path, origin, True)
 
 
 @dataclass(frozen=True)
