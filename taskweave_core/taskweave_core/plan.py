@@ -19,6 +19,21 @@ class IncludeError(ValueError):
     """A mission include cannot be expanded (unknown mission, missing or unknown parameter, a cycle)."""
 
 
+class _OriginStep(dict):
+    """A step dict that remembers where it came from (``origin``: {'step': index in the top mission's own steps,
+    'include': names of the include chain, outermost first (empty for the mission's own steps), 'inner_step': index
+    in the innermost mission}). An attribute, not a key: the dict itself, its equality and its serialisation are
+    those of a plain step."""
+
+    origin: dict | None = None
+
+
+def _with_origin(step: dict, origin: dict) -> dict:
+    tagged = _OriginStep(step)
+    tagged.origin = origin
+    return tagged
+
+
 def _fill(value, values: dict):
     """``value`` with ``{param}`` replaced by ``values[param]``; other placeholders (world state) stay. A string that
     is just one placeholder takes the value's type."""
@@ -43,7 +58,8 @@ def expand_includes(mission: dict, load: Callable[[str], dict], _depth: int = 0,
     for number, raw in enumerate(mission['steps'], start=1):
         step_id = raw.get('id', f's{number}')
         if 'include' not in raw:
-            steps.append({**copy.deepcopy(raw), 'id': step_id})
+            steps.append(_with_origin({**copy.deepcopy(raw), 'id': step_id},
+                                      {'step': number - 1, 'include': [], 'inner_step': number - 1}))
             continue
         name = raw['include']
         if name in _stack or _depth >= MAX_INCLUDE_DEPTH:
@@ -62,12 +78,15 @@ def expand_includes(mission: dict, load: Callable[[str], dict], _depth: int = 0,
         inner_defaults = inner.get('defaults', {})
         overrides = {k: raw[k] for k in STEP_SETTINGS if k in raw}  # the include step's own settings win
         for sub in expanded['steps']:
+            inner_origin = getattr(sub, 'origin', None) or {'include': [], 'inner_step': 0}
+            sub_origin = {'step': number - 1, 'include': [name, *inner_origin['include']],
+                          'inner_step': inner_origin['inner_step']}
             sub = {**_fill(sub, values), **overrides}
             sub.update({k: inner_defaults[k] for k in STEP_SETTINGS if k in inner_defaults and k not in sub})
             sub['id'] = f'{step_id}_{sub["id"]}'
             if sub.get('replan_from'):
                 sub['replan_from'] = f'{step_id}_{sub["replan_from"]}'
-            steps.append(sub)
+            steps.append(_with_origin(sub, sub_origin))
     return {**copy.deepcopy({k: v for k, v in mission.items() if k != 'steps'}), 'steps': steps}
 
 
@@ -85,6 +104,7 @@ class Step:
     on_failure: str = DEFAULT_ON_FAILURE
     replan_from: str | None = None
     max_replans: int = DEFAULT_MAX_REPLANS
+    origin: dict | None = field(default=None, compare=False, repr=False)  # see _OriginStep; None: not from a mission
 
 
 @dataclass
@@ -126,6 +146,7 @@ class Plan:
                 on_failure=raw.get('on_failure', defaults.get('on_failure', DEFAULT_ON_FAILURE)),
                 replan_from=raw.get('replan_from'),
                 max_replans=int(raw.get('max_replans', defaults.get('max_replans', DEFAULT_MAX_REPLANS))),
+                origin=getattr(raw, 'origin', None) or {'step': number - 1, 'include': [], 'inner_step': number - 1},
             ))
         return cls(plan_id=plan_id, goal=goal or mission['goal'], robot=mission.get('robot') or robot, steps=steps,
                    loop=mission.get('loop', 'once'), max_cycles=mission.get('max_cycles'),

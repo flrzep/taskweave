@@ -39,8 +39,27 @@ def validate_plan_structured(plan: Plan, catalog: Mapping[str, dict], store: Con
 
     ``path`` is the place in the plan's ``steps`` list (with includes that is the expanded plan, so the index is the
     expanded step's). Plan-level problems have path ``[]``, step-level ones ``['steps', i, ...]``. The message has
-    no step prefix (the string form of ``validate_plan`` has)."""
-    return [{'path': path, 'message': message} for path, message, _ in _plan_problems(plan, catalog, store)]
+    no step prefix (the string form of ``validate_plan`` has).
+
+    Every problem also has ``origin``, the place in the mission file(s): ``None`` for plan-level problems, else
+    ``{'step': index in the mission's own steps (for a step from an include: the include step's index),
+    'include': None for the mission's own steps, the included mission's name for a step from an include, a list of
+    names (outermost first) when includes are nested, 'inner_path': the path inside the (innermost) mission, e.g.
+    ['steps', 2, 'args', 'to', 'point']}``. With a placeholder filled from an include's ``with`` the path is that
+    of the placeholder in the included mission."""
+    return [{'path': path, 'message': message, 'origin': _origin(plan, path)}
+            for path, message, _ in _plan_problems(plan, catalog, store)]
+
+
+def _origin(plan: Plan, path: list) -> dict | None:
+    if len(path) < 2 or path[0] != 'steps' or not 0 <= path[1] < len(plan.steps):
+        return None
+    origin = plan.steps[path[1]].origin
+    if origin is None:
+        return None
+    chain = origin['include']
+    return {'step': origin['step'], 'include': None if not chain else chain[0] if len(chain) == 1 else list(chain),
+            'inner_path': ['steps', origin['inner_step'], *path[2:]]}
 
 
 def _plan_problems(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) -> list[tuple[list, str, str]]:
