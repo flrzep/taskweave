@@ -118,7 +118,11 @@ class ConfigStore:
         data = self._read_yaml(path)
         keyed = robot_file is not None and overlay.is_keyed(data)
         if keyed:  # a keyed cell override: laid over the robot pack's file, the result is validated
-            data = overlay.overlay(self._read_yaml(base) if base else {}, data, robot_file[1])
+            if base is None:    # not over {}: the delta alone is not a file (and would hide a missing/misnamed pack)
+                raise ConfigError(path, f'keyed override ({overlay.MARKER}: {overlay.KEYS}), but no robot pack has '
+                                        f'{robot_file[0]}/{robot_file[1]} (looked in '
+                                        f'{", ".join(p.label for p in self.robot_packs(robot_file[0])) or "no robot pack"})')
+            data = overlay.overlay(self._read_yaml(base), data, robot_file[1])
         if data is None:
             data = default if default is not None else {}
         errors = sorted(Draft202012Validator(schema).iter_errors(data), key=lambda e: list(e.absolute_path))
@@ -1046,18 +1050,19 @@ class ConfigStore:
         base_document = (handler.load(base.read_text(encoding='utf-8')) if base else None) or CommentedMap()
         base_data = _plain(base_document)
         cell_document = handler.load(cell.read_text(encoding='utf-8')) if cell.is_file() else None
-        header = None
+        header, origin = None, None     # origin: the whole-file copy's own keys (missing pack keys are not deletions)
         if overlay.is_keyed(cell_document):
             header = cell_document.ca.comment
             document = _overlay_document(base_document, cell_document, depth)
         else:
             document = cell_document if isinstance(cell_document, dict) else base_document
+            origin = _plain(document) if document is cell_document else None
         if edit:
             edit(document)
         data = _plain(document)
         if schema is not None:
             _check(schema, data, label or f'robots/{robot}/{file}')
-        _prune_document(document, base_data, depth)
+        _prune_document(document, base_data, depth, origin)
         document.insert(0, overlay.MARKER, overlay.KEYS)
         document.ca.comment = header
         if header is None:
@@ -1131,15 +1136,21 @@ def _overlay_document(base, over, depth: int | None):
     return base
 
 
-def _prune_document(node, base: dict, depth: int | None) -> None:
-    """overlay.delta on a ruamel document, in place: keys equal to ``base`` go, base keys it lacks become DELETE."""
-    missing = [key for key in base if key not in node]
+def _prune_document(node, base: dict, depth: int | None, origin: dict | None = None) -> None:
+    """overlay.delta on a ruamel document, in place: keys equal to ``base`` go, base keys it lacks become DELETE.
+    ``origin``: the plain whole-file copy it was loaded from; a base key it never had is not a deletion (the copy
+    predates the key), only one the edit removed is. None: a keyed override, every missing key is a deletion."""
+    missing = [key for key in base if key not in node and (origin is None or key in origin)]
     for key in list(node):
         if key not in base:
             continue
         if overlay.same(_plain(node[key]), base[key]):
             _pop(node, key)
         elif depth != 1 and isinstance(node[key], dict) and isinstance(base[key], dict):
-            _prune_document(node[key], base[key], None if depth is None else depth - 1)
+            inner = origin.get(key) if origin is not None else None
+            _prune_document(node[key], base[key], None if depth is None else depth - 1,
+                            (inner if isinstance(inner, dict) else {}) if origin is not None else None)
+            if not node[key]:   # everything in it equals the pack's (overlay.delta leaves such a mapping out)
+                _pop(node, key)
     for key in missing:
         node[key] = overlay.DELETE

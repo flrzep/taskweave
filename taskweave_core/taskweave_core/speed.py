@@ -5,7 +5,7 @@
 - ``SpeedOverride``: one per node; follows the handler's latched topic ``/taskweave/speed_override``. Skills never
   read the parameter.
 - ``WorkClock``: work time = the integral of the effective override over node time. The effective override follows
-  the target at a slew of at most ``slew_per_s`` (fraction/s). Phase-clock playback, scaled stall/settle/stuck checks
+  the target: up at a slew of at most ``slew_per_s`` (fraction/s), down at once (a decrease is a safety matter). Phase-clock playback, scaled stall/settle/stuck checks
   and step timeouts all run on it. At a constant override o it is exactly ``(now - start) * o``, so at 100 % it is
   bit-identical to plain elapsed time.
 """
@@ -42,14 +42,19 @@ class WorkClock:
         """Work time at ``now`` (node time); then the effective override moves toward the target."""
         with self._lock:
             now = max(now, self._last_t)  # a clock that steps back (sim reset) stands still
-            work = self._anchor_w + (now - self._anchor_t) * self.o
             target = self._target()
-            if target != self.o:
-                step = self.slew_per_s * (now - self._last_t) if self.slew_per_s > 0 else abs(target - self.o)
-                o = min(target, self.o + step) if target > self.o else max(target, self.o - step)
-                if o != self.o:
+            if target < self.o:
+                # A lower override applies at once (safety: test mode drops 100 -> 10 % as a run starts), and to the
+                # whole cycle since the last call: the drop may have come at any time in it.
+                work = self._anchor_w + (self._last_t - self._anchor_t) * self.o + (now - self._last_t) * target
+                self._anchor_t, self._anchor_w, self.o = now, work, target
+                self.o_min = min(self.o_min, target)
+            else:
+                work = self._anchor_w + (now - self._anchor_t) * self.o
+                if target > self.o:     # increases slew
+                    step = self.slew_per_s * (now - self._last_t) if self.slew_per_s > 0 else target - self.o
+                    o = min(target, self.o + step)
                     self._anchor_t, self._anchor_w, self.o = now, work, o
-                    self.o_min = min(self.o_min, o)
             self._last_t, self._work = now, work
             return work
 

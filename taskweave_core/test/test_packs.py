@@ -98,7 +98,8 @@ def test_read_only_pack_edits_become_a_cell_override(split, tmp_path, monkeypatc
 
 def test_missing_robot_file_names_the_places_searched(split):
     store, _ = split
-    (store.root / 'system.yaml').write_text('robot_packs: [../nowhere]\n')
+    (store.root.parent / 'empty').mkdir()    # a location without the robot's pack (a missing one is an error)
+    (store.root / 'system.yaml').write_text('robot_packs: [../empty]\n')
     with pytest.raises(ConfigError, match='file not found .looked in cell pack'):
         store.robot(ROBOT)
 
@@ -180,3 +181,47 @@ def test_migration_removes_copies_and_keeps_differences(old_config, tmp_path, mo
     assert store.robot_file_source(ROBOT, 'poses.yaml')['source'] == 'override'
     assert store.robot_file(ROBOT, 'profile.yaml') == installed / 'profile.yaml'
     assert os.path.samefile(store.robot_file(ROBOT, 'moveit'), installed / 'moveit')
+
+
+# ---- P1 review fix 3: a configured robot pack location that does not exist is an error ----
+def test_a_missing_env_location_is_an_error_naming_it(split, tmp_path, monkeypatch):
+    store, _ = split
+    monkeypatch.setenv(packs.ROBOT_PACKS_ENV, str(tmp_path / 'typo'))
+    with pytest.raises(ConfigError, match=r'typo.*does not exist.*env TASKWEAVE_ROBOT_PACKS'):
+        store.robot(ROBOT)
+
+
+def test_a_missing_system_yaml_location_is_an_error_naming_it(split):
+    store, _ = split
+    (store.root / 'system.yaml').write_text('robot: demo_bot\nrobot_packs: [../packs, ../nowhere]\n')
+    with pytest.raises(ConfigError, match=r'nowhere.*does not exist.*system.yaml robot_packs'):
+        ConfigStore(store.root).robot(ROBOT)
+
+
+def test_migration_writes_an_absolute_path_across_windows_drives(old_config, tmp_path, monkeypatch):
+    def other_drive(path, start=os.curdir):
+        raise ValueError('path is on mount D:, start on mount C:')
+
+    monkeypatch.setattr(os.path, 'relpath', other_drive)
+    assert migrate(old_config, tmp_path / 'robot_packs', say=lambda line: None) == 0
+    entry = (old_config / 'system.yaml').read_text()
+    assert (tmp_path / 'robot_packs').resolve().as_posix() in entry
+    assert ConfigStore(old_config).robot(ROBOT).name == ROBOT
+
+
+def test_migration_does_not_delete_robot_pack_files_through_a_linked_robot_folder(old_config, tmp_path, monkeypatch):
+    folder = old_config / 'robots' / ROBOT
+    pack = robot_pack(tmp_path / 'linked', files={name: (folder / name).read_text()
+                                                  for name in ('profile.yaml', 'embodiment.yaml', 'stances.yaml')})
+    shutil.copytree(folder / 'moveit', pack / 'moveit')
+    shutil.rmtree(folder)
+    try:
+        folder.symlink_to(pack, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip('no symlink support here')
+    monkeypatch.setenv(packs.ROBOT_PACKS_ENV, str(tmp_path / 'linked'))
+    before = {str(p.relative_to(pack)): p.read_bytes() for p in pack.rglob('*') if p.is_file()}
+    lines = []
+    assert migrate(old_config, say=lines.append) == 0
+    assert {str(p.relative_to(pack)): p.read_bytes() for p in pack.rglob('*') if p.is_file()} == before
+    assert any(line.startswith('skip') and 'robot pack' in line for line in lines)

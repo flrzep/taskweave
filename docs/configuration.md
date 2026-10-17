@@ -50,9 +50,15 @@ what the cell changes. It starts with `~override: keys` and is laid over the pac
 is what is validated), so later pack updates to other keys still reach the cell:
 
 - mappings merge key by key; lists and scalars replace; in `poses.yaml` a pose is replaced whole
-- `key: ~delete` removes that key of the pack's file (the only way to delete a pack key)
+- `key: ~delete` removes that key of the pack's file (the only way to delete a pack key; only explicit edits write it)
 - a file without `~override: keys` is a whole-file override (made before per-key overrides) and still replaces the pack's
-  file; the next HMI/teach save turns it into a keyed one, `taskweave config slim config/ [--dry-run]` does it for all
+  file; the next HMI/teach save turns it into a keyed one, `taskweave config slim config/ [--dry-run]` does it for all.
+  A pack key such a copy lacks is read as never had (the copy predates it), not deleted: after the slim the pack's value
+  applies (e.g. `arms` of an old profile copy). Until then the copy replaces the pack's file, so it lacks them too;
+  `taskweave check` warns about an IK arm without an elbow description
+- a configured robot pack location (env or `system.yaml`) that does not exist is an error, and so is a keyed override
+  whose robot pack file no pack has; `config migrate` and `slim` leave entries that resolve (symlinks) into a robot pack
+  location or outside the cell pack alone
 
 Frames: poses are `{frame, xyz: [x, y, z], rpy: [r, p, y]}` (metres, radians) or `{frame, x, y, yaw}` for planar base
 poses. `frame` is `cell` or a named object or fixture frame.
