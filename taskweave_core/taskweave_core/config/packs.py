@@ -31,7 +31,8 @@ PACK_FILE = 'pack.yaml'
 ROBOT_PACKS_ENV = 'TASKWEAVE_ROBOT_PACKS'
 INSTALLED_PACKAGE = 'taskweave_robots'
 ROBOT_PACK_FILES = ('profile.yaml', 'embodiment.yaml', 'moveit', 'navigation.yaml', 'sim.yaml', 'poses.yaml',
-                    'pose_targets.yaml')    # robot-intrinsic: what the robot pack holds (moveit/ is one unit)
+                    'pose_targets.yaml', 'skill_overrides.yaml')    # robot-intrinsic: what the robot pack holds
+# (moveit/ is one unit)
 CELL_ROBOT_FILES = ('stances.yaml', 'held_poses.yaml', 'object_points.yaml')  # robot data about this cell
 
 

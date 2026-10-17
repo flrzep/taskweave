@@ -10,6 +10,7 @@ first, then in the robot packs (packs.py); the cell pack holds the robot's cell-
     robots/<model>/embodiment.yaml required per robot (robot pack): what the robot is and can do
     robots/<model>/stances.yaml    optional (cell), robot-specific base poses relative to objects (per type, instance)
     robots/<model>/poses.yaml      optional (robot pack), named joint-space poses (used by move_to_pose)
+    robots/<model>/skill_overrides.yaml optional (robot pack), per skill: this robot's motion options and speeds
     cell/locations.yaml            optional, named base poses in the cell frame
     cell/objects.yaml              optional, placed object instances: object type and pose in the cell frame
     objects/<name>.yaml            optional per object, taught tool poses
@@ -531,6 +532,11 @@ class ConfigStore:
     def robot_object_points(self, robot: str) -> dict:
         """robots/<robot>/object_points.yaml: the robot's settings per object point ({object: {point: {elbow}}})."""
         return self._load(f'robots/{robot}/object_points.yaml', schemas.ROBOT_OBJECT_POINTS, required=False, default={})
+
+    def skill_overrides(self, robot: str) -> dict:
+        """robots/<robot>/skill_overrides.yaml (robot pack, optional): ``{skill: {motion, speed, accel}}``, this
+        robot's own values on top of skills/<skill>.yaml (motion.resolve); {} if the robot has none."""
+        return self._load(f'robots/{robot}/skill_overrides.yaml', schemas.SKILL_OVERRIDES, required=False, default={})
 
     def object_point(self, obj: str, point: str, robot: str | None = None) -> dict:
         """A named point on an object: tool poses (canonical TCP, object-relative) plus its metadata.

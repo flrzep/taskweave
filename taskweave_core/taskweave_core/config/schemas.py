@@ -627,3 +627,72 @@ SYSTEM = {
         'robot_packs': {'type': 'array', 'items': {'type': 'string', 'minLength': 1}},
     },
 }
+
+
+# ---- motion options shared by the arm skills (skill-api-spec 1.0, 2) --------------------------------------------
+# Skills embed MOTION (or motion_schema(keys) for a subset) as the ``motion`` argument. ``default`` is a hint for the
+# editor and is never written to a mission; the real defaults come from motion.resolve (skill yaml, robot override,
+# target data). x-taskweave-show-if names sibling keys of the same object only.
+MOTION_SPEED_KEYS = ('tcp_m_s', 'tcp_rad_s', 'joint_rad_s', 'joint_linear_m_s')  # standard and absolute speeds
+MOTION_PROPERTIES = {
+    'mode': {'enum': ['free', 'linear'], 'default': 'free',
+             'description': 'free: joint space, planned around obstacles. linear: the TCP on a straight line.'},
+    'speed': {'type': 'number', 'exclusiveMinimum': 0, 'maximum': 1, 'default': 1, 'x-taskweave-unit': 'fraction',
+              'description': 'Fraction of the skill standard speed (1 = standard). The global speed override applies '
+                             'on top.'},
+    'speed_abs': {'type': 'object', 'minProperties': 1, 'additionalProperties': False,
+                  'properties': {key: {'type': 'number', 'exclusiveMinimum': 0} for key in MOTION_SPEED_KEYS},
+                  'description': 'Absolute speeds instead of the fraction. Capped by the robot limits.'},
+    'accel': {'type': 'number', 'exclusiveMinimum': 0, 'maximum': 1, 'default': 1, 'x-taskweave-unit': 'fraction',
+              'description': 'Fraction of the standard acceleration.'},
+    'elbow': {'enum': ELBOW_SIDES,
+              'description': "Elbow side kept or reached (robot frame). Default: the point's, else the robot's."},
+    'planner': {'enum': ['auto', 'direct', 'planned'], 'default': 'auto',
+                'description': 'auto: straight joint move if free, else elbow swing first, else planner. direct: '
+                               'straight joint move only. planned: always the planner.'},
+    'approach_m': {'type': 'number', 'minimum': 0, 'x-taskweave-unit': 'm', 'x-taskweave-show-if': {'mode': ['free']},
+                   'description': 'free mode: the last part of the way, straight along the approach. 0 = planned all '
+                                  'the way.'},
+    'torso': {'enum': ['keep', 'auto'], 'default': 'keep',
+              'description': 'auto: if the target is out of reach, try the configured torso heights. keep: never move '
+                             'the torso.'},
+    'via': {'type': 'array', 'items': {'type': 'string', 'x-taskweave-point': 'via_target'},
+            'description': 'Reserved. Waypoints to pass: "pose:<joint pose>" or "<instance>/<point>".'},
+    'tolerance': {'type': 'number', 'exclusiveMinimum': 0,
+                  'description': 'End accuracy: m for hand skills, rad or m for joints.'},
+}
+MOTION_GROUP = 'Motion (advanced)'
+
+
+def motion_schema(keys=None) -> dict:
+    """The ``motion`` argument schema with only ``keys`` (default: all of MOTION_PROPERTIES). A fresh copy, so a
+    skill may add hints (e.g. a different ``default``)."""
+    import copy
+
+    keys = list(MOTION_PROPERTIES) if keys is None else list(keys)
+    unknown = [key for key in keys if key not in MOTION_PROPERTIES]
+    if unknown:
+        raise KeyError(f'unknown motion option {", ".join(unknown)}; known: {", ".join(MOTION_PROPERTIES)}')
+    return {'type': 'object', 'additionalProperties': False, 'x-taskweave-group': MOTION_GROUP,
+            'properties': {key: copy.deepcopy(MOTION_PROPERTIES[key]) for key in keys}}
+
+
+MOTION = motion_schema()
+
+# robots/<model>/skill_overrides.yaml (robot pack, optional): per skill, this robot's own motion options and standard
+# speeds on top of skills/<skill>.yaml (motion.resolve, layer 2). Same keys as the skill yaml's motion/speed/accel.
+_SKILL_SPEEDS = {'type': 'object', 'additionalProperties': False,
+                 'properties': {key: POSITIVE for key in MOTION_SPEED_KEYS + ('base_m_s', 'base_rad_s')}}
+SKILL_OVERRIDES = {
+    'type': 'object', 'propertyNames': NAME,
+    'additionalProperties': {
+        'type': 'object', 'additionalProperties': False,
+        'properties': {
+            'motion': {'type': 'object', 'additionalProperties': False,
+                       'properties': {key: MOTION_PROPERTIES[key] for key in MOTION_PROPERTIES
+                                      if key not in ('speed_abs', 'via')}},
+            'speed': _SKILL_SPEEDS,
+            'accel': {'type': 'object', 'additionalProperties': {'type': 'number', 'exclusiveMinimum': 0}},
+        },
+    },
+}
