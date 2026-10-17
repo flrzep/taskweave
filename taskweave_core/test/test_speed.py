@@ -177,3 +177,26 @@ def test_step_finished_carries_the_speed_data():
     ex.on_result(d.started[-1], Outcome.REJECTED, 'no server')
     finished = [e for e in episodes if e['event'] == 'step_finished'][0]
     assert finished['speed'] == {'override_min': 50.0, 'override_avg': 50.0}
+
+
+# ---- P1 review fix 5: a lower override applies at once, only increases slew ----
+def test_a_decrease_takes_effect_in_the_first_cycle():
+    """Test mode lowers 100 -> 10 % just after a clock started: the first move must not run at up to 100 %."""
+    target = Target(1.0)
+    clock = WorkClock(0.0, target, slew_per_s=2.0)
+    target.value = 0.1
+    assert clock(0.02) == pytest.approx(0.002)       # the drop may have come at any time in the cycle: the low value
+    assert clock.o == pytest.approx(0.1)             # not 1.0 - 2 * 0.02
+    assert clock(0.12) == pytest.approx(0.002 + 0.01)
+    assert clock.o_min == pytest.approx(0.1)
+
+
+def test_a_decrease_during_a_ramp_up_is_immediate_too():
+    target = Target(0.1)
+    clock = WorkClock(0.0, target, slew_per_s=2.0)
+    target.value = 1.0
+    clock(0.1)
+    assert 0.1 < clock.o < 1.0
+    target.value = 0.2
+    clock(0.12)
+    assert clock.o == pytest.approx(0.2)
