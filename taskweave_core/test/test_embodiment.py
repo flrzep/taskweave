@@ -86,3 +86,20 @@ def test_robot_card_lists_limits_points_and_skills(config_dir):
     assert '- locations: dock, home' in card and 'stance:shelf_a' in card and 'box.top_grasp' in card
     assert '- navigate_to(target: location) [script:navigate_direct]: Drive somewhere.' in card
     assert 'needs: path free' in card
+
+
+def test_check_warns_about_an_ik_arm_without_an_elbow_description(config_dir, capsys):
+    from taskweave_core import cli
+    from taskweave_core.embodiment import profile_warnings
+
+    profile = {'ik': {'groups': {'left': 'left_arm', 'right': 'right_arm'}},
+               'arms': {'left': {'elbow': {'shoulder': 'a', 'elbow': 'b', 'wrist': 'c'}}}}
+    assert [w for w in profile_warnings(profile) if 'right' in w and 'elbow' in w]
+    assert not [w for w in profile_warnings(profile) if 'left' in w]
+    profile['ik']['choose'] = {'elbow_links': ['{tool}_l2', '{tool}_l4', '{tool}_l6']}   # the deprecated spelling
+    assert profile_warnings(profile) == []
+    path = config_dir / 'robots' / 'demo_bot' / 'profile.yaml'
+    path.write_text(path.read_text() + 'ik:\n  groups: {left: left_arm}\n  joints: left_joint.*\n')
+    cli.check(str(config_dir))
+    assert any(line.lstrip().startswith('warn') and 'left' in line and 'elbow' in line
+               for line in capsys.readouterr().out.splitlines())

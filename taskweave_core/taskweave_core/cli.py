@@ -71,6 +71,7 @@ def describe(node) -> int:
 
 def check(config_dir: str) -> int:
     from .config import ConfigError, ConfigStore
+    from .embodiment import profile_warnings
     from .plan import Plan
 
     store = ConfigStore(config_dir)
@@ -88,6 +89,11 @@ def check(config_dir: str) -> int:
     for robot in store.robot_names():
         attempt(f'robots/{robot}', lambda r=robot: (store.robot(r), store.stances(r)))
         attempt(f'robots/{robot}/embodiment.yaml', lambda r=robot: _consistent(store, r))
+        try:
+            for warning in profile_warnings(store.robot(robot).data):
+                print(f'  warn  robots/{robot}/profile.yaml: {warning}')
+        except (ConfigError, KeyError, ValueError):
+            pass    # the attempt above reported it
     attempt('cell/locations.yaml', store.locations)
     attempt('cell/objects.yaml', store.object_instances)
     attempt('operator.yaml', store.operator)

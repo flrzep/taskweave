@@ -78,6 +78,19 @@ def check_profile(embodiment: Mapping[str, Any], profile: Mapping[str, Any]) -> 
     return problems
 
 
+def profile_warnings(profile: Mapping[str, Any]) -> list[str]:
+    """Things in a profile that load but cost a function: an IK arm without an elbow description (profile
+    arms.<tool>.elbow, or the deprecated ik.choose.elbow_links) has no elbow control. An old whole-file copy
+    of a robot pack profile (taskweave config slim) typically lacks it."""
+    ik = profile.get('ik') or {}
+    if (ik.get('choose') or {}).get('elbow_links'):
+        return []
+    arms = profile.get('arms') or {}
+    return [f'ik arm {tool!r} has no elbow description (profile arms.{tool}.elbow): no elbow control, and its '
+            'straight lines and elbow swings are unavailable; an old copy of the robot pack profile? '
+            '(taskweave config slim)' for tool in ik.get('groups') or {} if not (arms.get(tool) or {}).get('elbow')]
+
+
 def check_grasp(point: Mapping[str, Any], embodiment: Mapping[str, Any]) -> list[str]:
     """Check an object point (tool_type, grip_width_m, tool poses) against the robot's tools."""
     problems = []

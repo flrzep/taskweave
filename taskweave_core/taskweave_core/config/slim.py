@@ -1,8 +1,9 @@
 """``taskweave config slim CELL_DIR [--dry-run]``: rewrite whole-file cell overrides of robot pack files as keyed
-overrides (overlay.py), i.e. only the keys that differ from the robot pack's file. What a robot loads does not change.
+overrides (overlay.py), i.e. only the keys that differ from the robot pack's file. What a robot loads changes only for pack keys an old whole-file copy lacks: it gets the pack's.
 
 Per robots/<robot>/<file> of overlay.MERGED_FILES that a robot pack also has:
-  whole file, differs   rewritten as a keyed override; prints the keys it drops (equal to the pack's)
+  whole file, differs   rewritten as a keyed override; prints the keys it drops (equal to the pack's). Pack keys the
+                        copy lacks are not overridden (the pack's apply): the copy predates them, it did not delete them
   whole file, same      removed (the pack's file says the same)
   keyed already         left alone
 Idempotent: a second run finds only keyed overrides.
@@ -39,7 +40,7 @@ def slim(cell: str | Path, dry_run: bool = False, say=print) -> int:
             if overlay.is_keyed(data) or not isinstance(data, dict):
                 say(f'keep    {label}  ({"keyed already" if overlay.is_keyed(data) else "not a mapping"})')
                 continue
-            changed = overlay.delta(pack, data, overlay.DEPTH.get(file))
+            changed = overlay.delta(pack, data, overlay.DEPTH.get(file), deleted=False)
             dropped = overlay.same_paths(pack, data, overlay.DEPTH.get(file))
             if not changed:
                 say(f'{do}remove  {label}  (same as {base})')

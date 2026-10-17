@@ -8,7 +8,8 @@ A cell pack file robots/<robot>/<file> of a robot pack file (MERGED_FILES) is on
                  mappings merge key by key, lists and scalars replace, ``<key>: ~delete`` removes the pack's key.
                  poses.yaml merges one level deep: a pose is replaced whole (DEPTH).
 
-Saving (ConfigStore._edit_yaml) and ``taskweave config slim`` write keyed overrides: delta(pack, wanted).
+Saving (ConfigStore._edit_yaml) and ``taskweave config slim`` write keyed overrides: delta(pack, wanted). Only an
+explicit edit writes ~delete: slim reads a pack key a whole-file copy lacks as never had (the copy predates it).
 """
 
 from __future__ import annotations
@@ -64,19 +65,23 @@ def overlay(base: dict | None, cell, file: str):
     return merge(base or {}, {k: v for k, v in cell.items() if k != MARKER}, DEPTH.get(file))
 
 
-def delta(base: dict, data: dict, depth: int | None = None) -> dict:
-    """The keyed override (without MARKER) that turns ``base`` into ``data``: merge(base, delta) == data."""
+def delta(base: dict, data: dict, depth: int | None = None, deleted: bool = True) -> dict:
+    """The keyed override (without MARKER) that turns ``base`` into ``data``: merge(base, delta) == data.
+    ``deleted`` False: base keys ``data`` lacks are left out (not overridden) instead of becoming DELETE. That is the
+    reading of a whole-file copy made before the pack had those keys (slim): missing means never had it. DELETE
+    is written only by explicit edits."""
     result = {}
     for key, value in data.items():
         if key not in base:
             result[key] = value
         elif depth != 1 and isinstance(value, dict) and isinstance(base[key], dict):
-            inner = delta(base[key], value, None if depth is None else depth - 1)
+            inner = delta(base[key], value, None if depth is None else depth - 1, deleted)
             if inner:
                 result[key] = inner
         elif not same(value, base[key]):
             result[key] = value
-    result.update({key: DELETE for key in base if key not in data})
+    if deleted:
+        result.update({key: DELETE for key in base if key not in data})
     return result
 
 

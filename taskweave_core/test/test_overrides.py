@@ -212,3 +212,35 @@ def test_slim_dry_run_real_and_idempotent(cell):
     slimmed, again = nav.read_text(), []
     assert slim(root, say=again.append) == 0
     assert nav.read_text() == slimmed and again[-1] == 'nothing to slim'
+
+
+# ---- P1 review fix 1: a whole-file copy lacking pack keys is not a deletion of them ----
+def test_slim_of_an_old_copy_takes_new_pack_keys_from_the_pack(cell):
+    """An old full copy predates the pack's `padding` and `driving.sideways`: missing means never had, not deleted."""
+    root, _ = cell
+    old = override(root, 'navigation.yaml', 'envelope: {front: 0.5, back: 0.4, left: 0.3, right: 0.3}\n'
+                                            'driving:\n  max_forward: 0.9\n  max_turn: 1.0\n')
+    assert 'padding' not in ConfigStore(root).navigation(ROBOT)     # as a whole file it replaces the pack's
+    assert slim(root, say=lambda line: None) == 0
+    assert yaml.safe_load(old.read_text()) == {'~override': 'keys', 'driving': {'max_forward': 0.9}}
+    nav = ConfigStore(root).navigation(ROBOT)
+    assert nav['padding'] == 0.1 and nav['driving']['sideways'] is False and nav['driving']['max_forward'] == 0.9
+
+
+def test_slim_leaves_an_explicit_delete_alone(cell):
+    root, _ = cell
+    keyed = override(root, 'navigation.yaml', '~override: keys\npadding: ~delete\n')
+    text = keyed.read_text()
+    assert slim(root, say=lambda line: None) == 0
+    assert keyed.read_text() == text
+    assert 'padding' not in ConfigStore(root).navigation(ROBOT)
+
+
+def test_editing_a_whole_copy_writes_delete_only_for_what_the_edit_removes(cell):
+    root, _ = cell
+    path = override(root, 'navigation.yaml', 'envelope: {front: 0.5, back: 0.4, left: 0.3, right: 0.3}\n'
+                                             'driving:\n  max_forward: 0.5\n  max_turn: 1.0\npadding: 0.1\n')
+    ConfigStore(root).save_navigation(ROBOT, {})
+    assert yaml.safe_load(path.read_text()) == {'~override': 'keys'}    # sideways: never had it, not deleted
+    document, _ = ConfigStore(root).keyed_override(ROBOT, 'navigation.yaml', edit=lambda doc: doc.pop('padding'))
+    assert yaml.safe_load(yaml.dump(dict(document))) == {'~override': 'keys', 'padding': overlay.DELETE}
