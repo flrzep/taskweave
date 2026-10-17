@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip('rclpy')
 
-from taskweave_hmi.server import Bridge  # noqa: E402
+from taskweave_hmi.server import Bridge, await_skill  # noqa: E402
 
 
 def bridge_with(*listeners):
@@ -38,3 +38,18 @@ def test_step_events_are_numbered_and_read_since_a_number():
     assert [e['seq'] for e in state['events']] == [3, 4, 5] and state['event_seq'] == 5 and state['events_from'] == 3
     assert [e['step_id'] for e in bridge.snapshot(since=4)['events']] == ['s4']
     assert bridge.snapshot(since=5)['events'] == []
+
+
+def test_a_manual_skill_waits_on_work_time_and_is_given_up_when_its_server_is_gone():
+    t = {'now': 0.0}
+
+    def sleep(dt):
+        t['now'] += dt
+
+    # at 10 % a 30 s skill takes 300 s: its work time stays below the limit, so the wait goes on
+    finished = lambda: t['now'] >= 300.0  # noqa: E731
+    assert await_skill(finished, lambda: t['now'] * 0.1, 35.0, lambda: True, sleep) == ''
+    t['now'] = 0.0
+    assert await_skill(lambda: False, lambda: t['now'] * 0.1, 35.0, lambda: True, sleep) == 'did not finish in 35 s'
+    assert 350.0 < t['now'] < 351.0
+    assert await_skill(lambda: False, lambda: 0.0, 35.0, lambda: False, sleep) == 'skill server gone'

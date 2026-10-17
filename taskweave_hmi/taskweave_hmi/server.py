@@ -84,6 +84,7 @@ from std_srvs.srv import Trigger
 from taskweave_core import names
 from taskweave_core.config import ConfigError, ConfigStore, Pose2D
 from taskweave_core.planner import MissionFilePlanner
+from taskweave_core.speed import SpeedOverride
 from taskweave_core.teach import MAX_POSE_AGE_S, yaw_from_quaternion
 from taskweave_interfaces.action import RunSkill
 from taskweave_interfaces.msg import Plan as PlanMsg
@@ -98,8 +99,8 @@ WEB = Path(__file__).parent / 'web'
 STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
 CALL_TIMEOUT_S = 5.0
 STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'graph.js', 'record.js', 'style.css')
-MANUAL_SKILL_TIMEOUT_S = 120.0
-DRIVE_TIMEOUT_S = 300.0  # sim time; a drive across the cell in a slow sim
+MANUAL_SKILL_TIMEOUT_S = 120.0  # work time (sim time x speed override), as the skill's own timeout
+DRIVE_TIMEOUT_S = 300.0  # a drive across the cell
 NAV_COSTMAPS = ['/local_costmap/local_costmap', '/global_costmap/global_costmap']  # Nav2 defaults
 NAV_CONTROLLER = '/controller_server'
 FK_SERVICE = '/compute_fk'  # MoveIt move_group
@@ -136,6 +137,20 @@ def status_dict(msg: TaskStatus) -> dict:
             'step': step_dict(msg.step) if msg.step_index >= 0 else None, 'attempt': msg.attempt,
             'step_status': msg.step_status, 'step_progress': msg.step_progress,
             'step_elapsed_s': msg.step_elapsed_s, 'last_error': msg.last_error}
+
+
+def await_skill(done, work, limit_s: float, served, sleep=time.sleep) -> str:
+    """Wait for a manual skill's result: '' when ``done()``, else why it was given up. The deadline ``limit_s`` is on
+    ``work()``, work seconds (sim time scaled by the speed override, as the skill times itself), so a slow sim or a
+    low override does not give up on a skill that is still running; a pause stops both. Given up also when the skill
+    server is gone (``served()`` false)."""
+    while not done():
+        if work() > limit_s:
+            return f'did not finish in {limit_s:g} s'
+        if not served():
+            return 'skill server gone'
+        sleep(0.1)
+    return ''
 
 
 def ros_parameter(name: str, value) -> Parameter:
@@ -196,6 +211,7 @@ class Bridge(Node):
             node: self.create_client(SetParameters, f'{node}/set_parameters', callback_group=self.group)
             for node in [*self.get_parameter('nav_costmaps').value, self.get_parameter('nav_controller').value]}
         self.skill_lock = threading.Lock()  # one manual skill at a time
+        self.speed = SpeedOverride.for_node(self)  # manual skills wait on work time, like the skills
         self.skill_clients: dict[str, ActionClient] = {}
         self.fk_client = None  # created on first use (MoveIt)
         self.ik = None  # IkClient, created on first reach check
@@ -367,16 +383,24 @@ class Bridge(Node):
                 time.sleep(0.05)
             if not sent.done() or not sent.result().accepted:
                 raise TimeoutError(f'{skill} did not accept the goal')
-            result = sent.result().get_result_async()
-            deadline = time.monotonic() + timeout_s + CALL_TIMEOUT_S
-            while not result.done() and time.monotonic() < deadline:
-                time.sleep(0.1)
-            if not result.done():
-                raise TimeoutError(f'{skill} did not finish in {timeout_s:g} s')
+            handle = sent.result()
+            result = handle.get_result_async()
+            clock = self.speed.clock(self.now_s())
+            problem = await_skill(result.done, lambda: clock(self.now_s()), timeout_s + CALL_TIMEOUT_S,
+                                  action.server_is_ready)
+            if problem:  # stop it: the lock is released below, and a next manual skill must not run alongside
+                handle.cancel_goal_async()
+                deadline = time.monotonic() + CALL_TIMEOUT_S
+                while not result.done() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                raise TimeoutError(f'{skill} {problem}; cancelled')
             outcome = result.result().result
             return {'outcome': OUTCOMES[outcome.outcome], 'message': outcome.message}
         finally:
             self.skill_lock.release()
+
+    def now_s(self) -> float:
+        return self.get_clock().now().nanoseconds / 1e9
 
     def set_teach_target(self, target: dict | None) -> None:
         with self.lock:
