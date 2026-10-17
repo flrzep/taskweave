@@ -12,6 +12,10 @@ joints:                     # joint position targets in, joint states out (Isaac
   command: /joint_command
   state: /joint_states
   linear: [joint_lift_body]   # prismatic (m); all others revolute (rad)
+  groups:                     # move_joints `only`
+    torso: [joint_lift_body, joint_body_pitch]
+    left_arm: [left_arm_joint1, left_arm_joint2, left_arm_joint3, left_arm_joint4, left_arm_joint5, left_arm_joint6, left_arm_joint7]
+    right_arm: [right_arm_joint1, right_arm_joint2, right_arm_joint3, right_arm_joint4, right_arm_joint5, right_arm_joint6, right_arm_joint7]
 grippers:                   # one driven joint per hand, the other finger joints are PhysX mimic joints
   left:  {joint: left_hand_joint1,  open: 1.0, closed: 0.0}   # measured: 0 = fingers closed, 1 = fully open
   right: {joint: right_hand_joint1, open: 1.0, closed: 0.0}

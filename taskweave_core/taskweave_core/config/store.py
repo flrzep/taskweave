@@ -494,6 +494,7 @@ class ConfigStore:
 
     def point_names(self, robot: str) -> dict[str, list[str]]:
         """Names a plan can refer to, by kind (for planners and the robot card)."""
+        from .limits import joint_groups
         objects = []
         for path in sorted((self.root / 'objects').glob('*.yaml')):
             objects += [f'{path.stem}.{name}' for name in self.object(path.stem).get('points', {})]
@@ -511,6 +512,8 @@ class ConfigStore:
                 continue
         return {'locations': sorted(self.locations()), 'stances': self.stance_names(robot),
                 'joint poses': sorted(self.joint_poses(robot)), 'object points': objects,
+                'joint-only poses': sorted(n for n, p in self.joint_poses(robot).items() if 'tools' not in p),
+                'joint groups': sorted(joint_groups(self, robot)),
                 'placed object points': placed, 'placed object contacts': contacts,
                 'placed objects': sorted(self.object_instances())}
 

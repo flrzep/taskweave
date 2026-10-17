@@ -11,6 +11,10 @@ base:
 joints:                     # joint position targets in, joint states out (Isaac articulation controller)
   command: /joint_command
   state: /joint_states
+  groups:                     # move_joints `only`
+    torso: [leg_joint1, leg_joint2, leg_joint3, leg_joint4, leg_joint5]
+    left_arm: [left_arm_joint1, left_arm_joint2, left_arm_joint3, left_arm_joint4, left_arm_joint5, left_arm_joint6, left_arm_joint7]
+    right_arm: [right_arm_joint1, right_arm_joint2, right_arm_joint3, right_arm_joint4, right_arm_joint5, right_arm_joint6, right_arm_joint7]
 grippers:                   # one driven joint per hand, the knuckle/finger joints are PhysX mimic joints
   left:  {joint: left_gripper_joint,  open: 0.0, closed: 1.70}   # measured: 0 = open (finger links 0.137 m apart),
   right: {joint: right_gripper_joint, open: 0.0, closed: 1.70}   # 1.70 = closed (0.013 m), limit 1.703 rad

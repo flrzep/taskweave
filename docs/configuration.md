@@ -288,3 +288,32 @@ position_tolerance: 0.03
 yaw_tolerance: 0.05
 stuck_timeout_s: 5.0
 ```
+
+`move_joints` (torso, head, arm joints to a named joint pose or to given values) uses the new layout, which the other
+arm skills will follow: standard speeds in `speed`, option defaults in `motion`, accuracy and timeouts in `tolerances`.
+Joint groups for its `only` option come from the profile's `joints.groups`.
+
+```yaml
+# skills/move_joints.yaml
+implementations:
+  - {name: joint_targets, type: script, class: "taskweave_skills.joint_motion:MoveJoints"}
+speed: {joint_rad_s: 1.2, joint_linear_m_s: 0.25}   # standard speeds, scaled by a step's motion.speed
+motion: {planner: auto}
+tolerances: {position: 0.02, settle_s: 0.3, stall_timeout_s: 3.0, state_timeout_s: 1.0}
+```
+
+```yaml
+# robots/<robot>/profile.yaml
+joints: {command: /joint_command, state: /joint_states, linear: [body_joint],
+         groups: {torso: [body_joint], head: [head_joint1, head_joint2], left_arm: [left_joint1, ...]}}
+```
+
+```yaml
+# mission steps
+- {id: lift, skill: move_joints, args: {pose: lift_high}}                        # a named joint pose
+- {id: look, skill: move_joints, args: {joints: {head_joint1: 0.3, head_joint2: -0.2}}}
+- {id: raise, skill: move_joints, args: {pose: home, only: [torso]}}             # the torso part of the pose only
+- {id: tuck, skill: move_joints, args: {pose: tucked, motion: {speed: 0.5, via: [home]}}}   # half speed, via home
+```
+Joint values are checked against the robot's limits (URDF, profile `joints.limits`) before anything moves. While an
+object is held, moves of arm joints are refused; torso and head moves are fine.

@@ -5,7 +5,8 @@ the catalog, every argument object matches the skill's JSON Schema, every point 
 in config (object points also fit the robot's tools), and ``replan_from`` targets exist.
 
 Skills mark point arguments in their schema with ``"x-taskweave-point": "base_target" | "joint_pose" | "object_point"
-| "instance_point" | "instance_contact" | "via_target"``, at any depth (nested objects, oneOf variants, list items).
+| "instance_point" | "instance_contact" | "via_target" | "joint_pose_only" | "joint_group"``, at any depth (nested
+objects, oneOf variants, list items).
 Values that contain placeholders are only checked once their values are known (at step start): the skip is by path,
 so a placeholder may stand for a scalar, one vec3 component or a whole field. So are points on an object an earlier
 step of the plan puts down (an argument ``place_as: <name>``, e.g. gripper): it does not exist yet.
@@ -280,6 +281,18 @@ def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
             problems = pose_problems(store, robot, str(value))   # raises KeyError for an unknown pose
             if problems:
                 return f'pose {value} does not fit robot {robot!r}: ' + '; '.join(problems)
+        elif kind == 'joint_pose_only':   # a joint pose without tool targets; a leading pose: is allowed (via items)
+            name = str(value).removeprefix('pose:')
+            problem = check_point('joint_pose', name, store, robot)
+            if problem is None and store.named_pose(robot, name)['tools']:
+                return f'pose {name} places tools: use move_gripper to.pose'
+            return problem
+        elif kind == 'joint_group':
+            from .config.limits import joint_groups
+
+            groups = joint_groups(store, robot)
+            if str(value) not in groups:
+                return f'robot {robot!r} has no joint group {value!r} (has: {", ".join(sorted(groups)) or "none"})'
         elif kind in ('object_point', 'instance_point'):
             # object_point: <instance>/<point> (a placed object) or <object>.<point> (a type's point);
             # instance_point: only <instance>/<point>, for skills that go to one placed object

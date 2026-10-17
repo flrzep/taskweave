@@ -14,6 +14,7 @@ validation, and the HMI flags it (e.g. poses copied over from another robot).
 from __future__ import annotations
 
 import math
+import re
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
@@ -47,6 +48,30 @@ def joint_limits(store: ConfigStore, robot: str) -> dict[str, tuple[float, float
     for joint, (lower, upper) in store.robot(robot).data.get('joints', {}).get('limits', {}).items():
         limits[joint] = (float(lower), float(upper))
     return limits
+
+
+def joint_groups(store: ConfigStore, robot: str) -> dict[str, list[str]]:
+    """Group -> joints for move_joints ``only``: the profile's ``joints.groups``, plus a ``<tool>_arm`` group for each
+    IK tool it does not list (the URDF joints that the ik.joints regex, {tool} = tool name, matches). {} if unknown."""
+    data = store.robot(robot).data
+    groups = {name: list(joints) for name, joints in data.get('joints', {}).get('groups', {}).items()}
+    ik = data.get('ik') or {}
+    if ik.get('joints'):
+        known = list(joint_limits(store, robot))
+        for tool in ik.get('groups', {}):
+            if f'{tool}_arm' not in groups:
+                pattern = re.compile(ik['joints'].format(tool=tool))
+                if members := [joint for joint in known if pattern.fullmatch(joint)]:
+                    groups[f'{tool}_arm'] = members
+    return groups
+
+
+def arm_group_names(store: ConfigStore, robot: str) -> set[str]:
+    """The groups of ``joint_groups`` that are an arm: ``<tool>_arm`` for each tool of the robot (grippers, tool
+    frames, ik groups, arms). Moving their joints moves a hand."""
+    data = store.robot(robot).data
+    tools = set(data.get('grippers', {})) | set(data.get('tool_frames', {})) | set(data.get('arms', {}))
+    return {f'{tool}_arm' for tool in tools | set((data.get('ik') or {}).get('groups', {}))}
 
 
 def joint_problems(values: dict[str, float], limits: dict[str, tuple[float, float]],

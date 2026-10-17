@@ -1,6 +1,11 @@
 # Test robot with two arm joints, a lift and one gripper joint, driven by joint position targets.
 name: arm_bot
 base: {type: fixed, cmd_vel: /arm/cmd_vel, odom: /arm/odom, frame: base_link}
-joints: {command: /arm/joint_command, state: /arm/joint_states, linear: [lift]}
+joints:
+  command: /arm/joint_command
+  state: /arm/joint_states
+  linear: [lift]
+  groups: {left_arm: [j1, j2], torso: [lift]}
+  limits: {j1: [-2.6, 2.6], j2: [-2.0, 2.0], lift: [0.0, 0.75], grip: [0.0, 1.0]}
 grippers:
   left: {joint: grip, open: 1.0, closed: 0.0}
