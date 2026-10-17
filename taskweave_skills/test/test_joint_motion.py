@@ -39,19 +39,24 @@ class FakeJoints(Joints):
 
 
 class FakeHold:
+    """The registry calls move_joints uses (hold.HoldState): held_all, reached_hands, leave, tcp_poses, moved."""
+
     def __init__(self, hold=None):
         self.hold, self.cleared, self.moved_to = hold, 0, None
 
-    def held(self):
-        return self.hold
+    def held_all(self):
+        return [{**self.hold, 'hands': list(self.hold['tools'])}] if self.hold else []
 
-    def reached_point(self, *args):
+    def reached_hands(self, hands=None):
+        return {'left': {}}
+
+    def leave(self, hands):
         self.cleared += 1
 
     def tcp_poses(self, tools):
         return {tool: np.eye(4) for tool in tools}
 
-    def moved(self, pose):
+    def moved(self, pose, name=None):
         self.moved_to = pose
 
 

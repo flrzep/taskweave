@@ -95,10 +95,10 @@ class MoveJoints(MoveToPose):
         except _Rejected as error:
             return SkillResult.rejected(str(error))
         self._refresh_ik()
-        held = self.hold.held()
-        if held is not None and any(self._arm_joint_names(leg) for leg in legs):
+        holds = self.hold.held_all()
+        if holds and any(self._arm_joint_names(leg) for leg in legs):
             return self._holding_refusal()
-        self.hold.reached_point(None, None, (), None)
+        self.hold.leave(list(self.hold.reached_hands()))   # the hands are no longer at an object point
         self._path_used, self._time_scale = 'direct', 1.0
         self.p = self._step_params(values)
         try:
@@ -111,13 +111,13 @@ class MoveJoints(MoveToPose):
                 worst = max(worst, error)
         finally:
             self.p = self.base_p
-        if held is not None:  # the arms kept their joints: the object moved with them (e.g. the lift)
-            tool = held['tools'][0]
+        for hold in holds:  # the arms kept their joints: each object moved with its hands (e.g. the lift)
+            tool = hold['hands'][0]
             try:
                 tcp = self.hold.tcp_poses([tool])[tool]
             except LookupError as error:
                 return SkillResult.failed(f'{label} reached, but where is the held object now? {error}')
-            self.hold.moved(tcp @ np.linalg.inv(held['tcp_in_object'][tool]))
+            self.hold.moved(tcp @ np.linalg.inv(hold['tcp_in_object'][tool]), hold['object'])
         stats = ctx.work.stats()
         data = {'hands': self._hands(legs), 'mode': 'free', 'path': self._path_used, 'max_error': round(worst, 4),
                 'speed': {**stats, 'scale': round(self._time_scale * stats['override_avg'] / 100.0, 4)}}
