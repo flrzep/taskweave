@@ -118,7 +118,11 @@ class ConfigStore:
         data = self._read_yaml(path)
         keyed = robot_file is not None and overlay.is_keyed(data)
         if keyed:  # a keyed cell override: laid over the robot pack's file, the result is validated
-            data = overlay.overlay(self._read_yaml(base) if base else {}, data, robot_file[1])
+            if base is None:    # not over {}: the delta alone is not a file (and would hide a missing/misnamed pack)
+                raise ConfigError(path, f'keyed override ({overlay.MARKER}: {overlay.KEYS}), but no robot pack has '
+                                        f'{robot_file[0]}/{robot_file[1]} (looked in '
+                                        f'{", ".join(p.label for p in self.robot_packs(robot_file[0])) or "no robot pack"})')
+            data = overlay.overlay(self._read_yaml(base), data, robot_file[1])
         if data is None:
             data = default if default is not None else {}
         errors = sorted(Draft202012Validator(schema).iter_errors(data), key=lambda e: list(e.absolute_path))

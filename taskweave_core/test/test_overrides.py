@@ -244,3 +244,12 @@ def test_editing_a_whole_copy_writes_delete_only_for_what_the_edit_removes(cell)
     assert yaml.safe_load(path.read_text()) == {'~override': 'keys'}    # sideways: never had it, not deleted
     document, _ = ConfigStore(root).keyed_override(ROBOT, 'navigation.yaml', edit=lambda doc: doc.pop('padding'))
     assert yaml.safe_load(yaml.dump(dict(document))) == {'~override': 'keys', 'padding': overlay.DELETE}
+
+
+# ---- P1 review fix 4: a keyed override needs a robot pack file to lie over ----
+def test_a_keyed_override_without_a_robot_pack_file_is_an_error(cell):
+    root, pack = cell
+    (pack / 'navigation.yaml').unlink()
+    override(root, 'navigation.yaml', '~override: keys\ndriving: {max_turn: 2.0}\n')
+    with pytest.raises(ConfigError, match=r'no robot pack has demo_bot/navigation.yaml \(looked in .*packs'):
+        ConfigStore(root).navigation(ROBOT)
