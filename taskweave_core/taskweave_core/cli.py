@@ -19,6 +19,9 @@
     taskweave config migrate CELL_DIR [--robot-packs DIR] [--name NAME] [--dry-run]
                                           bring a cell pack (config directory) up to this taskweave's schema, e.g.
                                           split robot-intrinsic files out into robot packs (config/migrate.py)
+    taskweave config slim CELL_DIR [--dry-run]
+                                          rewrite whole-file overrides of robot pack files as per-key overrides
+                                          (only the keys that differ; config/slim.py)
     taskweave config files CELL_DIR [ROBOT]
                                           where each robot file comes from (cell pack, override, robot pack)
 """
@@ -112,9 +115,10 @@ def robot_files(config_dir: str, robot: str | None) -> int:
         for file in ROBOT_PACK_FILES + CELL_ROBOT_FILES + tuple(extra):
             source = store.robot_file_source(name, file)
             if source['source'] != 'missing':
+                keyed = f'  [{source["override_count"]} key(s) differ]' if source['override'] == 'keys' else ''
                 edited = file in POINT_FILE_SCHEMAS and source['save_path'] != source['path']  # HMI, teaching
                 saves = f'  (edits -> {store.display_path(source["save_path"])})' if edited else ''
-                print(f'  {file:<20} {source["source"]:<11} {store.display_path(source["path"])}{saves}')
+                print(f'  {file:<20} {source["source"]:<11} {store.display_path(source["path"])}{keyed}{saves}')
     return 0
 
 
@@ -267,6 +271,9 @@ def main(argv=None) -> int:
     migrate_parser.add_argument('--robot-packs', help='folder for robot packs of robot files no pack has yet')
     migrate_parser.add_argument('--name', help='cell pack name (default: the folder name)')
     migrate_parser.add_argument('--dry-run', action='store_true', help='only print what would be done')
+    slim_parser = config_sub.add_parser('slim', help='whole-file overrides of robot pack files to per-key overrides')
+    slim_parser.add_argument('cell_dir')
+    slim_parser.add_argument('--dry-run', action='store_true', help='only print what would be done')
     files_parser = config_sub.add_parser('files', help='where each robot file comes from')
     files_parser.add_argument('cell_dir')
     files_parser.add_argument('robot', nargs='?')
@@ -276,6 +283,10 @@ def main(argv=None) -> int:
     if options.command == 'config':
         if options.action == 'files':
             return robot_files(options.cell_dir, options.robot)
+        if options.action == 'slim':
+            from .config.slim import slim
+
+            return slim(options.cell_dir, options.dry_run)
         from .config.migrate import migrate
 
         return migrate(options.cell_dir, options.robot_packs, options.name, options.dry_run)
