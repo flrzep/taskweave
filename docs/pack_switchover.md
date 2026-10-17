@@ -106,9 +106,12 @@ Every command below runs on the GPU host (`ssh root@100.97.65.111`) unless it sa
 ## After the switch
 
 - HMI and teach edits of robot pack files (poses, navigation, the profile's ik.choose) cannot go to the installed
-  share (every build overwrites it), so they create a cell override in `config/robots/<robot>/`, a copy of the pack's
-  file with the edit; `taskweave config files` shows it as `override`. Commit it in the host repo as usual. To make it
-  part of the robot pack, copy it into `taskweave_robots/<robot>/` in the taskweave repo, deploy, and delete the
+  share (every build overwrites it), so they create a cell override in `config/robots/<robot>/` that holds only the keys
+  the edit changed (`~override: keys`, laid over the pack's file; pack updates to other keys still reach the cell;
+  `~delete` removes a pack key); `taskweave config files` shows it as `override`. Whole-file overrides kept by the
+  migration keep working; `taskweave config slim config/ --dry-run` shows how they would shrink to the differing keys,
+  without `--dry-run` it does it (idempotent). Commit it in the host repo as usual. To make it
+  part of the robot pack, merge its keys into `taskweave_robots/<robot>/` in the taskweave repo, deploy, and delete the
   override.
 - Changing a robot's MoveIt config, sim.yaml or poses for good: edit `taskweave_robots/<robot>/` in the taskweave repo
   and deploy (frame-ros restart; frame-sim restart for sim.yaml).

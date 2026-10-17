@@ -89,8 +89,9 @@ def test_read_only_pack_edits_become_a_cell_override(split, tmp_path, monkeypatc
     installed = tmp_path / 'installed' / ROBOT / 'poses.yaml'
     path = store.set_joint_pose(ROBOT, 'ready', {'lift': 0.2})
     assert path == store.root / 'robots' / ROBOT / 'poses.yaml'
-    assert '# pack comment' in path.read_text() and 'ready' in path.read_text()   # a copy of the pack's file
+    assert 'ready' in path.read_text() and 'home' not in path.read_text()         # only what the cell changed
     assert installed.read_text() == POSES
+    assert store.named_pose(ROBOT, 'home')['joints'] == {'lift': 0.1}             # the rest from the pack's file
     assert store.robot_file_source(ROBOT, 'poses.yaml')['source'] == 'override'
     assert store.display_path(store.robot_save_path(ROBOT, 'profile.yaml')) == f'robots/{ROBOT}/profile.yaml'
 

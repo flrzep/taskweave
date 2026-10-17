@@ -14,7 +14,7 @@ config/                  cell pack: everything about one cell
   objects/
     <object>.yaml        object frame, mesh reference, taught tool poses (grasp, place, hang ...)
   robots/
-    <model>/             the robot's cell-specific files, and whole-file overrides of its robot pack's files
+    <model>/             the robot's cell-specific files, and per-key overrides of its robot pack's files
       stances.yaml       where this robot stands relative to an object (per object type, per instance)
       held_poses.yaml    where this robot holds an object of a type (move_object pose)
       object_points.yaml this robot's settings per object point (elbow side, grip opening)
@@ -43,7 +43,16 @@ env `TASKWEAVE_ROBOT_PACKS` (paths separated by `os.pathsep`), `system.yaml` `ro
 `taskweave_robots`. Each location is a robot pack or a folder of robot packs. Edits from the HMI and teaching go to
 the cell pack for cell-specific files and files the cell pack already has, else to the robot pack the file came
 from; the installed share is read-only (a rebuild overwrites it), so an edit of one of its files creates a cell
-override, starting as a copy. `taskweave config files config/` lists each robot file's source.
+override. `taskweave config files config/` lists each robot file's source.
+
+A cell override of a robot pack file (`profile`, `embodiment`, `navigation`, `sim`, `poses`, `pose_targets`) holds only
+what the cell changes. It starts with `~override: keys` and is laid over the pack's file when loaded (the merged result
+is what is validated), so later pack updates to other keys still reach the cell:
+
+- mappings merge key by key; lists and scalars replace; in `poses.yaml` a pose is replaced whole
+- `key: ~delete` removes that key of the pack's file (the only way to delete a pack key)
+- a file without `~override: keys` is a whole-file override (made before per-key overrides) and still replaces the pack's
+  file; the next HMI/teach save turns it into a keyed one, `taskweave config slim config/ [--dry-run]` does it for all
 
 Frames: poses are `{frame, xyz: [x, y, z], rpy: [r, p, y]}` (metres, radians) or `{frame, x, y, yaw}` for planar base
 poses. `frame` is `cell` or a named object or fixture frame.
