@@ -5,11 +5,12 @@ system.yaml, operator.yaml and robots/<robot>/ with the robot's cell-specific fi
 points). A robot pack is one robot model, nothing about a cell: profile, embodiment, moveit/, navigation, sim, poses,
 pose targets. Both have a pack.yaml {name, version, schema_version[, description]}; a robot pack's name is the robot.
 
-A robot file is looked up in the cell pack's robots/<robot>/ first (cell-specific files, and whole-file overrides of
-robot pack files, e.g. a cell-tuned poses.yaml), then in the robot packs, in this order: env TASKWEAVE_ROBOT_PACKS
+A robot file is looked up in the cell pack's robots/<robot>/ first (cell-specific files, and overrides of robot pack
+files: keyed, only the keys the cell changes laid over the pack's file, or a whole file; overlay.py), then in the
+robot packs, in this order: env TASKWEAVE_ROBOT_PACKS
 (os.pathsep-separated), system.yaml robot_packs (relative to the cell pack), the installed taskweave_robots share.
 Each location is a robot pack (its pack.yaml names the robot) or a folder of robot packs (<location>/<robot>/).
-The installed share is read-only: edits of its files are written to the cell pack as overrides (a rebuild would
+The installed share is read-only: edits of its files are written to the cell pack as keyed overrides (a rebuild would
 overwrite them there).
 """
 

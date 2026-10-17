@@ -1,7 +1,8 @@
 """Loading, validating and querying a taskweave cell pack (a config directory) and the robot packs it uses.
 
 Layout (all files YAML; files marked optional may be absent). robots/<model>/<file> is looked up in the cell pack
-first, then in the robot packs (packs.py); the cell pack holds the robot's cell-specific files:
+first, then in the robot packs (packs.py); the cell pack holds the robot's cell-specific files, and overrides of robot
+pack files, keyed (only the keys the cell changes, laid over the pack's file) or whole (overlay.py):
 
     pack.yaml                      required: name, version, schema_version (packs.CELL_SCHEMA)
     system.yaml                    optional, robot_packs: robot pack locations (relative to the cell pack)
@@ -30,7 +31,7 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator
 
-from . import packs, schemas
+from . import overlay, packs, schemas
 from .poses import ObjectInstance, Pose2D, Pose3D, wrap_angle
 
 STANCE_PREFIX = 'stance:'
@@ -99,8 +100,9 @@ class ConfigStore:
         robots/<robot>/<file> is found through the robot file search path (robot_file)."""
         robot_file = self._robot_relative(relative)
         path = self.robot_file(*robot_file) if robot_file else self.root / relative
+        base = self.override_base(*robot_file) if robot_file and path.is_relative_to(self.root) else None
         try:
-            stamp = path.stat().st_mtime_ns
+            stamp = (_stamp(path), _stamp(base) if base else None)
         except OSError:
             stamp = None
         with self._lock:
@@ -112,10 +114,10 @@ class ConfigStore:
                 raise ConfigError(path, 'file not found' + (f' (looked in {self.robot_search(robot_file[0])})'
                                                             if robot_file else ''))
             return default
-        try:
-            data = yaml.safe_load(path.read_text(encoding='utf-8'))
-        except yaml.YAMLError as error:
-            raise ConfigError(path, f'invalid YAML: {error}') from error
+        data = self._read_yaml(path)
+        keyed = robot_file is not None and overlay.is_keyed(data)
+        if keyed:  # a keyed cell override: laid over the robot pack's file, the result is validated
+            data = overlay.overlay(self._read_yaml(base) if base else {}, data, robot_file[1])
         if data is None:
             data = default if default is not None else {}
         errors = sorted(Draft202012Validator(schema).iter_errors(data), key=lambda e: list(e.absolute_path))
@@ -123,10 +125,17 @@ class ConfigStore:
             first = errors[0]
             key = '.'.join(str(p) for p in first.absolute_path)
             more = f' (and {len(errors) - 1} more)' if len(errors) > 1 else ''
-            raise ConfigError(path, first.message + more, key)
+            raise ConfigError(f'{path} (laid over {base})' if keyed and base else path, first.message + more, key)
         with self._lock:
             self._cache[path] = (stamp, data)
         return data
+
+    @staticmethod
+    def _read_yaml(path: Path) -> Any:
+        try:
+            return yaml.safe_load(path.read_text(encoding='utf-8'))
+        except yaml.YAMLError as error:
+            raise ConfigError(path, f'invalid YAML: {error}') from error
 
     def reload(self) -> None:
         """Drop all cached files; the next access reads from disk again."""
@@ -158,20 +167,47 @@ class ConfigStore:
     def robot_file_source(self, robot: str, file: str) -> dict:
         """Where a robot file comes from and where an edit of it goes (HMI, error messages):
         ``{'path', 'source': 'cell' | 'override' | 'robot pack' | 'missing', 'pack': robot pack label or None,
-        'save_path'}``. override: the cell pack's own copy of a file a robot pack has too (whole file)."""
+        'save_path', 'override': 'keys' | 'file' | None, 'override_keys': [dotted paths], 'override_count',
+        'override_deleted': [dotted paths]}``. override: the cell pack's own copy of a file a robot pack has too,
+        keyed (only the keys the cell changes, laid over the pack's file; overlay.py) or a whole file. The override
+        keys are those whose values differ from the robot pack's (deleted: pack keys the cell removes); None for a
+        file that is not YAML or does not load."""
         cell = self.root / 'robots' / robot / file
         found = [p for p in self.robot_packs(robot) if (p.path / file).exists()]
         if cell.exists():
             source, path = 'override' if found else 'cell', cell
         else:
             source, path = ('robot pack', found[0].path / file) if found else ('missing', cell)
-        return {'path': path, 'source': source, 'pack': found[0].label if found else None,
-                'save_path': self.robot_save_path(robot, file)}
+        result = {'path': path, 'source': source, 'pack': found[0].label if found else None,
+                  'save_path': self.robot_save_path(robot, file), 'override': None, 'override_keys': [],
+                  'override_count': 0, 'override_deleted': []}
+        if source == 'override' and file in overlay.MERGED_FILES:
+            try:
+                base, data = self._read_yaml(found[0].path / file) or {}, self._read_yaml(cell)
+            except ConfigError:
+                return {**result, 'override': 'file', 'override_keys': None, 'override_count': None,
+                        'override_deleted': None}
+            keyed = overlay.is_keyed(data)
+            changed = overlay.delta(base, overlay.overlay(base, data, file) or {}, overlay.DEPTH.get(file))
+            depth = overlay.DEPTH.get(file)
+            paths = overlay.key_paths(changed, depth)
+            result.update({'override': 'keys' if keyed else 'file', 'override_keys': paths,
+                           'override_count': len(paths),
+                           'override_deleted': overlay.key_paths(changed, depth, deleted=True)})
+        return result
+
+    def override_base(self, robot: str, file: str) -> Path | None:
+        """The robot pack file a cell pack copy of robots/<robot>/<file> would be laid over (keyed override):
+        the first robot pack's that has it; None for cell-specific files and files no robot pack has."""
+        if file not in overlay.MERGED_FILES:
+            return None
+        return next((p.path / file for p in self.robot_packs(robot) if (p.path / file).is_file()), None)
 
     def robot_save_path(self, robot: str, file: str) -> Path:
         """Where an edit of a robot file is written. Cell-specific files (packs.CELL_ROBOT_FILES) and files the cell
         pack has: the cell pack. Robot pack files: the robot pack they come from, but a read-only one (the
-        installed share, overwritten by every build) gets a cell pack override, which starts as a copy."""
+        installed share, overwritten by every build) gets a cell pack override, which holds only the keys the cell
+        changes (keyed_override)."""
         cell = self.root / 'robots' / robot / file
         if file in packs.CELL_ROBOT_FILES or cell.exists():
             return cell
@@ -954,8 +990,9 @@ class ConfigStore:
         return self._edit_yaml(relative, edit)
 
     def _edit_yaml(self, relative: str, edit) -> Path:
-        """Apply ``edit(document)`` to a point file with comments and order kept; write only if the result is valid."""
-        from ruamel.yaml import YAML  # only needed for writing
+        """Apply ``edit(document)`` to a point file with comments and order kept; write only if the result is valid.
+        A cell pack copy of a robot pack file is edited as the whole file it stands for and written as a keyed
+        override (keyed_override)."""
         from ruamel.yaml.comments import CommentedMap
 
         schema = (POINT_FILE_SCHEMAS.get(relative) or POINT_FILE_SCHEMAS.get(Path(relative).name)
@@ -964,19 +1001,16 @@ class ConfigStore:
             raise ValueError(f'{relative} is not a point file')
         robot_file = self._robot_relative(relative)
         path = self.robot_save_path(*robot_file) if robot_file else self.root / relative
-        start = path if path.is_file() or not robot_file else self.robot_file(*robot_file)  # a new override: a copy
-        handler = YAML()
-        handler.preserve_quotes = True
-        handler.width = 4096  # one line per entry, as written by hand and by tools (joint poses are long)
-        document = handler.load(start.read_text(encoding='utf-8')) if start.is_file() else None
-        if document is None:
-            document = CommentedMap()
-        edit(document)
-        errors = sorted(Draft202012Validator(schema).iter_errors(json.loads(json.dumps(document))),
-                        key=lambda e: list(e.absolute_path))
-        if errors:
-            key = '.'.join(str(p) for p in errors[0].absolute_path)
-            raise ValueError(f'{relative}{f" [{key}]" if key else ""}: {errors[0].message}; nothing written')
+        handler = _yaml_handler()
+        if robot_file and self._keyed(*robot_file, path):
+            document = self.keyed_override(*robot_file, edit, schema, relative)[0]
+        else:
+            start = path if path.is_file() or not robot_file else self.robot_file(*robot_file)  # new override: a copy
+            document = handler.load(start.read_text(encoding='utf-8')) if start.is_file() else None
+            if document is None:
+                document = CommentedMap()
+            edit(document)
+            _check(schema, _plain(document), relative)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open('w', encoding='utf-8') as stream:
             handler.dump(document, stream)
@@ -984,7 +1018,122 @@ class ConfigStore:
             self._cache.pop(path, None)
         return path
 
+    def _keyed(self, robot: str, file: str, path: Path) -> bool:
+        """An edit of robots/<robot>/<file> written to ``path`` is a keyed override: the cell pack's copy of a robot
+        pack file (or a keyed file whose robot pack file is gone)."""
+        cell = self.root / 'robots' / robot / file
+        if path != cell or file not in overlay.MERGED_FILES:
+            return False
+        return self.override_base(robot, file) is not None or (cell.is_file() and overlay.is_keyed(
+            self._read_yaml(cell)))
+
+    def keyed_override(self, robot: str, file: str, edit=None, schema: dict | None = None,
+                       label: str = '') -> tuple[Any, dict]:
+        """The cell pack's robots/<robot>/<file> as a keyed override document (ruamel, comments kept: the cell file's,
+        the pack's for keys the cell changes) after ``edit(document)``, which gets the whole file the override stands
+        for (the pack's file, the cell's keys laid over it; a whole-file copy as it is). Returns the document and that
+        whole file as plain data, checked against ``schema`` (ValueError naming ``label``). Nothing is written."""
+        from ruamel.yaml.comments import CommentedMap
+
+        cell, base = self.root / 'robots' / robot / file, self.override_base(robot, file)
+        depth, handler = overlay.DEPTH.get(file), _yaml_handler()
+        base_document = (handler.load(base.read_text(encoding='utf-8')) if base else None) or CommentedMap()
+        base_data = _plain(base_document)
+        cell_document = handler.load(cell.read_text(encoding='utf-8')) if cell.is_file() else None
+        header = None
+        if overlay.is_keyed(cell_document):
+            header = cell_document.ca.comment
+            document = _overlay_document(base_document, cell_document, depth)
+        else:
+            document = cell_document if isinstance(cell_document, dict) else base_document
+        if edit:
+            edit(document)
+        data = _plain(document)
+        if schema is not None:
+            _check(schema, data, label or f'robots/{robot}/{file}')
+        _prune_document(document, base_data, depth)
+        document.insert(0, overlay.MARKER, overlay.KEYS)
+        document.ca.comment = header
+        if header is None:
+            document.yaml_set_start_comment(OVERRIDE_HEADER.format(file=file))
+        return document, data
+
     @staticmethod
     def _check_name(name: str) -> None:
         if not Draft202012Validator(schemas.NAME).is_valid(name):
             raise ValueError(f'invalid point name {name!r}: use letters, digits, "_" and "-", starting with a letter')
+
+
+OVERRIDE_HEADER = ("cell override of the robot pack's {file}: only the keys this cell changes, laid over the pack's "
+                   'file (~delete removes a pack key; see taskweave config/overlay.py)')
+
+
+def _stamp(path: Path) -> tuple[int, int]:
+    """Change marker of a file for the cache: mtime and size (a coarse clock misses quick rewrites by mtime alone)."""
+    info = path.stat()
+    return info.st_mtime_ns, info.st_size
+
+
+def _yaml_handler():
+    from ruamel.yaml import YAML  # only needed for writing
+
+    handler = YAML()
+    handler.preserve_quotes = True
+    handler.width = 4096  # one line per entry, as written by hand and by tools (joint poses are long)
+    return handler
+
+
+def _plain(document) -> Any:
+    return json.loads(json.dumps(document))
+
+
+def _check(schema: dict, data: Any, label: str) -> None:
+    errors = sorted(Draft202012Validator(schema).iter_errors(data), key=lambda e: list(e.absolute_path))
+    if errors:
+        key = '.'.join(str(p) for p in errors[0].absolute_path)
+        raise ValueError(f'{label}{f" [{key}]" if key else ""}: {errors[0].message}; nothing written')
+
+
+def _pop(node, key) -> None:
+    node.pop(key, None)
+    node.ca.items.pop(key, None)
+
+
+def _strip_document(value):
+    """A ruamel value without overlay.DELETE entries (overlay.strip)."""
+    if isinstance(value, dict):
+        for key in [k for k, v in value.items() if v == overlay.DELETE]:
+            _pop(value, key)
+        for item in value.values():
+            _strip_document(item)
+    return value
+
+
+def _overlay_document(base, over, depth: int | None):
+    """overlay.merge on ruamel documents: ``over``'s keys laid into ``base`` in place, with their comments."""
+    for key, value in over.items():
+        if key == overlay.MARKER:
+            continue
+        if value == overlay.DELETE:
+            _pop(base, key)
+        elif key in base and depth != 1 and isinstance(base[key], dict) and isinstance(value, dict):
+            _overlay_document(base[key], value, None if depth is None else depth - 1)
+        else:
+            base[key] = _strip_document(value)
+            if key in over.ca.items:
+                base.ca.items[key] = over.ca.items[key]
+    return base
+
+
+def _prune_document(node, base: dict, depth: int | None) -> None:
+    """overlay.delta on a ruamel document, in place: keys equal to ``base`` go, base keys it lacks become DELETE."""
+    missing = [key for key in base if key not in node]
+    for key in list(node):
+        if key not in base:
+            continue
+        if overlay.same(_plain(node[key]), base[key]):
+            _pop(node, key)
+        elif depth != 1 and isinstance(node[key], dict) and isinstance(base[key], dict):
+            _prune_document(node[key], base[key], None if depth is None else depth - 1)
+    for key in missing:
+        node[key] = overlay.DELETE
