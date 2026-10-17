@@ -95,7 +95,8 @@ def test_parameter_goes_through_the_same_rules(system):
     assert handler.set_parameters([Parameter('speed_override_percent', value=30.0)])[0].successful
     assert until(lambda: seen and seen[-1].percent == 30.0)
     assert not handler.set_parameters([Parameter('speed_override_percent', value=0.5)])[0].successful
-    call(client, SetSpeedOverride, names.SET_SPEED_OVERRIDE, SetSpeedOverride.Request(percent=0.0, test_mode=True))
+    call(client, SetSpeedOverride, names.SET_SPEED_OVERRIDE,
+         SetSpeedOverride.Request(percent=0.0, test_mode=True, set_test_mode=True))
     result = handler.set_parameters([Parameter('speed_override_percent', value=90.0)])[0]
     assert handler.speed.percent <= 50.0 and (not result.successful or
                                               handler.get_parameter('speed_override_percent').value == 50.0)
@@ -112,10 +113,10 @@ def test_test_mode_lowers_for_a_run_and_restores_after(system, config_dir):
     (config_dir / 'missions' / 'short.yaml').write_text(
         'goal: g\nrobot: demo_bot\nsteps:\n  - {instruction: wait, skill: wait, args: {seconds: 0.1}}\n')
     response = call(client, SetSpeedOverride, names.SET_SPEED_OVERRIDE,
-                    SetSpeedOverride.Request(percent=80.0, test_mode=True))
+                    SetSpeedOverride.Request(percent=80.0, test_mode=True, set_test_mode=True))
     assert response.ok and response.percent == 50.0 and 'cap' in response.message
     response = call(client, SetSpeedOverride, names.SET_SPEED_OVERRIDE,
-                    SetSpeedOverride.Request(percent=0.0, test_mode=True, test_percent=20.0))
+                    SetSpeedOverride.Request(percent=0.0, test_mode=True, set_test_mode=True, test_percent=20.0))
     assert response.ok and response.percent == 50.0
     assert call(client, StartMission, names.START_MISSION, StartMission.Request(mission='short')).accepted
     assert until(lambda: any(m.percent == 20.0 and m.test_mode for m in seen))
@@ -125,3 +126,20 @@ def test_test_mode_lowers_for_a_run_and_restores_after(system, config_dir):
     finished = [e for e in episodes if e['event'] == 'step_finished']
     speed = finished[0]['speed']
     assert speed['override_min'] == 20.0 and 20.0 <= speed['override_avg'] <= 50.0
+
+
+def test_a_percent_only_call_leaves_test_mode_alone(system):
+    """P1 review fix 6: test_mode is applied only when set_test_mode is true (a percent-only call used to switch the
+    latch off)."""
+    handler, _, client, seen, _ = system
+    request = SetSpeedOverride.Request
+    call(client, SetSpeedOverride, names.SET_SPEED_OVERRIDE, request(percent=0.0, test_mode=True, set_test_mode=True))
+    assert handler.speed.test_mode
+    assert call(client, SetSpeedOverride, names.SET_SPEED_OVERRIDE, request(percent=20.0)).ok
+    assert handler.speed.test_mode and handler.speed.percent == 20.0
+    assert until(lambda: seen[-1].test_mode and seen[-1].percent == 20.0)
+    call(client, SetSpeedOverride, names.SET_SPEED_OVERRIDE,
+         request(percent=0.0, test_mode=False, set_test_mode=True))
+    assert not handler.speed.test_mode                                  # set_test_mode true: false is applied
+    call(client, SetSpeedOverride, names.SET_SPEED_OVERRIDE, request(percent=0.0, test_mode=True, set_test_mode=False))
+    assert not handler.speed.test_mode                                  # set_test_mode false: test_mode is ignored

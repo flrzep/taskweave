@@ -248,7 +248,8 @@ class TaskHandler(Node):
 
     def _set_speed(self, request, response):
         response.ok, response.message, response.percent = self.speed_request(
-            float(request.percent), bool(request.test_mode), float(request.test_percent))
+            float(request.percent), bool(request.test_mode) if request.set_test_mode else None,
+            float(request.test_percent))
         self.get_logger().info(f'speed override: {response.message}')
         return response
 

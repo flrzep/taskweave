@@ -2,8 +2,10 @@
 # speed_override_percent goes through it too). Not persisted: after a handler restart it is 100 %.
 
 float32 percent         # 1-100; 0: unchanged. In test mode, values above the cap are clamped (the message says so)
-bool test_mode          # the test mode latch (send the current value to leave it)
 float32 test_percent    # 1-100 (at most the cap); 0: unchanged
+bool set_test_mode      # true: apply test_mode below. false: leave the test mode latch as it is, test_mode is ignored
+                        # (a request that only sets percent or test_percent must leave this false; the default is false)
+bool test_mode          # the test mode latch on (true) or off (false); only read when set_test_mode is true
 ---
 bool ok
 string message          # what was set, e.g. "speed 50 %; clamped to the test mode cap 50 %", or why not
