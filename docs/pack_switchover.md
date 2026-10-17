@@ -110,7 +110,11 @@ Every command below runs on the GPU host (`ssh root@100.97.65.111`) unless it sa
   the edit changed (`~override: keys`, laid over the pack's file; pack updates to other keys still reach the cell;
   `~delete` removes a pack key); `taskweave config files` shows it as `override`. Whole-file overrides kept by the
   migration keep working; `taskweave config slim config/ --dry-run` shows how they would shrink to the differing keys,
-  without `--dry-run` it does it (idempotent). Commit it in the host repo as usual. To make it
+  without `--dry-run` it does it (idempotent). A pack key an old copy lacks (a profile copy from before `arms`,
+  `motion_tuning`, `grippers.*.closed_from`) is not overridden after the slim, so the pack's value applies (and later
+  pack updates of it reach the cell); only an explicit `~delete` removes a pack key. Run the slim right after the
+  migration: until then the whole-file copy replaces the pack's file and lacks those keys (no elbow control; `taskweave
+  check` warns). Commit it in the host repo as usual. To make it
   part of the robot pack, merge its keys into `taskweave_robots/<robot>/` in the taskweave repo, deploy, and delete the
   override.
 - Changing a robot's MoveIt config, sim.yaml or poses for good: edit `taskweave_robots/<robot>/` in the taskweave repo
