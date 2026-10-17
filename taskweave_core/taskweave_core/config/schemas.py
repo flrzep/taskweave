@@ -225,8 +225,7 @@ ROBOT_PROFILE = {
                 # known-good postures IK starts from, in order (then the current state)
                 'seeds': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': FINITE}},
                 'avoid_collisions': {'type': 'boolean'},  # reject solutions in collision (robot + planning scene)
-                # the joint the pad's elbow jog turns before IK puts the TCP back ({tool} = tool name; default:
-                # the third joint the joints pattern matches, the upper-arm roll of a 7-joint arm)
+                # deprecated (use arms.<tool>.swivel): the elbow jog's swivel joint, {tool} = tool name
                 'swivel_joint': {'type': 'string'},
                 # tool -> the tool whose joints it mirrors with the same values (names with the prefix swapped)
                 'mirror': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {'type': 'string'}},
@@ -274,9 +273,11 @@ ROBOT_PROFILE = {
             },
             'additionalProperties': False,
         },
-        # arm roles by name (e.g. group, tool_frame); per IK tool the links of its elbow (ELBOW)
+        # arm roles by name (e.g. group, tool_frame); per IK tool the links of its elbow (ELBOW) and the swivel joint:
+        # the joint the pad's elbow jog turns (without a URDF: then IK puts the TCP back; with one: its positive way)
         'arms': {'type': 'object', 'propertyNames': NAME,
-                 'additionalProperties': {'type': 'object', 'properties': {'elbow': ELBOW}}},
+                 'additionalProperties': {'type': 'object', 'properties': {
+                     'elbow': ELBOW, 'swivel': {'type': 'string', 'minLength': 1}}}},
         'motion_tuning': MOTION_TUNING,
         'torso': {'type': 'object'},
         'cameras': {'type': 'object'},
@@ -401,7 +402,7 @@ OBJECT = {
         # the object is handled the same when turned by this angle about its vertical axis (e.g. 180: a frame lying
         # the other way round is approached and grasped as if it lay the usual way); 360 / angle turns are equivalent
         'yaw_symmetry_deg': {'enum': [90, 120, 180]},
-        # a placed object of this type is a place the next one comes to (e.g. a hanger waiting on a conveyor): taking
+        # a placed object of this type is a place the next one comes to (e.g. a carrier waiting on a conveyor): taking
         # it, or gripping it to work it, leaves the placed object where it is
         'replenished': {'type': 'boolean'},
         'points': {

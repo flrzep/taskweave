@@ -7,9 +7,9 @@ A mission's ``facts`` are worked out from the placed objects (with their run-tim
 planned and filled into its steps, so they stay the same for the whole cycle while the cycle changes the objects:
 
     facts:
-      next_stack: {fullest: frame_type2, among: "bay_*_stack_2_front"}   # most items left; ties: first by name
+      next_stack: {fullest: part_type, among: "lane_*_stack_b_front"}   # most items left; ties: first by name
     steps:
-    - {instruction: Pick a frame, include: pick_frame, with: {frame: "{next_stack}"}}
+    - {instruction: Pick a part, include: pick_part, with: {part: "{next_stack}"}}
 
 When a fact finds nothing (every matching stack is empty), the mission is complete.
 """

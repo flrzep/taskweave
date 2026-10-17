@@ -10,7 +10,7 @@ A run (and a reference, which is a saved run) is YAML::
     mission: frame_cycle
     outcome: 1 cycle done          # the recording's outcome
     steps:
-    - {cycle: 1, step_id: s1, skill: navigate_to, instruction: ..., outcome: SUCCEEDED, duration_s: 12.4,
+    - {cycle: 1, step_id: s3, skill: navigate_to, instruction: ..., outcome: SUCCEEDED, duration_s: 12.4,
        max_error: 0.005, attempts: 1, message: ...}
 
 Comparison: every reference step must come in the same order with outcome SUCCEEDED, its duration within

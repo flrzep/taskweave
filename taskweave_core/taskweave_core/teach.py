@@ -13,9 +13,9 @@ instance of that type; go_to_point drives the tools back to them. The TCP comes 
 (go_to_point's ``cell_frame``). Jog the tools onto the object with the pad, then teach (pad ``teach`` button or
 the CLI).
 
-    ros2 service call /taskweave/teach_point taskweave_interfaces/srv/TeachPoint "{name: bay_2, kind: location}"
-    taskweave teach location bay_2
-    taskweave teach point bay_2_stack_1/rails_top [--tool left]
+    ros2 service call /taskweave/teach_point taskweave_interfaces/srv/TeachPoint "{name: bin_2, kind: location}"
+    taskweave teach location bin_2
+    taskweave teach point bin_2/top_grasp [--tool left]
 """
 
 from __future__ import annotations
