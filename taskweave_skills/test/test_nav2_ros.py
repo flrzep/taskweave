@@ -132,3 +132,18 @@ def test_without_a_hold_the_costmaps_get_the_envelope(system):
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     for costmap in nav2.costmaps:  # the carry envelope only while holding (hold.py)
         assert costmap.get_parameter('footprint').value == '[[0.4, 0.3], [0.4, -0.3], [-0.3, -0.3], [-0.3, 0.3]]'
+
+
+def test_the_first_drive_after_a_restart_clears_a_limit_nav2_may_still_hold(system):
+    """A skill server restarted during a slowed drive does not know what limit Nav2 holds: at 100 % the first drive
+    still publishes 'no limit' (SpeedLimit 0), not nothing."""
+    from nav2_msgs.msg import SpeedLimit
+
+    _, nav2, client = system
+    received = []
+    client.create_subscription(SpeedLimit, '/speed_limit', received.append, 10)
+    time.sleep(0.3)
+    result = run(client, 'dock')
+    assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
+    time.sleep(0.2)
+    assert received and received[0].percentage and received[0].speed_limit == 0.0

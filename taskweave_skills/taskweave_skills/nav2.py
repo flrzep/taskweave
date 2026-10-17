@@ -109,8 +109,10 @@ class Nav2NavigateTo(NavigateTo):
         self.NavigateToPose = NavigateToPose
         from nav2_msgs.msg import SpeedLimit
 
-        self.SpeedLimit, self._speed_sent = SpeedLimit, None
+        self.SpeedLimit, self._speed_sent = SpeedLimit, None    # None: unknown (a restart does not know Nav2's limit)
         self.speed_limit = node.create_publisher(SpeedLimit, self.nav['speed_limit_topic'], 10)
+        self.speed_limit.publish(SpeedLimit(percentage=True, speed_limit=0.0))  # a previous server may have died during
+        # a slowed drive. Not recorded as sent: discovery may not have reached Nav2 yet, the first drive sends it again
         self.client = ActionClient(node, NavigateToPose, self.nav['action'], callback_group=ReentrantCallbackGroup())
         self.goal_handle = None
         self.goal_lock = threading.Lock()
@@ -212,12 +214,13 @@ class Nav2NavigateTo(NavigateTo):
 
     def _limit_speed(self, override: float) -> None:
         """Nav2's controller at the speed override (SpeedLimit as a percentage of its own limits; 0 = no limit).
-        At 100 % nothing is sent unless a limit was sent before."""
+        Sent when it changes; the first call after start always sends (what Nav2 holds is unknown, e.g. after a
+        restart during a slowed drive), at 100 % as 'no limit'."""
         percent = min(100.0, round(100.0 * override, 1))
-        if percent == (self._speed_sent if self._speed_sent is not None else 100.0):
+        if percent == self._speed_sent:
             return
         self.speed_limit.publish(self.SpeedLimit(percentage=True, speed_limit=percent if percent < 100.0 else 0.0))
-        self._speed_sent = percent if percent < 100.0 else None
+        self._speed_sent = percent
 
     def _goal(self, target: Pose2D):
         goal = self.NavigateToPose.Goal()
