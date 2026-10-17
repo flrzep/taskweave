@@ -1,0 +1,9 @@
+home: {left_joint1: 0.0, left_joint2: 0.0, right_joint1: 0.0, right_joint2: 0.0, lift: 0.0}
+present_left:
+  tools: {left: {tcp: [0.6, 0.2, 0.4], approach: [1.0, 0.0, 0.0], closing: [0.0, 0.0, 1.0]}}
+  elbow: out
+present_both:
+  joints: {lift: 0.1}
+  tools:
+    left: {tcp: [0.6, 0.2, 0.4], approach: [1.0, 0.0, 0.0], closing: [0.0, 0.0, 1.0]}
+    right: {tcp: [0.6, -0.2, 0.4], approach: [1.0, 0.0, 0.0], closing: [0.0, 0.0, 1.0]}

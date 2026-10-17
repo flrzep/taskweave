@@ -202,7 +202,8 @@ class TcpJog(Node):
 
     def _holding(self, msg) -> None:
         import json
-        self.held_tools = set(json.loads(msg.data or '{}').get('tools', []))
+        data = json.loads(msg.data or '{}')   # the legacy keys are the first hold; ``holds`` has them all
+        self.held_tools = set(data.get('tools', [])).union(*(h.get('hands', []) for h in data.get('holds', [])))
 
     def _joints(self, msg) -> None:
         with self.lock:

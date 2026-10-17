@@ -4,8 +4,9 @@ Checks: the robot profile and embodiment exist, every skill has an implementatio
 the catalog, every argument object matches the skill's JSON Schema, every point a skill argument refers to exists
 in config (object points also fit the robot's tools), and ``replan_from`` targets exist.
 
-Skills mark point arguments in their schema with ``"x-taskweave-point": "base_target" | "joint_pose" | "object_point"
-| "instance_point" | "instance_contact" | "via_target"``, at any depth (nested objects, oneOf variants, list items).
+Skills mark point arguments in their schema with ``"x-taskweave-point": "base_target" | "joint_pose" | "tool_pose"
+| "object_point" | "instance_point" | "instance_contact" | "via_target"``, at any depth (nested objects, oneOf
+variants, list items).
 Values that contain placeholders are only checked once their values are known (at step start): the skip is by path,
 so a placeholder may stand for a scalar, one vec3 component or a whole field. So are points on an object an earlier
 step of the plan puts down (an argument ``place_as: <name>``, e.g. gripper): it does not exist yet.
@@ -278,6 +279,14 @@ def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
             from .config.limits import pose_problems
 
             problems = pose_problems(store, robot, str(value))   # raises KeyError for an unknown pose
+            if problems:
+                return f'pose {value} does not fit robot {robot!r}: ' + '; '.join(problems)
+        elif kind == 'tool_pose':   # a named pose that places tools (move_gripper to.pose)
+            from .config.limits import pose_problems
+
+            if not store.named_pose(robot, str(value))['tools']:    # raises KeyError for an unknown pose
+                return f'pose {value} places no tools (joint values only): use move_joints'
+            problems = pose_problems(store, robot, str(value))
             if problems:
                 return f'pose {value} does not fit robot {robot!r}: ' + '; '.join(problems)
         elif kind in ('object_point', 'instance_point'):

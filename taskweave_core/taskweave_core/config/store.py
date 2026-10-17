@@ -38,7 +38,8 @@ from .poses import ObjectInstance, Pose2D, Pose3D, wrap_angle
 STANCE_PREFIX = 'stance:'
 LOCATION_PREFIX = 'location:'
 VARIANT_SEPARATOR = '/'     # stance:<instance>/<variant>
-POINT_METADATA = ('approach', 'tool_type', 'grip_width_m', 'approach_m', 'elbow')  # object point keys besides tool poses
+# object point keys besides tool poses
+POINT_METADATA = ('approach', 'tool_type', 'grip_width_m', 'approach_m', 'elbow', 'alone')
 TOOL_SUFFIX = '_tool'       # an object point's tool pose key: <tool>_tool
 POINT_FILE_SCHEMAS = {  # files that teaching and the HMI may edit (a file name matches any robot folder)
     'cell/locations.yaml': schemas.POINTS2D, 'stances.yaml': schemas.STANCES, 'poses.yaml': schemas.JOINT_POSES,
@@ -486,6 +487,10 @@ class ConfigStore:
                     'elbow': entry.get('elbow')}
         return {'joints': {j: float(v) for j, v in entry.items()}, 'tools': {}, 'elbow': None}
 
+    def tool_pose_names(self, robot: str) -> list[str]:
+        """The named poses of ``robot`` that place tools (``tools`` entries in poses.yaml): move_gripper to.pose."""
+        return sorted(name for name, entry in self.joint_poses(robot).items() if 'tools' in entry)
+
     def joint_pose(self, robot: str, name: str) -> dict[str, float]:
         """A joint-space pose; a pose given as tool targets has no fixed joint values (use named_pose)."""
         pose = self.named_pose(robot, name)
@@ -514,7 +519,8 @@ class ConfigStore:
             except ConfigError:
                 continue
         return {'locations': sorted(self.locations()), 'stances': self.stance_names(robot),
-                'joint poses': sorted(self.joint_poses(robot)), 'object points': objects,
+                'joint poses': sorted(self.joint_poses(robot)), 'tool poses': self.tool_pose_names(robot),
+                'object points': objects,
                 'placed object points': placed, 'placed object contacts': contacts,
                 'placed objects': sorted(self.object_instances())}
 
@@ -590,6 +596,8 @@ class ConfigStore:
         entry = dict(points[point])
         result: dict[str, Any] = {key: entry.pop(key, None) for key in POINT_METADATA}
         result.update({tool: Pose3D.from_dict(pose, obj) for tool, pose in entry.items()})
+        if result.get('alone'):   # single-hand poses: <hand>_tool -> Pose3D
+            result['alone'] = {tool: Pose3D.from_dict(pose, obj) for tool, pose in result['alone'].items()}
         if robot:
             result.update(self.robot_object_points(robot).get(obj, {}).get(point, {}))
         return result

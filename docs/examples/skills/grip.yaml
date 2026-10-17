@@ -1,0 +1,14 @@
+# Cell pack example: skills/grip.yaml (skill-api-spec 1.5). Replaces gripper.yaml: max_joint_speed -> speed.joint_rad_s,
+# position_tolerance / stall_timeout_s / state_timeout_s -> tolerances.*.
+implementations:
+  - name: joint_targets
+    type: script
+    class: taskweave_skills.gripper_motion:Grip
+    requires: {capabilities: [gripper.parallel]}
+cell_frame: world               # TF frame of the cell (place_as)
+speed: {joint_rad_s: 1.5}       # rad on the driving finger joint per second
+accel: {joint_rad_s2: 3.0}
+tolerances:
+  position: 0.03
+  stall_timeout_s: 1.0          # after the planned close: blocked (or creeping) this long -> holding
+  state_timeout_s: 5.0          # no joint states this long (wall time) -> fail; rides out sim stalls (UI asset loads)

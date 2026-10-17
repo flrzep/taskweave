@@ -26,6 +26,17 @@ def instance_matrix(instance) -> np.ndarray:
     return m
 
 
+def point_poses(point: dict, tools=None) -> dict:
+    """{tool: Pose3D} of an object point for ``tools`` (default: every tool the point has). One tool alone takes its
+    ``alone`` pose if the point has one (a single-hand grasp), else its pose from the pair."""
+    poses = {key[:-len(TOOL_SUFFIX)]: pose for key, pose in point.items()
+             if key.endswith(TOOL_SUFFIX) and pose is not None}
+    if tools is not None and len(tools) == 1:
+        solo = point.get('alone') or {}
+        poses.update({key[:-len(TOOL_SUFFIX)]: pose for key, pose in solo.items() if pose is not None})
+    return poses
+
+
 def point_targets(point: dict, instance, base_in_cell: np.ndarray, offset_m: float = 0.0,
                   tools=None) -> dict[str, dict]:
     """Tool targets {tool: {tcp, approach, closing}} in the base frame for an object point.
@@ -34,21 +45,42 @@ def point_targets(point: dict, instance, base_in_cell: np.ndarray, offset_m: flo
     along the approach (a pre-grasp pose). ``tools``: only these tools (default: every tool the point has)."""
     to_base = np.linalg.inv(base_in_cell) @ instance_matrix(instance)
     targets = {}
-    for key, pose in point.items():
-        if not key.endswith(TOOL_SUFFIX) or pose is None:
-            continue
-        tool = key[:-len(TOOL_SUFFIX)]
+    for tool, pose in point_poses(point, tools).items():
         if tools is not None and tool not in tools:
             continue
-        tcp = to_base @ rpy_matrix(pose.xyz, pose.rpy)
-        approach, closing = tcp[:3, 2], tcp[:3, 1]
-        position = tcp[:3, 3] - offset_m * approach
-        targets[tool] = {'tcp': [round(float(v), 5) for v in position],
-                         'approach': [round(float(v), 6) for v in approach],
-                         'closing': [round(float(v), 6) for v in closing]}
+        targets[tool] = target_of(to_base @ rpy_matrix(pose.xyz, pose.rpy), offset_m)
     if tools is not None and set(tools) - set(targets):
         raise KeyError(f'the point has no {", ".join(sorted(set(tools) - set(targets)))} tool pose')
     return targets
+
+
+def target_of(tcp: np.ndarray, offset_m: float = 0.0) -> dict:
+    """The tool target {tcp, approach, closing} of a 4x4 TCP pose, ``offset_m`` back along its approach (z)."""
+    approach, closing = tcp[:3, 2], tcp[:3, 1]
+    position = tcp[:3, 3] - offset_m * approach
+    return {'tcp': [round(float(v), 5) for v in position], 'approach': [round(float(v), 6) for v in approach],
+            'closing': [round(float(v), 6) for v in closing]}
+
+
+def axis_rotation(axis, degrees: float) -> np.ndarray:
+    """3x3 rotation of ``degrees`` about ``axis`` (right-hand rule)."""
+    axis = np.asarray(axis, float)
+    axis = axis / np.linalg.norm(axis)
+    k = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+    angle = math.radians(degrees)
+    return np.eye(3) + math.sin(angle) * k + (1 - math.cos(angle)) * k @ k
+
+
+def moved_tcp(tcp: np.ndarray, by, frame: str = 'robot', turn_deg: float = 0.0, tilt_deg: float = 0.0) -> np.ndarray:
+    """A TCP pose (4x4, base frame) moved ``by`` [x, y, z] and turned about its own origin. ``frame`` robot: ``by`` and
+    the axes are the base's (turn about the vertical z, tilt about y); tool: the TCP's own axes (turn about its
+    approach z, tilt about its y). Angles in degrees, right-hand rule."""
+    axes = np.eye(3) if frame == 'robot' else tcp[:3, :3]
+    rotation = axis_rotation(axes[:, 2], turn_deg) @ axis_rotation(axes[:, 1], tilt_deg)
+    moved = np.eye(4)
+    moved[:3, :3] = rotation @ tcp[:3, :3]
+    moved[:3, 3] = tcp[:3, 3] + axes @ np.asarray(by, float)
+    return moved
 
 
 def onto_pose(target, target_contact, held_contact, base_in_cell: np.ndarray, offset_m: float = 0.0) -> np.ndarray:

@@ -138,11 +138,11 @@ class _JointSkill(Skill):
 
     def _holding_refusal(self):
         """A free-arm motion would pull the holding hands apart: refuse while something is held."""
-        hold = self.hold.held()
-        if hold is None:
+        holds = self.hold.held_all()
+        if not holds:
             return None
-        return SkillResult.rejected(f'holding {hold["object"]} with {" and ".join(hold["tools"])}: move it with '
-                                    'move_object, or open the gripper first')
+        text = '; '.join(f'{hold["object"]} with {" and ".join(hold["tools"])}' for hold in holds)
+        return SkillResult.rejected(f'holding {text}: move it with move_object, or open the gripper first')
 
     def _start(self) -> dict | None:
         """Every joint now, a joint at the goal its last move reached at exactly that goal (JointInterface.start)."""
@@ -288,11 +288,12 @@ class MoveToPose(_JointSkill):
         return [name for name in joints if any(p.fullmatch(name) for p in patterns)]
 
     def _reach(self, ctx, joints: dict, tools: dict, label: str, fallback_joints=(), linear=False, flip=True,
-               elbow=None):
+               elbow=None, planner='auto'):
         """Set ``joints`` and put each tool on its target (IK), along a planned path if there is a planner. If IK
         finds no solution with ``joints``, each of ``fallback_joints`` (e.g. other lift heights) is tried instead.
         ``linear``: the TCPs move on straight lines (cartesian.linear_path) instead of a planned path; the lift
-        stays. Returns (failure result or None, worst joint error at the end)."""
+        stays. ``planner``: auto, direct or planned (see _go). Returns (failure result or None, worst joint error at
+        the end)."""
         from .ik import IkError
 
         if linear:
@@ -316,15 +317,17 @@ class MoveToPose(_JointSkill):
             else:
                 tried = f' (also tried {", ".join(str(a) for a in fallback_joints)})' if fallback_joints else ''
                 return SkillResult.failed(f'{first_error}{tried}'), 0
-        return self._go(ctx, goal, label, elbow=self.ik.elbow_side if tools else None)
+        return self._go(ctx, goal, label, elbow=self.ik.elbow_side if tools else None, planner=planner)
 
-    def _go(self, ctx, goal: dict, label: str, elbow=None):
+    def _go(self, ctx, goal: dict, label: str, elbow=None, planner='auto'):
         """Move to the joint ``goal`` along a planned path if there is a planner. ``elbow``: the side IK solved the
-        arms for; if the straight move is blocked, the elbows swing there first (_swing_first). Returns (failure or
-        None, worst joint error at the end)."""
+        arms for; if the straight move is blocked, the elbows swing there first (_swing_first). ``planner``: auto: as
+        said; direct: the straight joint move only, failing if it is blocked; planned: always the planner. Sets
+        ``path_kind`` (direct, swing_first, planned). Returns (failure or None, worst joint error at the end)."""
         from .motion_plan import PlanError
 
         path = None
+        self.path_kind = 'direct'
         if self.planner is not None:
             ctx.feedback(0.0, 'planning')
             start = self._start()
@@ -332,16 +335,28 @@ class MoveToPose(_JointSkill):
                 return SkillResult.failed(f'no joint states on {self.joints.state_topic}'), 0
             stop = lambda: ctx.should_stop  # noqa: E731
             try:
-                if elbow is None or not self.planner.direct:
-                    path = self.planner.plan(start, goal, stop)
+                if planner == 'direct':
+                    if not self.planner.free(start, goal, stop):
+                        return SkillResult.failed(f'{label}: straight move blocked (planner direct)'), 0
+                elif planner == 'planned' or elbow is None or not self.planner.direct:
+                    path, self.path_kind = self.planner.plan(start, goal, stop), 'planned'
                 elif not self.planner.free(start, goal, stop):
-                    path = self._swing_first(ctx, start, goal, elbow) or self.planner.plan(start, goal, stop)
+                    path = self._swing_first(ctx, start, goal, elbow)
+                    self.path_kind = 'swing_first'
+                    if not path:
+                        path, self.path_kind = self.planner.plan(start, goal, stop), 'planned'
             except PlanError as error:
                 return SkillResult.failed(f'{label}: {error}'), 0
+            if path is not None and self.path_kind == 'planned':
+                path = self._slowed(path)
         result, final = self._move(ctx, goal, label, path=path)
         if result is not None:
             return result, 0
         return None, max(abs(goal[n] - final[n]) for n in goal)
+
+    def _slowed(self, path):
+        """A planned path as it is played (move_gripper stretches it to its speed fraction)."""
+        return path
 
     def _swing_first(self, ctx, start: dict, goal: dict, side):
         """A goal IK solved with the elbows toward ``side`` whose straight move is blocked, typically from elbows on
@@ -468,8 +483,6 @@ class GoToPoint(MoveToPose):
         super().setup(node, config, robot, params)
 
     def execute(self, ctx, args):
-        from .cartesian import PathError, linear_path, tcp_targets
-        from .ik import flipped
         from .points import instance_matrix, point_targets
 
         refusal = self._holding_refusal()
@@ -502,25 +515,7 @@ class GoToPoint(MoveToPose):
         approach = 0.0 if args.get('linear') else float(args.get('approach_m', default))
         if approach > 0:  # planned (free) path to the start of the approach, then straight in
             before = point_targets(point, instance, base_in_cell, offset + approach, args.get('tools'))
-            end = self._end_of_approach(ctx, tools, lifts, label, elbow)  # how the point is reached decides
-            if isinstance(end, SkillResult):
-                return end
-            lift, flips, solution = end
-            tools = {t: flipped(v) if t in flips else v for t, v in tools.items()}
-            before = {t: flipped(v) if t in flips else v for t, v in before.items()}
-            try:  # solved backwards from the point: the approach starts in the configuration that ends there
-                path = linear_path(self.ik, tcp_targets(tools), tcp_targets(before), {**lift, **solution},
-                                   self.tcp_speed, self.tcp_turn,
-                                   state={**(self._start() or {}), **lift, **solution}).reversed()
-            except PathError as error:
-                return SkillResult.failed(f'{label}: no straight {approach:g} m approach to the point: {error}')
-            first, last = ({**lift, **dict(zip(path.names, path.points[i], strict=True))} for i in (0, -1))
-            result, _ = self._go(ctx, first, f'{label} (-{approach:g} m approach)', elbow=self.ik.elbow_side)
-            if result is not None:
-                return result
-            label += f' ({approach:g} m straight)'
-            result, final = self._move(ctx, last, label, path=path)
-            worst = 0 if result is not None else max(abs(last[n] - final[n]) for n in last)
+            result, worst, label = self._approach_in(ctx, tools, before, lifts, label, elbow, approach)
         else:
             result, worst = self._reach(ctx, {}, tools, label, fallback_joints=lifts, linear=bool(args.get('linear')),
                                         elbow=elbow)
@@ -531,6 +526,34 @@ class GoToPoint(MoveToPose):
                                     np.linalg.inv(base_in_cell) @ instance_matrix(instance))
         return SkillResult.succeeded(f'at {label} (max error {worst:.3f})', world_state={'arm_pose': label})
 
+
+    def _approach_in(self, ctx, tools: dict, before: dict, lifts: list, label: str, elbow=None, approach=0.0,
+                     planner='auto'):
+        """Planned (free) path to ``before`` (the tools ``approach`` m back along their approach), then straight in to
+        ``tools``. Returns (failure or None, worst joint error at the end, label)."""
+        from .cartesian import PathError, linear_path, tcp_targets
+        from .ik import flipped
+
+        end = self._end_of_approach(ctx, tools, lifts, label, elbow)  # how the point is reached decides
+        if isinstance(end, SkillResult):
+            return end, 0, label
+        lift, flips, solution = end
+        tools = {t: flipped(v) if t in flips else v for t, v in tools.items()}
+        before = {t: flipped(v) if t in flips else v for t, v in before.items()}
+        try:  # solved backwards from the point: the approach starts in the configuration that ends there
+            path = linear_path(self.ik, tcp_targets(tools), tcp_targets(before), {**lift, **solution},
+                               self.tcp_speed, self.tcp_turn,
+                               state={**(self._start() or {}), **lift, **solution}).reversed()
+        except PathError as error:
+            return SkillResult.failed(f'{label}: no straight {approach:g} m approach to the point: {error}'), 0, label
+        first, last = ({**lift, **dict(zip(path.names, path.points[i], strict=True))} for i in (0, -1))
+        result, _ = self._go(ctx, first, f'{label} (-{approach:g} m approach)', elbow=self.ik.elbow_side,
+                             planner=planner)
+        if result is not None:
+            return result, 0, label
+        label += f' ({approach:g} m straight)'
+        result, final = self._move(ctx, last, label, path=path)
+        return result, 0 if result is not None else max(abs(last[n] - final[n]) for n in last), label
 
     def _end_of_approach(self, ctx, tools: dict, lifts: list, label: str, elbow=None):
         """Solve the point itself first: the lift height (current, else the first of ``lifts``), the tools whose grasp
@@ -814,6 +837,12 @@ class Gripper(_JointSkill):
         hold = self.hold.held()
         if hold is None or not set(hold['tools']) & set(sides):
             return f'nothing held, {name} not placed'
+        return self._place(name, hold)
+
+    def _place(self, name: str, hold: dict) -> str:
+        """Save ``hold``'s object pose as the placed object ``name`` (see _placed)."""
+        import math
+
         instance = self.config.object_instances().get(hold['object'])
         if instance is None:
             return f'{hold["object"]} is not a placed object, {name} not placed'
