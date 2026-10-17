@@ -130,8 +130,8 @@ MISSION = {
         'params': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {
             'type': 'object', 'additionalProperties': False,
             'properties': {'description': {'type': 'string'},
-                           'point': {'enum': ['base_target', 'joint_pose', 'object_point', 'instance_point',
-                                              'instance_contact', 'instance']}}}},
+                           'point': {'enum': ['base_target', 'joint_pose', 'tool_pose', 'object_point',
+                                              'instance_point', 'instance_contact', 'instance']}}}},
         # facts each cycle starts from, filled into the steps as {name} (MissionFilePlanner): fullest = the placed object
         # of this type with the most items left, among instance names matching the glob. When a fact finds nothing
         # (e.g. every stack is empty) the mission is complete.
@@ -418,6 +418,10 @@ OBJECT = {
                     'approach_m': {'type': 'number', 'minimum': 0},
                     # preferred elbow side at this point, robot frame (else the robot profile's ik.choose.elbow)
                     'elbow': {'enum': ELBOW_SIDES},
+                    # single-hand grasps of the same point (move_gripper hands: [<hand>]): <hand>_tool poses that take
+                    # the place of the pair's pose for that hand when it goes alone
+                    'alone': {'type': 'object', 'propertyNames': {'pattern': r'.+_tool$'},
+                              'additionalProperties': POSE3D},
                 },
                 'additionalProperties': POSE3D,
             },
@@ -697,3 +701,20 @@ SKILL_OVERRIDES = {
         },
     },
 }
+
+
+# ---- hands and vectors shared by the gripper skills (skill-api-spec 1.0, 3.1) ------------------------------------
+VEC3 = {'type': 'array', 'items': {'type': 'number'}, 'minItems': 3, 'maxItems': 3, 'x-taskweave-widget': 'vec3'}
+HAND_RULES = ('auto', 'any_one', 'all')
+
+
+def hands_schema(hand_names=(), rules=HAND_RULES) -> dict:
+    """The ``hands`` argument: a rule, a hand name or a list of names. ``hand_names``: the robot's hands (profile
+    grippers), filled in by the skill's setup; ``rules``: the rule words the skill takes."""
+    names = list(hand_names)
+    return {'anyOf': [{'enum': [*rules, *names]},
+                      {'type': 'array', 'items': {'enum': names}, 'minItems': 1, 'uniqueItems': True}],
+            'x-taskweave-widget': 'hands',
+            'description': 'Which hands: a hand name or a list of names; "auto": the hands the target defines (or, '
+                           'for a held object, the hands holding it); "any_one": one free hand that can take the '
+                           'target; "all": every hand.'}
