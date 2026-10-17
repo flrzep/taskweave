@@ -207,3 +207,21 @@ def test_migration_writes_an_absolute_path_across_windows_drives(old_config, tmp
     entry = (old_config / 'system.yaml').read_text()
     assert (tmp_path / 'robot_packs').resolve().as_posix() in entry
     assert ConfigStore(old_config).robot(ROBOT).name == ROBOT
+
+
+def test_migration_does_not_delete_robot_pack_files_through_a_linked_robot_folder(old_config, tmp_path, monkeypatch):
+    folder = old_config / 'robots' / ROBOT
+    pack = robot_pack(tmp_path / 'linked', files={name: (folder / name).read_text()
+                                                  for name in ('profile.yaml', 'embodiment.yaml', 'stances.yaml')})
+    shutil.copytree(folder / 'moveit', pack / 'moveit')
+    shutil.rmtree(folder)
+    try:
+        folder.symlink_to(pack, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip('no symlink support here')
+    monkeypatch.setenv(packs.ROBOT_PACKS_ENV, str(tmp_path / 'linked'))
+    before = {str(p.relative_to(pack)): p.read_bytes() for p in pack.rglob('*') if p.is_file()}
+    lines = []
+    assert migrate(old_config, say=lines.append) == 0
+    assert {str(p.relative_to(pack)): p.read_bytes() for p in pack.rglob('*') if p.is_file()} == before
+    assert any(line.startswith('skip') and 'robot pack' in line for line in lines)

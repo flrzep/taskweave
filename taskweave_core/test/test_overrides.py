@@ -253,3 +253,43 @@ def test_a_keyed_override_without_a_robot_pack_file_is_an_error(cell):
     override(root, 'navigation.yaml', '~override: keys\ndriving: {max_turn: 2.0}\n')
     with pytest.raises(ConfigError, match=r'no robot pack has demo_bot/navigation.yaml \(looked in .*packs'):
         ConfigStore(root).navigation(ROBOT)
+
+
+# ---- P1 review fix 7: slim never touches what a cell entry links to outside the cell pack ----
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target.is_dir())
+    except (OSError, NotImplementedError):
+        pytest.skip('no symlink support here')
+
+
+def test_slim_does_not_delete_robot_pack_files_through_a_linked_robot_folder(cell):
+    root, pack = cell
+    shutil.rmtree(root / 'robots' / ROBOT)
+    _symlink_or_skip(root / 'robots' / ROBOT, pack)                 # the cell's robot folder IS the pack's
+    before = {p.name: p.read_text() for p in pack.iterdir() if p.is_file()}
+    lines = []
+    assert slim(root, say=lines.append) == 0
+    assert {p.name: p.read_text() for p in pack.iterdir() if p.is_file()} == before
+    assert any('skip' in line and 'robot pack' in line for line in lines)
+
+
+def test_slim_skips_an_entry_linked_to_the_pack_file(cell):
+    root, pack = cell
+    link = root / 'robots' / ROBOT / 'navigation.yaml'
+    _symlink_or_skip(link, pack / 'navigation.yaml')
+    lines = []
+    assert slim(root, say=lines.append) == 0
+    assert link.is_symlink() and (pack / 'navigation.yaml').read_text() == NAV
+    assert any(line.startswith('skip') and 'navigation.yaml' in line for line in lines)
+
+
+def test_slim_does_not_write_outside_the_cell_pack(cell, tmp_path):
+    root, _ = cell
+    outside = tmp_path / 'elsewhere' / 'navigation.yaml'
+    outside.parent.mkdir()
+    text = NAV.replace('max_turn: 1.0', 'max_turn: 3.0')
+    outside.write_text(text)
+    _symlink_or_skip(root / 'robots' / ROBOT / 'navigation.yaml', outside)
+    assert slim(root, say=lambda line: None) == 0
+    assert outside.read_text() == text

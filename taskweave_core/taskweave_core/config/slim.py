@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import overlay
+from . import overlay, packs
 from .store import ConfigError, ConfigStore
 
 
@@ -24,6 +24,7 @@ def slim(cell: str | Path, dry_run: bool = False, say=print) -> int:
         say(f'{cell}: no such directory')
         return 2
     store, do, code, count = ConfigStore(cell), 'would ' if dry_run else '', 0, 0
+    search = packs.locations(cell, store.system().get('robot_packs'))
     for folder in sorted(p for p in (cell / 'robots').glob('*') if p.is_dir()):
         robot = folder.name
         for file in overlay.MERGED_FILES:
@@ -31,6 +32,10 @@ def slim(cell: str | Path, dry_run: bool = False, say=print) -> int:
             if base is None or not path.is_file():
                 continue
             label = f'robots/{robot}/{file}'
+            foreign = packs.foreign(path, cell, search, base)    # a link into a robot pack: never touched
+            if foreign:
+                say(f'skip    {label}  {foreign} (not touched)')
+                continue
             try:
                 data, pack = store._read_yaml(path), store._read_yaml(base) or {}
             except ConfigError as error:
