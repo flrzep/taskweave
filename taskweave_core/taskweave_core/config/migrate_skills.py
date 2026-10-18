@@ -636,29 +636,37 @@ def migrate_skill_yamls(plan: Plan, say) -> None:
         path = skills / f'{name}.yaml'
         return _read(path)[0] if path.is_file() else None
 
-    def put(skill, old, old_name):
+    def put(skill, old, old_name) -> bool:
+        """Write the new yaml from the old one. False if skills/<skill>.yaml exists already (kept, old values not
+        carried over)."""
         target = skills / f'{skill}.yaml'
         if target.is_file():
             say(f'keep    skills/{skill}.yaml  exists already: not replaced')
-            return
+            return False
         document, flags = build_skill_yaml(skill, old, old_name)
         plan.writes[target] = _dump(document, _yaml_for(skill_templates.TEMPLATES[skill]))
         say(f'write   skills/{skill}.yaml  (from {old_name}.yaml: ' + ', '.join(
             f'{k}={_show(v)}' for k, v in _carried(old, skill)) + ')')
         for flag in flags:
             _flag(plan, say, flag)
+        return True
 
     for old_name, skill in OLD_SKILL_YAMLS.items():
         old = load(old_name)
         if old is None:
             continue
-        put(skill, old, old_name)
+        if not put(skill, old, old_name):     # the cell's values would be lost with the file: keep it, say so
+            _flag(plan, say, f'skills/{old_name}.yaml kept: skills/{skill}.yaml exists already, so its values were not '
+                             f'carried over; merge them by hand, then delete {old_name}.yaml')
+            continue
         plan.removes.append(skills / f'{old_name}.yaml')
         say(f'remove  skills/{old_name}.yaml')
     current = load('move_object')
     classes = [i.get('class', '') for i in (current or {}).get('implementations', [])]
     if current is not None and any(c.endswith('joints:MoveObject') for c in classes):
-        put('set_posture', current, 'move_object')
+        if not put('set_posture', current, 'move_object'):
+            _flag(plan, say, 'skills/move_object.yaml: skills/set_posture.yaml exists already, so the elbow and speed '
+                             'values of the old move_object were not carried to it; check set_posture.yaml by hand')
         document, flags = build_skill_yaml('move_object', current, 'move_object')
         plan.writes[skills / 'move_object.yaml'] = _dump(document, _yaml_for(skill_templates.MOVE_OBJECT))
         say('rewrite skills/move_object.yaml  (class taskweave_skills.object_motion:MoveObject, layout of '

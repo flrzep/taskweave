@@ -396,7 +396,7 @@ def test_skill_yamls_carry_the_cells_values_and_the_old_files_go(cell):
 def test_a_new_skill_yaml_that_exists_is_kept(cell):
     (cell / 'skills' / 'grip.yaml').write_text('implementations:\n  - {name: mine, type: script, class: "a:B"}\n')
     lines = run(cell)
-    assert 'mine' in (cell / 'skills' / 'grip.yaml').read_text() and not (cell / 'skills' / 'gripper.yaml').exists()
+    assert 'mine' in (cell / 'skills' / 'grip.yaml').read_text() and (cell / 'skills' / 'gripper.yaml').exists()    # kept too, see below
     assert any('skills/grip.yaml  exists already' in line for line in lines)
 
 
@@ -499,6 +499,17 @@ def test_a_placeholder_to_is_new_form_unless_a_contact_is_given(cell):
                                                        'args': {'to': '{target}'}}]}, 'p', robot=ROBOT)
     problems = validate_plan(plan, {'move_object': {'type': 'object'}}, store)
     assert not any('migrate-skills' in problem for problem in problems), problems
+
+
+def test_an_old_skill_yaml_is_kept_and_flagged_when_the_new_one_exists(cell):
+    (cell / 'skills' / 'grip.yaml').write_text('implementations:\n  - {name: mine, type: script, class: "a:B"}\n')
+    lines = run(cell)
+    assert (cell / 'skills' / 'gripper.yaml').is_file()                      # its values were not carried: kept
+    assert any(line.startswith('FLAG') and 'gripper.yaml' in line and 'grip.yaml' in line for line in lines)
+    assert not any(line.startswith('remove  skills/gripper.yaml') for line in lines)
+    assert not (cell / 'skills' / 'go_to_point.yaml').exists()               # the others migrated as before
+    run_again = []
+    assert migrate_skills_only(cell, False, run_again.append) == 0 and run_again[0].endswith('nothing to do')
 
 
 # ---- the old names in validation -----------------------------------------------------------------------------------
