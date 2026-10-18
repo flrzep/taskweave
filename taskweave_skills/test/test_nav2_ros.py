@@ -2,19 +2,17 @@
 
 import json
 import math
-import threading
 import time
 from pathlib import Path
 
 import pytest
-from conftest import connect, wait_ready, wait_until
+from conftest import RosRig, connect, wait_ready, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('nav2_msgs')
 
 from nav2_msgs.action import NavigateToPose  # noqa: E402
 from rclpy.action import ActionServer  # noqa: E402
-from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from test_navigate_ros import BaseSim  # noqa: E402
@@ -69,37 +67,31 @@ class FakeCostmap(Node):
 
 @pytest.fixture
 def system(tmp_path):
-    import shutil
+    with RosRig() as ros:
+        import shutil
 
-    config = tmp_path / 'config'
-    shutil.copytree(FIXTURE, config)
-    (config / 'skills' / 'navigate_to.yaml').write_text(NAV2_CONFIG)
-    (config / 'robots' / 'omni_bot' / 'navigation.yaml').write_text(
-        'envelope: {front: 0.4, back: 0.3, left: 0.3, right: 0.3}\n'
-        'carry_envelope: {front: 1.2, back: 0.3, left: 0.4, right: 0.4}\n')
-    rclpy.init()
-    sim = BaseSim('omni', True)
-    nav2 = FakeNav2(sim)
-    costmaps = [FakeCostmap('global_costmap'), FakeCostmap('local_costmap')]
-    server = SkillServer(parameter_overrides=[
-        Parameter('config_dir', value=str(config)), Parameter('robot', value='omni_bot'),
-        Parameter('skills', value=['navigate_to'])])
-    client = rclpy.create_node('test_client')
-    executor = MultiThreadedExecutor(num_threads=8)
-    for node in (sim, nav2, server, client, *costmaps):
-        executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
-    nav2.costmaps = costmaps
-    skill = server.skills['navigate_to']
-    wait_ready(server, *skill.costmaps.values())
-    wait_until(lambda: sim.pub.get_subscription_count() > 0, what='the skill server to subscribe to the odometry')
-    wait_until(lambda: skill.client.server_is_ready(), what='the Nav2 action server')
-    nav2.skill = skill
-    yield sim, nav2, client
-    executor.shutdown()
-    for node in (sim, nav2, server, client, *costmaps):
-        node.destroy_node()
-    rclpy.shutdown()
+        config = tmp_path / 'config'
+        shutil.copytree(FIXTURE, config)
+        (config / 'skills' / 'navigate_to.yaml').write_text(NAV2_CONFIG)
+        (config / 'robots' / 'omni_bot' / 'navigation.yaml').write_text(
+            'envelope: {front: 0.4, back: 0.3, left: 0.3, right: 0.3}\n'
+            'carry_envelope: {front: 1.2, back: 0.3, left: 0.4, right: 0.4}\n')
+        sim = ros.add(BaseSim('omni', True))
+        nav2 = ros.add(FakeNav2(sim))
+        costmaps = [ros.add(FakeCostmap('global_costmap')), ros.add(FakeCostmap('local_costmap'))]
+        server = SkillServer(parameter_overrides=[
+            Parameter('config_dir', value=str(config)), Parameter('robot', value='omni_bot'),
+            Parameter('skills', value=['navigate_to'])])
+        ros.add(server)
+        client = ros.add(rclpy.create_node('test_client'))
+        ros.spin(8)
+        nav2.costmaps = costmaps
+        skill = server.skills['navigate_to']
+        wait_ready(server, *skill.costmaps.values())
+        wait_until(lambda: sim.pub.get_subscription_count() > 0, what='the skill server to subscribe to the odometry')
+        wait_until(lambda: skill.client.server_is_ready(), what='the Nav2 action server')
+        nav2.skill = skill
+        yield sim, nav2, client
 
 
 def run(client, target, timeout_s=20.0):

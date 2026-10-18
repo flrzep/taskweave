@@ -1,14 +1,12 @@
 """The task handler's speed override over ROS: service, latched topic, parameter, test mode at run start and end."""
 
-import threading
 import time
 
 import pytest
-from conftest import wait_until, warm_up
+from conftest import RosRig, wait_until, warm_up
 
 rclpy = pytest.importorskip('rclpy')
 
-from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from rclpy.qos import DurabilityPolicy, QoSProfile  # noqa: E402
 
@@ -40,24 +38,17 @@ class NavigateTo(Wait):
 
 @pytest.fixture
 def system(config_dir):
-    rclpy.init()
-    params = [Parameter('config_dir', value=str(config_dir)), Parameter('robot', value='demo_bot')]
-    handler = TaskHandler(parameter_overrides=params)
-    server = SkillServer(skills=[NavigateTo(), Wait()], node_name='test_skills', parameter_overrides=params)
-    client = rclpy.create_node('test_client')
-    executor = MultiThreadedExecutor(num_threads=8)
-    for node in (handler, server, client):
-        executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
-    seen = []
-    latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-    client.create_subscription(SpeedOverride, names.SPEED_OVERRIDE, seen.append, latched)
-    warm_up(handler)
-    yield handler, server, client, seen, config_dir
-    executor.shutdown()
-    for node in (handler, server, client):
-        node.destroy_node()
-    rclpy.shutdown()
+    with RosRig() as ros:
+        params = [Parameter('config_dir', value=str(config_dir)), Parameter('robot', value='demo_bot')]
+        handler = ros.add(TaskHandler(parameter_overrides=params))
+        server = ros.add(SkillServer(skills=[NavigateTo(), Wait()], node_name='test_skills', parameter_overrides=params))
+        client = ros.add(rclpy.create_node('test_client'))
+        ros.spin(8)
+        seen = []
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        client.create_subscription(SpeedOverride, names.SPEED_OVERRIDE, seen.append, latched)
+        warm_up(handler)
+        yield handler, server, client, seen, config_dir
 
 
 def call(node, srv_type, name, request):

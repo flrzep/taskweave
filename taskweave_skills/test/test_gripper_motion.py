@@ -4,14 +4,13 @@
 import json
 import math
 import shutil
-import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from conftest import connect, wait_ready, wait_until
+from conftest import RosRig, connect, wait_ready, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('tf2_ros')
@@ -19,7 +18,6 @@ pytest.importorskip('moveit_msgs')
 
 from geometry_msgs.msg import TransformStamped  # noqa: E402
 from moveit_msgs.srv import GetPositionIK  # noqa: E402
-from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from rclpy.qos import DurabilityPolicy, QoSProfile  # noqa: E402
@@ -91,51 +89,45 @@ class FakeIk(Node):
 
 @pytest.fixture
 def system(tmp_path, request):
-    config = tmp_path / 'config'
-    shutil.copytree(FIXTURE, config)
-    if getattr(request, 'param', None):
-        (config / 'robots' / 'duo_bot' / 'skill_overrides.yaml').write_text(request.param)
-    rclpy.init()
-    sim, ik = DuoSim(), FakeIk()
-    server = SkillServer(parameter_overrides=[
-        Parameter('config_dir', value=str(config)), Parameter('robot', value='duo_bot'),
-        Parameter('skills', value=['move_gripper', 'grip', 'move_object', 'set_posture'])])
-    client = rclpy.create_node('test_client')
-    tf, transforms = StaticTransformBroadcaster(client), []
-    for parent, child, xyz in [('world', 'base_link', (0.0, 0.0, 0.0)),
-                               *(('base_link', f'{hand}_link7', xyz) for hand, xyz in FLANGES.items())]:
-        t = TransformStamped(child_frame_id=child)
-        t.header.frame_id = parent
-        t.transform.translation.x, t.transform.translation.y, t.transform.translation.z = xyz
-        t.transform.rotation.w = 1.0
-        transforms.append(t)
-    tf.sendTransform(transforms)
-    published = []
-    client.create_subscription(String, TOPIC, lambda m: published.append(json.loads(m.data)),
-                               QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
-    executor = MultiThreadedExecutor(num_threads=8)
-    for node in (sim, ik, server, client):
-        executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
-    hold = HoldState._instances[id(server)]
-    skill = server.skills['move_gripper']
-    wait_ready(server, skill.ik.client)
+    with RosRig() as ros:
+        config = tmp_path / 'config'
+        shutil.copytree(FIXTURE, config)
+        if getattr(request, 'param', None):
+            (config / 'robots' / 'duo_bot' / 'skill_overrides.yaml').write_text(request.param)
+        sim, ik = ros.add(DuoSim()), ros.add(FakeIk())
+        server = SkillServer(parameter_overrides=[
+            Parameter('config_dir', value=str(config)), Parameter('robot', value='duo_bot'),
+            Parameter('skills', value=['move_gripper', 'grip', 'move_object', 'set_posture'])])
+        ros.add(server)
+        client = ros.add(rclpy.create_node('test_client'))
+        tf, transforms = StaticTransformBroadcaster(client), []
+        for parent, child, xyz in [('world', 'base_link', (0.0, 0.0, 0.0)),
+                                   *(('base_link', f'{hand}_link7', xyz) for hand, xyz in FLANGES.items())]:
+            t = TransformStamped(child_frame_id=child)
+            t.header.frame_id = parent
+            t.transform.translation.x, t.transform.translation.y, t.transform.translation.z = xyz
+            t.transform.rotation.w = 1.0
+            transforms.append(t)
+        tf.sendTransform(transforms)
+        published = []
+        client.create_subscription(String, TOPIC, lambda m: published.append(json.loads(m.data)),
+                                   QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        ros.spin(8)
+        hold = HoldState._instances[id(server)]
+        skill = server.skills['move_gripper']
+        wait_ready(server, skill.ik.client)
 
-    def flanges_in_tf():  # the static transforms have reached the skill server's buffer
-        try:
-            hold.tcp_poses(list(FLANGES))
-        except LookupError:  # not in the buffer yet
-            return False
-        return True
+        def flanges_in_tf():  # the static transforms have reached the skill server's buffer
+            try:
+                hold.tcp_poses(list(FLANGES))
+            except LookupError:  # not in the buffer yet
+                return False
+            return True
 
-    wait_until(flanges_in_tf, what='the flange transforms at the skill server')
-    wait_until(lambda: published, what='the first holding message')
-    yield SimpleNamespace(sim=sim, ik=ik, server=server, client=client, published=published,
-                          hold=hold, config=config)
-    executor.shutdown()
-    for node in (sim, ik, server, client):
-        node.destroy_node()
-    rclpy.shutdown()
+        wait_until(flanges_in_tf, what='the flange transforms at the skill server')
+        wait_until(lambda: published, what='the first holding message')
+        yield SimpleNamespace(sim=sim, ik=ik, server=server, client=client, published=published,
+                              hold=hold, config=config)
 
 
 def run(system, skill, args, timeout_s=30.0):

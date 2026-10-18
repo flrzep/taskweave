@@ -1,11 +1,10 @@
 """move_joints with a motion planner: follows the planned trajectory, fails when there is no path."""
 
 import shutil
-import threading
 from types import SimpleNamespace
 
 import pytest
-from conftest import wait_ready
+from conftest import RosRig, wait_ready
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('moveit_msgs')
@@ -13,7 +12,6 @@ pytest.importorskip('moveit_msgs')
 from builtin_interfaces.msg import Duration  # noqa: E402
 from moveit_msgs.msg import ContactInformation  # noqa: E402
 from moveit_msgs.srv import GetMotionPlan, GetStateValidity  # noqa: E402
-from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from sensor_msgs.msg import JointState  # noqa: E402
@@ -76,30 +74,24 @@ class FakePlanner(Node):
 
 @pytest.fixture
 def system(tmp_path):
-    config = tmp_path / 'config'
-    shutil.copytree(FIXTURE, config)
-    profile = config / 'robots' / 'arm_bot' / 'profile.yaml'
-    profile.write_text(profile.read_text() + PLANNING)
-    rclpy.init()
-    sim, planner = JointSim(), FakePlanner()
-    server = SkillServer(parameter_overrides=[
-        Parameter('config_dir', value=str(config)), Parameter('robot', value='arm_bot'),
-        Parameter('skills', value=['move_joints'])])
-    client = rclpy.create_node('test_client')
-    seen = {'j1_min': 0.0}
-    client.create_subscription(JointState, '/arm/joint_states', lambda m: seen.update(
-        j1_min=min(seen['j1_min'], dict(zip(m.name, m.position, strict=False)).get('j1', 0.0))), 10)
-    executor = MultiThreadedExecutor(num_threads=8)
-    for node in (sim, planner, server, client):
-        executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
-    planning = server.skills['move_joints'].planner
-    wait_ready(server, planning.client, planning.validity)
-    yield sim, planner, client, seen
-    executor.shutdown()
-    for node in (sim, planner, server, client):
-        node.destroy_node()
-    rclpy.shutdown()
+    with RosRig() as ros:
+        config = tmp_path / 'config'
+        shutil.copytree(FIXTURE, config)
+        profile = config / 'robots' / 'arm_bot' / 'profile.yaml'
+        profile.write_text(profile.read_text() + PLANNING)
+        sim, planner = ros.add(JointSim()), ros.add(FakePlanner())
+        server = SkillServer(parameter_overrides=[
+            Parameter('config_dir', value=str(config)), Parameter('robot', value='arm_bot'),
+            Parameter('skills', value=['move_joints'])])
+        ros.add(server)
+        client = ros.add(rclpy.create_node('test_client'))
+        seen = {'j1_min': 0.0}
+        client.create_subscription(JointState, '/arm/joint_states', lambda m: seen.update(
+            j1_min=min(seen['j1_min'], dict(zip(m.name, m.position, strict=False)).get('j1', 0.0))), 10)
+        ros.spin(8)
+        planning = server.skills['move_joints'].planner
+        wait_ready(server, planning.client, planning.validity)
+        yield sim, planner, client, seen
 
 
 def test_trajectory_interpolates_between_points():

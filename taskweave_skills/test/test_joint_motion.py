@@ -5,7 +5,6 @@ test_speed_playback); the last one goes through a skill server and a joint simul
 
 import json
 import shutil
-import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -304,7 +303,7 @@ def test_a_speed_within_the_limits_reports_no_cap(rig):
 
 rclpy = pytest.importorskip('rclpy')
 
-from rclpy.executors import MultiThreadedExecutor  # noqa: E402
+from conftest import RosRig  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from test_joints_ros import JointSim, run  # noqa: E402
 
@@ -314,24 +313,18 @@ from taskweave_interfaces.action import RunSkill  # noqa: E402
 
 @pytest.fixture
 def system(tmp_path):
-    config = tmp_path / 'config'
-    shutil.copytree(FIXTURE, config)
-    rclpy.init()
-    sim = JointSim()
-    server = SkillServer(parameter_overrides=[
-        Parameter('config_dir', value=str(config)), Parameter('robot', value=ROBOT),
-        Parameter('skills', value=['move_joints'])])
-    client = rclpy.create_node('test_client')
-    executor = MultiThreadedExecutor(num_threads=8)
-    for node in (sim, server, client):
-        executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
-    time.sleep(0.3)
-    yield sim, client
-    executor.shutdown()
-    for node in (sim, server, client):
-        node.destroy_node()
-    rclpy.shutdown()
+    with RosRig() as ros:
+        config = tmp_path / 'config'
+        shutil.copytree(FIXTURE, config)
+        sim = ros.add(JointSim())
+        server = SkillServer(parameter_overrides=[
+            Parameter('config_dir', value=str(config)), Parameter('robot', value=ROBOT),
+            Parameter('skills', value=['move_joints'])])
+        ros.add(server)
+        client = ros.add(rclpy.create_node('test_client'))
+        ros.spin(8)
+        time.sleep(0.3)
+        yield sim, client
 
 
 def test_skill_server_runs_move_joints(system):

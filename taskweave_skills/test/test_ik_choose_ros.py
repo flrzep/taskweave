@@ -1,6 +1,5 @@
 """IkClient with ``choose``: the best of several IK solutions wins, not the first (fake /compute_ik, /compute_fk)."""
 
-import threading
 from types import SimpleNamespace
 
 import pytest
@@ -8,9 +7,9 @@ import pytest
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('moveit_msgs')
 
+from conftest import RosRig  # noqa: E402
 from geometry_msgs.msg import PoseStamped  # noqa: E402
 from moveit_msgs.srv import GetPositionFK, GetPositionIK  # noqa: E402
-from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 
 from taskweave_skills.ik import IkClient  # noqa: E402
@@ -70,17 +69,10 @@ def robot(choose=None, flip=False):
 
 @pytest.fixture
 def moveit():
-    rclpy.init()
-    fake, client = FakeMoveIt(), rclpy.create_node('ik_client_test')
-    executor = MultiThreadedExecutor(num_threads=4)
-    executor.add_node(fake)
-    executor.add_node(client)
-    threading.Thread(target=executor.spin, daemon=True).start()
-    yield fake, client
-    executor.shutdown()
-    fake.destroy_node()
-    client.destroy_node()
-    rclpy.shutdown()
+    with RosRig() as ros:
+        fake, client = ros.add(FakeMoveIt()), ros.add(rclpy.create_node('ik_client_test'))
+        ros.spin(4)
+        yield fake, client
 
 
 def test_without_choose_the_first_seed_wins(moveit):

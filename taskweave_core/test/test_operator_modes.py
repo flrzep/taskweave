@@ -1,16 +1,14 @@
 """Pad modes of operator_joy: drive passthrough, tool modes that jog a TCP, missions force drive."""
 
-import threading
 import time
 
 import pytest
-from conftest import wait_until
+from conftest import RosRig, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('tf2_ros')
 
 from geometry_msgs.msg import TransformStamped, TwistStamped  # noqa: E402
-from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from rclpy.qos import DurabilityPolicy, QoSProfile  # noqa: E402
 from sensor_msgs.msg import Joy  # noqa: E402
@@ -35,45 +33,39 @@ TOOL_FRAMES = "tool_frames:\n  left: {link: left_link7, xyz: [-0.28, 0.0, 0.0], 
 
 @pytest.fixture
 def pad(config_dir):
-    from taskweave_core.operator_joy import OperatorJoy
+    with RosRig() as ros:
+        from taskweave_core.operator_joy import OperatorJoy
 
-    (config_dir / 'operator.yaml').write_text(OPERATOR)
-    profile = config_dir / 'robots' / 'demo_bot' / 'profile.yaml'
-    profile.write_text(profile.read_text() + TOOL_FRAMES)
-    rclpy.init()
-    operator = OperatorJoy(parameter_overrides=[Parameter('config_dir', value=str(config_dir)),
-                                                Parameter('robot', value='demo_bot')])
-    client = rclpy.create_node('pad_test')
-    seen = {'drive': [], 'twist': [], 'mode': []}
-    client.create_subscription(Joy, '/joy_drive', seen['drive'].append, 10)
-    client.create_subscription(TwistStamped, '/taskweave/jog/left', seen['twist'].append, 10)
-    latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-    client.create_subscription(String, names.OPERATOR_MODE, lambda m: seen['mode'].append(m.data), latched)
-    status = client.create_publisher(TaskStatus, names.STATUS, latched)
-    tf = StaticTransformBroadcaster(client)
-    transform = TransformStamped(child_frame_id='left_link7')
-    transform.header.frame_id = operator.base_frame
-    transform.transform.rotation.w = 1.0
-    tf.sendTransform(transform)
-    executor = MultiThreadedExecutor(num_threads=4)
-    for node in (operator, client):
-        executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
-    joy = client.create_publisher(Joy, '/joy', 10)
-    wait_until(lambda: joy.get_subscription_count() > 0, what='the operator node to subscribe to /joy')
-    wait_until(lambda: seen['mode'], what='the latched pad mode at the test node')
-    wait_until(lambda: operator.tf.can_transform(operator.base_frame, 'left_link7', rclpy.time.Time()),
-               what='the flange transform at the operator node')
+        (config_dir / 'operator.yaml').write_text(OPERATOR)
+        profile = config_dir / 'robots' / 'demo_bot' / 'profile.yaml'
+        profile.write_text(profile.read_text() + TOOL_FRAMES)
+        operator = OperatorJoy(parameter_overrides=[Parameter('config_dir', value=str(config_dir)),
+                                                    Parameter('robot', value='demo_bot')])
+        ros.add(operator)
+        client = ros.add(rclpy.create_node('pad_test'))
+        seen = {'drive': [], 'twist': [], 'mode': []}
+        client.create_subscription(Joy, '/joy_drive', seen['drive'].append, 10)
+        client.create_subscription(TwistStamped, '/taskweave/jog/left', seen['twist'].append, 10)
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        client.create_subscription(String, names.OPERATOR_MODE, lambda m: seen['mode'].append(m.data), latched)
+        status = client.create_publisher(TaskStatus, names.STATUS, latched)
+        tf = StaticTransformBroadcaster(client)
+        transform = TransformStamped(child_frame_id='left_link7')
+        transform.header.frame_id = operator.base_frame
+        transform.transform.rotation.w = 1.0
+        tf.sendTransform(transform)
+        ros.spin(4)
+        joy = client.create_publisher(Joy, '/joy', 10)
+        wait_until(lambda: joy.get_subscription_count() > 0, what='the operator node to subscribe to /joy')
+        wait_until(lambda: seen['mode'], what='the latched pad mode at the test node')
+        wait_until(lambda: operator.tf.can_transform(operator.base_frame, 'left_link7', rclpy.time.Time()),
+                   what='the flange transform at the operator node')
 
-    def send(buttons=(), axes=(0.0,) * 6):
-        joy.publish(Joy(axes=list(axes), buttons=[1 if i in buttons else 0 for i in range(15)]))
-        time.sleep(0.15)
+        def send(buttons=(), axes=(0.0,) * 6):
+            joy.publish(Joy(axes=list(axes), buttons=[1 if i in buttons else 0 for i in range(15)]))
+            time.sleep(0.15)
 
-    yield operator, send, seen, status
-    executor.shutdown()
-    for node in (operator, client):
-        node.destroy_node()
-    rclpy.shutdown()
+        yield operator, send, seen, status
 
 
 def test_drive_mode_passes_the_pad_on(pad):

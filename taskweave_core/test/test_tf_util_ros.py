@@ -8,6 +8,7 @@ rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('tf2_ros')
 
 from builtin_interfaces.msg import Time  # noqa: E402
+from conftest import RosRig  # noqa: E402
 from geometry_msgs.msg import TransformStamped  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from rosgraph_msgs.msg import Clock  # noqa: E402
@@ -33,9 +34,8 @@ def publish_clock(node, clock, sec: int, timeout: float = 30.0) -> None:
 
 
 def test_a_clock_jump_back_clears_the_buffer():
-    rclpy.init()
-    try:
-        node = rclpy.create_node('tf_util_test', parameter_overrides=[Parameter('use_sim_time', value=True)])
+    with RosRig() as ros:
+        node = ros.add(rclpy.create_node('tf_util_test', parameter_overrides=[Parameter('use_sim_time', value=True)]))
         clock = node.create_publisher(Clock, '/clock', 10)
         tf, _listener = tf_util.buffer(node)
 
@@ -50,15 +50,11 @@ def test_a_clock_jump_back_clears_the_buffer():
         tick(3)  # simulator restarted
         tf.set_transform(transform(3, 1.0), 'test')  # dropped as old data without the clear
         assert tf.lookup_transform('world', 'base_link', rclpy.time.Time()).transform.translation.x == 1.0
-        node.destroy_node()
-    finally:
-        rclpy.shutdown()
 
 
 def test_a_late_transform_of_the_old_run_is_cleared_too():
-    rclpy.init()
-    try:
-        node = rclpy.create_node('tf_util_late', parameter_overrides=[Parameter('use_sim_time', value=True)])
+    with RosRig() as ros:
+        node = ros.add(rclpy.create_node('tf_util_late', parameter_overrides=[Parameter('use_sim_time', value=True)]))
         clock = node.create_publisher(Clock, '/clock', 10)
         tf, _listener = tf_util.buffer(node, settle_s=1.0)
 
@@ -79,6 +75,3 @@ def test_a_late_transform_of_the_old_run_is_cleared_too():
         tf.set_transform(transform(4, 2.0), 'test')
         spin(0.4)
         assert tf.lookup_transform('world', 'base_link', rclpy.time.Time()).transform.translation.x == 2.0
-        node.destroy_node()
-    finally:
-        rclpy.shutdown()
