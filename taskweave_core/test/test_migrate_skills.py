@@ -488,6 +488,19 @@ def test_an_unwritable_file_stops_before_anything_is_touched(cell, monkeypatch):
     assert 'operator.yaml is not writable' in lines[-1] and tree(cell) == before
 
 
+def test_a_placeholder_to_is_new_form_unless_a_contact_is_given(cell):
+    assert converted(cell, 'move_object', {'to': '{target}'}) is None
+    assert converted(cell, 'move_object', {'to': '{target}', 'contact': 'plate'})[0] == [
+        ('move_object', {'to': {'onto': '{target}', 'contact': 'plate'}})]
+    assert not ms.is_old_move_object({'to': '{target}', 'hands': 'all'}) and ms.is_old_move_object({'to': 'h/hook'})
+    run(cell)
+    store = ConfigStore(cell)
+    plan = Plan.from_mission({'goal': 'g', 'steps': [{'instruction': 'i', 'skill': 'move_object',
+                                                       'args': {'to': '{target}'}}]}, 'p', robot=ROBOT)
+    problems = validate_plan(plan, {'move_object': {'type': 'object'}}, store)
+    assert not any('migrate-skills' in problem for problem in problems), problems
+
+
 # ---- the old names in validation -----------------------------------------------------------------------------------
 @pytest.mark.parametrize('skill, args, text', [
     ('move_to_pose', {'pose': 'home'}, 'the skill move_to_pose was removed, use move_joints'),

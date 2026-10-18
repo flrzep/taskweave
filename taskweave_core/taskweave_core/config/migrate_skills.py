@@ -77,6 +77,9 @@ def is_old_move_object(args: Mapping) -> bool:
     """Old move_object args: no ``to``, or ``to`` as a string (a contact); new ones have ``to`` as an object."""
     if isinstance(args.get('to'), Mapping) or any(key in args for key in NEW_OBJECT_KEYS):
         return False
+    to = args.get('to')
+    if isinstance(to, str) and PLACEHOLDER.fullmatch(to) and 'contact' not in args:
+        return False    # `to: "{target}"` (spec 8.2) is the new form: the parameter holds the whole target
     return 'to' in args or any(key in args for key in OLD_OBJECT_KEYS)
 
 
