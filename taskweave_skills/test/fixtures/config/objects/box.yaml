@@ -11,3 +11,6 @@ points:
     tool_type: parallel_gripper
     left_tool: {xyz: [0.0, 0.2, 0.3], rpy: [0.0, 3.14159265, 0.0]}
     right_tool: {xyz: [0.0, -0.2, 0.3], rpy: [0.0, 3.14159265, 0.0]}
+contacts:                         # frames where the box meets another object (move_object to.onto)
+  top: {xyz: [0.0, 0.0, 0.1], rpy: [0.0, 0.0, 0.0]}
+  base: {xyz: [0.0, 0.0, 0.0], rpy: [0.0, 0.0, 0.0]}

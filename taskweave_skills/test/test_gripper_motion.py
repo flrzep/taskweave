@@ -99,7 +99,7 @@ def system(tmp_path, request):
     sim, ik = DuoSim(), FakeIk()
     server = SkillServer(parameter_overrides=[
         Parameter('config_dir', value=str(config)), Parameter('robot', value='duo_bot'),
-        Parameter('skills', value=['move_gripper', 'grip'])])
+        Parameter('skills', value=['move_gripper', 'grip', 'move_object', 'set_posture'])])
     client = rclpy.create_node('test_client')
     tf, transforms = StaticTransformBroadcaster(client), []
     for parent, child, xyz in [('world', 'base_link', (0.0, 0.0, 0.0)),
