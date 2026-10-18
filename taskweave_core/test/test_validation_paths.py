@@ -173,3 +173,60 @@ def test_flat_schemas_behave_as_before(store):
     assert validate_args({'n': '{n}'}, flat, store, 'demo_bot') == ["args: 'target' is a required property"]
     problems = validate_args({'target': 'nowhere', 'n': 'x'}, flat, store, 'demo_bot')
     assert problems[0].startswith('args.n: ') and problems[1].startswith('args.target: ')
+
+
+def _step(args):
+    return {'skill': 'move', 'instruction': 'go', 'args': args}
+
+
+def _problems(store, mission, blocks):
+    from taskweave_core.plan import expand_includes
+    plan = Plan.from_mission(expand_includes(mission, blocks.__getitem__), 'p', robot='demo_bot')
+    return validate_plan_structured(plan, CATALOG, store)
+
+
+BAD = {'to': {'point': 'box_1/nope'}}
+FINE = {'to': {'by': [0, 0, 0]}}
+
+
+def test_origin_of_a_plain_mission(store):
+    [problem] = _problems(store, {'goal': 'g', 'steps': [_step(FINE), _step(BAD)]}, {})
+    assert problem['path'] == ['steps', 1, 'args', 'to', 'point']
+    assert problem['origin'] == {'step': 1, 'include': None, 'inner_path': ['steps', 1, 'args', 'to', 'point']}
+
+
+def test_origin_of_a_step_from_an_include(store):
+    blocks = {'inner': {'goal': 'i', 'steps': [_step(FINE), _step(FINE), _step(BAD)]}}
+    mission = {'goal': 'g', 'steps': [_step(FINE), {'instruction': 'x', 'include': 'inner'}, _step(FINE)]}
+    [problem] = _problems(store, mission, blocks)
+    assert problem['path'] == ['steps', 3, 'args', 'to', 'point']  # the expanded plan's index
+    assert problem['origin'] == {'step': 1, 'include': 'inner', 'inner_path': ['steps', 2, 'args', 'to', 'point']}
+
+
+def test_origin_of_nested_includes_names_the_chain_and_the_outermost_step(store):
+    blocks = {'inner': {'goal': 'i', 'steps': [_step(FINE), _step(BAD)]},
+              'middle': {'goal': 'm', 'steps': [_step(FINE), {'instruction': 'x', 'include': 'inner'}]}}
+    mission = {'goal': 'g', 'steps': [_step(FINE), _step(FINE), {'instruction': 'x', 'include': 'middle'}]}
+    [problem] = _problems(store, mission, blocks)
+    assert problem['origin'] == {'step': 2, 'include': ['middle', 'inner'],
+                                 'inner_path': ['steps', 1, 'args', 'to', 'point']}
+
+
+def test_origin_of_a_problem_from_a_param_placeholder(store):
+    blocks = {'inner': {'goal': 'i', 'params': {'where': {}}, 'steps': [_step(FINE), _step({'to': {'point': '{where}'}})]}}
+    mission = {'goal': 'g', 'steps': [{'instruction': 'x', 'include': 'inner', 'with': {'where': 'box_1/nope'}}]}
+    [problem] = _problems(store, mission, blocks)
+    assert problem['origin'] == {'step': 0, 'include': 'inner', 'inner_path': ['steps', 1, 'args', 'to', 'point']}
+
+
+def test_a_robot_level_problem_has_no_origin(store):
+    plan = Plan.from_mission({'goal': 'g', 'steps': [_step(FINE)]}, 'p', robot='no_such_robot')
+    problems = validate_plan_structured(plan, CATALOG, store)
+    assert problems and problems[0]['path'] == [] and problems[0]['origin'] is None
+
+
+def test_origin_does_not_show_in_steps_or_equality():
+    from taskweave_core.plan import expand_includes
+    expanded = expand_includes({'goal': 'g', 'steps': [{'instruction': 'x', 'skill': 'wait'}]}, lambda n: {})
+    assert expanded['steps'][0] == {'instruction': 'x', 'skill': 'wait', 'id': 's1'}
+    assert 'origin' not in repr(Plan.from_mission(expanded, 'p').steps[0])

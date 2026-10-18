@@ -5,9 +5,8 @@ the catalog, every argument object matches the skill's JSON Schema, every point 
 in config (object points also fit the robot's tools), and ``replan_from`` targets exist.
 
 Skills mark point arguments in their schema with ``"x-taskweave-point": "base_target" | "joint_pose" | "tool_pose"
-| "object_point" | "instance_point" | "instance_contact" | "via_target" | "held_pose" | "held_object"``, at any
-depth (nested objects, oneOf
-variants, list items).
+| "object_point" | "instance_point" | "instance_contact" | "via_target" | "joint_pose_only" | "joint_group"
+| "held_pose" | "held_object"``, at any depth (nested objects, oneOf variants, list items).
 Values that contain placeholders are only checked once their values are known (at step start): the skip is by path,
 so a placeholder may stand for a scalar, one vec3 component or a whole field. So are points on an object an earlier
 step of the plan puts down (an argument ``place_as: <name>``, e.g. gripper): it does not exist yet.
@@ -40,8 +39,27 @@ def validate_plan_structured(plan: Plan, catalog: Mapping[str, dict], store: Con
 
     ``path`` is the place in the plan's ``steps`` list (with includes that is the expanded plan, so the index is the
     expanded step's). Plan-level problems have path ``[]``, step-level ones ``['steps', i, ...]``. The message has
-    no step prefix (the string form of ``validate_plan`` has)."""
-    return [{'path': path, 'message': message} for path, message, _ in _plan_problems(plan, catalog, store)]
+    no step prefix (the string form of ``validate_plan`` has).
+
+    Every problem also has ``origin``, the place in the mission file(s): ``None`` for plan-level problems, else
+    ``{'step': index in the mission's own steps (for a step from an include: the include step's index),
+    'include': None for the mission's own steps, the included mission's name for a step from an include, a list of
+    names (outermost first) when includes are nested, 'inner_path': the path inside the (innermost) mission, e.g.
+    ['steps', 2, 'args', 'to', 'point']}``. With a placeholder filled from an include's ``with`` the path is that
+    of the placeholder in the included mission."""
+    return [{'path': path, 'message': message, 'origin': _origin(plan, path)}
+            for path, message, _ in _plan_problems(plan, catalog, store)]
+
+
+def _origin(plan: Plan, path: list) -> dict | None:
+    if len(path) < 2 or path[0] != 'steps' or not 0 <= path[1] < len(plan.steps):
+        return None
+    origin = plan.steps[path[1]].origin
+    if origin is None:
+        return None
+    chain = origin['include']
+    return {'step': origin['step'], 'include': None if not chain else chain[0] if len(chain) == 1 else list(chain),
+            'inner_path': ['steps', origin['inner_step'], *path[2:]]}
 
 
 def _plan_problems(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) -> list[tuple[list, str, str]]:
@@ -290,6 +308,18 @@ def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
             problems = pose_problems(store, robot, str(value))
             if problems:
                 return f'pose {value} does not fit robot {robot!r}: ' + '; '.join(problems)
+        elif kind == 'joint_pose_only':   # a joint pose without tool targets; a leading pose: is allowed (via items)
+            name = str(value).removeprefix('pose:')
+            problem = check_point('joint_pose', name, store, robot)
+            if problem is None and store.named_pose(robot, name)['tools']:
+                return f'pose {name} places tools: use move_gripper to.pose'
+            return problem
+        elif kind == 'joint_group':
+            from .config.limits import joint_groups
+
+            groups = joint_groups(store, robot)
+            if str(value) not in groups:
+                return f'robot {robot!r} has no joint group {value!r} (has: {", ".join(sorted(groups)) or "none"})'
         elif kind in ('object_point', 'instance_point'):
             # object_point: <instance>/<point> (a placed object) or <object>.<point> (a type's point);
             # instance_point: only <instance>/<point>, for skills that go to one placed object
