@@ -14,7 +14,8 @@ A run (and a reference, which is a saved run) is YAML::
        max_error: 0.005, attempts: 1, message: ...}
 
 Comparison: every reference step must come in the same order with outcome SUCCEEDED, its duration within
-±tolerance (relative) plus an absolute slack, its max error not above reference × (1 + tolerance) plus a slack.
+±tolerance (relative; per skill, see DEFAULT_SKILL_TOLERANCE) plus an absolute slack, its max error not above
+reference × (1 + tolerance) plus a slack.
 """
 
 from __future__ import annotations
@@ -34,6 +35,8 @@ ERROR_RE = re.compile(r'max error (-?\d+(?:\.\d*)?(?:[eE][-+]?\d+)?)')
 DEFAULT_HMI = 'http://localhost:8090'
 STATE_EVENTS = 50  # /api/state shows the latest 50 events
 END_MARGIN_S = 300.0  # beyond the mission time limit: sim reset before, recording finish after
+# duration tolerance per skill (relative), over the general one: Nav2 drives vary ~±8 % between identical runs
+DEFAULT_SKILL_TOLERANCE = {'navigate_to': 0.25}
 
 
 class SmokeError(Exception):
@@ -80,9 +83,18 @@ def step_results(events: list[dict], cycles: int | None = None) -> list[dict]:
 
 # ---- comparison ---------------------------------------------------------------------------
 def compare(reference: dict, run: dict, tolerance: float = 0.10, slack_s: float = 1.0, error_slack: float = 0.002,
-            allow_extra: bool = False) -> dict:
-    """Rows (one per reference step, plus EXTRA run steps) and ``passed``."""
+            allow_extra: bool = False, skill_tolerance: dict | None = None) -> dict:
+    """Rows (one per reference step, plus EXTRA run steps) and ``passed``.
+
+    A step's duration tolerance is its skill's: ``skill_tolerance`` (the command line) over the reference's
+    ``limits.tolerance_by_skill`` over ``DEFAULT_SKILL_TOLERANCE``, else ``tolerance``. Errors use ``tolerance``."""
     ref_steps, run_steps = reference.get('steps') or [], run.get('steps') or []
+    overrides = {**DEFAULT_SKILL_TOLERANCE, **((reference.get('limits') or {}).get('tolerance_by_skill') or {}),
+                 **(skill_tolerance or {})}
+
+    def duration_tolerance(skill: str) -> float:
+        return overrides.get(skill, tolerance)
+
     rows, at = [], 0
     for ref in ref_steps:
         key = (ref.get('cycle'), ref.get('step_id'))
@@ -93,14 +105,17 @@ def compare(reference: dict, run: dict, tolerance: float = 0.10, slack_s: float 
             continue
         rows.extend(_row(None, extra, 'PASS' if allow_extra else 'EXTRA', 'not in the reference')
                     for extra in run_steps[at:found])
-        rows.append(_judge(ref, run_steps[found], tolerance, slack_s, error_slack))
+        now = run_steps[found]
+        rows.append(_judge(ref, now, tolerance, slack_s, error_slack,
+                           duration_tolerance(now.get('skill') or ref.get('skill') or '')))
         at = found + 1
     rows.extend(_row(None, extra, 'PASS' if allow_extra else 'EXTRA', 'not in the reference')
                 for extra in run_steps[at:])
     failed = sum(row['result'] != 'PASS' for row in rows)
+    skills = sorted({step.get('skill') or '' for step in ref_steps + run_steps} - {''})
     return {'passed': failed == 0, 'failed': failed, 'rows': rows,
-            'limits': {'tolerance': tolerance, 'slack_s': slack_s, 'error_slack': error_slack,
-                       'allow_extra': allow_extra}}
+            'limits': {'tolerance': tolerance, 'skill_tolerance': {s: duration_tolerance(s) for s in skills},
+                       'slack_s': slack_s, 'error_slack': error_slack, 'allow_extra': allow_extra}}
 
 
 def _row(ref: dict | None, now: dict | None, result: str, note: str = '') -> dict:
@@ -113,15 +128,17 @@ def _row(ref: dict | None, now: dict | None, result: str, note: str = '') -> dic
             'result': result, 'note': note}
 
 
-def _judge(ref: dict, now: dict, tolerance: float, slack_s: float, error_slack: float) -> dict:
+def _judge(ref: dict, now: dict, tolerance: float, slack_s: float, error_slack: float,
+           duration_tolerance: float | None = None) -> dict:
     row, problems = _row(ref, now, 'PASS'), []
+    duration_tolerance = tolerance if duration_tolerance is None else duration_tolerance
     if now.get('outcome') != 'SUCCEEDED':
         problems.append(f'{now.get("outcome")}: {now.get("message", "")}'.rstrip(': '))
     ref_s, now_s = ref.get('duration_s'), now.get('duration_s')
     if ref_s is not None and now_s is not None:
         row['delta_pct'] = round(100.0 * (now_s - ref_s) / ref_s, 1) if ref_s else None
-        if abs(now_s - ref_s) > tolerance * ref_s + slack_s:
-            problems.append(f'{"slower" if now_s > ref_s else "faster"} than {ref_s:g} s ±{tolerance:.0%}')
+        if abs(now_s - ref_s) > duration_tolerance * ref_s + slack_s:
+            problems.append(f'{"slower" if now_s > ref_s else "faster"} than {ref_s:g} s ±{duration_tolerance:.0%}')
     elif ref_s is not None:
         problems.append('no duration')
     ref_e, now_e = ref.get('max_error'), now.get('max_error')
@@ -283,6 +300,17 @@ def _collect(hmi: Hmi, seen: set, events: list) -> bool:
 
 
 # ---- command line (taskweave smoke ...) --------------------------------------------------
+def skill_tolerance_arg(text: str) -> tuple[str, float]:
+    skill, sep, value = text.partition('=')
+    try:
+        fraction = float(value)
+    except ValueError:
+        fraction = -1.0
+    if not sep or not skill.strip() or fraction < 0:
+        raise argparse.ArgumentTypeError(f'expected SKILL=FRACTION (e.g. navigate_to=0.25), not {text!r}')
+    return skill.strip(), fraction
+
+
 def add_arguments(parser) -> None:
     sub = parser.add_subparsers(dest='smoke_command', required=True)
     run_parser = sub.add_parser('run', help='run a mission from a clean start, compare it with a reference run')
@@ -306,13 +334,16 @@ def add_arguments(parser) -> None:
                        help='absolute duration slack (1 s)')
         p.add_argument('--error-slack', type=float, default=0.002, help='absolute max error slack (0.002)')
         p.add_argument('--allow-extra', action='store_true', help='steps not in the reference do not fail')
+        p.add_argument('--skill-tolerance', action='append', default=[], type=skill_tolerance_arg,
+                       metavar='SKILL=FRACTION', help='duration tolerance of one skill, repeatable '
+                       '(navigate_to=0.25 by default; the reference file may set limits.tolerance_by_skill)')
         p.add_argument('--report', metavar='FILE', help='report file (default: <reference>.report.yaml)')
 
 
 def main(options) -> int:
     """0: passed, 1: failed, 2: could not run."""
     limits = {'tolerance': options.tolerance, 'slack_s': options.slack, 'error_slack': options.error_slack,
-              'allow_extra': options.allow_extra}
+              'allow_extra': options.allow_extra, 'skill_tolerance': dict(options.skill_tolerance)}
     try:
         if options.smoke_command == 'compare':
             reference, run_data = load(options.reference), load(options.run)
