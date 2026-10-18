@@ -5,11 +5,15 @@ print what they do (with --dry-run only that) and are idempotent: a second run f
 
 1 -> 2: split one config directory into a cell pack and robot packs. Per robot-intrinsic file in robots/<robot>/
 (packs.ROBOT_PACK_FILES; moveit/ as one unit), compared with the robot pack the store would read after the move:
-  same content       removed from the cell pack
+  same content       removed from the cell pack (a unit an interrupted run left half removed, i.e. a folder with
+                     only some of the pack's files, all identical, is removed too)
   different content  kept in the cell pack, as a cell override of the robot pack's file (nothing changes)
   no pack has it     moved to <--robot-packs>/<robot>/ (pack.yaml written, the folder added to system.yaml
                      robot_packs if it is not on the search path), or kept without --robot-packs
-Cell-specific files (stances, held poses, object points) stay. Last, the cell pack's pack.yaml is written.
+Cell-specific files (stances, held poses, object points) stay. Before a unit is removed or moved, every entry in it
+(and the folders that hold them) is checked to be removable; if one is not (root-owned, read-only), nothing of that
+unit is touched, it is named, the other units go on, the exit code is 1 and pack.yaml is not written: fix the
+permissions and run again. Last, the cell pack's pack.yaml is written.
 """
 
 from __future__ import annotations
@@ -27,15 +31,59 @@ from . import packs
 ROBOT_PACK_VERSION = '0.1.0'
 
 
-def _same(a: Path, b: Path) -> bool:
-    """Same file content, or the same files with the same content below two folders."""
+def _relation(a: Path, b: Path) -> str:
+    """How ``a`` (the cell copy) relates to ``b`` (the pack copy): 'same' (same content, or the same files with the
+    same content below two folders), 'subset' (a folder with only some of the pack files, each identical: a unit left
+    half removed) or 'different'."""
     if a.is_dir() != b.is_dir():
-        return False
+        return 'different'
     if not a.is_dir():
-        return filecmp.cmp(a, b, shallow=False)
-    files = sorted(p.relative_to(a) for p in a.rglob('*') if p.is_file())
-    return files == sorted(p.relative_to(b) for p in b.rglob('*') if p.is_file()) and all(
-        filecmp.cmp(a / f, b / f, shallow=False) for f in files)
+        return 'same' if filecmp.cmp(a, b, shallow=False) else 'different'
+    mine = {p.relative_to(a) for p in a.rglob('*') if p.is_file()}
+    theirs = {p.relative_to(b) for p in b.rglob('*') if p.is_file()}
+    if not mine <= theirs or not all(filecmp.cmp(a / f, b / f, shallow=False) for f in mine):
+        return 'different'
+    return 'same' if mine == theirs else 'subset'
+
+
+def _entry_blocker(path: Path) -> str | None:
+    """Why ``path`` cannot be removed (or moved away), None if it can: no write access to the folder that holds it,
+    a sticky folder of someone else, a folder we cannot enter, a read-only file (Windows)."""
+    parent = path.parent
+    if not os.access(parent, os.W_OK | os.X_OK):
+        return f'no write permission on {parent}'
+    if os.name == 'nt':
+        if not path.is_symlink() and not path.is_dir() and not os.access(path, os.W_OK):
+            return 'file is read-only'
+        return None
+    info = parent.stat()
+    if info.st_mode & 0o1000 and os.geteuid() not in (0, info.st_uid, path.lstat().st_uid):
+        return f'{parent} is sticky and the entry belongs to another user'
+    if path.is_dir() and not path.is_symlink() and not os.access(path, os.R_OK | os.W_OK | os.X_OK):
+        return f'no read/write permission on {path}'
+    return None
+
+
+def removal_blocker(unit: Path) -> tuple[Path, str] | None:
+    """The first entry of ``unit`` (a file, or a folder with all that is below it) that cannot be removed, with the
+    reason; None if all can."""
+    candidates = [unit]
+    if unit.is_dir() and not unit.is_symlink():
+        candidates += sorted(unit.rglob('*'))
+    for path in candidates:
+        reason = _entry_blocker(path)
+        if reason:
+            return path, reason
+    return None
+
+
+def cannot_remove(blocker: tuple[Path, str], label: str, say) -> None:
+    say(f'cannot remove {blocker[0]}: {blocker[1]} (unit {label} left as it is; fix permissions or remove it as its '
+        'owner)')
+
+
+def _remove(path: Path) -> None:
+    shutil.rmtree(path) if path.is_dir() and not path.is_symlink() else path.unlink()
 
 
 def _system_robot_packs(cell: Path) -> list[str]:
@@ -70,8 +118,10 @@ def _add_robot_packs(cell: Path, entry: str) -> None:
         handler.dump(document, stream)
 
 
-def split_robot_packs(cell: Path, robot_packs: Path | None, dry_run: bool, say) -> None:
-    """Migration 1 -> 2 without the pack.yaml (see the module docstring)."""
+def split_robot_packs(cell: Path, robot_packs: Path | None, dry_run: bool, say) -> list[str]:
+    """Migration 1 -> 2 without the pack.yaml (see the module docstring). Returns the units (labels) that had to go
+    but could not."""
+    stuck: list[str] = []
     do = 'would ' if dry_run else ''
     configured = _system_robot_packs(cell)
     target = robot_packs.expanduser().resolve() if robot_packs else None
@@ -96,15 +146,29 @@ def split_robot_packs(cell: Path, robot_packs: Path | None, dry_run: bool, say) 
                 say(f'skip    {label}  {foreign} (not touched)')
                 keep_folder = True
                 continue
-            if base is not None and _same(here, base):
-                say(f'{do}remove  {label}  (same as {base})')
+            relation = _relation(here, base) if base is not None else 'none'
+            if relation in ('same', 'subset'):
+                blocker = removal_blocker(here)
+                if blocker:
+                    cannot_remove(blocker, label, say)
+                    stuck.append(label)
+                    keep_folder = True
+                    continue
+                say(f'{do}remove  {label}  (same as {base}' + (', partly removed already' if relation == 'subset' else '')
+                    + ')')
                 gone.add(name)
                 if not dry_run:
-                    shutil.rmtree(here) if here.is_dir() else here.unlink()
+                    _remove(here)
             elif base is not None:
                 say(f'keep    {label}  as a cell override: differs from {base}')
             elif target is not None:
                 pack = target / robot
+                blocker = removal_blocker(here)
+                if blocker:
+                    cannot_remove(blocker, label, say)
+                    stuck.append(label)
+                    keep_folder = True
+                    continue
                 say(f'{do}move    {label}  -> {pack / name}')
                 gone.add(name)
                 moved = True
@@ -121,11 +185,16 @@ def split_robot_packs(cell: Path, robot_packs: Path | None, dry_run: bool, say) 
         if gone and not keep_folder and not {p.name for p in folder.iterdir()} - gone:
             say(f'{do}remove  robots/{robot}/  (empty)')
             if not dry_run:
-                folder.rmdir()
+                reason = _entry_blocker(folder)
+                if reason:
+                    say(f'cannot remove {folder}: {reason} (empty folder left as it is)')
+                else:
+                    folder.rmdir()
     if moved and not on_path:
         say(f'{do}add     {entry}  to system.yaml robot_packs')
         if not dry_run:
             _add_robot_packs(cell, entry)
+    return stuck
 
 
 def write_cell_pack(cell: Path, name: str, version: int, dry_run: bool, say) -> None:
@@ -140,7 +209,8 @@ def write_cell_pack(cell: Path, name: str, version: int, dry_run: bool, say) -> 
         (cell / packs.PACK_FILE).write_text(text, encoding='utf-8')
 
 
-MIGRATIONS = {1: split_robot_packs}  # from schema_version -> function(cell, robot_packs, dry_run, say)
+# from schema_version -> function(cell, robot_packs, dry_run, say) -> units it could not remove (pack.yaml waits)
+MIGRATIONS = {1: split_robot_packs}
 
 
 def migrate(cell: str | Path, robot_packs: str | Path | None = None, name: str | None = None, dry_run: bool = False,
@@ -159,6 +229,10 @@ def migrate(cell: str | Path, robot_packs: str | Path | None = None, name: str |
         return 0
     say(f'{cell}: cell pack schema {version} -> {packs.CELL_SCHEMA}' + (' (dry run: nothing is changed)' if dry_run else ''))
     for step in range(version, packs.CELL_SCHEMA):
-        MIGRATIONS[step](cell, Path(robot_packs) if robot_packs else None, dry_run, say)
+        stuck = MIGRATIONS[step](cell, Path(robot_packs) if robot_packs else None, dry_run, say)
+        if stuck:
+            say(f'pack.yaml not written: still to remove: {", ".join(stuck)}. Fix the permissions (or remove them as '
+                'their owner) and run taskweave config migrate again; it finishes what is left.')
+            return 1
         write_cell_pack(cell, name or cell.name, step + 1, dry_run, say)
     return 0
