@@ -1,0 +1,5 @@
+implementations:
+  - {name: joint_targets, type: script, class: "taskweave_skills.joint_motion:MoveJoints"}
+speed: {joint_rad_s: 2.0, joint_linear_m_s: 0.4}
+motion: {planner: auto}
+tolerances: {position: 0.02, settle_s: 0.3, stall_timeout_s: 1.0, state_timeout_s: 3.0}

@@ -87,7 +87,7 @@ Placeholders such as `{fullest_stack}` are resolved from the world state when th
 |---|---|
 | [`taskweave_interfaces/`](taskweave_interfaces) | ROS 2 interfaces: `RunSkill` action, `Plan`, `PlanStep`, `TaskStatus`, `SkillInfo`, `ListSkills`, `StartMission` |
 | [`taskweave_core/`](taskweave_core) | Config loader and schemas, planners, task handler, skill server base class, CLI |
-| [`taskweave_skills/`](taskweave_skills) | Generic, robot-agnostic skills: `wait`, `navigate_to`, `move_to_pose`, `gripper` |
+| [`taskweave_skills/`](taskweave_skills) | Generic, robot-agnostic skills: `wait`, `navigate_to`, `move_to_pose`, `move_joints`, `gripper` |
 | [`taskweave_hmi/`](taskweave_hmi) | Web HMI: live mission status and control, validated mission editor |
 | [`docs/architecture.md`](docs/architecture.md) | Layers, interfaces, decision rules, design rules |
 | [`docs/configuration.md`](docs/configuration.md) | Config tree and file formats |
