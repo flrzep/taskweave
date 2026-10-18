@@ -22,7 +22,7 @@ from taskweave_core.config.limits import arm_group_names, joint_groups, joint_li
 from taskweave_core.config.schemas import motion_schema
 from taskweave_core.skill import SkillResult
 
-from .joints import MoveToPose
+from .joints import _PoseMotion
 from .motion_plan import Trajectory
 
 MOTION_KEYS = ('speed', 'speed_abs', 'accel', 'planner', 'tolerance', 'via')   # spec 1.4: always free, no mode
@@ -59,7 +59,7 @@ class _Rejected(Exception):
     """Invalid target or an unfit situation: nothing moved."""
 
 
-class MoveJoints(MoveToPose):
+class MoveJoints(_PoseMotion):
     name = 'move_joints'
     description = ('Move joint groups (torso, head, an arm) to a named joint pose or to given joint values and hold '
                    'them. `only` restricts the move to some groups, `motion.via` passes waypoints first, '

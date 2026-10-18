@@ -34,13 +34,13 @@ from taskweave_core.skill import SkillResult
 
 from .gripper_motion import RESOURCES, MoveGripper, Target, hands_arg
 from .joints import SWING_STRAIGHT_STEPS, interpolate
-from .joints import MoveObject as _OldMoveObject
+from .joints import _ObjectMotion
 
 OBJECT_MODE = 'linear'                    # the mode of move_object whose yaml has no ``motion.mode``
 HOLD_RULES = ('auto', 'all')              # hands words of the held-object skills: the hold's hands, all hands
 
 
-class _HeldMotion(MoveGripper, _OldMoveObject):
+class _HeldMotion(MoveGripper, _ObjectMotion):
     """Shared setup of the held-object skills: the motion settings of move_gripper (speeds, accel, torso fallback) and
     the held-object helpers of the old move_object."""
 

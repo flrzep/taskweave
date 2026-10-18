@@ -33,7 +33,7 @@ from taskweave_core.config.schemas import HAND_RULES, VEC3, hands_schema, motion
 from taskweave_core.gripper import joint_for_opening, opening_for_joint, opening_table
 from taskweave_core.skill import SkillResult
 
-from .joints import GoToPoint, Gripper, _JointSkill
+from .joints import _FingerMotion, _JointSkill, _PointMotion
 
 # skills/<skill>.yaml (spec 2.2) -> the joint skill parameter names
 SPEED_PARAMS = {'joint_rad_s': 'max_joint_speed', 'joint_linear_m_s': 'max_linear_speed', 'tcp_m_s': 'tcp_speed',
@@ -80,7 +80,7 @@ class Target:
     reached: tuple | None = None                       # (point, instance name, object_in_base): hold.reach on arrival
 
 
-class MoveGripper(GoToPoint):
+class MoveGripper(_PointMotion):
     name = 'move_gripper'
     description = ('Move the gripper (TCP) of one or more hands to a target with nothing held: a point on a placed '
                    'object (to.point, offset_m stops short along its approach), a named tool pose of this robot '
@@ -351,7 +351,7 @@ class MoveGripper(GoToPoint):
         return legs
 
 
-class Grip(Gripper):
+class Grip(_FingerMotion):
     name = 'grip'
     description = ('Open or close the fingers of one or more hands, or set their opening in mm. Closing hands that '
                    'are at an object point (move_gripper to.point with no offset) makes them hold that object, also '

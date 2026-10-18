@@ -1,10 +1,11 @@
 """Robot settings for the HMI: named joint poses and navigation clearance. No ROS dependency.
 
 Joint poses live in ``robots/<robot>/poses.yaml`` (joint -> rad, or m for the profile's ``joints.linear``). A pose that
-a mission uses cannot be renamed or deleted; which skill arguments name a joint pose comes from the skill catalog
-(``x-taskweave-point: joint_pose``). Navigation clearance lives in ``robots/<robot>/navigation.yaml`` (see
-``schemas.NAVIGATION``); the server applies saved values to the running path planner. Arm solutions: the profile's
-``ik.choose`` (preferred elbow side, how much joint-limit room and move size count); skills read it before every solve.
+a mission uses cannot be renamed or deleted; which skill arguments name a pose comes from the skill catalog (the point
+kinds in POSE_KINDS, at any depth: move_joints ``pose``, move_gripper ``to.pose``; a dotted path names a nested one).
+Navigation clearance lives in ``robots/<robot>/navigation.yaml`` (see ``schemas.NAVIGATION``); the server applies
+saved values to the running path planner. Arm solutions: the profile's ``ik.choose`` (preferred elbow side, how much
+joint-limit room and move size count); skills read it before every solve.
 """
 
 from __future__ import annotations
@@ -18,32 +19,52 @@ from taskweave_core.config import ConfigError, ConfigStore, schemas
 from taskweave_core.config.limits import joint_limits, joint_problems, pose_problems
 
 HMI_NOTE = 'edited in the HMI'
-DEFAULT_POSE_ARGS = {('move_to_pose', 'pose')}
+POSE_KINDS = ('joint_pose', 'joint_pose_only', 'tool_pose')    # x-taskweave-point kinds that name a pose of poses.yaml
+DEFAULT_POSE_ARGS = {('move_joints', 'pose'), ('move_gripper', 'to.pose')}
 
 
 class RobotSettingsError(ValueError):
     """A robot setting cannot be changed; the message says why."""
 
 
+def _pose_paths(schema: Mapping, prefix: str = '') -> set[str]:
+    """Dotted paths of the properties of ``schema`` (also in oneOf / anyOf / allOf branches) that name a pose."""
+    found = set()
+    for branch in (schema, *(b for key in ('oneOf', 'anyOf', 'allOf') for b in schema.get(key, []))):
+        for arg, spec in (branch.get('properties') or {}).items():
+            path = f'{prefix}{arg}'
+            if spec.get('x-taskweave-point') in POSE_KINDS:
+                found.add(path)
+            found |= _pose_paths(spec, f'{path}.')
+    return found
+
+
 def pose_args(catalog: Iterable[dict] | None) -> set[tuple[str, str]]:
-    """(skill, argument) pairs whose value names a joint pose, from the skill catalog."""
-    found = {(skill['name'], arg) for skill in catalog or []
-             for arg, spec in skill.get('args_schema', {}).get('properties', {}).items()
-             if spec.get('x-taskweave-point') == 'joint_pose'}
+    """(skill, argument path) pairs whose value names a pose, from the skill catalog."""
+    found = {(skill['name'], path) for skill in catalog or [] for path in _pose_paths(skill.get('args_schema', {}))}
     return found or DEFAULT_POSE_ARGS
 
 
+def _value(args, path: str):
+    """The value at the dotted ``path`` in a step's args, None if absent."""
+    for key in path.split('.'):
+        args = args.get(key) if isinstance(args, Mapping) else None
+    return args
+
+
 def pose_usage(store: ConfigStore, args: set[tuple[str, str]]) -> dict[str, list[str]]:
-    """Joint pose name -> missions that use it."""
+    """Pose name -> missions that use it."""
     result: dict[str, list[str]] = {}
     for mission_name in store.mission_names():
         try:
             steps = store.expanded_mission(mission_name).get('steps', [])
         except ConfigError:
             continue
-        used = {step.get('args', {}).get(arg) for step in steps for skill, arg in args if step.get('skill') == skill}
+        used = {_value(step.get('args', {}), arg) for step in steps
+                for skill, arg in args if step.get('skill') == skill}
         for name in used - {None}:
-            result.setdefault(name, []).append(mission_name)
+            if isinstance(name, str):
+                result.setdefault(name, []).append(mission_name)
     return result
 
 

@@ -1,4 +1,4 @@
 # cell pack of the test config (robots included: the cell pack is searched first)
 name: skills_test_cell
 version: 1
-schema_version: 2
+schema_version: 3

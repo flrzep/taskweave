@@ -19,6 +19,10 @@
     taskweave config migrate CELL_DIR [--robot-packs DIR] [--name NAME] [--dry-run]
                                           bring a cell pack (config directory) up to this taskweave's schema, e.g.
                                           split robot-intrinsic files out into robot packs (config/migrate.py)
+    taskweave config migrate-skills CELL_DIR [--dry-run]
+                                          only the last migration: move_to_pose, go_to_point, gripper and the old
+                                          move_object become move_joints, move_gripper, grip, move_object, set_posture
+                                          in missions, operator.yaml and skills/ (config/migrate_skills.py)
     taskweave config slim CELL_DIR [--dry-run]
                                           rewrite whole-file overrides of robot pack files as per-key overrides
                                           (only the keys that differ; config/slim.py)
@@ -277,6 +281,9 @@ def main(argv=None) -> int:
     migrate_parser.add_argument('--robot-packs', help='folder for robot packs of robot files no pack has yet')
     migrate_parser.add_argument('--name', help='cell pack name (default: the folder name)')
     migrate_parser.add_argument('--dry-run', action='store_true', help='only print what would be done')
+    skills_parser = config_sub.add_parser('migrate-skills', help='cell pack schema 2 -> 3: the new skill model')
+    skills_parser.add_argument('cell_dir')
+    skills_parser.add_argument('--dry-run', action='store_true', help='only print what would be done')
     slim_parser = config_sub.add_parser('slim', help='whole-file overrides of robot pack files to per-key overrides')
     slim_parser.add_argument('cell_dir')
     slim_parser.add_argument('--dry-run', action='store_true', help='only print what would be done')
@@ -293,6 +300,10 @@ def main(argv=None) -> int:
             from .config.slim import slim
 
             return slim(options.cell_dir, options.dry_run)
+        if options.action == 'migrate-skills':
+            from .config.migrate import migrate_skills_only
+
+            return migrate_skills_only(options.cell_dir, options.dry_run)
         from .config.migrate import migrate
 
         return migrate(options.cell_dir, options.robot_packs, options.name, options.dry_run)

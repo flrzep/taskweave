@@ -1,8 +1,6 @@
-# Cell pack example: skills/move_object.yaml (skill-api-spec 1.2, 2.2). The new move_object (args: to / object / hands /
-# motion) is the class taskweave_skills.object_motion:MoveObject; the old one (joints:MoveObject, flat args by / at /
-# pose / to + contact / elbow) stays in the skill yaml of a cell until its missions are migrated
-# (taskweave migrate skills). The old max_joint_speed / max_linear_speed / tcp_speed / tcp_turn are renamed as in
-# move_gripper.yaml; the old elbow argument is the set_posture skill now.
+# skills/move_object.yaml (skill-api-spec 1.2, 2.2): the new move_object (args: to / object / hands / motion). The old
+# max_joint_speed / max_linear_speed / tcp_speed / tcp_turn were renamed as in move_gripper.yaml; the old elbow argument
+# is the set_posture skill now.
 implementations:
   - name: ik_held               # the hands that hold the object move it, IK from where they are
     type: script

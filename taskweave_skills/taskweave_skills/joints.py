@@ -20,8 +20,6 @@ from dataclasses import dataclass, fields
 import numpy as np
 from sensor_msgs.msg import JointState
 
-from taskweave_core.config import Pose2D
-from taskweave_core.gripper import joint_for_opening, opening_table
 from taskweave_core.skill import Skill, SkillResult
 
 SWING_STRAIGHT_STEPS = 20  # samples of the eased straight move that follows an elbow swing (_swing_first)
@@ -217,23 +215,10 @@ class _JointSkill(Skill):
             time.sleep(period)
 
 
-class MoveToPose(_JointSkill):
-    name = 'move_to_pose'
-    description = ('Move to a named pose of this robot (for example home or carry) and hold it. A pose is joint '
-                   'values, or tool (TCP) targets in robot space solved by inverse kinematics. With a motion planner '
-                   'the path avoids collisions with the robot itself and the planning scene; without one it is a '
-                   'straight joint-space move. While an object is held, only poses without arm joints or tool '
-                   'targets (for example a lift height) are allowed: the arms keep their joints and the object moves '
-                   'with them.')
-    args_schema = {
-        'type': 'object',
-        'required': ['pose'],
-        'properties': {'pose': {'type': 'string', 'x-taskweave-point': 'joint_pose',
-                                'description': 'named pose from robots/<robot>/poses.yaml'}},
-        'additionalProperties': False,
-    }
-    needs = ['the motion path is free of obstacles']
-    achieves = ['joints at the named pose']
+class _PoseMotion(_JointSkill):
+    """Joint targets, IK for tool targets and the planned or straight path to them: what move_joints and move_gripper
+    build on. Not a skill itself (the old move_to_pose was replaced by move_joints / move_gripper)."""
+
     default_timeout_s = 60.0
 
     def setup(self, node, config, robot, params):
@@ -258,26 +243,6 @@ class MoveToPose(_JointSkill):
         """The profile's current ik.choose (edited in the HMI) for the next solve."""
         if self.ik is not None:
             self.ik.set_choice(self.config.robot(self.robot.name).data['ik'].get('choose'))
-
-    def execute(self, ctx, args):
-        pose = self.config.named_pose(self.robot.name, args['pose'])
-        self._refresh_ik()
-        held = self.hold.held()
-        if held is not None and (pose['tools'] or self._arm_joints(pose['joints'])):
-            return self._holding_refusal()
-        self.hold.reached_point(None, None, (), None)
-        result, worst = self._reach(ctx, pose['joints'], pose['tools'], args['pose'], elbow=pose.get('elbow'))
-        if result is not None:
-            return result
-        if held is not None:  # the arms kept their joints: the object moved with them (e.g. the lift)
-            tool = held['tools'][0]
-            try:
-                tcp = self.hold.tcp_poses([tool])[tool]
-            except LookupError as error:
-                return SkillResult.failed(f'{args["pose"]} reached, but where is the held object now? {error}')
-            self.hold.moved(tcp @ np.linalg.inv(held['tcp_in_object'][tool]))
-        return SkillResult.succeeded(f'at {args["pose"]} (max error {worst:.3f})',
-                                     world_state={'arm_pose': args['pose']})
 
     def _arm_joints(self, joints: dict) -> list[str]:
         """The joints of ``joints`` that belong to a tool's arm (all of them if the profile has no ik section)."""
@@ -442,34 +407,10 @@ class MoveToPose(_JointSkill):
                     f'{np.round(reached[tool][:3, 3], 3).tolist()}, goal {np.round(goal[:3, 3], 3).tolist()}')
 
 
-class GoToPoint(MoveToPose):
-    name = 'go_to_point'
-    description = ('Move one or both tools to a point on a placed object, for example the grasp point of a frame in a '
-                   'bin: the point is taught relative to the object, the robot solves where its tools must go from '
-                   'where it stands. offset_m stops short of the point along its approach direction (a pre-grasp '
-                   'pose). Collision-free path with a motion planner to approach_m before the point, then a straight '
-                   'line along the approach for the rest. The torso lift stays where it is unless the point is only '
-                   'in reach at another of the configured lift heights.')
-    args_schema = {
-        'type': 'object',
-        'required': ['point'],
-        'properties': {
-            'point': {'type': 'string', 'x-taskweave-point': 'instance_point',
-                      'description': '<instance>/<point>: a placed object (cell/objects.yaml) and its point'},
-            'offset_m': {'type': 'number', 'minimum': 0, 'description': 'stop this far back along the approach'},
-            'approach_m': {'type': 'number', 'minimum': 0,
-                           'description': 'the last part of the way, in a straight line along the approach '
-                                          '(default from the skill config; 0 = planned path all the way)'},
-            'tools': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1,
-                      'description': 'only these tools (default: every tool the point has)'},
-            'linear': {'type': 'boolean', 'description': 'move the TCPs on straight lines from where they are '
-                                                         '(final approach), instead of a planned path'},
-        },
-        'additionalProperties': False,
-    }
-    needs = ["the robot stands where the point is in reach (e.g. at the object's stance)"]
-    achieves = ['tools at the object point']
-    default_timeout_s = 60.0
+class _PointMotion(_PoseMotion):
+    """Reaching a point of a placed object: the approach (planned path to ``approach_m`` before the point, then a
+    straight line) and the lift fallback; move_gripper builds on it (the old go_to_point was replaced by it)."""
+
     # skills/<skill>.yaml defaults: tcp_speed (m/s) and tcp_turn (rad/s) of straight-line TCP motions
     param_defaults = {'tcp_speed': 0.05, 'tcp_turn': 0.3}
 
@@ -482,51 +423,6 @@ class GoToPoint(MoveToPose):
         self.tcp_turn = float(params.pop('tcp_turn', self.param_defaults['tcp_turn']))
         self.approach_m = float(params.pop('approach_m', 0.0))  # straight final approach (m) unless args say other
         super().setup(node, config, robot, params)
-
-    def execute(self, ctx, args):
-        from .points import instance_matrix, point_targets
-
-        refusal = self._holding_refusal()
-        if refusal is not None:
-            return refusal
-        try:
-            base_in_cell = self.hold.transform(self.cell_frame, self.robot.base['frame'])
-        except LookupError as error:
-            return SkillResult.failed(f'where is the robot? {error}')
-        # a symmetric object (e.g. a frame lying the other way round) is grasped from the robot's side
-        base = Pose2D(float(base_in_cell[0, 3]), float(base_in_cell[1, 3]),
-                      math.atan2(base_in_cell[1, 0], base_in_cell[0, 0]))
-        try:
-            instance, point = self.config.instance_point(args['point'], self.robot.name, base)
-        except KeyError as error:
-            return SkillResult.rejected(str(error.args[0]))
-        offset = float(args.get('offset_m', 0.0))
-        try:
-            tools = point_targets(point, instance, base_in_cell, offset, args.get('tools'))
-        except KeyError as error:
-            return SkillResult.rejected(f'{args["point"]}: {error.args[0]}')
-        if not tools:
-            return SkillResult.rejected(f'{args["point"]} has no tool poses')
-        label = args['point'] + (f' (-{offset:g} m)' if offset else '') + (' (linear)' if args.get('linear') else '')
-        lifts = [{self.lift_joint: float(v)} for v in self.lift_values] if self.lift_joint else []
-        self.hold.reached_point(None, None, (), None)
-        self._refresh_ik()
-        elbow = point.get('elbow')  # the point's elbow side (robot frame), else the profile's
-        default = point.get('approach_m') if point.get('approach_m') is not None else self.approach_m
-        approach = 0.0 if args.get('linear') else float(args.get('approach_m', default))
-        if approach > 0:  # planned (free) path to the start of the approach, then straight in
-            before = point_targets(point, instance, base_in_cell, offset + approach, args.get('tools'))
-            result, worst, label = self._approach_in(ctx, tools, before, lifts, label, elbow, approach)
-        else:
-            result, worst = self._reach(ctx, {}, tools, label, fallback_joints=lifts, linear=bool(args.get('linear')),
-                                        elbow=elbow)
-        if result is not None:
-            return result
-        if offset == 0.0:  # at the point itself: closing the grippers now grasps this object
-            self.hold.reached_point(args['point'], instance.name, list(tools),
-                                    np.linalg.inv(base_in_cell) @ instance_matrix(instance))
-        return SkillResult.succeeded(f'at {label} (max error {worst:.3f})', world_state={'arm_pose': label})
-
 
     def _approach_in(self, ctx, tools: dict, before: dict, lifts: list, label: str, elbow=None, approach=0.0,
                      planner='auto'):
@@ -575,95 +471,9 @@ class GoToPoint(MoveToPose):
         return SkillResult.failed(f'{label}: the point itself is out of reach: {first_error}')
 
 
-class MoveObject(GoToPoint):
-    name = 'move_object'
-    description = ('Move the object held with the grippers (after go_to_point to its point and gripper close): every '
-                   'holding tool moves with it, locked in orientation and distance to the object and to each other. '
-                   'The object moves on a straight line: by an offset in the robot\'s frame (x forward, y left, z up), '
-                   'optionally turning about the vertical through the object and tilting it (far side up); to a '
-                   'position in the robot\'s frame (at: where its origin goes, orientation kept); to a named pose '
-                   'of this robot for this kind of object (pose: e.g. carry; torso first, then straight lines); or to a '
-                   'contact on a placed object: one of the held object\'s contacts goes onto it (e.g. a frame\'s hook '
-                   'plate onto a hook), offset_m short of it against the contact\'s engage direction. With elbow '
-                   '(alone), the object stays and the holding arms swing their elbows toward that side.')
-    args_schema = {
-        'type': 'object',
-        'oneOf': [{'required': ['by']}, {'required': ['to', 'contact']}, {'required': ['at']}, {'required': ['pose']},
-                  {'required': ['elbow']}],
-        'properties': {
-            'by': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 3, 'maxItems': 3,
-                   'description': '[x, y, z] in metres, robot frame'},
-            'pose': {'type': 'string', 'description': 'a held pose of this robot for the object\'s type '
-                                                      '(robots/<robot>/held_poses.yaml), e.g. carry'},
-            'at': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 3, 'maxItems': 3,
-                   'description': '[x, y, z] in metres, robot frame: where the object\'s origin goes'},
-            'turn_deg': {'type': 'number', 'description': 'with by: turn about the vertical through the object (deg)'},
-            'tilt_deg': {'type': 'number', 'description': 'with by: tilt about the robot\'s y axis through the object, '
-                                                          'far side up (degrees)'},
-            'to': {'type': 'string', 'x-taskweave-point': 'instance_contact',
-                   'description': '<instance>/<contact>: where on a placed object the held object goes'},
-            'contact': {'type': 'string', 'description': 'the held object\'s contact that goes there'},
-            'offset_m': {'type': 'number', 'minimum': 0,
-                         'description': 'with to: stop this far before the contact, against its engage direction'},
-            'elbow': {'enum': ['down', 'up', 'out', 'in', 'back', 'forward'],
-                      'description': 'the object stays; the holding arms swing their elbows toward this side (robot '
-                                     'frame, out = away from the body), as far as joint limits and collisions allow'},
-        },
-        'additionalProperties': False,
-    }
-    needs = ['an object held with the grippers']
-    achieves = ['the held object moved']
-    default_timeout_s = 60.0
-
-    def execute(self, ctx, args):
-        import math
-
-        hold = self.hold.held()
-        if hold is None:
-            return SkillResult.rejected('nothing is held: go_to_point to the object, then close the grippers')
-        obj = hold['object_in_base']
-        if 'pose' in args:
-            return self._held_pose(ctx, hold, args['pose'])
-        if 'elbow' in args:
-            return self._swing_elbows(ctx, hold, args['elbow'])
-        if 'to' in args:
-            moved = self._onto(hold, args)
-            if isinstance(moved, SkillResult):
-                return moved
-            label = f'{hold["object"]} {args["contact"]} to {args["to"]}' + \
-                (f' (-{args["offset_m"]:g} m)' if args.get('offset_m') else '')
-        else:
-            from .points import moved_object
-
-            moved = moved_object(obj, args.get('by'), args.get('at'), float(args.get('turn_deg', 0.0)),
-                                 float(args.get('tilt_deg', 0.0)))
-            label = f'{hold["object"]} ' + (f'to {args["at"]}' if 'at' in args else
-                                            f'by {[round(float(v), 3) for v in args["by"]]}') + \
-                (f', {args["turn_deg"]:g} deg' if args.get('turn_deg') else '') + \
-                (f', tilted {args["tilt_deg"]:g} deg' if args.get('tilt_deg') else '')
-        goals = {tool: moved @ pose for tool, pose in hold['tcp_in_object'].items()}
-        result, worst = self._linear(ctx, {}, label, goals=goals)
-        if result is not None:
-            return result
-        self.hold.moved(moved)
-        return SkillResult.succeeded(f'moved {label} (max error {worst:.3f})',
-                                     world_state={'held_object': hold['object']})
-
-    def _swing_elbows(self, ctx, hold: dict, side: str):
-        """move_object elbow: the holding arms' elbows toward ``side``, hands and object staying."""
-        label = f'elbows of {" and ".join(hold["tools"])} {side}'
-        failure, path, _report, swung = self._swing_plan(ctx, list(hold['tools']), side, label)
-        if failure is not None:
-            return failure
-        if path is None:
-            return SkillResult.succeeded(f'{label}: already as far as they go ({swung})',
-                                         world_state={'held_object': hold['object']})
-        goal = dict(zip(path.names, path.points[-1], strict=True))
-        result, final = self._move(ctx, goal, label, path=path)
-        if result is not None:
-            return result
-        self._check_hands({tool: hold['object_in_base'] @ tcp for tool, tcp in hold['tcp_in_object'].items()}, label)
-        return SkillResult.succeeded(f'{label}: {swung}', world_state={'held_object': hold['object']})
+class _ObjectMotion(_PointMotion):
+    """Helpers for moving a held object: the elbow swing plan and the contact pose; move_object and set_posture build
+    on it (the old move_object was replaced by the two)."""
 
     def _swing_plan(self, ctx, tools: list, side: str, label: str, tolerance_deg: float | None = None):
         """The elbow swing of ``tools`` toward ``side``, planned but not moved: (failure or None, Trajectory or None
@@ -694,44 +504,6 @@ class MoveObject(GoToPoint):
                                       f'off {side}: {short}; not moved'), None, report, swung
         return None, path, report, swung
 
-    def _held_pose(self, ctx, hold: dict, name: str):
-        """move_object pose: the robot's held pose ``name`` for the held object's type: its joints (not the arms'),
-        then straight lines through its waypoints."""
-        from .ik import rpy_matrix
-
-        instance = self.config.object_instances().get(hold['object'])
-        if instance is None:
-            return SkillResult.rejected(f'the held {hold["object"]} is not a placed object: its type is unknown')
-        try:
-            pose = self.config.held_pose(self.robot.name, instance.object, name)
-        except KeyError as error:
-            return SkillResult.rejected(str(error.args[0]))
-        arm = self._arm_joints(pose['joints'])
-        if arm:
-            return SkillResult.rejected(f'held pose {name} sets arm joints {arm}: only joints the held object '
-                                        'moves with (e.g. a lift) can be set')
-        label = f'{hold["object"]} to {name}'
-        worst = 0.0
-        if pose['joints']:
-            result, worst = self._go(ctx, pose['joints'], f'{label} (joints)')
-            if result is not None:
-                return result
-            tool = hold['tools'][0]  # the arms kept their joints: the object moved with them
-            try:
-                tcp = self.hold.tcp_poses([tool])[tool]
-            except LookupError as error:
-                return SkillResult.failed(f'{label}: where is the held object now? {error}')
-            self.hold.moved(tcp @ np.linalg.inv(hold['tcp_in_object'][tool]))
-        for index, waypoint in enumerate(pose['path'], start=1):
-            hold = self.hold.held()
-            moved = rpy_matrix(waypoint.xyz, waypoint.rpy)
-            goals = {tool: moved @ tcp for tool, tcp in hold['tcp_in_object'].items()}
-            result, worst = self._linear(ctx, {}, f'{label} ({index}/{len(pose["path"])})', goals=goals)
-            if result is not None:
-                return result
-            self.hold.moved(moved)
-        return SkillResult.succeeded(f'moved {label} (max error {worst:.3f})', world_state={'held_object': hold['object']})
-
     def _onto(self, hold: dict, args: dict):
         """The held object's pose (base frame) with its contact ``args['contact']`` on the placed contact
         ``args['to']``, ``offset_m`` back against that contact's z (engage direction); a SkillResult if that cannot be
@@ -753,103 +525,9 @@ class MoveObject(GoToPoint):
         return onto_pose(target, contact, mine, base_in_cell, float(args.get('offset_m', 0.0)))
 
 
-class Gripper(_JointSkill):
-    name = 'gripper'
-    description = ('Open or close the left, right or both grippers. Reports whether an object is held after closing. '
-                   'Opening with place_as records where the released object now is, as a placed object of that name '
-                   '(object state), so it can be picked again or used to teach points on. Closing on an object '
-                   'takes it off its stack in the object state.')
-    args_schema = {
-        'type': 'object',
-        'required': ['side', 'action'],
-        'properties': {
-            'side': {'type': 'string', 'description': 'a gripper of this robot (profile grippers) or both'},
-            'action': {'enum': ['open', 'close']},
-            'place_as': {'type': 'string', 'description': 'with open: the released object is a placed object of '
-                                                          'this name now (object state)'},
-        },
-        'additionalProperties': False,
-    }
-
-    def setup(self, node, config, robot, params):
-        import copy
-
-        params = dict(params)
-        self.cell_frame = params.pop('cell_frame', 'world')  # TF frame of the cell (place_as)
-        super().setup(node, config, robot, params)
-        self.hold.on_reset.append(config.clear_object_state)  # a sim reset puts every object back
-        self.tools = list(robot.data.get('grippers', {}))  # the robot's grippers by tool name, e.g. left and right
-        self.args_schema = copy.deepcopy(self.args_schema)
-        self.args_schema['properties']['side'] = {'enum': [*self.tools, 'both'],
-                                                  'description': 'one gripper, or both (all of them)'}
-    achieves = ['gripper open, or closed (holding an object if one was between the fingers)']
-    default_timeout_s = 20.0
-
-    def execute(self, ctx, args):
-        sides = self.tools if args['side'] == 'both' else [args['side']]
-        grippers = {side: self.robot.role(f'grippers.{side}') for side in sides}
-        key = 'open' if args['action'] == 'open' else 'closed'
-        goal = {g['joint']: float(g[key]) for g in grippers.values()}
-        grip_m = self._point_grip(sides) if key == 'closed' else {}
-        grip = {side: joint_for_opening(grippers[side], opening) for side, opening in grip_m.items()}
-        goal.update({grippers[side]['joint']: value for side, value in grip.items()})
-        result, final = self._move(ctx, goal, f'{args["side"]} gripper {args["action"]}',
-                                   stall_ok=args['action'] == 'close')
-        if result is not None:
-            return result
-        state, holding = {}, {}
-        for side, g in grippers.items():
-            stopped_short = abs(final[g['joint']] - goal[g['joint']]) > self.p.position_tolerance
-            # closed to the point's grip: on the part (the sim's parts have no colliders to stop the fingers)
-            holding[side] = args['action'] == 'close' and (stopped_short or side in grip)
-            state[f'{side}_gripper'] = 'holding' if holding[side] else key
-        message = ', '.join(f'{s}: {v}' for s, v in state.items())
-        if grip:
-            message += ' (grip ' + ', '.join(f'{s} {opening * 1000:.0f} mm' for s, opening in grip_m.items()) + ')'
-        if args['action'] == 'close':
-            grasped = self.hold.grasp(sides)  # at an object point reached by go_to_point
-            if grasped:
-                message += f'; holding {grasped}'
-                state['held_object'] = grasped
-                try:
-                    message += f'; {self.config.take_object(grasped)}'  # one off its stack (object state)
-                except (KeyError, ValueError) as error:
-                    message += f'; object state not updated: {error}'
-        else:
-            placed = self._placed(args['place_as'], sides) if args.get('place_as') else None
-            released = self.hold.release(sides)
-            if released:
-                message += f'; released {released}'
-                state['held_object'] = None
-            if placed:
-                message += f'; {placed}'
-        return SkillResult.succeeded(message, holding=holding, world_state=state)
-
-    def _point_grip(self, sides) -> dict[str, float]:
-        """How far (m) each of ``sides`` stays open when closing at the object point go_to_point brought it to (the
-        robot's grip_m for the point, robots/<robot>/object_points.yaml); sides without one, or whose gripper has no
-        opening_m table, close fully."""
-        at = self.hold.reached_at()
-        if at is None:
-            return {}
-        try:
-            instance = self.config.object_instances()[at['instance']]
-            point = self.config.object_point(instance.object, at['point'].rpartition('/')[2], self.robot.name)
-        except (KeyError, ValueError):
-            return {}
-        grip = point.get('grip_m') or {}
-        tables = {side: self.robot.role(f'grippers.{side}') for side in sides}
-        return {side: float(grip[side]) for side in sides
-                if side in grip and side in at['tools'] and opening_table(tables[side]) is not None}
-
-    def _placed(self, name: str, sides) -> str:
-        """Save the held object's pose (cell frame, yaw only) as the placed object ``name``; says what was done."""
-        import math
-
-        hold = self.hold.held()
-        if hold is None or not set(hold['tools']) & set(sides):
-            return f'nothing held, {name} not placed'
-        return self._place(name, hold)
+class _FingerMotion(_JointSkill):
+    """Finger moves and the placed-object record of a release; grip builds on it (the old gripper was replaced by
+    grip)."""
 
     def _place(self, name: str, hold: dict) -> str:
         """Save ``hold``'s object pose as the placed object ``name`` (see _placed)."""

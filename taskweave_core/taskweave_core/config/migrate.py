@@ -2,6 +2,7 @@
 
 Each migration takes a cell pack from one schema_version to the next; they run in order up to packs.CELL_SCHEMA,
 print what they do (with --dry-run only that) and are idempotent: a second run finds nothing left to do.
+``taskweave config migrate-skills CELL_DIR [--dry-run]`` runs only the last one (2 -> 3, migrate_skills.py).
 
 1 -> 2: split one config directory into a cell pack and robot packs. Per robot-intrinsic file in robots/<robot>/
 (packs.ROBOT_PACK_FILES; moveit/ as one unit), compared with the robot pack the store would read after the move:
@@ -10,6 +11,9 @@ print what they do (with --dry-run only that) and are idempotent: a second run f
   no pack has it     moved to <--robot-packs>/<robot>/ (pack.yaml written, the folder added to system.yaml
                      robot_packs if it is not on the search path), or kept without --robot-packs
 Cell-specific files (stances, held poses, object points) stay. Last, the cell pack's pack.yaml is written.
+
+2 -> 3: the new skill model: missions, operator.yaml, skills/*.yaml and joint-and-tool poses rewritten for move_joints,
+move_gripper, grip, move_object (args ``to``) and set_posture (migrate_skills.py).
 """
 
 from __future__ import annotations
@@ -137,10 +141,18 @@ def write_cell_pack(cell: Path, name: str, version: int, dry_run: bool, say) -> 
                               'schema_version': version}, sort_keys=False))
     say(f'{"would " if dry_run else ""}write   pack.yaml  (schema_version {version})')
     if not dry_run:
-        (cell / packs.PACK_FILE).write_text(text, encoding='utf-8')
+        with (cell / packs.PACK_FILE).open('w', encoding='utf-8', newline='') as stream:    # LF on Windows too
+            stream.write(text)
 
 
-MIGRATIONS = {1: split_robot_packs}  # from schema_version -> function(cell, robot_packs, dry_run, say)
+def skill_model(cell: Path, robot_packs: Path | None, dry_run: bool, say) -> None:
+    from .migrate_skills import migrate_skills
+
+    migrate_skills(cell, robot_packs, dry_run, say)
+
+
+# from schema_version -> function(cell, robot_packs, dry_run, say)
+MIGRATIONS = {1: split_robot_packs, 2: skill_model}
 
 
 def migrate(cell: str | Path, robot_packs: str | Path | None = None, name: str | None = None, dry_run: bool = False,
@@ -159,6 +171,20 @@ def migrate(cell: str | Path, robot_packs: str | Path | None = None, name: str |
         return 0
     say(f'{cell}: cell pack schema {version} -> {packs.CELL_SCHEMA}' + (' (dry run: nothing is changed)' if dry_run else ''))
     for step in range(version, packs.CELL_SCHEMA):
-        MIGRATIONS[step](cell, Path(robot_packs) if robot_packs else None, dry_run, say)
+        try:
+            MIGRATIONS[step](cell, Path(robot_packs) if robot_packs else None, dry_run, say)
+        except RuntimeError as error:   # a file cannot be written: the migration checked before it touched anything
+            say(f'{cell}: {error}')
+            return 2
         write_cell_pack(cell, name or cell.name, step + 1, dry_run, say)
     return 0
+
+
+def migrate_skills_only(cell: str | Path, dry_run: bool = False, say=print) -> int:
+    """``taskweave config migrate-skills``: the 2 -> 3 migration alone (a cell pack of schema 1 needs ``migrate``)."""
+    path = Path(cell).expanduser().resolve()
+    version = packs.cell_schema(path) if path.is_dir() else 0
+    if version == 1:
+        say(f'{path}: cell pack schema 1: run taskweave config migrate {cell} first (it ends with this migration)')
+        return 2
+    return migrate(path, None, None, dry_run, say)   # 2: the skill migration; 3: nothing to do

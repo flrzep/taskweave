@@ -1,5 +1,5 @@
-# Cell pack example: skills/set_posture.yaml (skill-api-spec 1.3). New; it is the old move_object elbow argument. The
-# hands stay where they are, the elbows swing toward the given side along the arms' null space.
+# skills/set_posture.yaml (skill-api-spec 1.3). New; it is the old move_object elbow argument. The hands stay where
+# they are, the elbows swing toward the given side along the arms' null space.
 implementations:
   - name: null_space
     type: script

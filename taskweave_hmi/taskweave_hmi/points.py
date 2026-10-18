@@ -127,8 +127,9 @@ def overview(store: ConfigStore, robot: str) -> dict:
         'locations': [{'name': n, 'pose': pose_dict(p), 'used_by': used.get(('location', n), [])}
                       for n, p in store.locations().items()],
         'objects': objects,
-        # go_to_point's straight final approach when a point does not set its own
-        'approach_default': float(store.skill_params('go_to_point').get('approach_m', 0.0)),
+        # move_gripper's straight final approach when a point does not set its own
+        'approach_default': float((store.skill_params('move_gripper').get('motion') or {})
+                                  .get('approach_m', 0.0)),
         'elbow_sides': schemas.ELBOW_SIDES,
     }
 

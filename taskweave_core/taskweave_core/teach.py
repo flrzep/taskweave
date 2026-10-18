@@ -9,8 +9,8 @@ The base pose comes from the robot profile's ``base.odom`` topic, which must rep
 
 Object points (kind ``object_point``, name ``<instance>/<point>``) store each tool's canonical TCP (profile
 ``tool_frames``: flange link + offset) relative to the instance's top item in objects/<object>.yaml, for every
-instance of that type; go_to_point drives the tools back to them. The TCP comes from TF in the cell frame
-(go_to_point's ``cell_frame``). Jog the tools onto the object with the pad, then teach (pad ``teach`` button or
+instance of that type; move_gripper drives the tools back to them. The TCP comes from TF in the cell frame
+(move_gripper's ``cell_frame``). Jog the tools onto the object with the pad, then teach (pad ``teach`` button or
 the CLI).
 
     ros2 service call /taskweave/teach_point taskweave_interfaces/srv/TeachPoint "{name: bin_2, kind: location}"
@@ -45,7 +45,7 @@ class Teach(Node):
         super().__init__(kwargs.pop('node_name', 'teach'), **kwargs)
         self.declare_parameter('config_dir', '')
         self.declare_parameter('robot', '')
-        self.declare_parameter('cell_frame', '')  # default: go_to_point's cell_frame, else 'world'
+        self.declare_parameter('cell_frame', '')  # default: move_gripper's cell_frame, else 'world'
         self.config = ConfigStore(self.get_parameter('config_dir').value)
         self.robot = self.config.robot(self.get_parameter('robot').value)
         self.cell_frame = self.get_parameter('cell_frame').value or self._skill_cell_frame()
@@ -58,7 +58,7 @@ class Teach(Node):
 
     def _skill_cell_frame(self) -> str:
         try:
-            return self.config.skill_config('go_to_point').get('cell_frame', 'world')
+            return self.config.skill_config('move_gripper').get('cell_frame', 'world')
         except (ConfigError, KeyError):
             return 'world'
 

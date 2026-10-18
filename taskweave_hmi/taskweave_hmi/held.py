@@ -1,5 +1,5 @@
 """Held poses for the HMI Teach tab: where the robot holds an object of a type (robots/<robot>/held_poses.yaml),
-used by move_object ``pose: <name>``. No ROS dependency.
+used by move_object ``to: {pose: <name>}``. No ROS dependency.
 
 A held pose moves some joints first (e.g. the torso lift; the object moves with the arms), then the held object's
 origin in straight lines through the waypoints (base frame: x y z in m, roll pitch yaw in rad). It cannot be captured
@@ -14,7 +14,19 @@ from collections.abc import Mapping
 from taskweave_core.config import ConfigError, ConfigStore
 from taskweave_core.config.limits import joint_limits
 
-SKILL, ARG = 'move_object', 'pose'
+SKILL = 'move_object'
+
+
+def args(name: str) -> dict:
+    """The move_object args that take held pose ``name``."""
+    return {'to': {'pose': name}}
+
+
+def pose_of(step_args) -> str | None:
+    """The held pose a move_object step names (None: it names none, or a placeholder)."""
+    to = (step_args or {}).get('to')
+    pose = to.get('pose') if isinstance(to, Mapping) else None
+    return pose if isinstance(pose, str) and '{' not in pose else None
 
 
 class HeldError(ValueError):
@@ -31,8 +43,8 @@ def used_names(store: ConfigStore) -> dict[str, list[str]]:
         except ConfigError:
             continue
         for step in steps:
-            pose = (step.get('args') or {}).get(ARG) if step.get('skill') == SKILL else None
-            if isinstance(pose, str) and '{' not in pose and mission_name not in names.setdefault(pose, []):
+            pose = pose_of(step.get('args')) if step.get('skill') == SKILL else None
+            if pose is not None and mission_name not in names.setdefault(pose, []):
                 names[pose].append(mission_name)
     return names
 

@@ -9,7 +9,7 @@ Skills mark point arguments in their schema with ``"x-taskweave-point": "base_ta
 | "held_pose" | "held_object"``, at any depth (nested objects, oneOf variants, list items).
 Values that contain placeholders are only checked once their values are known (at step start): the skip is by path,
 so a placeholder may stand for a scalar, one vec3 component or a whole field. So are points on an object an earlier
-step of the plan puts down (an argument ``place_as: <name>``, e.g. gripper): it does not exist yet.
+step of the plan puts down (an argument ``place_as: <name>``, e.g. grip): it does not exist yet.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from jsonschema import Draft202012Validator
 
 from . import placeholders
 from .config import ConfigError, ConfigStore
+from .config.migrate_skills import removed_skill_message
 from .embodiment import check_grasp
 from .plan import Plan
 
@@ -82,6 +83,10 @@ def _plan_problems(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) 
         def add(message: str, path: list, where: str = where, label: str = '') -> None:
             problems.append((path, message, f'{where}: {label}{message}'))
 
+        removed = removed_skill_message(step.skill, step.args, str(store.root))
+        if removed:   # an old skill name: say how to migrate, whatever the catalog offers
+            add(removed, here + ['skill'])
+            continue
         if step.replan_from and step.replan_from not in ids:
             add(f'replan_from {step.replan_from!r} is not a step of this plan', here + ['replan_from'])
         configured = bool(_implementations(store, step.skill))

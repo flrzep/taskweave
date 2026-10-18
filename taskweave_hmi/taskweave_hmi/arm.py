@@ -2,7 +2,7 @@
 
 A position is relative to the robot (a named pose in ``robots/<robot>/poses.yaml``: hand targets in the base frame
 solved by IK, or joint values) or to an object type (a point in ``objects/<type>.yaml``: hand targets in the object's
-frame, e.g. a grasp). The files and the skills that use them (move_to_pose, go_to_point) stay as they are; this module
+frame, e.g. a grasp). The files and the skills that use them (move_joints, move_gripper) stay as they are; this module
 shows both the same way: each hand as x y z (m) and roll pitch yaw (rad) of its canonical TCP (z = approach,
 y = closing), plus joints (robot positions), elbow side and straight approach (object positions).
 
@@ -80,7 +80,8 @@ def overview(store: ConfigStore, robot_name: str, pose_args: set) -> dict:
         'joint_limits': {joint: [None if math.isinf(v) else v for v in bounds]
                          for joint, bounds in joint_limits(store, robot_name).items()},
         'elbow_sides': schemas.ELBOW_SIDES,
-        'approach_default': float(store.skill_params('go_to_point').get('approach_m', 0.0)),
+        'approach_default': float((store.skill_params('move_gripper').get('motion') or {})
+                                  .get('approach_m', 0.0)),
         'files': {'poses': store.display_path(store.robot_save_path(robot_name, 'poses.yaml')),
                   'objects': 'objects/<type>.yaml'},
     }

@@ -1,7 +1,8 @@
-# Cell pack example: skills/move_gripper.yaml (skill-api-spec 2.2). Replaces go_to_point.yaml; the old flat keys are
-# renamed: max_joint_speed -> speed.joint_rad_s, max_linear_speed -> speed.joint_linear_m_s, tcp_speed -> speed.tcp_m_s,
-# tcp_turn -> speed.tcp_rad_s, position_tolerance / stall_timeout_s / state_timeout_s -> tolerances.*,
-# lift_joint / lift_values -> torso_fallback, approach_m -> motion.approach_m.
+# skills/move_gripper.yaml (skill-api-spec 2.2). Replaces go_to_point.yaml and the tool-pose part of move_to_pose.yaml:
+# the old flat keys were renamed (taskweave config migrate-skills): max_joint_speed -> speed.joint_rad_s,
+# max_linear_speed -> speed.joint_linear_m_s, tcp_speed -> speed.tcp_m_s, tcp_turn -> speed.tcp_rad_s,
+# position_tolerance / stall_timeout_s / state_timeout_s -> tolerances.*, lift_joint / lift_values -> torso_fallback,
+# approach_m -> motion.approach_m.
 # The first implementation whose requires fits the robot is served (the same class twice: two arms, then one arm).
 implementations:
   - name: ik_planned            # IK for the target from where the robot stands, MoveIt-planned path

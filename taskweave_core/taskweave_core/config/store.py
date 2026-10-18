@@ -88,11 +88,12 @@ class ConfigStore:
     Placed objects (cell/objects.yaml) are the start state; what happens to them at run time (items taken off a stack,
     objects put down) is kept in <state dir>/objects.yaml and laid over them by object_instances()."""
 
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, check_schema: bool = True):
         self.root = Path(root).expanduser().resolve()
         if not self.root.is_dir():
             raise ConfigError(self.root, 'config directory does not exist')
-        packs.check_cell_schema(self.root)
+        if check_schema:    # False: the migrations read the cell pack of an older schema
+            packs.check_cell_schema(self.root)
         self._cache: dict[Path, Any] = {}
         self._lock = threading.Lock()
 

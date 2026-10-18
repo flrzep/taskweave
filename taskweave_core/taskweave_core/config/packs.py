@@ -26,7 +26,8 @@ from jsonschema import Draft202012Validator
 
 from . import schemas
 
-CELL_SCHEMA = 2         # cell pack layout this taskweave reads (1: one config directory with whole robot folders)
+CELL_SCHEMA = 3         # cell pack layout this taskweave reads (1: one config directory with whole robot folders,
+                        # 2: robot packs, old skills move_to_pose / go_to_point / gripper / old move_object)
 ROBOT_SCHEMA = 1        # robot pack layout this taskweave reads
 PACK_FILE = 'pack.yaml'
 ROBOT_PACKS_ENV = 'TASKWEAVE_ROBOT_PACKS'
@@ -75,8 +76,9 @@ def cell_schema(folder: Path) -> int:
 def check_cell_schema(folder: Path) -> None:
     version = cell_schema(folder)
     if version < CELL_SCHEMA:
+        command = 'migrate-skills' if version == 2 else 'migrate'   # 2 -> 3 is the skill migration (migrate_skills.py)
         raise _error(Path(folder) / PACK_FILE, f'cell pack schema {version}, this taskweave needs {CELL_SCHEMA}: '
-                                               f'run taskweave config migrate {folder}')
+                                               f'run taskweave config {command} {folder}')
     if version > CELL_SCHEMA:
         raise _error(Path(folder) / PACK_FILE, f'cell pack schema {version}, this taskweave reads schema '
                                                f'{CELL_SCHEMA}: update taskweave')

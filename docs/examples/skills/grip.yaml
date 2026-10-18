@@ -1,4 +1,4 @@
-# Cell pack example: skills/grip.yaml (skill-api-spec 1.5). Replaces gripper.yaml: max_joint_speed -> speed.joint_rad_s,
+# skills/grip.yaml (skill-api-spec 1.5). Replaces gripper.yaml: max_joint_speed -> speed.joint_rad_s,
 # position_tolerance / stall_timeout_s / state_timeout_s -> tolerances.*.
 implementations:
   - name: joint_targets

@@ -107,9 +107,13 @@ def test_missing_robot_file_names_the_places_searched(split):
 def test_schema_version_is_checked(tmp_path):
     shutil.copytree(FIXTURE, tmp_path / 'cell')
     (tmp_path / 'cell' / 'pack.yaml').unlink()
-    with pytest.raises(ConfigError, match='cell pack schema 1, this taskweave needs 2: run taskweave config migrate'):
+    with pytest.raises(ConfigError, match='cell pack schema 1, this taskweave needs 3: run taskweave config migrate '):
         ConfigStore(tmp_path / 'cell')
-    (tmp_path / 'cell' / 'pack.yaml').write_text('name: cell\nversion: 1\nschema_version: 3\n')
+    (tmp_path / 'cell' / 'pack.yaml').write_text('name: cell\nversion: 1\nschema_version: 2\n')
+    with pytest.raises(ConfigError, match='cell pack schema 2, this taskweave needs 3: run taskweave config '
+                                          'migrate-skills'):
+        ConfigStore(tmp_path / 'cell')
+    (tmp_path / 'cell' / 'pack.yaml').write_text('name: cell\nversion: 1\nschema_version: 4\n')
     with pytest.raises(ConfigError, match='update taskweave'):
         ConfigStore(tmp_path / 'cell')
 
@@ -160,7 +164,7 @@ def test_migration_splits_and_is_idempotent(old_config, tmp_path):
     assert store.robot_file(ROBOT, 'moveit/robot.urdf') == pack / 'moveit' / 'robot.urdf'
     again = []
     assert migrate(old_config, tmp_path / 'robot_packs', say=again.append) == 0
-    assert again == [f'{old_config.resolve()}: cell pack schema 2, nothing to do']
+    assert again == [f'{old_config.resolve()}: cell pack schema 3, nothing to do']
 
 
 def test_migration_removes_copies_and_keeps_differences(old_config, tmp_path, monkeypatch):
