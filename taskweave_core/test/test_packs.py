@@ -225,3 +225,121 @@ def test_migration_does_not_delete_robot_pack_files_through_a_linked_robot_folde
     assert migrate(old_config, say=lines.append) == 0
     assert {str(p.relative_to(pack)): p.read_bytes() for p in pack.rglob('*') if p.is_file()} == before
     assert any(line.startswith('skip') and 'robot pack' in line for line in lines)
+
+
+# ---- F1: migrate removes a unit completely or not at all; a half-removed unit is recognised on the rerun ----
+MOVEIT = {'robot.urdf': '<robot name="demo_bot"/>\n', 'a.srdf': 'a\n', 'b.yaml': 'b: 1\n', 'meshes/m.stl': 'solid\n'}
+
+
+@pytest.fixture
+def same_as_pack(old_config, tmp_path, monkeypatch):
+    """The cell's robot files all equal the installed robot pack's; moveit/ has a meshes/ subfolder."""
+    folder = old_config / 'robots' / ROBOT
+    for name, text in MOVEIT.items():
+        (folder / 'moveit' / name).parent.mkdir(exist_ok=True)
+        (folder / 'moveit' / name).write_text(text)
+    installed = robot_pack(tmp_path / 'installed', files={name: (folder / name).read_text()
+                                                          for name in ('profile.yaml', 'embodiment.yaml', 'poses.yaml')})
+    shutil.copytree(folder / 'moveit', installed / 'moveit')
+    monkeypatch.setattr(packs, 'installed_location', lambda: installed.parent)
+    return old_config
+
+
+def tree(folder: Path) -> list[str]:
+    return sorted(str(p.relative_to(folder)) for p in folder.rglob('*'))
+
+
+def test_migration_removes_nothing_of_a_unit_it_cannot_remove_completely(same_as_pack):
+    moveit = same_as_pack / 'robots' / ROBOT / 'moveit'
+    before = tree(moveit)
+    (moveit / 'meshes').chmod(0o555)
+    try:
+        if os.access(moveit / 'meshes', os.W_OK):
+            pytest.skip('permissions are not enforced here (root?)')
+        lines = []
+        assert migrate(same_as_pack, say=lines.append) == 1
+        assert tree(moveit) == before                          # not even the 3 files that could go
+        assert any(line.startswith('cannot remove ') and 'meshes' in line and line.endswith(
+            f'(unit robots/{ROBOT}/moveit/ left as it is; fix permissions or remove it as its owner)')
+            for line in lines)
+        assert not (same_as_pack / 'robots' / ROBOT / 'profile.yaml').exists()    # the other units went
+        assert not (same_as_pack / 'pack.yaml').exists()
+        assert any('pack.yaml not written' in line and 'moveit' in line for line in lines)
+    finally:
+        (moveit / 'meshes').chmod(0o755)
+    again = []
+    assert migrate(same_as_pack, say=again.append) == 0         # fixed permissions: the rerun finishes the job
+    assert not moveit.exists() and (same_as_pack / 'pack.yaml').is_file()
+
+
+def test_migration_blocked_unit_with_a_stubbed_permission_check(same_as_pack, monkeypatch):
+    """Same as above where chmod cannot block (root): the check is one function, forced to say no."""
+    from taskweave_core.config import migrate as module
+
+    moveit = same_as_pack / 'robots' / ROBOT / 'moveit'
+    before = tree(moveit)
+    real = module._entry_blocker
+    monkeypatch.setattr(module, '_entry_blocker',
+                        lambda path: 'Permission denied' if path.name == 'meshes' else real(path))
+    lines = []
+    assert migrate(same_as_pack, say=lines.append) == 1
+    assert tree(moveit) == before
+    assert f'cannot remove {moveit / "meshes"}: Permission denied (unit robots/{ROBOT}/moveit/ left as it is; ' \
+           'fix permissions or remove it as its owner)' in lines
+    assert not (same_as_pack / 'robots' / ROBOT / 'profile.yaml').exists()
+    assert not (same_as_pack / 'pack.yaml').exists() and any('pack.yaml not written' in line for line in lines)
+    monkeypatch.setattr(module, '_entry_blocker', real)
+    assert migrate(same_as_pack, say=lambda line: None) == 0
+    assert not moveit.exists() and (same_as_pack / 'pack.yaml').is_file()
+
+
+def test_migration_dry_run_reports_what_it_cannot_remove(same_as_pack, monkeypatch):
+    from taskweave_core.config import migrate as module
+
+    monkeypatch.setattr(module, '_entry_blocker', lambda path: 'Permission denied' if path.name == 'meshes' else None)
+    lines = []
+    assert migrate(same_as_pack, dry_run=True, say=lines.append) == 1
+    assert any(line.startswith('cannot remove ') for line in lines)
+
+
+def test_migration_rerun_finishes_a_half_removed_unit(same_as_pack):
+    moveit = same_as_pack / 'robots' / ROBOT / 'moveit'
+    for name in ('robot.urdf', 'a.srdf', 'b.yaml'):            # what the incident left behind
+        (moveit / name).unlink()
+    lines = []
+    assert migrate(same_as_pack, say=lines.append) == 0
+    assert not moveit.exists()
+    assert any('robots/demo_bot/moveit/' in line and 'partly removed' in line for line in lines)
+    assert not any('cell override' in line and 'moveit' in line for line in lines)
+    assert (same_as_pack / 'pack.yaml').is_file()
+
+
+def test_migration_keeps_a_subset_unit_whose_files_differ(same_as_pack):
+    moveit = same_as_pack / 'robots' / ROBOT / 'moveit'
+    (moveit / 'a.srdf').unlink()
+    (moveit / 'b.yaml').write_text('b: 2\n')
+    lines = []
+    assert migrate(same_as_pack, say=lines.append) == 0
+    assert (moveit / 'b.yaml').is_file()
+    assert any('keep    robots/demo_bot/moveit/  as a cell override' in line for line in lines)
+
+
+def test_migration_keeps_a_unit_with_a_file_the_pack_lacks(same_as_pack):
+    moveit = same_as_pack / 'robots' / ROBOT / 'moveit'
+    (moveit / 'extra.yaml').write_text('x: 1\n')
+    assert migrate(same_as_pack, say=lambda line: None) == 0
+    assert (moveit / 'extra.yaml').is_file()
+
+
+def test_slim_does_not_remove_a_file_it_cannot_remove(same_as_pack, monkeypatch):
+    from taskweave_core.config import migrate as module
+    from taskweave_core.config.slim import slim
+
+    assert migrate(same_as_pack, say=lambda line: None) == 0
+    profile = same_as_pack / 'robots' / ROBOT / 'profile.yaml'
+    shutil.copy(ConfigStore(same_as_pack).robot_file(ROBOT, 'profile.yaml'), profile)   # an old whole-file copy
+    monkeypatch.setattr(module, '_entry_blocker', lambda path: 'Permission denied')
+    lines = []
+    assert slim(same_as_pack, say=lines.append) == 1
+    assert profile.is_file()
+    assert any(line.startswith('cannot remove ') and 'profile.yaml' in line for line in lines)

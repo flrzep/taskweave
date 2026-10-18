@@ -79,6 +79,13 @@ Every command below runs on the GPU host (`ssh root@100.97.65.111`) unless it sa
    ```
 
    Run the migration as user robot (uid 1234) so new files keep the group-writable ownership.
+   A unit (a file, or a folder such as `moveit/`) is removed completely or not at all: the migration first checks
+   that every entry in it can be removed. If not (a root-owned `meshes/` subfolder, say) it prints `cannot remove
+   <path>: <reason> (unit ... left as it is; ...)`, leaves that unit alone, finishes the other units, does not write
+   pack.yaml and exits 1. Fix the permissions (or remove the unit as its owner) and run it again. A unit that an
+   interrupted run left half removed (some of the pack's files left, all identical) is recognised as "same as the pack,
+   partly removed" and removed on the rerun, not kept as a cell override. `config slim` checks the same before it
+   removes a whole file.
 4. **Check** in frame-ros:
 
    ```bash

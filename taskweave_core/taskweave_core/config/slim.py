@@ -14,11 +14,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import overlay, packs
+from .migrate import cannot_remove, removal_blocker
 from .store import ConfigError, ConfigStore
 
 
 def slim(cell: str | Path, dry_run: bool = False, say=print) -> int:
-    """Slim every whole-file override in the cell pack. Returns an exit code (2: not a cell pack, 1: unreadable file)."""
+    """Slim every whole-file override in the cell pack. Returns an exit code (2: not a cell pack, 1: unreadable file or one that cannot be removed)."""
     cell = Path(cell).expanduser().resolve()
     if not cell.is_dir():
         say(f'{cell}: no such directory')
@@ -48,6 +49,11 @@ def slim(cell: str | Path, dry_run: bool = False, say=print) -> int:
             changed = overlay.delta(pack, data, overlay.DEPTH.get(file), deleted=False)
             dropped = overlay.same_paths(pack, data, overlay.DEPTH.get(file))
             if not changed:
+                blocker = removal_blocker(path)
+                if blocker:
+                    cannot_remove(blocker, label, say)
+                    code = 1
+                    continue
                 say(f'{do}remove  {label}  (same as {base})')
                 if not dry_run:
                     path.unlink()
