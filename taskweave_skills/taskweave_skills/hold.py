@@ -56,6 +56,7 @@ class HoldState:
         self.lock = threading.Lock()
         self.reached: dict[str, dict] = {}   # hand -> {point, instance, object_in_base}
         self.holds: dict[str, dict] = {}     # object -> {object, point, hands, tcp_in_object, object_in_base}
+        self._first_link: str | None = None  # links[0] of the last published hold (the sim's magic grasp sits there)
         self.on_reset: list = []             # called after a simulator reset (e.g. clear the object state)
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.publisher = node.create_publisher(String, TOPIC, latched)
@@ -261,4 +262,9 @@ class HoldState:
                     'links': [self.tool_frames[t]['link'] for t in first['hands']],
                     'holds': [{'object': h['object'], 'point': h['point'], 'hands': h['hands'],
                                'links': [self.tool_frames[t]['link'] for t in h['hands']]} for h in holds]}
+        first_link = data['links'][0] if data and data['links'] else None
+        if self._first_link is not None and first_link is not None and first_link != self._first_link:
+            # the sim attaches the object to links[0] and ignores payloads while attached: release it first
+            self.publisher.publish(self.String(data=json.dumps({})))
+        self._first_link = first_link
         self.publisher.publish(self.String(data=json.dumps(data)))

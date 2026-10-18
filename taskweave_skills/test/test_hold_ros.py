@@ -157,3 +157,31 @@ def test_leaving_a_point_and_the_old_reached_calls(hold):
     assert state.held()['hands'] == ['left'] and state.hand_holds == {'left': 'box'}      # the old attribute
     state.hold = None
     assert state.held() is None
+
+
+def published(state):
+    """Spy on what the hold state publishes: a list of payload dicts, in order."""
+    payloads = []
+    real = state.publisher.publish
+    state.publisher.publish = lambda msg: (payloads.append(json.loads(msg.data)), real(msg))[1]
+    return payloads
+
+
+def test_opening_the_first_hand_of_a_hold_republishes_via_released(hold):
+    """The sim's magic grasp stays on links[0] while attached: a changed first link needs {} first (review I1)."""
+    state, _seen = hold
+    at_points(state, ('left', 'crate_1/rails', 'crate_1'), ('right', 'crate_1/rails', 'crate_1'))
+    state.close_hands(['left', 'right'])
+    payloads = published(state)
+    state.open_hands(['left'])
+    assert payloads[0] == {}
+    assert len(payloads) == 2 and payloads[1]['tools'] == ['right'] and payloads[1]['links'] == ['right_link7']
+
+
+def test_an_unchanged_first_link_publishes_no_released_in_between(hold):
+    state, _seen = hold
+    at_points(state, ('left', 'crate_1/rails', 'crate_1'), ('right', 'crate_1/rails', 'crate_1'))
+    state.close_hands(['left', 'right'])
+    payloads = published(state)
+    state.open_hands(['right'])
+    assert len(payloads) == 1 and payloads[0]['tools'] == ['left']
