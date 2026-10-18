@@ -2,8 +2,8 @@
 # ones the direct joint moves use (taskweave joint skills: 1.2 rad/s, lift 0.25 m/s; 15 Oct, was 0.6 and 0.1); the URDF
 # limits (2.0 rad/s, 0.5 m/s) are the ceiling.
 joint_limits:
-  right_gripper_joint: {has_velocity_limits: true, max_velocity: 0.6, has_acceleration_limits: true, max_acceleration: 1.5}
-  left_gripper_joint: {has_velocity_limits: true, max_velocity: 0.6, has_acceleration_limits: true, max_acceleration: 1.5}
+  right_gripper_joint: {has_velocity_limits: true, max_velocity: 1.5, has_acceleration_limits: true, max_acceleration: 1.5}
+  left_gripper_joint: {has_velocity_limits: true, max_velocity: 1.5, has_acceleration_limits: true, max_acceleration: 1.5}
   left_joint1: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
   left_joint2: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
   left_joint3: {has_velocity_limits: true, max_velocity: 1.2, has_acceleration_limits: true, max_acceleration: 3.0}
