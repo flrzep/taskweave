@@ -46,7 +46,7 @@ def test_points_of_a_stack_refer_to_its_top_item():
 
 
 def test_a_taught_tcp_comes_back_as_the_same_target():
-    """ObjectInstance.relative_pose (teaching) is the inverse of point_targets (go_to_point)."""
+    """ObjectInstance.relative_pose (teaching) is the inverse of point_targets (move_gripper)."""
     from taskweave_core.config.poses import quaternion_from_rpy
 
     stack = ObjectInstance('stack_1', 'box', Pose2D(8.8, 1.1, 1.5708), z=0.1, stack_count=8, stack_pitch=0.04)

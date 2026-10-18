@@ -84,14 +84,11 @@ def test_the_schemas_pass_the_oneof_rule_and_carry_the_robots_hands(system):
     assert validate_args({'to': {'by': [0, 0, 1], 'at': [0, 0, 1]}}, skill.args_schema, store, robot)   # ambiguous
 
 
-def test_the_old_move_object_is_still_there_under_the_same_name():
-    """Both classes are the skill ``move_object``; the cell's skill yaml names the implementation (the switch is a yaml
-    edit, not a rename)."""
-    from taskweave_skills import joints, object_motion
+def test_move_object_args_are_the_new_ones_only():
+    from taskweave_skills import object_motion
 
-    assert joints.MoveObject.name == object_motion.MoveObject.name == 'move_object'
-    assert 'by' in joints.MoveObject.args_schema['properties'] and 'required' not in joints.MoveObject.args_schema
-    assert object_motion.MoveObject.args_schema['required'] == ['to']
+    assert object_motion.MoveObject.name == 'move_object' and object_motion.MoveObject.args_schema['required'] == ['to']
+    assert 'by' not in object_motion.MoveObject.args_schema['properties']
 
 
 # ---- targets x modes --------------------------------------------------------------------------------------------

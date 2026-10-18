@@ -15,10 +15,10 @@ named held pose of the robot for this kind of object (``pose``), or a contact of
 toward a side along the arms' null space. A held object does not move. It fails before moving when the swing would stop
 further than ``tolerance_deg`` from the side.
 
-Both reuse the old move_object's internals (_onto, _swing_plan, the linear and free move paths of the joint skills) and
-the motion options of gripper_motion (skill yaml, robot override, step: ``taskweave_core.motion``). Until the switch
-of the live missions the old ``joints:MoveObject`` stays the implementation of ``move_object`` in the cell's skill yaml;
-this module's classes are what ``skills/move_object.yaml`` and ``skills/set_posture.yaml`` name afterwards.
+Both reuse the helpers of the joint skills (_onto, _swing_plan, the linear and free move paths, joints.py) and
+the motion options of gripper_motion (skill yaml, robot override, step: ``taskweave_core.motion``). The old
+move_object (flat args by / at / pose / to + contact / elbow) is gone: ``taskweave config migrate-skills``
+rewrites missions and skills/move_object.yaml, set_posture.yaml is new.
 """
 
 from __future__ import annotations

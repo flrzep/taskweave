@@ -8,6 +8,12 @@ Named poses: robots/<robot>/poses.yaml, ``<pose>: {<joint>: <value>, ...}`` (rad
 Moves are streamed as position targets: a straight joint-space move, or, if the profile has a ``planning`` section,
 a collision-free trajectory from MoveIt (motion_plan.py). A ros2_control implementation can later serve the same
 skill names (see skills/<skill>.yaml implementations) without changing missions.
+
+This module holds the shared machinery, not skills: the joint interface, the parameters, the move playback
+(``_JointSkill``) and the bases of move_joints, move_gripper, move_object / set_posture and grip (``_PoseMotion``,
+``_PointMotion``, ``_ObjectMotion``, ``_FingerMotion``: IK, planned or straight paths, the approach, the elbow
+swing plan, the placed-object record). The old skills that lived here (move_to_pose, go_to_point, gripper and the
+old move_object) were removed with the migration to the new skill model (taskweave config migrate-skills).
 """
 
 from __future__ import annotations

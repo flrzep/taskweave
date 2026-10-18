@@ -11,7 +11,7 @@ from taskweave_core import cli, smoke
 
 
 def episode(kind, step_id, time, cycle=1, attempt=1, plan_id='frame_cycle-0001', **extra):
-    skill = {'s1': 'navigate_to', 's2': 'move_to_pose', 's3': 'go_to_point'}.get(step_id, 'wait')
+    skill = {'s1': 'navigate_to', 's2': 'move_joints', 's3': 'move_gripper'}.get(step_id, 'wait')
     return {'event': kind, 'time': time, 'plan_id': plan_id, 'cycle': cycle, 'step_id': step_id, 'skill': skill,
             'instruction': f'do {step_id}', 'args': {}, 'attempt': attempt, **extra}
 
@@ -62,9 +62,9 @@ def test_step_results_skip_later_cycles_and_unfinished_starts():
 def ref_run(**changes):
     steps = [{'cycle': 1, 'step_id': 's1', 'skill': 'navigate_to', 'instruction': 'drive', 'outcome': 'SUCCEEDED',
               'duration_s': 12.5, 'max_error': None, 'attempts': 1, 'message': ''},
-             {'cycle': 1, 'step_id': 's2', 'skill': 'move_to_pose', 'instruction': 'arms up', 'outcome': 'SUCCEEDED',
+             {'cycle': 1, 'step_id': 's2', 'skill': 'move_joints', 'instruction': 'arms up', 'outcome': 'SUCCEEDED',
               'duration_s': 0.8, 'max_error': 0.005, 'attempts': 1, 'message': ''},
-             {'cycle': 1, 'step_id': 's3', 'skill': 'go_to_point', 'instruction': 'reach', 'outcome': 'SUCCEEDED',
+             {'cycle': 1, 'step_id': 's3', 'skill': 'move_gripper', 'instruction': 'reach', 'outcome': 'SUCCEEDED',
               'duration_s': 4.0, 'max_error': 0.002, 'attempts': 1, 'message': ''}]
     for step_id, values in changes.items():
         next(s for s in steps if s['step_id'] == step_id).update(values)

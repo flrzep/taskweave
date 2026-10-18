@@ -1,4 +1,4 @@
-"""instance_point: a point on one placed object (<instance>/<point>), as go_to_point needs it."""
+"""instance_point: a point on one placed object (<instance>/<point>), as move_gripper needs it."""
 
 from taskweave_core.config import ConfigStore
 from taskweave_core.validation import check_point

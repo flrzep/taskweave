@@ -5,7 +5,9 @@ schema shipped with `taskweave_core` when it is loaded; errors name the file, th
 
 ```
 config/                  cell pack: everything about one cell
-  pack.yaml              name, version, schema_version (2); without it: run `taskweave config migrate config/`
+  pack.yaml              name, version, schema_version (3); without it: run `taskweave config migrate config/` (schema 2: `taskweave config
+                         migrate-skills config/`, the old skills move_to_pose, go_to_point, gripper and the old
+                         move_object become move_joints, move_gripper, grip, move_object and set_posture)
   system.yaml            optional robot_packs: [paths relative to the cell pack]
   cell/
     layout.yaml          fixtures and zones of the work cell (application-specific content)
@@ -118,7 +120,7 @@ Point references: `stance:<instance>[/<variant>]` (where this robot stands at a 
 or a bare name (cell location),
 `<object>.<point>` (a point of an object type) or `<instance>/<point>` (that point on one placed object). A skill
 declares which arguments are points in its argument schema with `"x-taskweave-point": "base_target"`, `"object_point"`
-(either form), `"instance_point"` (only `<instance>/<point>`, e.g. go_to_point) or `"instance_contact"`
+(either form), `"instance_point"` (only `<instance>/<point>`, e.g. move_gripper) or `"instance_contact"`
 (`<instance>/<contact>`, e.g. move_object `to`), so missing points are reported before anything moves.
 
 Contacts (`contacts:` in `objects/<object>.yaml`, `{xyz, rpy}` relative to the object) are frames where one object

@@ -1,4 +1,4 @@
-"""move_to_pose and gripper against a small joint simulator (targets in, states out)."""
+"""move_joints and grip against a small joint simulator (targets in, states out)."""
 
 import json
 import math
@@ -64,7 +64,7 @@ def system(tmp_path):
     sim = JointSim()
     server = SkillServer(parameter_overrides=[
         Parameter('config_dir', value=str(config)), Parameter('robot', value='arm_bot'),
-        Parameter('skills', value=['move_to_pose', 'gripper'])])
+        Parameter('skills', value=['move_joints', 'grip'])])
     client = rclpy.create_node('test_client')
     executor = MultiThreadedExecutor(num_threads=8)
     for node in (sim, server, client):
@@ -98,7 +98,7 @@ def test_plan_duration_uses_the_slowest_joint():
 
 
 def test_a_blocked_move_swings_the_elbows_first_then_goes_straight(tmp_path):
-    """move_to_pose / go_to_point to an IK goal with the elbows on the other side: the straight joint move is blocked
+    """move_joints / move_gripper to an IK goal with the elbows on the other side: the straight joint move is blocked
     (the hands would swing through each other) and a planner's path wanders, so the elbows swing over first, the hands
     staying, then the arms move straight to the goal (instead of planning), if that is free."""
     from types import SimpleNamespace
@@ -109,7 +109,7 @@ def test_a_blocked_move_swings_the_elbows_first_then_goes_straight(tmp_path):
 
     from taskweave_skills.cartesian import elbow_deviation_of, elbow_swing_path
     from taskweave_skills.chain import Chain
-    from taskweave_skills.joints import MoveToPose
+    from taskweave_skills.joints import _PoseMotion
 
     path = tmp_path / 'arm.urdf'
     path.write_text(URDF)
@@ -125,8 +125,8 @@ def test_a_blocked_move_swings_the_elbows_first_then_goes_straight(tmp_path):
         blocked_from.append(start)
         return elbow_deviation_of(chain, start, 'down') < math.radians(120)
 
-    skill = MoveToPose.__new__(MoveToPose)
-    skill.ik, skill.p, skill.name = ik, Params(max_joint_speed=1.0, elbow_tolerance_deg=20.0), 'move_to_pose'
+    skill = _PoseMotion.__new__(_PoseMotion)
+    skill.ik, skill.p, skill.name = ik, Params(max_joint_speed=1.0, elbow_tolerance_deg=20.0), 'move_joints'
     skill.planner = SimpleNamespace(free=free)
     logged = []
     skill.node = SimpleNamespace(get_logger=lambda: SimpleNamespace(info=logged.append))
@@ -146,42 +146,6 @@ def test_a_blocked_move_swings_the_elbows_first_then_goes_straight(tmp_path):
     assert 'the next step would collide' in logged[-1]
 
 
-def test_an_elbow_swing_that_stops_short_fails_before_moving(tmp_path):
-    """move_object elbow: elbows that would end further than elbow_tolerance_deg from the side fail the step (where they
-    stop and why), instead of a partial swing reported as success."""
-    from types import SimpleNamespace
-
-    from test_cartesian import ChainIk
-    from test_chain import ELBOW, NAMES, START, URDF
-
-    from taskweave_skills.chain import Chain
-    from taskweave_skills.joints import MoveObject
-
-    path = tmp_path / 'arm.urdf'
-    path.write_text(URDF)
-    ik = ChainIk(Chain.from_urdf(path, 'base', 'flange', elbow=ELBOW), NAMES)
-    ik.joint_pattern = 'j[1-7]'
-    moved = []
-    skill = MoveObject.__new__(MoveObject)
-    skill.ik, skill.p = ik, Params(max_joint_speed=1.0, elbow_tolerance_deg=20.0)
-    skill.joints = SimpleNamespace(start=lambda max_age, tolerance: dict(START))
-    skill._move = lambda ctx, goal, label, path=None: moved.append(goal) or (None, goal)
-    skill._check_hands = lambda goals, label: None
-    ctx = SimpleNamespace(should_stop=False, feedback=lambda fraction, text: None)
-    hold = {'tools': ['arm'], 'object': 'box', 'object_in_base': None, 'tcp_in_object': {}}
-    result = skill._swing_elbows(ctx, hold, 'down')                          # the wrist reaches its limit halfway
-    assert result.outcome.name == 'FAILED' and not moved
-    assert result.message == ('elbows of arm down: the elbows would stop more than 20 deg off down: arm 173 -> 53 deg '
-                              'off (j5 at its limit); not moved')
-    ik.valid = lambda joints, group: False                                   # every step collides
-    result = skill._swing_elbows(ctx, hold, 'out')
-    assert result.outcome.name == 'FAILED' and not moved and 'the next step would collide' in result.message
-    ik.valid = lambda joints, group: True
-    result = skill._swing_elbows(ctx, hold, 'out')
-    assert result.outcome.name == 'SUCCEEDED' and len(moved) == 1, result.message
-    assert result.message == 'elbows of arm out: arm 83 -> 6 deg off out'
-
-
 def test_the_start_of_a_move_is_the_last_goal_while_the_joints_are_within_tolerance():
     """Joint states settle with noise; IK, planning and paths start from the goal the last move reached, so identical
     runs start from identical joints."""
@@ -199,7 +163,7 @@ def test_the_start_of_a_move_is_the_last_goal_while_the_joints_are_within_tolera
 
 def test_move_to_named_pose(system):
     sim, client = system
-    result = run(client, 'move_to_pose', {'pose': 'ready'})
+    result = run(client, 'move_joints', {'pose': 'ready'})
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     assert sim.position['j1'] == pytest.approx(1.0, abs=0.02)
     assert sim.position['lift'] == pytest.approx(0.2, abs=0.02)
@@ -208,61 +172,67 @@ def test_move_to_named_pose(system):
 
 def test_unknown_pose_is_rejected(system):
     sim, client = system
-    result = run(client, 'move_to_pose', {'pose': 'dance'})
+    result = run(client, 'move_joints', {'pose': 'dance'})
     assert result.outcome == RunSkill.Result.REJECTED and "unknown pose 'dance'" in result.message
     assert sim.position['j1'] == 0.0
 
 
 def test_unreachable_pose_fails_and_names_the_joint(system):
     _, client = system
-    result = run(client, 'move_to_pose', {'pose': 'beyond_limit'})
+    result = run(client, 'move_joints', {'pose': 'beyond_limit'})
     assert result.outcome == RunSkill.Result.FAILED and 'j1' in result.message
 
 
-def test_gripper_close_open_and_holding(system):
+def test_a_pose_that_places_tools_is_refused_by_move_joints(system):
     sim, client = system
-    result = run(client, 'gripper', {'side': 'left', 'action': 'close'})
+    result = run(client, 'move_joints', {'pose': 'reach'})     # arm_bot's reach has a tool target: move_gripper's
+    assert result.outcome == RunSkill.Result.REJECTED and 'places tools' in result.message
+    assert sim.position['lift'] == 0.0
+
+
+def test_grip_close_open_and_holding(system):
+    sim, client = system
+    result = run(client, 'grip', {'hands': ['left'], 'action': 'close'})
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     assert json.loads(result.data_json)['holding'] == {'left': False}
-    assert run(client, 'gripper', {'side': 'left', 'action': 'open'}).outcome == RunSkill.Result.SUCCEEDED
+    assert run(client, 'grip', {'hands': ['left'], 'action': 'open'}).outcome == RunSkill.Result.SUCCEEDED
     sim.object_at = 0.4  # an object between the fingers
-    result = run(client, 'gripper', {'side': 'left', 'action': 'close'})
+    result = run(client, 'grip', {'hands': ['left'], 'action': 'close'})
     data = json.loads(result.data_json)
     assert result.outcome == RunSkill.Result.SUCCEEDED and data['holding'] == {'left': True}
     assert data['world_state'] == {'left_gripper': 'holding'}
 
 
-def test_gripper_close_on_a_creeping_object_stops_soon(system):
+def test_grip_close_on_a_creeping_object_stops_soon(system):
     sim, client = system
     sim.object_at, sim.creep = 0.6, 0.02  # blocked, giving way slower than stall_speed: no progress either
     start = time.monotonic()
-    result = run(client, 'gripper', {'side': 'left', 'action': 'close'})
+    result = run(client, 'grip', {'hands': ['left'], 'action': 'close'})
     took = time.monotonic() - start
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     assert json.loads(result.data_json)['holding'] == {'left': True}
     assert took < 4.0 and sim.position['grip'] > 0.5  # planned 0.5 s + stall 1 s, not 30 s of creeping
 
 
-def test_while_holding_a_pose_with_arm_joints_is_refused(system):
-    from taskweave_skills.hold import HoldState
-
-    sim, client = system
-    holds = list(HoldState._instances.values())  # the server's, and those of earlier tests' servers
-    for hold in holds:
-        hold.hold = {'object': 'box', 'point': 'box/top', 'tools': ['left'], 'object_in_base': None,
-                     'tcp_in_object': {}}
-    try:  # arm_bot has no ik section: every joint counts as an arm joint
-        result = run(client, 'move_to_pose', {'pose': 'ready'})
-    finally:
-        for hold in holds:
-            hold.hold = None
-    assert result.outcome == RunSkill.Result.REJECTED and 'holding box' in result.message
-    assert sim.position['j1'] == 0.0
-
-
-def test_gripper_sides_are_the_robots_grippers(system):
+def test_grip_hands_are_the_robots_grippers(system):
     _, client = system
-    result = run(client, 'gripper', {'side': 'right', 'action': 'close'})  # arm_bot has only a left gripper
-    assert result.outcome == RunSkill.Result.REJECTED and 'left' in result.message
-    result = run(client, 'gripper', {'side': 'both', 'action': 'close'})
+    result = run(client, 'grip', {'hands': ['right'], 'action': 'close'})  # arm_bot has only a left gripper
+    assert result.outcome == RunSkill.Result.REJECTED and 'args.hands' in result.message
+    result = run(client, 'grip', {'hands': 'all', 'action': 'close'})
     assert result.outcome == RunSkill.Result.SUCCEEDED and json.loads(result.data_json)['holding'] == {'left': False}
+
+
+def test_the_old_skills_are_not_in_joints_py_any_more():
+    """The skills of joints.py were replaced by move_joints, move_gripper, grip, move_object and set_posture; what is
+    left there are their bases (no name, no schema, no execute) and the old class names fail with the way out."""
+    from taskweave_core.skill import Skill
+    from taskweave_core.skill_server import load_skill_class
+    from taskweave_skills import joints
+
+    assert [c.__name__ for c in vars(joints).values()
+            if isinstance(c, type) and issubclass(c, Skill) and c is not Skill and (c.name or 'execute' in vars(c))] == []
+    for old in ('MoveToPose', 'GoToPoint', 'MoveObject', 'Gripper'):
+        assert not hasattr(joints, old)
+        with pytest.raises(ValueError, match='was removed.*taskweave config migrate-skills'):
+            load_skill_class(f'taskweave_skills.joints:{old}')
+    assert load_skill_class('taskweave_skills.joint_motion:MoveJoints').name == 'move_joints'

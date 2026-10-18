@@ -113,9 +113,10 @@ def test_schema_version_is_checked(tmp_path):
     with pytest.raises(ConfigError, match='cell pack schema 2, this taskweave needs 3: run taskweave config '
                                           'migrate-skills'):
         ConfigStore(tmp_path / 'cell')
-    (tmp_path / 'cell' / 'pack.yaml').write_text('name: cell\nversion: 1\nschema_version: 4\n')
+    shutil.copytree(tmp_path / 'cell', tmp_path / 'newer')   # (a pack.yaml is read again only when its mtime changes)
+    (tmp_path / 'newer' / 'pack.yaml').write_text('name: cell\nversion: 1\nschema_version: 4\n')
     with pytest.raises(ConfigError, match='update taskweave'):
-        ConfigStore(tmp_path / 'cell')
+        ConfigStore(tmp_path / 'newer')
 
 
 def test_robot_pack_needs_pack_yaml_and_its_schema(split):

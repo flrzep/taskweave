@@ -20,7 +20,7 @@ loop: once
 steps:
 - instruction: Carry it
   skill: move_object
-  args: {pose: carry}
+  args: {to: {pose: carry}}
 """
 
 
@@ -70,3 +70,10 @@ def test_an_unused_held_pose_can_be_deleted(store):
     held.save(store, ROBOT, 'box', 'spare', {'path': [{'xyz': [1, 0, 0], 'rpy': [0, 0, 0]}]})
     held.delete(store, ROBOT, 'box', 'spare')
     assert [p['name'] for p in held.overview(ConfigStore(store.root), ROBOT)] == ['carry']
+
+
+def test_the_held_pose_a_step_names_is_read_from_to_pose_and_the_run_args_nest_it():
+    assert held.args('carry') == {'to': {'pose': 'carry'}}
+    assert held.pose_of({'to': {'pose': 'carry'}}) == 'carry'
+    assert held.pose_of({'to': {'by': [0, 0, 1]}}) is None and held.pose_of({'to': {'pose': '{p}'}}) is None
+    assert held.pose_of({}) is None and held.pose_of(None) is None

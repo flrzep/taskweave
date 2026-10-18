@@ -31,6 +31,8 @@ grasp_ready:                                    # joints and tools
 """
 PROFILE_JOINTS = """\
 joints:
+  command: /joint_command
+  state: /joint_states
   groups: {torso: [lift], left_arm: [j1, j2]}
 """
 MISSION = """\

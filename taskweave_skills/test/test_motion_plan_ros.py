@@ -1,4 +1,4 @@
-"""move_to_pose with a motion planner: follows the planned trajectory, fails when there is no path."""
+"""move_joints with a motion planner: follows the planned trajectory, fails when there is no path."""
 
 import shutil
 import threading
@@ -84,7 +84,7 @@ def system(tmp_path):
     sim, planner = JointSim(), FakePlanner()
     server = SkillServer(parameter_overrides=[
         Parameter('config_dir', value=str(config)), Parameter('robot', value='arm_bot'),
-        Parameter('skills', value=['move_to_pose'])])
+        Parameter('skills', value=['move_joints'])])
     client = rclpy.create_node('test_client')
     seen = {'j1_min': 0.0}
     client.create_subscription(JointState, '/arm/joint_states', lambda m: seen.update(
@@ -111,7 +111,7 @@ def test_trajectory_interpolates_between_points():
 
 def test_move_follows_the_planned_path(system):
     sim, planner, client, seen = system
-    result = run(client, 'move_to_pose', {'pose': 'ready'})
+    result = run(client, 'move_joints', {'pose': 'ready'})
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     assert sim.position['j1'] == pytest.approx(1.0, abs=0.02)
     assert seen['j1_min'] < -0.3  # went through the planner's detour, not straight
@@ -125,7 +125,7 @@ def test_move_follows_the_planned_path(system):
 def test_no_path_fails_without_moving(system):
     sim, planner, client, _ = system
     planner.error = -12
-    result = run(client, 'move_to_pose', {'pose': 'ready'})
+    result = run(client, 'move_joints', {'pose': 'ready'})
     assert result.outcome == RunSkill.Result.FAILED and 'goal in collision' in result.message
     assert sim.position['j1'] == 0.0
 
@@ -133,7 +133,7 @@ def test_no_path_fails_without_moving(system):
 def test_a_failed_plan_is_planned_again(system):
     sim, planner, client, _ = system
     planner.fail_first = 1  # e.g. the path failed MoveIt's final validation
-    result = run(client, 'move_to_pose', {'pose': 'ready'})
+    result = run(client, 'move_joints', {'pose': 'ready'})
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     assert len(planner.requests) == 2 and sim.position['j1'] == pytest.approx(1.0, abs=0.02)
 
@@ -150,7 +150,7 @@ def test_joints_outside_the_goal_are_held_where_they_are(system):
 def test_a_free_straight_move_is_not_planned(system):
     sim, planner, client, seen = system
     planner.free = True
-    result = run(client, 'move_to_pose', {'pose': 'ready'})
+    result = run(client, 'move_joints', {'pose': 'ready'})
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     assert not planner.requests and seen['j1_min'] > -0.05  # straight in joint space, no detour
     assert planner.checked[-1]['j1'] == pytest.approx(1.0) and len(planner.checked) > 10  # checked up to the goal
@@ -180,7 +180,7 @@ def elbow_at_upright(clear_from=0.2, deeper_toward_goal=False):
 def test_a_start_in_collision_moves_out_toward_the_goal(system):
     sim, planner, client, seen = system
     planner.touching = elbow_at_upright()
-    result = run(client, 'move_to_pose', {'pose': 'ready'})
+    result = run(client, 'move_joints', {'pose': 'ready'})
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     assert not planner.requests and sim.position['j1'] == pytest.approx(1.0, abs=0.02)  # straight out, then free
 
@@ -188,7 +188,7 @@ def test_a_start_in_collision_moves_out_toward_the_goal(system):
 def test_an_escape_that_goes_deeper_fails_naming_the_contact(system):
     sim, planner, client, _ = system
     planner.touching = elbow_at_upright(clear_from=9.0, deeper_toward_goal=True)
-    result = run(client, 'move_to_pose', {'pose': 'ready'})
+    result = run(client, 'move_joints', {'pose': 'ready'})
     assert result.outcome == RunSkill.Result.FAILED and 'elbow - upright' in result.message
     assert 'jog it free' in result.message and sim.position['j1'] == 0.0
 

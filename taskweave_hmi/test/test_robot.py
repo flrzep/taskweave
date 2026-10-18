@@ -8,7 +8,7 @@ from taskweave_hmi import robot
 
 FIXTURE = Path(__file__).resolve().parents[2] / 'taskweave_core' / 'test' / 'fixtures' / 'config'
 ROBOT = 'demo_bot'
-CATALOG = [{'name': 'move_to_pose', 'args_schema': {'properties': {'pose': {'x-taskweave-point': 'joint_pose'}}}},
+CATALOG = [{'name': 'move_joints', 'args_schema': {'properties': {'pose': {'x-taskweave-point': 'joint_pose_only'}}}},
            {'name': 'wait', 'args_schema': {'properties': {'seconds': {'type': 'number'}}}}]
 POSES = """# Named joint poses of the demo bot
 home: {lift: 0.0, j1: 0.0, j2: 0.0}   # IK error 0 mm
@@ -21,7 +21,7 @@ reach:
 MISSION = """goal: Carry something
 steps:
   - instruction: Take the carry pose
-    skill: move_to_pose
+    skill: move_joints
     args: {pose: carry}
 """
 
@@ -121,7 +121,22 @@ def test_poses_outside_the_joint_limits_are_refused_and_flagged(store):
 
 
 def test_pose_args_fall_back_when_the_catalog_names_none():
-    assert robot.pose_args([]) == robot.DEFAULT_POSE_ARGS
+    assert robot.pose_args([]) == robot.DEFAULT_POSE_ARGS == {('move_joints', 'pose'), ('move_gripper', 'to.pose')}
+
+
+def test_pose_args_find_nested_pose_arguments_in_every_variant():
+    catalog = [{'name': 'move_gripper', 'args_schema': {'properties': {'to': {'oneOf': [
+        {'properties': {'point': {'x-taskweave-point': 'instance_point'}}},
+        {'properties': {'pose': {'x-taskweave-point': 'tool_pose'}}}]}, 'hands': {'type': 'string'}}}},
+        {'name': 'move_joints', 'args_schema': {'properties': {'pose': {'x-taskweave-point': 'joint_pose_only'}}}}]
+    assert robot.pose_args(catalog) == {('move_gripper', 'to.pose'), ('move_joints', 'pose')}
+
+
+def test_a_pose_a_nested_argument_names_counts_as_used(store):
+    (store.root / 'missions' / 'reach.yaml').write_text(
+        'goal: Reach\nsteps:\n- instruction: Reach out\n  skill: move_gripper\n  args: {to: {pose: reach}}\n')
+    used = robot.pose_usage(store, robot.DEFAULT_POSE_ARGS)
+    assert used['reach'] == ['reach'] and used['carry'] == ['carry']
 
 
 def test_the_ik_choice_is_shown_with_defaults_and_saved(store):

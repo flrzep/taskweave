@@ -9,7 +9,7 @@ from taskweave_hmi import arm, robot
 
 FIXTURE = Path(__file__).resolve().parents[2] / 'taskweave_core' / 'test' / 'fixtures' / 'config'
 ROBOT = 'demo_bot'
-CATALOG = [{'name': 'move_to_pose', 'args_schema': {'properties': {'pose': {'x-taskweave-point': 'joint_pose'}}}}]
+CATALOG = [{'name': 'move_joints', 'args_schema': {'properties': {'pose': {'x-taskweave-point': 'joint_pose_only'}}}}]
 ARGS = robot.pose_args(CATALOG)
 POSES = """home: {lift: 0.0, j1: 0.0, j2: 0.0}
 reach:
