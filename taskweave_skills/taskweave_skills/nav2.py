@@ -26,10 +26,17 @@ Parameters (``skills/navigate_to.yaml``): the direct controller's (see ``navigat
   depart_slack_s: 5.0           backing out fails after this plus 3x the time it takes at depart_speed
   costmaps: /global_costmap/global_costmap,/local_costmap/local_costmap   nodes whose footprint follows the hold
   speed_limit_topic: /speed_limit   Nav2 controller_server's nav2_msgs/SpeedLimit topic
-  speed_limit: false            true: the global speed override also goes to Nav2 as a SpeedLimit percentage. Off by
-                                default: the cmd_vel speed gate (taskweave_core speed_gate) scales Nav2's output, and
-                                a SpeedLimit on top would slow a drive twice; 'no limit' is still sent once, so a
-                                limit Nav2 holds from before (e.g. a restart during a slowed drive) is cleared
+  speed_limit: true             true: the global speed override goes to Nav2: velocities as a SpeedLimit percentage (100 %
+                                = 'no limit') and, if nominal_accel is set, MPPI's accelerations at nominal x o^2 (time
+                                scaling by 1/o: a velocity cap alone does nothing to drives that stay below it). False:
+                                only 'no limit' and the nominal accelerations are sent, once. Followed during a drive
+                                whenever the override changes (0.1 % steps), restored when the Nav2 phase ends
+  controller_node: /controller_server   node whose parameters hold the accelerations (SetParameters service)
+  controller_param_prefix: FollowPath   controller plugin prefix of those parameters
+  nominal_accel: {}             nominal accelerations of the controller, e.g. {ax_max: 2.0, ax_min: -2.0, az_max: 2.0}
+                                (m/s^2, rad/s^2, same numbers as the Nav2 params). Not read back from the controller (it
+                                may still hold scaled values after a restart). Empty: accelerations are not touched
+  min_accel_scale: 0.01         floor of o^2 on the accelerations (never zero)
 """
 
 from __future__ import annotations
@@ -47,7 +54,9 @@ from .navigate import NavigateTo
 NAV2_DEFAULTS = {'action': 'navigate_to_pose', 'frame': 'map', 'server_timeout_s': 10.0, 'handover_distance': 0.3,
                  'map_topic': '/map', 'depart_max_m': 1.0, 'depart_margin_m': 0.1, 'depart_speed': 0.15,
                  'costmaps': '/global_costmap/global_costmap,/local_costmap/local_costmap',
-                 'speed_limit_topic': '/speed_limit', 'speed_limit': False}
+                 'speed_limit_topic': '/speed_limit', 'speed_limit': True,
+                 'controller_node': '/controller_server', 'controller_param_prefix': 'FollowPath',
+                 'nominal_accel': {}, 'min_accel_scale': 0.01}
 POLL_S = 0.05
 
 
@@ -112,7 +121,9 @@ class Nav2NavigateTo(NavigateTo):
         self.NavigateToPose = NavigateToPose
         from nav2_msgs.msg import SpeedLimit
 
-        self.SpeedLimit, self._speed_sent = SpeedLimit, None    # None: unknown (a restart does not know Nav2's limit)
+        self.SpeedLimit, self._speed_sent, self._accel_sent, self._accel_warned = SpeedLimit, None, None, False
+        self.accel_client = None
+        # None: unknown (a restart does not know Nav2's limit)
         self.speed_limit = node.create_publisher(SpeedLimit, self.nav['speed_limit_topic'], 10)
         self.speed_limit.publish(SpeedLimit(percentage=True, speed_limit=0.0))  # a previous server may have died during
         # a slowed drive. Not recorded as sent: discovery may not have reached Nav2 yet, the first drive sends it again
@@ -126,6 +137,9 @@ class Nav2NavigateTo(NavigateTo):
         from .hold import HoldState
         self.hold = HoldState.for_node(node, robot)
         self.SetParameters = SetParameters
+        if self.nav['nominal_accel']:
+            self.accel_client = node.create_client(SetParameters, f'{self.nav["controller_node"]}/set_parameters',
+                                                   callback_group=ReentrantCallbackGroup())
         self.costmaps = {name: node.create_client(SetParameters, f'{name}/set_parameters',
                                                   callback_group=ReentrantCallbackGroup())
                          for name in filter(None, (n.strip() for n in self.nav['costmaps'].split(',')))}
@@ -216,16 +230,51 @@ class Nav2NavigateTo(NavigateTo):
         super().stop()
 
     def _limit_speed(self, override: float) -> None:
-        """Nav2's controller at the speed override (SpeedLimit as a percentage of its own limits; 0 = no limit).
-        Sent when it changes; the first call after start always sends (what Nav2 holds is unknown, e.g. after a
-        restart during a slowed drive), at 100 % as 'no limit'. With speed_limit off only 'no limit' is ever sent."""
+        """Nav2's controller at the speed override: SpeedLimit as a percentage of its own limits (0 = no limit) and
+        the accelerations at nominal x o^2. Sent when it changes (so a mid-drive override change is followed); the
+        first call after start always sends (what Nav2 holds is unknown, e.g. after a restart during a slowed
+        drive), at 100 % as 'no limit' and the nominal accelerations. With speed_limit off only those are sent."""
         if not self.nav.get('speed_limit'):
             override = 1.0
         percent = min(100.0, round(100.0 * override, 1))
+        self._scale_accel(percent)
         if percent == self._speed_sent:
             return
         self.speed_limit.publish(self.SpeedLimit(percentage=True, speed_limit=percent if percent < 100.0 else 0.0))
         self._speed_sent = percent
+
+    def _scale_accel(self, percent: float) -> None:
+        """MPPI's accelerations at nominal x o^2 through the controller server's parameter service (not configured:
+        untouched). An unavailable service is a warning (once per outage), not a failure; the next call retries."""
+        nominal = self.nav.get('nominal_accel') or {}
+        if not nominal or self.accel_client is None or percent == self._accel_sent:
+            return
+        if not self.accel_client.service_is_ready():
+            if not self._accel_warned:
+                self.node.get_logger().warning(f'navigate_to: {self.nav["controller_node"]} parameter service not '
+                                               'available, Nav2 accelerations not scaled')
+                self._accel_warned = True
+            return
+        self._accel_warned = False
+        from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+
+        factor = max((percent / 100.0) ** 2, self.nav['min_accel_scale'])
+        prefix = self.nav['controller_param_prefix']
+        request = self.SetParameters.Request()
+        request.parameters = [Parameter(name=f'{prefix}.{key}', value=ParameterValue(
+            type=ParameterType.PARAMETER_DOUBLE, double_value=float(value) * factor)) for key, value in nominal.items()]
+        future = self.accel_client.call_async(request)
+        self._accel_sent = percent
+        future.add_done_callback(self._accel_done)
+
+    def _accel_done(self, future) -> None:
+        try:
+            failed = [r.reason for r in future.result().results if not r.successful]
+        except Exception as error:  # noqa: BLE001
+            failed = [str(error)]
+        if failed:
+            self._accel_sent = None  # retry at the next change / drive
+            self.node.get_logger().warning(f'navigate_to: Nav2 accelerations not set: {"; ".join(failed)}')
 
     def _goal(self, target: Pose2D):
         goal = self.NavigateToPose.Goal()
@@ -271,6 +320,7 @@ class Nav2NavigateTo(NavigateTo):
             return ctx.interrupted()
         handle = sent.result()
         if not handle.accepted:
+            self._limit_speed(1.0)
             return SkillResult.failed('Nav2 rejected the goal')
         with self.goal_lock:
             self.goal_handle = handle
