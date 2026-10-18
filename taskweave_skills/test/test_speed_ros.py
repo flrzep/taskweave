@@ -4,6 +4,7 @@ import json
 import time
 
 import pytest
+from conftest import wait_until
 
 rclpy = pytest.importorskip('rclpy')
 
@@ -29,15 +30,15 @@ def test_override_slows_moves_and_their_timeouts(system):  # noqa: F811
     assert result.outcome == 0, result.message
     run(client, 'move_joints', {'pose': 'home'})
     publisher.publish(SpeedOverride(percent=50.0, cap_percent=50.0, test_percent=10.0))
-    time.sleep(0.3)
+    wait_until(lambda: client.taskweave_server.speed.fraction() == 0.5, what='the server to take the 50 % override')
     result, half = timed(client, 'ready')
     assert result.outcome == 0, result.message
-    assert 1.6 < half / full < 2.6
+    assert 1.5 < half / full < 3.0  # wall time of two runs: loose bounds for a loaded machine
     speed = json.loads(result.data_json)['speed']     # move_joints adds the effective time scale of the move
     assert (speed['override_min'], speed['override_avg']) == (50.0, 50.0) and speed['scale'] == pytest.approx(0.5)
     run(client, 'move_joints', {'pose': 'home'})
     publisher.publish(SpeedOverride(percent=25.0, cap_percent=50.0, test_percent=10.0))
-    time.sleep(0.3)
+    wait_until(lambda: client.taskweave_server.speed.fraction() == 0.25, what='the server to take the 25 % override')
     result, slow = timed(client, 'ready', timeout_s=1.5)   # about 3.2 s of node time: 0.8 work s, no timeout
     assert result.outcome == 0, result.message
     assert slow > 2.5

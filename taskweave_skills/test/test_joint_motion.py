@@ -274,6 +274,32 @@ def test_yaml_layout_maps_onto_the_params():
     assert MoveJoints._joint_params({'max_joint_speed': 2.0}) == {'max_joint_speed': 2.0}
 
 
+def limited(rig, **limits):
+    """Give the rig's skill velocity limits from a MoveIt joint_limits.yaml in the robot's files."""
+    from taskweave_core.config.limits import velocity_limits
+    folder = rig.store.root / 'robots' / ROBOT / 'moveit'
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'joint_limits.yaml').write_text('joint_limits:\n' + ''.join(
+        f'  {joint}: {{has_velocity_limits: true, max_velocity: {value}}}\n' for joint, value in limits.items()))
+    rig.skill.p.velocity_limits = velocity_limits(ConfigStore(rig.store.root), ROBOT)
+    rig.skill.base_p = rig.skill.p
+
+
+def test_speed_abs_above_a_joint_limit_is_capped_and_reported(rig):
+    limited(rig, j1=0.5)
+    result = rig.run({'joints': {'j1': 1.0, 'j2': 0.3}, 'motion': {'speed_abs': {'joint_rad_s': 4.0}}})
+    assert result.outcome == Outcome.SUCCEEDED, result.message
+    assert rig.reached_at('j1', 1.0) == pytest.approx(2.0, rel=0.05)   # 1.0 rad at the 0.5 rad/s limit, not 0.25 s
+    assert result.data['motion']['capped'] == {'j1': 0.5}              # j2 has no limit: not mentioned
+
+
+def test_a_speed_within_the_limits_reports_no_cap(rig):
+    limited(rig, j1=5.0)
+    result = rig.run({'joints': {'j1': 1.0}, 'motion': {'speed_abs': {'joint_rad_s': 1.0}}})
+    assert result.outcome == Outcome.SUCCEEDED, result.message
+    assert 'capped' not in result.data.get('motion', {})
+
+
 # ---- through a skill server -------------------------------------------------------------------------------------
 
 rclpy = pytest.importorskip('rclpy')

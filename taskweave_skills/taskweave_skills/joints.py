@@ -21,11 +21,13 @@ from __future__ import annotations
 import math
 import threading
 import time
-from dataclasses import dataclass, fields
+import functools
+from dataclasses import dataclass, field, fields
 
 import numpy as np
 from sensor_msgs.msg import JointState
 
+from taskweave_core.config.limits import velocity_limits
 from taskweave_core.skill import Skill, SkillResult
 
 SWING_STRAIGHT_STEPS = 20  # samples of the eased straight move that follows an elbow swing (_swing_first)
@@ -36,6 +38,8 @@ class Params:
     max_joint_speed: float = 0.6       # rad/s (revolute) used to time a move
     max_linear_speed: float = 0.1      # m/s (prismatic, e.g. a lift)
     linear_joints: tuple = ()          # prismatic joints (metres), from the profile's joints.linear
+    velocity_limits: dict = field(default_factory=dict)   # joint -> max rad/s or m/s (limits.velocity_limits): no
+                                       # commanded joint goes faster; a move that would is stretched (T2.6)
     position_tolerance: float = 0.02   # rad or m
     settle_s: float = 0.3              # within tolerance this long before success
     stall_timeout_s: float = 3.0       # after the planned move: no progress this long -> fail / holding
@@ -51,7 +55,7 @@ class Params:
 
     @classmethod
     def from_config(cls, params: dict) -> Params:
-        known = {f.name for f in fields(cls)} - {'linear_joints'}  # robot-specific: profile joints.linear
+        known = {f.name for f in fields(cls)} - {'linear_joints', 'velocity_limits'}  # robot-specific: profile joints.linear
         unknown = set(params) - known
         if unknown:
             raise ValueError(f'unknown joint skill parameters: {", ".join(sorted(unknown))}')
@@ -63,13 +67,50 @@ def smoothstep(fraction: float) -> float:
     return fraction * fraction * (3 - 2 * fraction)
 
 
+def joint_speed(name: str, p: Params) -> float:
+    """The speed a joint moves at: the configured one (rad/s, m/s for a linear joint), capped by its velocity limit."""
+    speed = p.max_linear_speed if name in p.linear_joints else p.max_joint_speed
+    return min(speed, p.velocity_limits.get(name, math.inf))
+
+
 def plan_duration(start: dict, goal: dict, p: Params) -> float:
-    """Time for the slowest joint at its configured speed."""
+    """Time for the slowest joint at its configured speed, none faster than its velocity limit."""
     duration = p.min_duration_s
     for name, target in goal.items():
-        speed = p.max_linear_speed if name in p.linear_joints else p.max_joint_speed
-        duration = max(duration, abs(target - start[name]) / speed)
+        duration = max(duration, abs(target - start[name]) / joint_speed(name, p))
     return duration
+
+
+def capped_joints(start: dict, goal: dict, p: Params) -> dict[str, float]:
+    """The joints of a straight move whose configured speed is above their velocity limit: {joint: limit}. Only joints
+    that move (a joint at its goal is not capped by anything)."""
+    capped = {}
+    for name, target in goal.items():
+        limit = p.velocity_limits.get(name)
+        speed = p.max_linear_speed if name in p.linear_joints else p.max_joint_speed
+        if limit is not None and speed > limit and abs(target - start[name]) > 1e-9:
+            capped[name] = limit
+    return capped
+
+
+def limit_path(path, p: Params):
+    """``path`` (motion_plan.Trajectory) stretched in time so no joint exceeds its velocity limit on any segment;
+    returns (path, {joint: limit} of the joints that needed it). A path within the limits is returned as it is."""
+    factor, capped = 1.0, {}
+    limits = p.velocity_limits
+    for index, name in enumerate(path.names):
+        limit = limits.get(name)
+        if limit is None:
+            continue
+        for k in range(1, len(path.times)):
+            dt = path.times[k] - path.times[k - 1]
+            move = abs(path.points[k][index] - path.points[k - 1][index])
+            if move > limit * dt * (1 + 1e-9) and move > 1e-9:
+                capped[name] = limit
+                factor = max(factor, move / (limit * max(dt, 1e-9)))
+    if factor <= 1.0:
+        return path, {}
+    return type(path)(path.names, [t * factor for t in path.times], path.points), capped
 
 
 def interpolate(start: dict, goal: dict, fraction: float) -> dict:
@@ -131,15 +172,42 @@ class JointInterface:
         self.publisher.publish(JointState(name=list(targets), position=[float(v) for v in targets.values()]))
 
 
+def _report_caps(execute):
+    """``execute`` that resets the skill's velocity caps first and reports them in a finished result as
+    ``data.motion.capped`` ({joint: limit}: joints held to their limit)."""
+    @functools.wraps(execute)
+    def wrapper(self, ctx, args):
+        self._capped = {}
+        result = execute(self, ctx, args)
+        if self._capped and result is not None and hasattr(result, 'data'):
+            motion = result.data.setdefault('motion', {})
+            if isinstance(motion, dict):
+                motion['capped'] = dict(self._capped)
+        return result
+    return wrapper
+
+
 class _JointSkill(Skill):
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if 'execute' in cls.__dict__:
+            cls.execute = _report_caps(cls.__dict__['execute'])
+
     def setup(self, node, config, robot, params):
         super().setup(node, config, robot, params)
         self.p = Params.from_config(params)
         self.p.linear_joints = tuple(robot.role('joints').get('linear', ()))
+        self.p.velocity_limits = velocity_limits(config, robot.name)
+        self._capped: dict[str, float] = {}
         self.joints = JointInterface.for_node(node, robot)
         self._held: dict = {}
         from .hold import HoldState
         self.hold = HoldState.for_node(node, robot)
+
+    def _note_caps(self, capped: dict) -> None:
+        """Remember joints held to their velocity limit by this move (reported by the execute wrapper)."""
+        if capped:
+            self.__dict__.setdefault('_capped', {}).update(capped)
 
     def _holding_refusal(self):
         """A free-arm motion would pull the holding hands apart: refuse while something is held."""
@@ -176,8 +244,13 @@ class _JointSkill(Skill):
             return SkillResult.failed(reason), None
         if path is None:
             duration = plan_duration(start, goal, self.p)
+            self._note_caps(capped_joints(start, goal, self.p))
             reference = lambda t: interpolate(start, goal, t / duration)  # noqa: E731
         else:  # goal joints the planner did not move go straight alongside
+            path, capped = limit_path(path, self.p)
+            self._note_caps(capped)
+            rest_goal = {n: v for n, v in goal.items() if n not in path.names}
+            self._note_caps(capped_joints(start, rest_goal, self.p))
             duration = max(path.duration, self.p.min_duration_s)
             rest = {n: v for n, v in goal.items() if n not in path.names}
             reference = lambda t: {**interpolate(start, rest, t / duration), **path.at(t)}  # noqa: E731
