@@ -520,13 +520,17 @@ class ConfigStore:
                 contacts += [f'{name}{VARIANT_SEPARATOR}{c}' for c in self.object(instance.object).get('contacts', {})]
             except ConfigError:
                 continue
+        joint_poses = sorted(self.joint_poses(robot))
+        held = sorted({name for poses in self.held_poses(robot).values() for name in poses})  # any object type
         return {'locations': sorted(self.locations()), 'stances': self.stance_names(robot),
-                'joint poses': sorted(self.joint_poses(robot)), 'tool poses': self.tool_pose_names(robot),
+                'joint poses': joint_poses, 'tool poses': self.tool_pose_names(robot),
                 'object points': objects,
                 'joint-only poses': sorted(n for n, p in self.joint_poses(robot).items() if 'tools' not in p),
                 'joint groups': sorted(joint_groups(self, robot)),
                 'placed object points': placed, 'placed object contacts': contacts,
-                'placed objects': sorted(self.object_instances())}
+                'placed objects': sorted(self.object_instances()),
+                'held poses': held,
+                'via targets': [f'pose:{pose}' for pose in joint_poses] + placed}
 
     def held_pose(self, robot: str, obj: str, name: str) -> dict:
         """robots/<robot>/held_poses.yaml <obj>.<name>: ``{'joints': {...}, 'path': [Pose3D, ...]}``."""

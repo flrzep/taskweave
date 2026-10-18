@@ -120,3 +120,15 @@ def test_a_replenished_object_stays_when_taken(config_dir):
     store = ConfigStore(config_dir)
     assert store.take_object('waiting') == 'waiting stays (the next hanger takes its place)'
     assert 'waiting' in store.object_instances()
+
+
+def test_held_poses_and_via_targets_are_listed(config_dir):
+    (config_dir / 'robots' / 'demo_bot' / 'poses.yaml').write_text('home: {j1: 0.0, j2: 0.0}\nready: {j1: 0.3}\n')
+    (config_dir / 'robots' / 'demo_bot' / 'held_poses.yaml').write_text(
+        'box:\n  carry:\n    joints: {lift: 0.5}\n    path: []\n'
+        'cup:\n  stand_up:\n    joints: {lift: 0.2}\n    path: []\n  carry:\n    joints: {lift: 0.4}\n    path: []\n')
+    names = placed(config_dir).point_names('demo_bot')
+    assert names['held poses'] == ['carry', 'stand_up']                    # the union over object types, sorted
+    assert names['joint poses'] == ['home', 'ready']
+    assert names['via targets'] == ['pose:home', 'pose:ready'] + names['placed object points']
+    assert 'box_1/top_grasp' in names['via targets']
