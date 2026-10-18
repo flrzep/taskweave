@@ -33,7 +33,7 @@ from pathlib import Path
 
 import yaml
 
-from . import skill_templates
+from . import packs, skill_templates
 
 COMMAND = 'taskweave config migrate-skills'
 OLD_SKILLS = ('move_to_pose', 'go_to_point', 'gripper')    # gone; move_object keeps its name, its args changed
@@ -745,14 +745,19 @@ def list_comments(plan: Plan, say) -> None:
 
 # ---- apply -------------------------------------------------------------------------------------------------------
 def check_writable(plan: Plan) -> list[str]:
-    """Problems that would stop the writing part-way (checked before anything is touched)."""
+    """Problems that would stop the writing part-way (checked before anything is touched): every file to write or
+    remove, the folders of the files to remove, and pack.yaml (written last: a cell that cannot get it would be left
+    half-migrated)."""
     problems = []
-    for path in [*plan.writes, *plan.removes]:
+    for path in [*plan.writes, *plan.removes, plan.cell / packs.PACK_FILE]:
         if path.is_symlink():
             problems.append(f'{plan.rel(path)} is a symbolic link: not touched')
         elif path.exists() and not os.access(path, os.W_OK):
             problems.append(f'{plan.rel(path)} is not writable')
         elif not os.access(path.parent, os.W_OK):
+            problems.append(f'{plan.rel(path.parent)}/ is not writable')
+    for path in plan.removes:      # removing needs the folder, not the file
+        if os.access(path.parent, os.W_OK) is False and f'{plan.rel(path.parent)}/ is not writable' not in problems:
             problems.append(f'{plan.rel(path.parent)}/ is not writable')
     return problems
 

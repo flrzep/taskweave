@@ -1,5 +1,6 @@
 """Cell pack migration 2 -> 3 (config/migrate_skills.py): the old skills become the new ones, rule by rule."""
 
+import os
 import shutil
 from pathlib import Path
 
@@ -510,6 +511,26 @@ def test_an_old_skill_yaml_is_kept_and_flagged_when_the_new_one_exists(cell):
     assert not (cell / 'skills' / 'go_to_point.yaml').exists()               # the others migrated as before
     run_again = []
     assert migrate_skills_only(cell, False, run_again.append) == 0 and run_again[0].endswith('nothing to do')
+
+
+def test_an_unwritable_pack_yaml_stops_everything_with_a_clear_message(cell, monkeypatch):
+    before = tree(cell)
+    blocked = cell / 'pack.yaml'
+    real = os.access
+    monkeypatch.setattr(os, 'access', lambda path, mode, **kw: False if Path(path) == blocked else real(path, mode, **kw))
+    lines = []
+    assert migrate(cell, None, None, False, lines.append) == 1
+    assert any('pack.yaml is not writable' in line and 'nothing was changed' in line for line in lines), lines
+    assert tree(cell) == before
+
+
+def test_an_os_error_while_writing_is_reported_not_raised(cell, monkeypatch):
+    def broken(source, target):
+        raise PermissionError(13, 'Permission denied', str(target))
+    monkeypatch.setattr(ms.os, 'replace', broken)
+    lines = []
+    assert migrate(cell, None, None, False, lines.append) == 1
+    assert any('Permission denied' in line and 'migrate' in line for line in lines), lines
 
 
 # ---- the old names in validation -----------------------------------------------------------------------------------

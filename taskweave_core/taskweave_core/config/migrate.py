@@ -240,17 +240,33 @@ def migrate(cell: str | Path, robot_packs: str | Path | None = None, name: str |
         say(f'{cell}: cell pack schema {version}, nothing to do')
         return 0
     say(f'{cell}: cell pack schema {version} -> {packs.CELL_SCHEMA}' + (' (dry run: nothing is changed)' if dry_run else ''))
+    pack = cell / packs.PACK_FILE
+    blocked = pack.is_symlink() or (not os.access(pack, os.W_OK) if pack.exists() else not os.access(cell, os.W_OK))
+    if blocked:     # pack.yaml is written last: without it a run would leave a half-migrated cell
+        say(f'{pack.name} is not writable (or is a symbolic link): nothing was changed. Fix the permissions of '
+            f'{pack} and run taskweave config migrate again.')
+        if not dry_run:
+            return 1
     for step in range(version, packs.CELL_SCHEMA):
         try:
             stuck = MIGRATIONS[step](cell, Path(robot_packs) if robot_packs else None, dry_run, say)
         except RuntimeError as error:   # a file cannot be written: the migration checked before it touched anything
             say(f'{cell}: {error}')
             return 2
+        except OSError as error:        # a write or remove failed anyway (a file changed meanwhile, a full disk)
+            say(f'{cell}: migration step {step} stopped: {error}. The cell may be half-migrated: fix the cause and run '
+                'taskweave config migrate again; it finishes what is left.')
+            return 1
         if stuck:
             say(f'pack.yaml not written: still to remove: {", ".join(stuck)}. Fix the permissions (or remove them as '
                 'their owner) and run taskweave config migrate again; it finishes what is left.')
             return 1
-        write_cell_pack(cell, name or cell.name, step + 1, dry_run, say)
+        try:
+            write_cell_pack(cell, name or cell.name, step + 1, dry_run, say)
+        except OSError as error:
+            say(f'{cell}: pack.yaml could not be written: {error}. Fix the permissions and run taskweave config '
+                'migrate again.')
+            return 1
     return 0
 
 
