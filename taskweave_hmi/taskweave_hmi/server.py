@@ -24,7 +24,8 @@ HTTP API (JSON):
   GET  /api/missions/<name>/plan   the plan a start would run now (includes expanded, facts filled): step ids to start at
   POST /api/start {mission[, start_step]}  start a mission (at a step id: the first cycle begins there, robot and
                                    objects as they are); POST /api/pause | /api/resume | /api/abort
-  GET  /api/skills                 skill catalog;  GET /api/points  named points for argument pickers
+  GET  /api/skills                 skill catalog;  GET /api/points  named points for argument pickers (the store's
+                                   lists plus 'held poses' and 'via targets')
   GET  /api/points/all             locations, stance offsets and placed objects, with the missions using each point
   PUT  /api/points/location/<name>                          {x, y, yaw[, rename]}  create, update or rename
   PUT  /api/points/stance/<objects|instances>/<owner>/<variant>  {x, y, yaw[, rename]}  (offset in the object frame)
@@ -38,15 +39,17 @@ HTTP API (JSON):
   PUT  /api/robot/navigation       {envelope: {front, back, left, right}, padding, inflation_radius, driving}: checked
                                    against the robot's base, saved and applied to the running costmaps
                                    (parameter nav_costmaps) and controller (nav_controller)
-  POST /api/robot/move {pose}      run move_to_pose now (no mission running); returns the outcome when it ends
+  POST /api/robot/move {pose}      go to a named pose now (no mission running: move_joints, or move_gripper for a pose
+                                   with tool targets); returns the outcome when it ends
   POST /api/robot/reach {joints, tools, search: [tool]}   per tool: ok, message, warnings, nearest reachable target
   PUT  /api/robot/joints {joints: {name: value}}  send joint targets now (no mission running; within the limits)
   GET  /api/teach/arm               arm positions: robot poses and object points as one list (arm.py)
   PUT  /api/teach/arm/<robot|type>/<name>      {hands, joints, elbow, approach_m[, rename]};  DELETE the same
   POST /api/teach/arm/<robot|type>/<name>/capture {at, tools, form}  save the robot's current arm there (also creates)
-  POST /api/teach/arm/<robot|type>/<name>/test {at}  move there now (move_to_pose / go_to_point at placed object <at>)
+  POST /api/teach/arm/<robot|type>/<name>/test {at}  move there now (a robot pose as /api/robot/move; an object point:
+                                   move_gripper to <at>/<name>, at the placed object <at>)
   PUT  /api/teach/target {scope, name, at, form} or {}   the position a pad teach press saves into
-  PUT  /api/teach/held/<type>/<name> {joints, path, rename}; DELETE the same   held poses (move_object pose:)
+  PUT  /api/teach/held/<type>/<name> {joints, path, rename}; DELETE the same   held poses (move_object to: {pose})
   POST /api/teach/held/<type>/<name>/test   move the held object there now (move_object)
   GET  /api/recordings              {status, recordings, free_bytes} (404 without recordings_dir; recording.py)
   POST /api/recordings/start {mission, name, cycles, reset, bag, camera, video, quality, max_min};  POST .../stop
@@ -331,7 +334,7 @@ class Bridge(Node):
 
     def reach(self, body: dict) -> dict:
         """Can the robot put its tools on these targets? Per tool: ok, message, warnings, and with ``search`` the
-        nearest reachable target (TCP moved along a base axis). Solved like move_to_pose solves a pose."""
+        nearest reachable target (TCP moved along a base axis). Solved like move_gripper solves a named pose."""
         from taskweave_skills.ik import IkClient, IkError, target_warnings
 
         profile = self.config.robot(self.robot)
@@ -454,11 +457,31 @@ class Bridge(Node):
         return arm.nearest_placed(self.config, object_type,
                                   points.relative_poses(self.config, self.robot_pose())['relative'])
 
+    def go_to_pose(self, name: str) -> dict:
+        """Run the skill that takes the robot to named pose ``name``: move_gripper for one with tool targets (IK),
+        else move_joints."""
+        try:
+            tools = self.config.named_pose(self.robot, name)['tools']
+        except KeyError as error:
+            raise arm.ArmError(str(error.args[0])) from error
+        if tools:
+            return self.run_skill('move_gripper', {'to': {'pose': name}})
+        return self.run_skill('move_joints', {'pose': name})
+
     def test_position(self, scope: str, name: str, body: dict) -> dict:
         if scope == arm.ROBOT:
-            return self.run_skill('move_to_pose', {'pose': name})
+            return self.go_to_pose(name)
         at = body.get('at') or self.nearest_placed(scope)
-        return self.run_skill('go_to_point', {'point': f'{at}/{name}'})
+        return self.run_skill('move_gripper', {'to': {'point': f'{at}/{name}'}})
+
+    def point_names(self) -> dict[str, list[str]]:
+        """Named points for argument pickers: the store's lists, plus held poses (any object type: the held type is
+        known at run time) and via targets (``pose:<joint pose>`` or a placed object point)."""
+        names = self.config.point_names(self.robot)
+        names['held poses'] = sorted({name for poses in self.config.held_poses(self.robot).values() for name in poses})
+        names['via targets'] = [f'pose:{pose}' for pose in names.get('joint poses', [])] + \
+            list(names.get('placed object points', []))
+        return names
 
     def send_joints(self, values: dict) -> dict:
         """Joint targets straight to the robot (the HMI's joint panel): within the limits, no mission running."""
@@ -669,7 +692,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'GET' and route == ['skills']:
                 return self._json(bridge.catalog())
             if method == 'GET' and route == ['points']:
-                return self._json(bridge.config.point_names(bridge.robot))
+                return self._json(bridge.point_names())
             if method == 'GET' and route == ['points', 'all']:
                 return self._json(points.overview(bridge.config, bridge.robot))
             if method in ('PUT', 'DELETE') and len(route) >= 3 and route[0] == 'points':
@@ -760,9 +783,9 @@ class Handler(BaseHTTPRequestHandler):
                                              f'{obj}/{name} -> {file}')
                     return self._json({'file': file})
                 if len(route) == 5 and method == 'POST' and route[4] == 'test':
-                    return self._json(bridge.run_skill(held.SKILL, {held.ARG: name}))
+                    return self._json(bridge.run_skill(held.SKILL, held.args(name)))
             if method == 'POST' and route == ['robot', 'move']:
-                return self._json(bridge.run_skill('move_to_pose', {'pose': self._body()['pose']}))
+                return self._json(bridge.go_to_pose(self._body()['pose']))
             return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
         except missions.MissionError as error:
             return self._json({'problems': error.problems}, HTTPStatus.UNPROCESSABLE_ENTITY)

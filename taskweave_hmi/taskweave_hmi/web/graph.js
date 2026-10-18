@@ -4,7 +4,8 @@
 // defaults, replan_from, stop_when) come from the mission file. Uses $, el, api, state from app.js.
 
 const SVG = 'http://www.w3.org/2000/svg';
-const SKILL_KINDS = { navigate_to: 'drive', move_to_pose: 'arm', gripper: 'grip', wait: 'wait' };
+const SKILL_KINDS = { navigate_to: 'drive', drive_straight: 'drive', move_joints: 'arm', move_gripper: 'arm',
+  move_object: 'arm', set_posture: 'arm', grip: 'grip', wait: 'wait' };
 const G = { width: 384, nodeX: 70, nodeW: 220, nodeH: 52, gap: 30, top: 44, lane: 34, abortLane: 368 };
 const BREATHE_MS = 2800;  // period of node-breathe for the running step (style.css)
 const missionCache = {};
@@ -20,7 +21,14 @@ function mainArg(step) {
   const a = step.args || {};
   if (a.target) return String(a.target);
   if (a.pose) return String(a.pose);
-  if (a.action) return `${a.side || ''} ${a.action}`.trim();
+  if (a.to && typeof a.to === 'object') {  // move_gripper / move_object: the target variant's main value
+    const [key, value] = Object.entries(a.to)[0] || [];
+    if (key === 'point' || key === 'pose') return String(value);
+    if (key === 'onto') return `${value}/${a.to.contact ?? '?'}`;
+    if (key) return `${key} ${Array.isArray(value) ? `[${value.join(', ')}]` : value}`;
+  }
+  if (a.action) return `${[].concat(a.hands ?? []).join('+')} ${a.action}`.trim();
+  if (a.elbow) return `elbow ${a.elbow}`;
   if (a.seconds !== undefined) return `${a.seconds} s`;
   const first = Object.entries(a)[0];
   return first ? `${first[0]} ${typeof first[1] === 'object' ? '…' : first[1]}` : '';
@@ -171,7 +179,7 @@ function renderGraph() {
     label(G.abortLane - 4, rowY(last) + G.nodeH + 2, 'fails', 'fail-label', 'end'));
   }
   box.replaceChildren(root, el('div', { class: 'legend' },
-    ...Object.entries({ drive: 'drive', arm: 'arm pose', grip: 'gripper', wait: 'wait', other: 'other' })
+    ...Object.entries({ drive: 'drive', arm: 'arm', grip: 'gripper', wait: 'wait', other: 'other' })
       .filter(([kind]) => kind !== 'other' || plan.steps.some((s) => !SKILL_KINDS[s.skill]))
       .map(([kind, text]) => el('span', { class: `legend-item kind-${kind}` }, el('i'), text)),
     el('span', { class: 'legend-item' }, el('i', { class: 'swatch-fail' }), 'on failure')));

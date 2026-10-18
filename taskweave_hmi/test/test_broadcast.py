@@ -1,4 +1,5 @@
-"""Live events: a client that stops reading must not block the others; numbered step events (no ROS graph needed)."""
+"""Bridge pieces without a ROS graph: live events (a client that stops reading must not block the others, numbered
+step events), manual skill waits, which skill a pose test runs, the argument picker lists."""
 
 import json
 import queue
@@ -53,3 +54,33 @@ def test_a_manual_skill_waits_on_work_time_and_is_given_up_when_its_server_is_go
     assert await_skill(lambda: False, lambda: t['now'] * 0.1, 35.0, lambda: True, sleep) == 'did not finish in 35 s'
     assert 350.0 < t['now'] < 351.0
     assert await_skill(lambda: False, lambda: 0.0, 35.0, lambda: False, sleep) == 'skill server gone'
+
+
+class FakeStore:
+    def named_pose(self, _robot, name):
+        poses = {'home': {'joints': {'j1': 0.0}, 'tools': {}}, 'reach': {'joints': {}, 'tools': {'left': {}}}}
+        if name not in poses:
+            raise KeyError(f'unknown pose {name!r}')
+        return poses[name]
+
+    def point_names(self, _robot):
+        return {'joint poses': ['home', 'reach'], 'placed object points': ['bin_a/grasp']}
+
+    def held_poses(self, _robot):
+        return {'frame': {'up': {}, 'carry': {}}, 'box': {'up': {}}}
+
+
+def test_a_pose_test_runs_move_joints_or_move_gripper_and_pickers_list_held_poses_and_via_targets():
+    bridge = bridge_with()
+    bridge.config, bridge.robot, runs = FakeStore(), 'r', []
+    bridge.run_skill = lambda skill, args: runs.append((skill, args)) or {'outcome': 'succeeded'}
+    bridge.go_to_pose('home')
+    bridge.go_to_pose('reach')
+    bridge.test_position('frame', 'grasp', {'at': 'bin_a'})
+    assert runs == [('move_joints', {'pose': 'home'}), ('move_gripper', {'to': {'pose': 'reach'}}),
+                    ('move_gripper', {'to': {'point': 'bin_a/grasp'}})]
+    with pytest.raises(Exception, match='unknown pose'):
+        bridge.go_to_pose('nowhere')
+    names = bridge.point_names()
+    assert names['held poses'] == ['carry', 'up']
+    assert names['via targets'] == ['pose:home', 'pose:reach', 'bin_a/grasp']
