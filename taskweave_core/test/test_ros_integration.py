@@ -1,14 +1,12 @@
 """Task handler + skill server talking over real ROS 2 interfaces (in one process)."""
 
-import threading
 import time
 
 import pytest
-from conftest import wait_until, warm_up
+from conftest import RosRig, wait_until, warm_up
 
 rclpy = pytest.importorskip('rclpy')
 
-from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from sensor_msgs.msg import Joy  # noqa: E402
 from std_srvs.srv import Trigger  # noqa: E402
@@ -47,24 +45,16 @@ class Wait(Skill):
 
 @pytest.fixture
 def system(config_dir):
-    rclpy.init()
-    params = [Parameter('config_dir', value=str(config_dir)), Parameter('robot', value='demo_bot')]
-    handler = TaskHandler(parameter_overrides=params)
-    server = SkillServer(skills=[NavigateTo(), Wait()], node_name='test_skills', parameter_overrides=params)
-    client = rclpy.create_node('test_client')
-    executor = MultiThreadedExecutor(num_threads=8)
-    for node in (handler, server, client):
-        executor.add_node(node)
-    thread = threading.Thread(target=executor.spin, daemon=True)
-    thread.start()
-    statuses = []
-    client.create_subscription(TaskStatus, names.STATUS, statuses.append, 10)
-    warm_up(handler)
-    yield handler, client, statuses, config_dir
-    executor.shutdown()
-    for node in (handler, server, client):
-        node.destroy_node()
-    rclpy.shutdown()
+    with RosRig() as ros:
+        params = [Parameter('config_dir', value=str(config_dir)), Parameter('robot', value='demo_bot')]
+        handler = ros.add(TaskHandler(parameter_overrides=params))
+        ros.add(SkillServer(skills=[NavigateTo(), Wait()], node_name='test_skills', parameter_overrides=params))
+        client = ros.add(rclpy.create_node('test_client'))
+        ros.spin(8)
+        statuses = []
+        client.create_subscription(TaskStatus, names.STATUS, statuses.append, 10)
+        warm_up(handler)
+        yield handler, client, statuses, config_dir
 
 
 def call(node, srv_type, name, request):
@@ -164,14 +154,19 @@ def test_describe_robot_returns_card_and_served_skills(system):
     assert sorted(s.name for s in response.skills) == ['navigate_to', 'wait']
 
 
-def test_operator_buttons_pause_resume_and_abort(system, config_dir):
+@pytest.fixture
+def operator(system, config_dir):
+    """An operator node of its own beside the system, spun and torn down by a rig (also when the test fails)."""
     from taskweave_core.operator_joy import OperatorJoy
 
+    with RosRig() as ros:
+        node = ros.add(OperatorJoy(parameter_overrides=[Parameter('config_dir', value=str(config_dir))]))
+        ros.spin(2)
+        yield node
+
+
+def test_operator_buttons_pause_resume_and_abort(system, operator, config_dir):
     handler, client, _, _ = system
-    operator = OperatorJoy(parameter_overrides=[Parameter('config_dir', value=str(config_dir))])
-    executor = MultiThreadedExecutor(num_threads=2)
-    executor.add_node(operator)
-    threading.Thread(target=executor.spin, daemon=True).start()
     joy = client.create_publisher(Joy, '/joy', 10)
     wait_until(lambda: joy.get_subscription_count() > 0, what='the operator node to subscribe to /joy')
     PAUSE_RESUME, ABORT = 7, 6  # operator.yaml
@@ -185,18 +180,10 @@ def test_operator_buttons_pause_resume_and_abort(system, config_dir):
     press_until(joy, PAUSE_RESUME, lambda: state() == 'RUNNING', 'the pause button to resume')
     press_until(joy, ABORT, lambda: state() == 'ABORTED', 'the abort button to abort')
     assert wait_for(handler, {'ABORTED'}).state.name == 'ABORTED'
-    executor.shutdown()
-    operator.destroy_node()
 
 
-def test_operator_button_runs_a_skill_only_when_no_mission_is_active(system, config_dir):
-    from taskweave_core.operator_joy import OperatorJoy
-
+def test_operator_button_runs_a_skill_only_when_no_mission_is_active(system, operator, config_dir):
     handler, client, _, _ = system
-    operator = OperatorJoy(parameter_overrides=[Parameter('config_dir', value=str(config_dir))])
-    executor = MultiThreadedExecutor(num_threads=2)
-    executor.add_node(operator)
-    threading.Thread(target=executor.spin, daemon=True).start()
     joy = client.create_publisher(Joy, '/joy', 10)
     wait_until(lambda: joy.get_subscription_count() > 0, what='the operator node to subscribe to /joy')
     # the operator node also needs the skill server (action goal) and the status topic before a press can count
@@ -215,5 +202,3 @@ def test_operator_button_runs_a_skill_only_when_no_mission_is_active(system, con
     time.sleep(0.5)  # a negative check: give the press time to be (wrongly) acted on
     assert not operator.running  # ignored while the mission runs
     call(client, Trigger, names.ABORT, Trigger.Request())
-    executor.shutdown()
-    operator.destroy_node()

@@ -1,18 +1,16 @@
 """Hold state: grasp at a reached point, published for the sim and the jog node, released on open."""
 
 import json
-import threading
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from conftest import wait_until
+from conftest import RosRig, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('tf2_ros')
 
 from geometry_msgs.msg import TransformStamped  # noqa: E402
-from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.qos import DurabilityPolicy, QoSProfile  # noqa: E402
 from std_msgs.msg import String  # noqa: E402
 from tf2_ros import StaticTransformBroadcaster  # noqa: E402
@@ -34,29 +32,24 @@ def tf_ready(state):
 
 @pytest.fixture
 def hold():
-    rclpy.init()
-    node = rclpy.create_node('hold_test')
-    seen = []
-    node.create_subscription(String, TOPIC, lambda m: seen.append(json.loads(m.data)),
-                             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
-    tf = StaticTransformBroadcaster(node)
-    transforms = []
-    for link, y in (('left_link7', 0.2), ('right_link7', -0.2)):
-        t = TransformStamped(child_frame_id=link)
-        t.header.frame_id = 'base_link'
-        t.transform.translation.x, t.transform.translation.y, t.transform.rotation.w = 0.5, y, 1.0
-        transforms.append(t)
-    tf.sendTransform(transforms)
-    executor = MultiThreadedExecutor(num_threads=2)
-    executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
-    state = HoldState(node, ROBOT)
-    wait_until(lambda: seen, what='the first (latched) holding message')
-    wait_until(lambda: tf_ready(state), what='the flange transforms in the buffer')
-    yield state, seen
-    executor.shutdown()
-    node.destroy_node()
-    rclpy.shutdown()
+    with RosRig() as ros:
+        node = ros.add(rclpy.create_node('hold_test'))
+        seen = []
+        node.create_subscription(String, TOPIC, lambda m: seen.append(json.loads(m.data)),
+                                 QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        tf = StaticTransformBroadcaster(node)
+        transforms = []
+        for link, y in (('left_link7', 0.2), ('right_link7', -0.2)):
+            t = TransformStamped(child_frame_id=link)
+            t.header.frame_id = 'base_link'
+            t.transform.translation.x, t.transform.translation.y, t.transform.rotation.w = 0.5, y, 1.0
+            transforms.append(t)
+        tf.sendTransform(transforms)
+        ros.spin(2)
+        state = HoldState(node, ROBOT)
+        wait_until(lambda: seen, what='the first (latched) holding message')
+        wait_until(lambda: tf_ready(state), what='the flange transforms in the buffer')
+        yield state, seen
 
 
 def test_grasp_only_at_a_reached_point_then_release(hold):

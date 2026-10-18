@@ -3,16 +3,14 @@
 import json
 import math
 import shutil
-import threading
 import time
 from pathlib import Path
 
 import pytest
-from conftest import connect, wait_ready, wait_until
+from conftest import RosRig, connect, wait_ready, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 
-from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from sensor_msgs.msg import JointState  # noqa: E402
@@ -58,25 +56,19 @@ class JointSim(Node):
 
 @pytest.fixture
 def system(tmp_path):
-    config = tmp_path / 'config'
-    shutil.copytree(FIXTURE, config)
-    rclpy.init()
-    sim = JointSim()
-    server = SkillServer(parameter_overrides=[
-        Parameter('config_dir', value=str(config)), Parameter('robot', value='arm_bot'),
-        Parameter('skills', value=['move_joints', 'grip'])])
-    client = rclpy.create_node('test_client')
-    executor = MultiThreadedExecutor(num_threads=8)
-    for node in (sim, server, client):
-        executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
-    wait_ready(server)
-    client.taskweave_server = server  # for tests that wait for what the server has received
-    yield sim, client
-    executor.shutdown()
-    for node in (sim, server, client):
-        node.destroy_node()
-    rclpy.shutdown()
+    with RosRig() as ros:
+        config = tmp_path / 'config'
+        shutil.copytree(FIXTURE, config)
+        sim = ros.add(JointSim())
+        server = SkillServer(parameter_overrides=[
+            Parameter('config_dir', value=str(config)), Parameter('robot', value='arm_bot'),
+            Parameter('skills', value=['move_joints', 'grip'])])
+        ros.add(server)
+        client = ros.add(rclpy.create_node('test_client'))
+        ros.spin(8)
+        wait_ready(server)
+        client.taskweave_server = server  # for tests that wait for what the server has received
+        yield sim, client
 
 
 def run(client, skill, args, timeout_s=20.0):

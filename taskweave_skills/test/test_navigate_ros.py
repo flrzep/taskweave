@@ -2,18 +2,16 @@
 
 import json
 import math
-import threading
 import time
 from pathlib import Path
 
 import pytest
-from conftest import connect, wait_until
+from conftest import RosRig, connect, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 
 from geometry_msgs.msg import Twist  # noqa: E402
 from nav_msgs.msg import Odometry  # noqa: E402
-from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 
@@ -55,29 +53,22 @@ class BaseSim(Node):
 
 @pytest.fixture(params=[('omni', True, 'omni_bot'), ('diff', False, 'diff_bot')], ids=['holonomic', 'differential'])
 def system(request, tmp_path):
-    import shutil
+    with RosRig() as ros:
+        import shutil
 
-    prefix, holonomic, robot = request.param
-    config = tmp_path / 'config'
-    shutil.copytree(FIXTURE, config)
-    rclpy.init()
-    params = [Parameter('config_dir', value=str(config)), Parameter('robot', value=robot)]
-    sim = BaseSim(prefix, holonomic)
-    # production path: skill names resolved through config/skills/<name>.yaml implementations
-    server = SkillServer(parameter_overrides=params + [Parameter('skills', value=['navigate_to', 'wait', 'drive_straight'])])
-    teach = Teach(parameter_overrides=params)
-    client = rclpy.create_node('test_client')
-    executor = MultiThreadedExecutor(num_threads=8)
-    for node in (sim, server, teach, client):
-        executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
-    wait_until(lambda: sim.pub.get_subscription_count() > 0, what='the skill server to subscribe to the odometry')
-    wait_until(lambda: sim.count_publishers(sim.cmd_topic) > 0, what='the skill server to advertise cmd_vel')
-    yield sim, client, config
-    executor.shutdown()
-    for node in (sim, server, teach, client):
-        node.destroy_node()
-    rclpy.shutdown()
+        prefix, holonomic, robot = request.param
+        config = tmp_path / 'config'
+        shutil.copytree(FIXTURE, config)
+        params = [Parameter('config_dir', value=str(config)), Parameter('robot', value=robot)]
+        sim = ros.add(BaseSim(prefix, holonomic))
+        # production path: skill names resolved through config/skills/<name>.yaml implementations
+        ros.add(SkillServer(parameter_overrides=params + [Parameter('skills', value=['navigate_to', 'wait', 'drive_straight'])]))
+        ros.add(Teach(parameter_overrides=params))
+        client = ros.add(rclpy.create_node('test_client'))
+        ros.spin(8)
+        wait_until(lambda: sim.pub.get_subscription_count() > 0, what='the skill server to subscribe to the odometry')
+        wait_until(lambda: sim.count_publishers(sim.cmd_topic) > 0, what='the skill server to advertise cmd_vel')
+        yield sim, client, config
 
 
 def run_skill(client, skill, args, timeout_s=20.0):
@@ -175,27 +166,20 @@ def test_drive_straight_to_a_target_in_line(system):
 @pytest.fixture
 def fast_system(tmp_path):
     """diff_bot (base limits 0.8 m/s, 1.5 rad/s) with drive_straight and navigate_to configured above them."""
-    import shutil
+    with RosRig() as ros:
+        import shutil
 
-    config = tmp_path / 'config'
-    shutil.copytree(FIXTURE, config)
-    with open(config / 'skills' / 'drive_straight.yaml', 'a') as f:
-        f.write('speed: 1.2\nmax_linear: 1.5\nmax_angular: 2.5\n')
-    rclpy.init()
-    params = [Parameter('config_dir', value=str(config)), Parameter('robot', value='diff_bot')]
-    sim = BaseSim('diff', False)
-    server = SkillServer(parameter_overrides=params + [Parameter('skills', value=['drive_straight'])])
-    client = rclpy.create_node('test_client')
-    executor = MultiThreadedExecutor(num_threads=8)
-    for node in (sim, server, client):
-        executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
-    time.sleep(0.3)
-    yield sim, client
-    executor.shutdown()
-    for node in (sim, server, client):
-        node.destroy_node()
-    rclpy.shutdown()
+        config = tmp_path / 'config'
+        shutil.copytree(FIXTURE, config)
+        with open(config / 'skills' / 'drive_straight.yaml', 'a') as f:
+            f.write('speed: 1.2\nmax_linear: 1.5\nmax_angular: 2.5\n')
+        params = [Parameter('config_dir', value=str(config)), Parameter('robot', value='diff_bot')]
+        sim = ros.add(BaseSim('diff', False))
+        ros.add(SkillServer(parameter_overrides=params + [Parameter('skills', value=['drive_straight'])]))
+        client = ros.add(rclpy.create_node('test_client'))
+        ros.spin(8)
+        time.sleep(0.3)
+        yield sim, client
 
 
 def test_base_speeds_above_the_robot_limits_are_capped_and_reported(fast_system):

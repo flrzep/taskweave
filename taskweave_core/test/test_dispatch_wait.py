@@ -1,6 +1,5 @@
 """The dispatcher's first dispatch to a skill can happen before DDS discovery has matched the skill server."""
 
-import threading
 import time
 from types import SimpleNamespace
 
@@ -8,7 +7,7 @@ import pytest
 
 rclpy = pytest.importorskip('rclpy')
 
-from rclpy.executors import MultiThreadedExecutor  # noqa: E402
+from conftest import RosRig  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 
 from taskweave_core import names  # noqa: E402
@@ -29,25 +28,17 @@ class LateSkill(Skill):
 
 @pytest.fixture
 def rig(config_dir):
-    rclpy.init()
-    params = [Parameter('config_dir', value=str(config_dir)), Parameter('robot', value='demo_bot'),
-              Parameter('server_wait_s', value=8.0)]
-    handler = TaskHandler(parameter_overrides=params)
-    results = []
-    handler.executive = SimpleNamespace(on_result=lambda token, outcome, message='', data=None:
-                                        results.append((token, outcome, message)),
-                                        on_feedback=lambda *a: None, tick=lambda: None, status=Status())
-    handler.catalog = {n: SimpleNamespace(name=n, action_name=names.skill_action(n)) for n in ('late_skill', 'ghost_skill')}
-    executor = MultiThreadedExecutor(num_threads=8)
-    executor.add_node(handler)
-    thread = threading.Thread(target=executor.spin, daemon=True)
-    thread.start()
-    nodes = [handler]
-    yield handler, executor, results, params, nodes
-    executor.shutdown()
-    for node in nodes:
-        node.destroy_node()
-    rclpy.shutdown()
+    with RosRig() as ros:
+        params = [Parameter('config_dir', value=str(config_dir)), Parameter('robot', value='demo_bot'),
+                  Parameter('server_wait_s', value=8.0)]
+        handler = ros.add(TaskHandler(parameter_overrides=params))
+        results = []
+        handler.executive = SimpleNamespace(on_result=lambda token, outcome, message='', data=None:
+                                            results.append((token, outcome, message)),
+                                            on_feedback=lambda *a: None, tick=lambda: None, status=Status())
+        handler.catalog = {n: SimpleNamespace(name=n, action_name=names.skill_action(n)) for n in ('late_skill', 'ghost_skill')}
+        executor = ros.spin(8)
+        yield handler, executor, results, params, ros.nodes
 
 
 def step(skill):

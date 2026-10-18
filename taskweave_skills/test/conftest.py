@@ -47,6 +47,76 @@ def connect(node, action_type, name, timeout=90.0, attempt_s=5.0):
         assert time.monotonic() < deadline, f'action server {name} not found within {timeout:g} s'
 
 
+class RosRig:
+    """The nodes of one ROS test, one executor and the thread spinning it, torn down in the right order whatever
+    happens (use as ``with RosRig() as rig:`` around the yield of a fixture, or around a test body).
+
+    ``rig.add(node)`` registers a node the moment it exists, so a fixture that fails half way through its setup still
+    destroys what it made. ``rig.spin(threads)`` starts the executor. On exit: shut the executor down, join its
+    thread (nothing may still run a callback while nodes are destroyed), destroy the nodes in reverse order, drop
+    the per-node singletons the production classes keep in class-level dicts (they hold the node, so the node would
+    stay alive), and collect garbage so the DDS endpoints of the test are closed before the next test starts.
+    A fixture without this leaked every executor, spin thread and node when its setup or test failed, and left it to
+    the garbage collector otherwise."""
+
+    SINGLETONS = (('taskweave_core.speed', 'SpeedOverride'), ('taskweave_skills.joints', 'JointInterface'),
+                  ('taskweave_skills.hold', 'HoldState'))
+
+    def __init__(self):
+        self.nodes = []
+        self.executor = None
+        self.thread = None
+
+    def add(self, node):
+        self.nodes.append(node)
+        if self.executor is not None:
+            self.executor.add_node(node)
+        return node
+
+    def spin(self, threads=8):
+        import threading
+
+        from rclpy.executors import MultiThreadedExecutor
+
+        self.executor = MultiThreadedExecutor(num_threads=threads)
+        for node in self.nodes:
+            self.executor.add_node(node)
+        self.thread = threading.Thread(target=self.executor.spin, daemon=True)
+        self.thread.start()
+        return self.executor
+
+    def close(self):
+        import gc
+        import importlib
+
+        problems = []
+        if self.executor is not None:
+            self.executor.shutdown()
+        if self.thread is not None:
+            self.thread.join(10.0)
+            if self.thread.is_alive():
+                problems.append('the executor thread did not stop within 10 s')
+        for node in reversed(self.nodes):
+            try:
+                node.destroy_node()
+            except Exception as error:  # keep destroying the rest
+                problems.append(f'destroy_node({node.get_name()}): {error}')
+            for module, name in self.SINGLETONS:
+                try:
+                    getattr(importlib.import_module(module), name)._instances.pop(id(node), None)
+                except (ImportError, AttributeError):
+                    pass
+        self.nodes, self.executor, self.thread = [], None, None
+        gc.collect()
+        assert not problems, '; '.join(problems)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
 @pytest.fixture(scope='session', autouse=True)
 def one_ros_context():
     """One rclpy context for the whole session. The ROS tests call rclpy.init()/shutdown() around every test; creating
