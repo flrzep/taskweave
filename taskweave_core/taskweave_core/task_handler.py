@@ -100,6 +100,12 @@ class RosDispatcher:
             self._report(token, Outcome.REJECTED,
                          f'skill server for {step.skill!r} is not available (waited {wait_s:g} s)')
             return
+        with self.lock:
+            canceled = token in self.pending_cancel   # abort/pause/timeout while the wait ran: send nothing
+            self.pending_cancel.discard(token)
+        if canceled:
+            self._report(token, Outcome.CANCELED, 'canceled before the goal was sent')
+            return
         self._send(token, step, client)
 
     def _send(self, token: int, step: Step, client: ActionClient) -> None:
@@ -142,6 +148,8 @@ class RosDispatcher:
         self.node.executive.on_result(token, Outcome(result.outcome), result.message, data)
 
     def _report(self, token: int, outcome: Outcome, message: str) -> None:
+        with self.lock:
+            self.pending_cancel.discard(token)   # a step that ended without a goal leaves no cancel behind
         # Never call back into the executive from inside its own dispatch call.
         threading.Thread(target=self.node.executive.on_result, args=(token, outcome, message), daemon=True).start()
 
