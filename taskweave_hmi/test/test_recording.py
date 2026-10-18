@@ -179,12 +179,19 @@ def test_post_processing_runs_on_the_folder(tmp_path):
     assert 'exit 3' in rec['problems'][0]
 
 
-def test_a_light_recording_deletes_nothing(tmp_path, monkeypatch):
+def test_a_light_recording_deletes_only_old_light_ones(tmp_path, monkeypatch):
     monkeypatch.setattr(Recorder, '_run', lambda self, rec, folder: None)
-    make(tmp_path, '20251016_100000_a', files=['x_fixed.mp4'])
+    monkeypatch.setattr(recording, 'LIGHT_KEEP', 2)
+    light = {'options': {'bag': False, 'video': False}}
+    make(tmp_path, '20251016_100000_heavy', files=['x_fixed.mp4'])
+    for rec_id in ('20251016_110000_l1', '20251016_120000_l2', '20251016_130000_l3'):
+        make(tmp_path, rec_id, meta=light)
     recorder = Recorder(FakeBridge(), str(tmp_path), keep=1)
-    assert recorder.start({'reset': False, 'bag': False, 'video': False}, [])['deleted'] == []
-    assert len(recorder.recordings()) == 2
+    recorder.set_keep('20251016_110000_l1', True)
+    started = recorder.start({'reset': False, 'bag': False, 'video': False}, [])
+    assert started['deleted'] == ['20251016_120000_l2']  # newest light one stays, marked and heavy ones too
+    names = [r['id'] for r in recorder.recordings()]
+    assert names == [started['id'], '20251016_130000_l3', '20251016_110000_l1', '20251016_100000_heavy']
 
 
 def test_step_events_and_plan_ids_go_into_the_status_and_meta(tmp_path, monkeypatch):
