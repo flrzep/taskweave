@@ -4,7 +4,9 @@
 const $ = (id) => document.getElementById(id);
 const ON_FAILURE = ['', 'retry', 'replan', 'skip', 'abort'];
 const POINT_KINDS = { base_target: ['locations', 'stances'], joint_pose: ['joint poses'], object_point: ['object points'],
-  instance_point: ['placed object points'], instance_contact: ['placed object contacts'], instance: ['placed objects'] };
+  instance_point: ['placed object points'], instance_contact: ['placed object contacts'], instance: ['placed objects'],
+  tool_pose: ['tool poses'], joint_pose_only: ['joint-only poses'], joint_group: ['joint groups'],
+  held_pose: ['held poses'], held_object: ['placed objects'], via_target: ['via targets'] };
 const INCLUDE = 'mission:';  // skill choice that includes another mission's steps
 const state = { snapshot: null, skills: [], points: {}, missions: [], editing: null, dirty: false, previews: {}, startStep: null };
 

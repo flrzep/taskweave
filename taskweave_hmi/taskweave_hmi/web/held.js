@@ -1,6 +1,6 @@
 'use strict';
-// taskweave HMI, Teach tab: held poses (robots/<robot>/held_poses.yaml), where `move_object pose: <name>` takes a held
-// object: some joints first (e.g. the body), then the object's origin along straight lines through the waypoints (in
+// taskweave HMI, Teach tab: held poses (robots/<robot>/held_poses.yaml), where `move_object to: {pose: <name>}` takes
+// a held object: some joints first (e.g. the body), then the object's origin along straight lines through the waypoints (in
 // the robot's base frame). Typed in, not captured: a held object cannot be jogged. Uses app.js ($, el, api, message,
 // DEG, NAME_RE) and teach.js (teach, showJoint, unshowJoint, jointUnit, numberInput, failText, JOINT_SKIP).
 
