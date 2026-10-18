@@ -25,8 +25,11 @@ Parameters (``skills/navigate_to.yaml``): the direct controller's (see ``navigat
   depart_speed: 0.15            m/s backwards
   depart_slack_s: 5.0           backing out fails after this plus 3x the time it takes at depart_speed
   costmaps: /global_costmap/global_costmap,/local_costmap/local_costmap   nodes whose footprint follows the hold
-  speed_limit_topic: /speed_limit   Nav2 controller_server's nav2_msgs/SpeedLimit topic: the global speed override
-                                    is sent there as a percentage while Nav2 drives (nothing at 100 %)
+  speed_limit_topic: /speed_limit   Nav2 controller_server's nav2_msgs/SpeedLimit topic
+  speed_limit: false            true: the global speed override also goes to Nav2 as a SpeedLimit percentage. Off by
+                                default: the cmd_vel speed gate (taskweave_core speed_gate) scales Nav2's output, and
+                                a SpeedLimit on top would slow a drive twice; 'no limit' is still sent once, so a
+                                limit Nav2 holds from before (e.g. a restart during a slowed drive) is cleared
 """
 
 from __future__ import annotations
@@ -44,7 +47,7 @@ from .navigate import NavigateTo
 NAV2_DEFAULTS = {'action': 'navigate_to_pose', 'frame': 'map', 'server_timeout_s': 10.0, 'handover_distance': 0.3,
                  'map_topic': '/map', 'depart_max_m': 1.0, 'depart_margin_m': 0.1, 'depart_speed': 0.15,
                  'costmaps': '/global_costmap/global_costmap,/local_costmap/local_costmap',
-                 'speed_limit_topic': '/speed_limit'}
+                 'speed_limit_topic': '/speed_limit', 'speed_limit': False}
 POLL_S = 0.05
 
 
@@ -215,7 +218,9 @@ class Nav2NavigateTo(NavigateTo):
     def _limit_speed(self, override: float) -> None:
         """Nav2's controller at the speed override (SpeedLimit as a percentage of its own limits; 0 = no limit).
         Sent when it changes; the first call after start always sends (what Nav2 holds is unknown, e.g. after a
-        restart during a slowed drive), at 100 % as 'no limit'."""
+        restart during a slowed drive), at 100 % as 'no limit'. With speed_limit off only 'no limit' is ever sent."""
+        if not self.nav.get('speed_limit'):
+            override = 1.0
         percent = min(100.0, round(100.0 * override, 1))
         if percent == self._speed_sent:
             return
