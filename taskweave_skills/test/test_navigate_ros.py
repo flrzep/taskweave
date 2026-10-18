@@ -7,13 +7,12 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import wait_until
+from conftest import connect, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 
 from geometry_msgs.msg import Twist  # noqa: E402
 from nav_msgs.msg import Odometry  # noqa: E402
-from rclpy.action import ActionClient  # noqa: E402
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
@@ -82,8 +81,7 @@ def system(request, tmp_path):
 
 
 def run_skill(client, skill, args, timeout_s=20.0):
-    action = ActionClient(client, RunSkill, names.skill_action(skill))
-    assert action.wait_for_server(timeout_sec=30)
+    action = connect(client, RunSkill, names.skill_action(skill))
     goal = RunSkill.Goal(step_id='t', skill=skill, args_json=json.dumps(args), timeout_s=timeout_s)
     handle_future = action.send_goal_async(goal)
     wait_until(handle_future.done, what='the goal to be accepted')

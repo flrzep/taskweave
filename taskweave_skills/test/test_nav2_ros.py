@@ -7,13 +7,13 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import wait_ready, wait_until
+from conftest import connect, wait_ready, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('nav2_msgs')
 
 from nav2_msgs.action import NavigateToPose  # noqa: E402
-from rclpy.action import ActionClient, ActionServer  # noqa: E402
+from rclpy.action import ActionServer  # noqa: E402
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
@@ -103,8 +103,7 @@ def system(tmp_path):
 
 
 def run(client, target, timeout_s=20.0):
-    action = ActionClient(client, RunSkill, names.skill_action('navigate_to'))
-    assert action.wait_for_server(timeout_sec=30)
+    action = connect(client, RunSkill, names.skill_action('navigate_to'))
     future = action.send_goal_async(RunSkill.Goal(step_id='t', skill='navigate_to',
                                                   args_json=json.dumps({'target': target}), timeout_s=timeout_s))
     wait_until(future.done, what='the goal to be accepted')

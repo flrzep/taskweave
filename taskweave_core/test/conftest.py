@@ -28,3 +28,57 @@ def wait_until(condition, timeout=30.0, interval=0.02, what='condition'):
         if time.monotonic() >= deadline:
             raise AssertionError(f'timed out after {timeout:g} s waiting for {what}')
         time.sleep(interval)
+
+
+def warm_up(handler):
+    """Make the handler's own action clients talk to the live skill servers before the first mission. The handler
+    makes its client at the first dispatch and refuses the step ('skill server ... is not available') if the server is
+    not matched yet; and a server of the previous test (same names, gone but not yet forgotten by discovery) can make
+    a client look ready too early. So prove it with a real goal: the 'wait' skill for 0 s, sent through the handler's
+    client, retried until accepted."""
+    import json
+
+    from rclpy.action import ActionClient
+
+    from taskweave_interfaces.action import RunSkill
+
+    catalog = wait_until(handler.refresh_catalog, what='the skill catalog')
+    for info in catalog.values():
+        if info.action_name not in handler.dispatcher.clients:
+            handler.dispatcher.clients[info.action_name] = ActionClient(
+                handler, RunSkill, info.action_name, callback_group=handler.group)
+        client = handler.dispatcher.clients[info.action_name]
+        wait_until(client.server_is_ready, what=f'the action server of {info.name}')
+        if info.name != 'wait':
+            continue
+        import time
+        done = False
+        while not done:
+            future = client.send_goal_async(RunSkill.Goal(step_id='warm', skill='wait',
+                                                          args_json=json.dumps({'seconds': 0})))
+            until = time.monotonic() + 5.0
+            while not future.done() and time.monotonic() < until:
+                time.sleep(0.02)
+            done = future.done() and future.result().accepted
+        wait_until(client.server_is_ready, what=f'the action server of {info.name} to stay ready')
+
+
+@pytest.fixture(scope='session', autouse=True)
+def one_ros_context():
+    """One rclpy context for the whole session. The ROS tests call rclpy.init()/shutdown() around every test; creating
+    and destroying a DDS participant per test makes discovery slow and now and then lost on a loaded machine (an action
+    server that stays invisible to a node of the same process), so init happens once and the per-test calls do nothing."""
+    try:
+        import rclpy
+    except ImportError:
+        yield
+        return
+    real_init, real_shutdown = rclpy.init, rclpy.shutdown
+    real_init()
+    rclpy.init = lambda *args, **kwargs: None
+    rclpy.shutdown = lambda *args, **kwargs: None
+    try:
+        yield
+    finally:
+        rclpy.init, rclpy.shutdown = real_init, real_shutdown
+        real_shutdown()

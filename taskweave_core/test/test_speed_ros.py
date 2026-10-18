@@ -4,7 +4,7 @@ import threading
 import time
 
 import pytest
-from conftest import wait_until
+from conftest import wait_until, warm_up
 
 rclpy = pytest.importorskip('rclpy')
 
@@ -52,6 +52,7 @@ def system(config_dir):
     seen = []
     latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
     client.create_subscription(SpeedOverride, names.SPEED_OVERRIDE, seen.append, latched)
+    warm_up(handler)
     yield handler, server, client, seen, config_dir
     executor.shutdown()
     for node in (handler, server, client):

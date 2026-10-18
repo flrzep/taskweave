@@ -1,5 +1,7 @@
 import time
 
+import pytest
+
 
 def wait_until(condition, timeout=30.0, interval=0.02, what='condition'):
     """Poll ``condition()`` (while a background executor spins the nodes) until it is truthy, and return its value.
@@ -28,3 +30,39 @@ def wait_ready(server, *clients):
         wait_until(lambda: joints.snapshot(1.0), what='joint states at the skill server')
     for client in clients:
         wait_until(client.service_is_ready, what=f'service {client.srv_name}')
+
+
+def connect(node, action_type, name, timeout=90.0, attempt_s=5.0):
+    """An ActionClient whose server is visible. A client that has not found the server after ``attempt_s`` is replaced by
+    a fresh one (new endpoints are announced again), which gets over a discovery that was lost under load; the deadline
+    is generous."""
+    from rclpy.action import ActionClient
+
+    deadline = time.monotonic() + timeout
+    while True:
+        client = ActionClient(node, action_type, name)
+        if client.wait_for_server(timeout_sec=attempt_s):
+            return client
+        client.destroy()
+        assert time.monotonic() < deadline, f'action server {name} not found within {timeout:g} s'
+
+
+@pytest.fixture(scope='session', autouse=True)
+def one_ros_context():
+    """One rclpy context for the whole session. The ROS tests call rclpy.init()/shutdown() around every test; creating
+    and destroying a DDS participant per test makes discovery slow and now and then lost on a loaded machine (an action
+    server that stays invisible to a node of the same process), so init happens once and the per-test calls do nothing."""
+    try:
+        import rclpy
+    except ImportError:
+        yield
+        return
+    real_init, real_shutdown = rclpy.init, rclpy.shutdown
+    real_init()
+    rclpy.init = lambda *args, **kwargs: None
+    rclpy.shutdown = lambda *args, **kwargs: None
+    try:
+        yield
+    finally:
+        rclpy.init, rclpy.shutdown = real_init, real_shutdown
+        real_shutdown()

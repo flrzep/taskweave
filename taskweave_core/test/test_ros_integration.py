@@ -4,11 +4,10 @@ import threading
 import time
 
 import pytest
-from conftest import wait_until
+from conftest import wait_until, warm_up
 
 rclpy = pytest.importorskip('rclpy')
 
-from rclpy.action import ActionClient  # noqa: E402
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from sensor_msgs.msg import Joy  # noqa: E402
@@ -18,7 +17,6 @@ from taskweave_core import names  # noqa: E402
 from taskweave_core.skill import Skill, SkillResult  # noqa: E402
 from taskweave_core.skill_server import SkillServer  # noqa: E402
 from taskweave_core.task_handler import TaskHandler  # noqa: E402
-from taskweave_interfaces.action import RunSkill  # noqa: E402
 from taskweave_interfaces.msg import TaskStatus  # noqa: E402
 from taskweave_interfaces.srv import DescribeRobot, ListSkills, StartMission  # noqa: E402
 
@@ -69,18 +67,6 @@ def system(config_dir):
     rclpy.shutdown()
 
 
-def warm_up(handler):
-    """Discover the skill servers before the first mission: the handler makes its action client at the first
-    dispatch and refuses the step if the server is not matched yet, which a loaded machine makes likely."""
-    catalog = wait_until(handler.refresh_catalog, what='the skill catalog')
-    for info in catalog.values():
-        if info.action_name not in handler.dispatcher.clients:
-            handler.dispatcher.clients[info.action_name] = ActionClient(
-                handler, RunSkill, info.action_name, callback_group=handler.group)
-        wait_until(handler.dispatcher.clients[info.action_name].server_is_ready,
-                   what=f'the action server of {info.name}')
-
-
 def call(node, srv_type, name, request):
     proxy = node.create_client(srv_type, name)
     assert proxy.wait_for_service(timeout_sec=30)
@@ -102,10 +88,25 @@ def wait_for(handler, states, timeout=30):
     return handler.executive.status
 
 
-def press(joy, button):  # a press and release; the pad topic is only used once the operator node is subscribed
+def press(joy, button):  # a press and release
     for pressed in (1, 0):
         joy.publish(Joy(buttons=[pressed if i == button else 0 for i in range(15)]))
         time.sleep(0.2)
+
+
+def press_until(joy, button, condition, what, patience_s=4.0):
+    """Press until ``condition()``: a press can be lost while nodes are still finding each other (or sit unprocessed
+    on a loaded machine), so look for its effect for ``patience_s`` before pressing again."""
+    def pressed():
+        press(joy, button)
+        deadline = time.monotonic() + patience_s
+        while time.monotonic() < deadline:
+            if condition():
+                return True
+            time.sleep(0.05)
+        return False
+
+    wait_until(pressed, what=what, interval=0.0)
 
 
 def test_catalog_lists_skills_from_servers(system):
@@ -179,11 +180,10 @@ def test_operator_buttons_pause_resume_and_abort(system, config_dir):
         'goal: g\nrobot: demo_bot\nsteps:\n  - {instruction: wait, skill: wait, args: {seconds: 30}}\n')
     assert call(client, StartMission, names.START_MISSION, StartMission.Request(mission='long')).accepted
     wait_until(lambda: handler.dispatcher.goals, what='the step to be running')
-    press(joy, PAUSE_RESUME)
-    wait_for(handler, {'PAUSED'})
-    press(joy, PAUSE_RESUME)
-    wait_for(handler, {'RUNNING'})
-    press(joy, ABORT)
+    state = lambda: handler.executive.status.state.name  # noqa: E731
+    press_until(joy, PAUSE_RESUME, lambda: state() == 'PAUSED', 'the pause button to pause')
+    press_until(joy, PAUSE_RESUME, lambda: state() == 'RUNNING', 'the pause button to resume')
+    press_until(joy, ABORT, lambda: state() == 'ABORTED', 'the abort button to abort')
     assert wait_for(handler, {'ABORTED'}).state.name == 'ABORTED'
     executor.shutdown()
     operator.destroy_node()
@@ -203,9 +203,8 @@ def test_operator_button_runs_a_skill_only_when_no_mission_is_active(system, con
     wait_until(lambda: all(c.server_is_ready() for c in operator.skill_clients.values()),
                what='the operator node to see the skill server')
 
-    press(joy, 0)  # operator.yaml: button 0 -> wait 1.5 s
-    started = wait_until(lambda: operator.running, what='the manual action to start')
-    assert started
+    # operator.yaml: button 0 -> wait 1.5 s
+    press_until(joy, 0, lambda: operator.running, 'the manual action to start', patience_s=3.0)
     wait_until(lambda: not operator.running, what='the manual action to finish')
 
     (config_dir / 'missions' / 'long.yaml').write_text(

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from conftest import wait_ready, wait_until
+from conftest import connect, wait_ready, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('tf2_ros')
@@ -19,7 +19,6 @@ pytest.importorskip('moveit_msgs')
 
 from geometry_msgs.msg import TransformStamped  # noqa: E402
 from moveit_msgs.srv import GetPositionIK  # noqa: E402
-from rclpy.action import ActionClient  # noqa: E402
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
@@ -140,8 +139,7 @@ def system(tmp_path, request):
 
 
 def run(system, skill, args, timeout_s=30.0):
-    action = ActionClient(system.client, RunSkill, names.skill_action(skill))
-    assert action.wait_for_server(timeout_sec=30)
+    action = connect(system.client, RunSkill, names.skill_action(skill))
     future = action.send_goal_async(RunSkill.Goal(step_id='t', skill=skill, args_json=json.dumps(args),
                                                   timeout_s=timeout_s))
     wait_until(future.done, what='the goal to be accepted')
