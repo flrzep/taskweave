@@ -1,0 +1,7 @@
+box:
+  carry:                          # the lift first (the box moves with the hands), then straight to the waypoint
+    joints: {lift: 0.1}
+    path:
+      - {xyz: [0.7, 0.0, 0.1], rpy: [0.0, 0.0, 0.0]}
+  arm_pose:                       # sets an arm joint: not allowed with something held
+    joints: {left_joint1: 0.2}

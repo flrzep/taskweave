@@ -1,0 +1,14 @@
+implementations:
+  - name: null_space
+    type: script
+    class: taskweave_skills.object_motion:SetPosture
+    requires: {capabilities: [arms.bimanual]}
+  - name: null_space_single
+    type: script
+    class: taskweave_skills.object_motion:SetPosture
+    requires: {capabilities: [arms.single]}
+cell_frame: world
+speed: {joint_rad_s: 2.0}
+accel: {joint_rad_s2: 3.0}
+elbow_tolerance_deg: 20.0
+tolerances: {position: 0.03, settle_s: 0.3, stall_timeout_s: 1.0, state_timeout_s: 3.0}

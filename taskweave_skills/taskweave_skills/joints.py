@@ -47,6 +47,7 @@ class Params:
     elbow_tolerance_deg: float = 20.0  # an elbow swing ending further than this from its side fails (move_object
                                        # elbow) or is not used (move_to_pose: planned instead)
     override_slew_per_s: float = 2.0   # the speed override changes playback speed by at most this (fraction/s)
+    grip_drift_m: float = 0.02         # free move_object, several hands: the hands may drift this far apart (m)
 
     @classmethod
     def from_config(cls, params: dict) -> Params:
@@ -723,28 +724,10 @@ class MoveObject(GoToPoint):
 
     def _swing_elbows(self, ctx, hold: dict, side: str):
         """move_object elbow: the holding arms' elbows toward ``side``, hands and object staying."""
-        import re
-
-        from .cartesian import PathError, elbow_swing_path, swing_short
-
         label = f'elbows of {" and ".join(hold["tools"])} {side}'
-        if self.ik is None:
-            return SkillResult.rejected(f'{label}: needs the profile\'s ik section')
-        current = self._start()
-        if current is None:
-            return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)')
-        patterns = [re.compile(self.ik.joint_pattern.format(tool=tool)) for tool in hold['tools']]
-        arm = {n: v for n, v in current.items() if any(p.fullmatch(n) for p in patterns)}
-        try:
-            ctx.feedback(0.0, 'elbow swing')
-            path, report = elbow_swing_path(self.ik, list(hold['tools']), arm, current, side, self.p.max_joint_speed)
-        except PathError as error:
-            return SkillResult.failed(f'{label}: {error}')
-        swung = ', '.join(f'{tool} {a} -> {b} deg off {side}' for tool, (a, b, _) in report.items())
-        short = swing_short(report, self.p.elbow_tolerance_deg)
-        if short:  # a partial swing is not what the mission asked for: fail before moving
-            return SkillResult.failed(f'{label}: the elbows would stop more than {self.p.elbow_tolerance_deg:g} deg '
-                                      f'off {side}: {short}; not moved')
+        failure, path, _report, swung = self._swing_plan(ctx, list(hold['tools']), side, label)
+        if failure is not None:
+            return failure
         if path is None:
             return SkillResult.succeeded(f'{label}: already as far as they go ({swung})',
                                          world_state={'held_object': hold['object']})
@@ -754,6 +737,35 @@ class MoveObject(GoToPoint):
             return result
         self._check_hands({tool: hold['object_in_base'] @ tcp for tool, tcp in hold['tcp_in_object'].items()}, label)
         return SkillResult.succeeded(f'{label}: {swung}', world_state={'held_object': hold['object']})
+
+    def _swing_plan(self, ctx, tools: list, side: str, label: str, tolerance_deg: float | None = None):
+        """The elbow swing of ``tools`` toward ``side``, planned but not moved: (failure or None, Trajectory or None
+        if already there, cartesian.elbow_swing_path report, text of what it does). A swing that would stop more than
+        ``tolerance_deg`` (default p.elbow_tolerance_deg) off ``side`` fails here, before anything moves."""
+        import re
+
+        from .cartesian import PathError, elbow_swing_path, swing_short
+
+        tolerance = self.p.elbow_tolerance_deg if tolerance_deg is None else tolerance_deg
+        if self.ik is None:
+            return SkillResult.rejected(f"{label}: needs the profile's ik section"), None, {}, ''
+        current = self._start()
+        if current is None:
+            return (SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)'),
+                    None, {}, '')
+        patterns = [re.compile(self.ik.joint_pattern.format(tool=tool)) for tool in tools]
+        arm = {n: v for n, v in current.items() if any(p.fullmatch(n) for p in patterns)}
+        try:
+            ctx.feedback(0.0, 'elbow swing')
+            path, report = elbow_swing_path(self.ik, list(tools), arm, current, side, self.p.max_joint_speed)
+        except PathError as error:
+            return SkillResult.failed(f'{label}: {error}'), None, {}, ''
+        swung = ', '.join(f'{tool} {a} -> {b} deg off {side}' for tool, (a, b, _) in report.items())
+        short = swing_short(report, tolerance)
+        if short:  # a partial swing is not what the mission asked for: fail before moving
+            return SkillResult.failed(f'{label}: the elbows would stop more than {tolerance:g} deg '
+                                      f'off {side}: {short}; not moved'), None, report, swung
+        return None, path, report, swung
 
     def _held_pose(self, ctx, hold: dict, name: str):
         """move_object pose: the robot's held pose ``name`` for the held object's type: its joints (not the arms'),

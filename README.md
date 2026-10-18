@@ -139,12 +139,14 @@ taskweave smoke run frame_cycle --hmi http://<hmi>:8090 --reference config/tests
 taskweave smoke compare config/tests/frame_cycle.reference.yaml run.yaml   # offline, a saved run (--save-run)
 ```
 
-A step passes when it runs in the reference's order with outcome `SUCCEEDED`, its duration is within
-`--tolerance` (default ±10 %) plus `--slack` seconds (1.0) of the reference, and its max error is at most
-reference × (1 + tolerance) + `--error-slack` (0.002). Missing steps fail, and so do steps that are not in the
-reference unless `--allow-extra`. The command prints a table (step, instruction, ref s, now s, Δ%, error, result),
-writes a report (`<name>.report.yaml` next to the reference, or `--report FILE`) and exits 0 (passed), 1 (failed) or
-2 (could not run: HMI unreachable, recording rejected). Without `--reference` it passes when every step succeeded.
+A step passes when it runs in the reference's order with outcome `SUCCEEDED`, its duration is within `--tolerance`
+(default ±10 %) plus `--slack` seconds (1.0) of the reference, and its max error is at most reference × (1 +
+tolerance) + `--error-slack` (0.002). Missing steps fail, and so do steps that are not in the reference unless
+`--allow-extra`. Duration tolerance is per skill: `navigate_to` gets 25 % (Nav2 drives vary more than arm moves),
+overridable with `--skill-tolerance SKILL=FRACTION` or `limits: {tolerance_by_skill: {...}}` in the reference. The
+command prints a table (step, instruction, ref s, now s, Δ%, error, result), writes a report (`<name>.report.yaml`
+next to the reference, or `--report FILE`) and exits 0 (passed), 1 (failed) or 2 (could not run: HMI unreachable,
+recording rejected). Without `--reference` it passes when every step succeeded.
 The reference is just a saved run: re-record it when a mission changes on purpose.
 
 ## Build
