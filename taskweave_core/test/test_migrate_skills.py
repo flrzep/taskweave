@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import stat
 from pathlib import Path
 
 import pytest
@@ -489,28 +490,41 @@ def test_an_unwritable_file_stops_before_anything_is_touched(cell, monkeypatch):
     assert 'operator.yaml is not writable' in lines[-1] and tree(cell) == before
 
 
-def test_a_placeholder_to_is_new_form_unless_a_contact_is_given(cell):
-    assert converted(cell, 'move_object', {'to': '{target}'}) is None
-    assert converted(cell, 'move_object', {'to': '{target}', 'contact': 'plate'})[0] == [
-        ('move_object', {'to': {'onto': '{target}', 'contact': 'plate'}})]
-    assert not ms.is_old_move_object({'to': '{target}', 'hands': 'all'}) and ms.is_old_move_object({'to': 'h/hook'})
-    run(cell)
-    store = ConfigStore(cell)
-    plan = Plan.from_mission({'goal': 'g', 'steps': [{'instruction': 'i', 'skill': 'move_object',
-                                                       'args': {'to': '{target}'}}]}, 'p', robot=ROBOT)
-    problems = validate_plan(plan, {'move_object': {'type': 'object'}}, store)
-    assert not any('migrate-skills' in problem for problem in problems), problems
+# ---- review fixes: owners and modes, pack.yaml, a kept old yaml, placeholder `to` ----------------------------------
+def other_group():
+    """A group of the test user other than its primary one, or None."""
+    return next((g for g in os.getgroups() if g != os.getegid()), None) if hasattr(os, 'getgroups') else None
 
 
-def test_an_old_skill_yaml_is_kept_and_flagged_when_the_new_one_exists(cell):
-    (cell / 'skills' / 'grip.yaml').write_text('implementations:\n  - {name: mine, type: script, class: "a:B"}\n')
-    lines = run(cell)
-    assert (cell / 'skills' / 'gripper.yaml').is_file()                      # its values were not carried: kept
-    assert any(line.startswith('FLAG') and 'gripper.yaml' in line and 'grip.yaml' in line for line in lines)
-    assert not any(line.startswith('remove  skills/gripper.yaml') for line in lines)
-    assert not (cell / 'skills' / 'go_to_point.yaml').exists()               # the others migrated as before
-    run_again = []
-    assert migrate_skills_only(cell, False, run_again.append) == 0 and run_again[0].endswith('nothing to do')
+def test_rewritten_files_keep_mode_and_group_and_new_files_follow_the_directory(cell):
+    old = os.umask(0o022)
+    try:
+        group = other_group()
+        operator = cell / 'operator.yaml'
+        operator.chmod(0o640)
+        skills = cell / 'skills'
+        skills.chmod(0o775)
+        if group is not None:
+            os.chown(operator, -1, group)
+            os.chown(skills, -1, group)
+        run(cell)
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(operator.stat().st_mode) == 0o640
+    assert (group is None) or operator.stat().st_gid == group
+    created = skills / 'set_posture.yaml'           # a file the migration made
+    assert stat.S_IMODE(created.stat().st_mode) == 0o664, oct(created.stat().st_mode)   # 0666 & ~umask, dir g+w
+    assert (group is None) or created.stat().st_gid == group
+
+
+def test_a_new_file_in_a_directory_without_group_write_gets_no_group_write(cell):
+    old = os.umask(0o022)
+    try:
+        (cell / 'skills').chmod(0o755)
+        run(cell)
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE((cell / 'skills' / 'set_posture.yaml').stat().st_mode) == 0o644
 
 
 def test_an_unwritable_pack_yaml_stops_everything_with_a_clear_message(cell, monkeypatch):
@@ -531,6 +545,30 @@ def test_an_os_error_while_writing_is_reported_not_raised(cell, monkeypatch):
     lines = []
     assert migrate(cell, None, None, False, lines.append) == 1
     assert any('Permission denied' in line and 'migrate' in line for line in lines), lines
+
+
+def test_an_old_skill_yaml_is_kept_and_flagged_when_the_new_one_exists(cell):
+    (cell / 'skills' / 'grip.yaml').write_text('implementations:\n  - {name: mine, type: script, class: "a:B"}\n')
+    lines = run(cell)
+    assert (cell / 'skills' / 'gripper.yaml').is_file()                      # its values were not carried: kept
+    assert any(line.startswith('FLAG') and 'gripper.yaml' in line and 'grip.yaml' in line for line in lines)
+    assert not any(line.startswith('remove  skills/gripper.yaml') for line in lines)
+    assert not (cell / 'skills' / 'go_to_point.yaml').exists()               # the others migrated as before
+    run_again = []
+    assert migrate_skills_only(cell, False, run_again.append) == 0 and run_again[0].endswith('nothing to do')
+
+
+def test_a_placeholder_to_is_new_form_unless_a_contact_is_given(cell):
+    assert converted(cell, 'move_object', {'to': '{target}'}) is None
+    assert converted(cell, 'move_object', {'to': '{target}', 'contact': 'plate'})[0] == [
+        ('move_object', {'to': {'onto': '{target}', 'contact': 'plate'}})]
+    assert not ms.is_old_move_object({'to': '{target}', 'hands': 'all'}) and ms.is_old_move_object({'to': 'h/hook'})
+    run(cell)
+    store = ConfigStore(cell)
+    plan = Plan.from_mission({'goal': 'g', 'steps': [{'instruction': 'i', 'skill': 'move_object',
+                                                       'args': {'to': '{target}'}}]}, 'p', robot=ROBOT)
+    problems = validate_plan(plan, {'move_object': {'type': 'object'}}, store)
+    assert not any('migrate-skills' in problem for problem in problems), problems
 
 
 # ---- the old names in validation -----------------------------------------------------------------------------------

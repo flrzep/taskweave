@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -762,6 +763,32 @@ def check_writable(plan: Plan) -> list[str]:
     return problems
 
 
+def _give_owner_and_mode(name: str, path: Path) -> None:
+    """The staged file ``name`` takes the place of ``path``: an existing file keeps its owner, group and mode; a new
+    one gets 0666 & ~umask (group-write too if the folder has it) and the folder's group."""
+    try:
+        if path.exists():
+            info = path.stat()
+            os.chmod(name, stat.S_IMODE(info.st_mode))
+            owner = (info.st_uid, info.st_gid)
+        else:
+            umask = os.umask(0)
+            os.umask(umask)
+            parent = path.parent.stat()
+            mode = 0o666 & ~umask
+            if parent.st_mode & stat.S_IWGRP:
+                mode |= stat.S_IWGRP
+            os.chmod(name, mode)
+            owner = (-1, parent.st_gid)
+        if hasattr(os, 'chown'):
+            try:
+                os.chown(name, *owner)
+            except PermissionError:     # not the owner (or not root): the owner stays the runner
+                pass
+    except OSError:
+        pass
+
+
 def apply(plan: Plan) -> None:
     staged = []
     try:
@@ -769,9 +796,8 @@ def apply(plan: Plan) -> None:
             handle, name = tempfile.mkstemp(prefix=f'.{path.name}.', dir=path.parent)
             with os.fdopen(handle, 'w', encoding='utf-8', newline='') as stream:
                 stream.write(text)
-            if path.exists():
-                os.chmod(name, path.stat().st_mode & 0o7777)
             staged.append((name, path))
+            _give_owner_and_mode(name, path)
     except OSError:
         for name, _ in staged:
             Path(name).unlink(missing_ok=True)
