@@ -399,6 +399,12 @@ class Grip(_FingerMotion):
         if action == 'opening' and args.get('opening_mm') is None:
             return SkillResult.rejected('opening_mm needed with action opening')
         hands = self._hands(hands_arg(args.get('hands')), action)
+        if action == 'opening':
+            holding = self.hold.hand_holds
+            for hand in hands:
+                if hand in holding:
+                    return SkillResult.rejected(f'{hand} holds {holding[hand]}: open it with action open, or move the '
+                                                f'object first')
         grippers = {hand: self.robot.role(f'grippers.{hand}') for hand in hands}
         opening = None if args.get('opening_mm') is None else float(args['opening_mm']) / 1000.0
         if opening is not None:

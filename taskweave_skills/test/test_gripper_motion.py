@@ -474,18 +474,20 @@ def test_open_with_place_as_records_the_object_only_when_the_last_hand_lets_go(s
     assert 'box_2' in system.server.config.object_instances()
 
 
-def test_opening_sets_the_gap_in_mm_and_leaves_the_holds_alone(system):
+def test_opening_sets_the_gap_in_mm_of_a_free_hand_and_rejects_a_holding_one(system):
     go(system, {'to': {'point': 'box_1/rim'}, 'hands': ['left'], 'motion': {'approach_m': 0}})
     run(system, 'grip', {'action': 'close', 'hands': ['left']})
-    result = run(system, 'grip', {'action': 'opening', 'opening_mm': 20, 'hands': ['left']})
+    before = dict(system.sim.position)
+    for args in ({'hands': ['left']}, {}):                                  # the holding hand, alone or among all hands
+        result = run(system, 'grip', {'action': 'opening', 'opening_mm': 20, **args})
+        assert result.outcome == REJECTED
+        assert 'left holds box_1: open it with action open, or move the object first' in result.message
+    assert system.sim.position == before and system.hold.hand_holds == {'left': 'box_1'}   # no finger commanded
+    result = run(system, 'grip', {'action': 'opening', 'opening_mm': 60, 'hands': ['right']})   # a free hand works
     data = json.loads(result.data_json)
     assert result.outcome == OK, result.message
-    assert system.sim.position['left_grip'] == pytest.approx(0.25, abs=0.03)
-    assert system.sim.position['right_grip'] == 1.0
-    assert data['opening_mm']['left'] == pytest.approx(20, abs=3) and data['holding'] == {'left': True}
-    assert system.hold.hand_holds == {'left': 'box_1'}
-    result = run(system, 'grip', {'action': 'opening', 'opening_mm': 60})   # all hands
-    assert result.outcome == OK and system.sim.position['right_grip'] == pytest.approx(0.75, abs=0.03)
+    assert system.sim.position['right_grip'] == pytest.approx(0.75, abs=0.03)
+    assert data['opening_mm']['right'] == pytest.approx(60, abs=3) and data['holding'] == {'right': False}
     assert system.hold.hand_holds == {'left': 'box_1'}
 
 
