@@ -83,10 +83,50 @@ def test_compare_pass_within_tolerance_and_slack():
 
 
 def test_compare_slow_and_fast_steps_fail():
-    comparison = smoke.compare(ref_run(), ref_run(s1={'duration_s': 15.0}, s3={'duration_s': 2.0}))
+    comparison = smoke.compare(ref_run(), ref_run(s1={'duration_s': 17.0}, s3={'duration_s': 2.0}))
     assert not comparison['passed'] and results(comparison) == [('s1', 'FAIL'), ('s2', 'PASS'), ('s3', 'FAIL')]
     assert 'slower' in comparison['rows'][0]['note'] and 'faster' in comparison['rows'][2]['note']
-    assert smoke.compare(ref_run(), ref_run(s1={'duration_s': 15.0}), tolerance=0.25)['passed']
+    assert smoke.compare(ref_run(), ref_run(s3={'duration_s': 4.9}), tolerance=0.25)['passed']  # general tolerance
+
+
+def test_navigate_to_step_20_percent_slower_passes():
+    # 12.5 s drive: 15.0 s is 20 % slower, within the navigate_to tolerance (25 %) plus the 1 s slack
+    comparison = smoke.compare(ref_run(), ref_run(s1={'duration_s': 15.0}))
+    assert comparison['passed'] and results(comparison)[0] == ('s1', 'PASS')
+    assert comparison['limits']['skill_tolerance']['navigate_to'] == 0.25
+
+
+def test_move_to_pose_step_20_percent_slower_fails():
+    # the 1 s slack hides a 20 % change of a 0.8 s step, so the step is 12 s long here: 14.4 s is 20 % slower
+    comparison = smoke.compare(ref_run(s2={'duration_s': 12.0}), ref_run(s2={'duration_s': 14.4}))
+    assert not comparison['passed'] and results(comparison)[1] == ('s2', 'FAIL')
+    assert 'slower than 12 s' in comparison['rows'][1]['note']
+
+
+def test_reference_file_overrides_skill_tolerance():
+    reference = ref_run(s2={'duration_s': 12.0})
+    reference['limits'] = {'tolerance_by_skill': {'move_to_pose': 0.25, 'navigate_to': 0.05}}
+    comparison = smoke.compare(reference, ref_run(s2={'duration_s': 14.4}, s1={'duration_s': 15.0}))
+    assert results(comparison)[:2] == [('s1', 'FAIL'), ('s2', 'PASS')]  # 15 s is over the tightened 5 % + 1 s
+    assert comparison['limits']['skill_tolerance'] == {'go_to_point': 0.10, 'move_to_pose': 0.25, 'navigate_to': 0.05}
+
+
+def test_cli_skill_tolerance_overrides_reference_and_default(tmp_path, capsys):
+    reference, run = tmp_path / 'cycle.reference.yaml', tmp_path / 'run.yaml'
+    reference_data = ref_run(s2={'duration_s': 12.0})
+    reference_data['limits'] = {'tolerance_by_skill': {'move_to_pose': 0.05}}
+    smoke.save(str(reference), reference_data)
+    smoke.save(str(run), ref_run(s2={'duration_s': 14.4}, s1={'duration_s': 15.0}))
+    args = ['smoke', 'compare', str(reference), str(run), '--report', str(tmp_path / 'r.yaml')]
+    assert cli.main(args) == 1  # the reference file's 5 % fails move_to_pose
+    assert cli.main(args + ['--skill-tolerance', 'move_to_pose=0.25', '--skill-tolerance', 'navigate_to=0.1']) == 1
+    report = yaml.safe_load((tmp_path / 'r.yaml').read_text())
+    assert report['limits']['skill_tolerance'] == {'go_to_point': 0.10, 'move_to_pose': 0.25, 'navigate_to': 0.1}
+    assert [r['result'] for r in report['rows']] == ['FAIL', 'PASS', 'PASS']  # navigate_to 10 % now fails 15 s
+    assert cli.main(args + ['--skill-tolerance', 'move_to_pose=0.25']) == 0  # navigate_to back at its 25 %
+    capsys.readouterr()
+    with pytest.raises(SystemExit):
+        cli.main(args + ['--skill-tolerance', 'move_to_pose'])  # not SKILL=FRACTION
 
 
 def test_compare_failed_step():
@@ -117,15 +157,15 @@ def test_compare_error_growth():
 def test_table_and_compare_command(tmp_path, capsys):
     reference, run = tmp_path / 'cycle.reference.yaml', tmp_path / 'run.yaml'
     smoke.save(str(reference), ref_run())
-    smoke.save(str(run), ref_run(s1={'duration_s': 15.0}))
+    smoke.save(str(run), ref_run(s1={'duration_s': 17.0}))
     assert cli.main(['smoke', 'compare', str(reference), str(run)]) == 1
     out = capsys.readouterr().out
-    assert 'FAILED: 1 FAIL, 2 PASS' in out and '+20.0' in out
+    assert 'FAILED: 1 FAIL, 2 PASS' in out and '+36.0' in out
     report = yaml.safe_load((tmp_path / 'cycle.report.yaml').read_text())
-    assert report['failed'] == 1 and report['run']['steps'][0]['duration_s'] == 15.0
+    assert report['failed'] == 1 and report['run']['steps'][0]['duration_s'] == 17.0
     # a report can stand in for a run
     assert cli.main(['smoke', 'compare', str(reference), str(tmp_path / 'cycle.report.yaml'),
-                     '--tolerance', '0.3', '--report', str(tmp_path / 'r2.yaml')]) == 0
+                     '--skill-tolerance', 'navigate_to=0.4', '--report', str(tmp_path / 'r2.yaml')]) == 0
 
 
 # ---- the run loop against a fake HMI --------------------------------------------------
