@@ -93,7 +93,7 @@ def system(tmp_path):
     for node in (sim, planner, server, client):
         executor.add_node(node)
     threading.Thread(target=executor.spin, daemon=True).start()
-    planning = server.skills['move_to_pose'].planner
+    planning = server.skills['move_joints'].planner
     wait_ready(server, planning.client, planning.validity)
     yield sim, planner, client, seen
     executor.shutdown()

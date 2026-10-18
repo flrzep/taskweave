@@ -96,7 +96,7 @@ def test_navigate_to_step_20_percent_slower_passes():
     assert comparison['limits']['skill_tolerance']['navigate_to'] == 0.25
 
 
-def test_move_to_pose_step_20_percent_slower_fails():
+def test_move_joints_step_20_percent_slower_fails():
     # the 1 s slack hides a 20 % change of a 0.8 s step, so the step is 12 s long here: 14.4 s is 20 % slower
     comparison = smoke.compare(ref_run(s2={'duration_s': 12.0}), ref_run(s2={'duration_s': 14.4}))
     assert not comparison['passed'] and results(comparison)[1] == ('s2', 'FAIL')
@@ -105,28 +105,28 @@ def test_move_to_pose_step_20_percent_slower_fails():
 
 def test_reference_file_overrides_skill_tolerance():
     reference = ref_run(s2={'duration_s': 12.0})
-    reference['limits'] = {'tolerance_by_skill': {'move_to_pose': 0.25, 'navigate_to': 0.05}}
+    reference['limits'] = {'tolerance_by_skill': {'move_joints': 0.25, 'navigate_to': 0.05}}
     comparison = smoke.compare(reference, ref_run(s2={'duration_s': 14.4}, s1={'duration_s': 15.0}))
     assert results(comparison)[:2] == [('s1', 'FAIL'), ('s2', 'PASS')]  # 15 s is over the tightened 5 % + 1 s
-    assert comparison['limits']['skill_tolerance'] == {'go_to_point': 0.10, 'move_to_pose': 0.25, 'navigate_to': 0.05}
+    assert comparison['limits']['skill_tolerance'] == {'move_gripper': 0.10, 'move_joints': 0.25, 'navigate_to': 0.05}
 
 
 def test_cli_skill_tolerance_overrides_reference_and_default(tmp_path, capsys):
     reference, run = tmp_path / 'cycle.reference.yaml', tmp_path / 'run.yaml'
     reference_data = ref_run(s2={'duration_s': 12.0})
-    reference_data['limits'] = {'tolerance_by_skill': {'move_to_pose': 0.05}}
+    reference_data['limits'] = {'tolerance_by_skill': {'move_joints': 0.05}}
     smoke.save(str(reference), reference_data)
     smoke.save(str(run), ref_run(s2={'duration_s': 14.4}, s1={'duration_s': 15.0}))
     args = ['smoke', 'compare', str(reference), str(run), '--report', str(tmp_path / 'r.yaml')]
-    assert cli.main(args) == 1  # the reference file's 5 % fails move_to_pose
-    assert cli.main(args + ['--skill-tolerance', 'move_to_pose=0.25', '--skill-tolerance', 'navigate_to=0.1']) == 1
+    assert cli.main(args) == 1  # the reference file's 5 % fails move_joints
+    assert cli.main(args + ['--skill-tolerance', 'move_joints=0.25', '--skill-tolerance', 'navigate_to=0.1']) == 1
     report = yaml.safe_load((tmp_path / 'r.yaml').read_text())
-    assert report['limits']['skill_tolerance'] == {'go_to_point': 0.10, 'move_to_pose': 0.25, 'navigate_to': 0.1}
+    assert report['limits']['skill_tolerance'] == {'move_gripper': 0.10, 'move_joints': 0.25, 'navigate_to': 0.1}
     assert [r['result'] for r in report['rows']] == ['FAIL', 'PASS', 'PASS']  # navigate_to 10 % now fails 15 s
-    assert cli.main(args + ['--skill-tolerance', 'move_to_pose=0.25']) == 0  # navigate_to back at its 25 %
+    assert cli.main(args + ['--skill-tolerance', 'move_joints=0.25']) == 0  # navigate_to back at its 25 %
     capsys.readouterr()
     with pytest.raises(SystemExit):
-        cli.main(args + ['--skill-tolerance', 'move_to_pose'])  # not SKILL=FRACTION
+        cli.main(args + ['--skill-tolerance', 'move_joints'])  # not SKILL=FRACTION
 
 
 def test_compare_failed_step():
