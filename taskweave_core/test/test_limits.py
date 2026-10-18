@@ -63,3 +63,31 @@ def test_a_robot_without_known_limits_is_not_checked(config_dir):
     store = ConfigStore(config_dir)
     (config_dir / 'robots' / 'demo_bot' / 'poses.yaml').write_text('anything: {x: 99.0}\n')
     assert joint_limits(store, 'demo_bot') == {} and pose_problems(store, 'demo_bot', 'anything') == []
+
+
+# ---- velocity limits (T2.6) --------------------------------------------------------------------------------------
+
+def test_velocity_limits_come_from_joint_limits_yaml_then_the_urdf(store):
+    from taskweave_core.config.limits import velocity_limits
+    assert velocity_limits(store, 'demo_bot') == {'lift': 1.0, 'j1': 1.0}   # the URDF (wheel has no velocity)
+    folder = store.root / 'robots' / 'demo_bot' / 'moveit'
+    (folder / 'joint_limits.yaml').write_text(
+        'joint_limits:\n'
+        '  j1: {has_velocity_limits: true, max_velocity: 0.4}\n'
+        '  lift: {has_velocity_limits: false, max_velocity: 9.0}\n'      # flag off: the URDF says
+        '  wheel: {has_velocity_limits: true, max_velocity: 2.5}\n')
+    assert velocity_limits(ConfigStore(store.root), 'demo_bot') == {'lift': 1.0, 'j1': 0.4, 'wheel': 2.5}
+
+
+def test_no_velocity_limits_known_is_empty(config_dir):
+    from taskweave_core.config.limits import velocity_limits
+    assert velocity_limits(ConfigStore(config_dir), 'no_such_bot') == {}
+
+
+def test_base_limits_and_capped_by(store):
+    from taskweave_core.config.limits import base_limits, capped_by
+    profile = store.root / 'robots' / 'demo_bot' / 'profile.yaml'
+    assert base_limits(store, 'demo_bot') == {'linear': 1.0, 'angular': 1.5}
+    profile.write_text(profile.read_text().replace('linear: 1.0,', 'linear: 0.8,'))
+    assert base_limits(ConfigStore(store.root), 'demo_bot') == {'linear': 0.8, 'angular': 1.5}
+    assert capped_by({'linear': 1.0, 'angular': 1.5, 'x': 3}, {'linear': 0.8, 'angular': 1.5}) == {'linear': 0.8}

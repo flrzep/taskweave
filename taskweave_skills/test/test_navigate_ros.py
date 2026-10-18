@@ -170,3 +170,46 @@ def test_drive_straight_to_a_target_in_line(system):
     assert sim.x == pytest.approx(0.5, abs=0.04) and abs(sim.yaw) < 0.03   # the heading is kept, not turned
     result = run_skill(client, 'drive_straight', {'to': 'dock'})          # faces 90 deg away, off to the side
     assert result.outcome == RunSkill.Result.REJECTED and 'heading' in result.message
+
+
+@pytest.fixture
+def fast_system(tmp_path):
+    """diff_bot (base limits 0.8 m/s, 1.5 rad/s) with drive_straight and navigate_to configured above them."""
+    import shutil
+
+    config = tmp_path / 'config'
+    shutil.copytree(FIXTURE, config)
+    with open(config / 'skills' / 'drive_straight.yaml', 'a') as f:
+        f.write('speed: 1.2\nmax_linear: 1.5\nmax_angular: 2.5\n')
+    rclpy.init()
+    params = [Parameter('config_dir', value=str(config)), Parameter('robot', value='diff_bot')]
+    sim = BaseSim('diff', False)
+    server = SkillServer(parameter_overrides=params + [Parameter('skills', value=['drive_straight'])])
+    client = rclpy.create_node('test_client')
+    executor = MultiThreadedExecutor(num_threads=8)
+    for node in (sim, server, client):
+        executor.add_node(node)
+    threading.Thread(target=executor.spin, daemon=True).start()
+    time.sleep(0.3)
+    yield sim, client
+    executor.shutdown()
+    for node in (sim, server, client):
+        node.destroy_node()
+    rclpy.shutdown()
+
+
+def test_base_speeds_above_the_robot_limits_are_capped_and_reported(fast_system):
+    sim, client = fast_system
+    peak = []
+    sim.create_subscription(Twist, '/diff/cmd_vel', lambda m: peak.append(abs(m.linear.x)), 10)
+    result = run_skill(client, 'drive_straight', {'distance_m': 0.6})
+    assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
+    assert max(peak) <= 0.8 + 1e-9
+    assert json.loads(result.data_json)['motion']['capped'] == {'linear': 0.8, 'angular': 1.5}
+
+
+def test_base_speeds_within_the_limits_report_no_cap(system):
+    sim, client, _ = system
+    result = run_skill(client, 'drive_straight', {'distance_m': 0.1})
+    assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
+    assert 'motion' not in json.loads(result.data_json)

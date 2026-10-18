@@ -17,6 +17,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 
 from taskweave_core.config import Pose2D, wrap_angle
+from taskweave_core.config.limits import base_limits, capped_by
 from taskweave_core.skill import Skill, SkillResult
 
 MIN_DT_S = 1e-3           # s, floor of a control step (first tick, coarse clock): keeps the accel limits finite
@@ -142,7 +143,10 @@ class NavigateTo(Skill):
     def setup(self, node, config, robot, params):
         super().setup(node, config, robot, params)
         self.base = robot.base
-        self.p = Params.from_config(params, self.base.get('limits', {}))
+        limits = base_limits(config, robot.name)
+        self.p = Params.from_config(params, limits)
+        wanted = Params.from_config(params, {})
+        self.capped = capped_by({'linear': wanted.max_linear, 'angular': wanted.max_angular}, limits)  # motion.capped
         self.pose: Pose2D | None = None
         self.pose_time = -math.inf
         self.lock = threading.Lock()
@@ -168,6 +172,10 @@ class NavigateTo(Skill):
 
     def stop(self) -> None:
         self._publish(0.0, 0.0, 0.0)
+
+    def _capped_data(self) -> dict:
+        """Result data naming the base limits that held the speeds down (``motion.capped``), if any."""
+        return {'motion': {'capped': dict(self.capped)}} if self.capped else {}
 
     def execute(self, ctx, args):
         if self.base['type'] == 'fixed':
@@ -206,7 +214,7 @@ class NavigateTo(Skill):
                     self.stop()
                     return SkillResult.succeeded(
                         f'at {label} ({distance * 1000:.0f} mm, {math.degrees(yaw_error):.1f} deg)',
-                        world_state={'robot_location': label})
+                        world_state={'robot_location': label}, **self._capped_data())
             else:
                 settled_since = None
             # A differential base first turns towards the target: while travelling, progress counts its heading to the

@@ -54,6 +54,8 @@ class DriveStraight(NavigateTo):
         self.speed, self.max_distance, self.to_offset = own['speed'], own['max_distance_m'], own['to_offset_m']
         self.to_turn = math.radians(own['to_turn_deg'])
         super().setup(node, config, robot, params)
+        if self.speed > self.p.max_linear + 1e-12:   # its own speed above the base limit
+            self.capped = {**self.capped, 'linear': self.p.max_linear}
 
     def execute(self, ctx, args):
         if self.base['type'] == 'fixed':
@@ -101,7 +103,7 @@ class DriveStraight(NavigateTo):
                     self.stop()
                     return SkillResult.succeeded(f'drove {forward:+.2f} m' + (f', {sideways:+.2f} m sideways'
                                                                              if sideways else '')
-                                                 + f' ({remaining * 1000:.0f} mm off)')
+                                                 + f' ({remaining * 1000:.0f} mm off)', **self._capped_data())
             else:
                 settled_since = None
             work = clock(now)

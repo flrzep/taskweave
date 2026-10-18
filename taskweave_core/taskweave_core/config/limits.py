@@ -18,6 +18,8 @@ import re
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
+import yaml
+
 from .store import ConfigStore
 
 URDF_FILE = 'moveit/robot.urdf'           # a robot file (ConfigStore.robot_file): cell pack, then robot packs
@@ -48,6 +50,43 @@ def joint_limits(store: ConfigStore, robot: str) -> dict[str, tuple[float, float
     for joint, (lower, upper) in store.robot(robot).data.get('joints', {}).get('limits', {}).items():
         limits[joint] = (float(lower), float(upper))
     return limits
+
+
+def _urdf_velocities(path: Path) -> dict[str, float]:
+    return {joint.get('name'): float(limit.get('velocity'))
+            for joint in ElementTree.parse(path).getroot().iter('joint')
+            if (limit := joint.find('limit')) is not None and limit.get('velocity') is not None
+            and float(limit.get('velocity')) > 0}
+
+
+def velocity_limits(store: ConfigStore, robot: str) -> dict[str, float]:
+    """Joint -> max speed (rad/s, m/s for a prismatic joint) for the robot. Source order: the robot pack's
+    ``moveit/joint_limits.yaml`` (MoveIt format, ``joint_limits: {joint: {has_velocity_limits, max_velocity}}``; a
+    joint with ``has_velocity_limits: false`` or no ``max_velocity`` is skipped), else the URDF ``<limit velocity>``.
+    {} if neither says anything."""
+    limits: dict[str, float] = {}
+    urdf = urdf_path(store, robot)
+    if urdf.is_file():
+        limits.update(_urdf_velocities(urdf))
+    path = store.robot_file(robot, 'moveit/joint_limits.yaml')
+    if path.is_file():
+        data = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+        for joint, entry in (data.get('joint_limits') or {}).items():
+            if isinstance(entry, dict) and entry.get('has_velocity_limits', True) and entry.get('max_velocity'):
+                limits[joint] = float(entry['max_velocity'])
+    return limits
+
+
+def base_limits(store: ConfigStore, robot: str) -> dict[str, float]:
+    """The base's speed limits from the profile's ``base.limits``: ``{linear: m/s, angular: rad/s}`` (keys it lacks are
+    left out)."""
+    limits = (store.robot(robot).data.get('base') or {}).get('limits') or {}
+    return {key: float(value) for key, value in limits.items() if key in ('linear', 'angular')}
+
+
+def capped_by(wanted: dict[str, float], limits: dict[str, float]) -> dict[str, float]:
+    """The entries of ``wanted`` that exceed their limit, as ``{key: limit}`` (the ``motion.capped`` of a step result)."""
+    return {key: limits[key] for key, value in wanted.items() if key in limits and value > limits[key] + 1e-12}
 
 
 def joint_groups(store: ConfigStore, robot: str) -> dict[str, list[str]]:
