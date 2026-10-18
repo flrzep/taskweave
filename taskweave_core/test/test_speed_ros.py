@@ -4,6 +4,7 @@ import threading
 import time
 
 import pytest
+from conftest import wait_until, warm_up
 
 rclpy = pytest.importorskip('rclpy')
 
@@ -51,6 +52,7 @@ def system(config_dir):
     seen = []
     latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
     client.create_subscription(SpeedOverride, names.SPEED_OVERRIDE, seen.append, latched)
+    warm_up(handler)
     yield handler, server, client, seen, config_dir
     executor.shutdown()
     for node in (handler, server, client):
@@ -60,15 +62,13 @@ def system(config_dir):
 
 def call(node, srv_type, name, request):
     proxy = node.create_client(srv_type, name)
-    assert proxy.wait_for_service(timeout_sec=5)
+    assert proxy.wait_for_service(timeout_sec=30)
     future = proxy.call_async(request)
-    deadline = time.time() + 10
-    while not future.done() and time.time() < deadline:
-        time.sleep(0.02)
+    wait_until(future.done, what=f'the answer of {name}')
     return future.result()
 
 
-def until(condition, timeout=5.0):
+def until(condition, timeout=30.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
         if condition():

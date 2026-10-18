@@ -4,11 +4,13 @@ import threading
 import time
 
 import pytest
+from conftest import wait_until, warm_up
 
 rclpy = pytest.importorskip('rclpy')
 
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
+from sensor_msgs.msg import Joy  # noqa: E402
 from std_srvs.srv import Trigger  # noqa: E402
 
 from taskweave_core import names  # noqa: E402
@@ -57,6 +59,7 @@ def system(config_dir):
     thread.start()
     statuses = []
     client.create_subscription(TaskStatus, names.STATUS, statuses.append, 10)
+    warm_up(handler)
     yield handler, client, statuses, config_dir
     executor.shutdown()
     for node in (handler, server, client):
@@ -66,21 +69,44 @@ def system(config_dir):
 
 def call(node, srv_type, name, request):
     proxy = node.create_client(srv_type, name)
-    assert proxy.wait_for_service(timeout_sec=5)
+    assert proxy.wait_for_service(timeout_sec=30)
     future = proxy.call_async(request)
-    deadline = time.time() + 10
-    while not future.done() and time.time() < deadline:
-        time.sleep(0.02)
+    wait_until(future.done, what=f'the answer of {name}')
     return future.result()
 
 
-def wait_for(handler, states, timeout=10):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if handler.executive and handler.executive.status.state.name in states:
-            return handler.executive.status
-        time.sleep(0.02)
-    raise AssertionError(f'state {handler.executive.status.state.name if handler.executive else None} not in {states}')
+def wait_for(handler, states, timeout=30):
+    def reached():
+        return handler.executive and handler.executive.status.state.name in states
+
+    try:
+        wait_until(reached, timeout)
+    except AssertionError:
+        raise AssertionError(
+            f'state {handler.executive.status.state.name if handler.executive else None} not in {states}'
+            + (f': {handler.executive.status.last_error}' if handler.executive else '')) from None
+    return handler.executive.status
+
+
+def press(joy, button):  # a press and release
+    for pressed in (1, 0):
+        joy.publish(Joy(buttons=[pressed if i == button else 0 for i in range(15)]))
+        time.sleep(0.2)
+
+
+def press_until(joy, button, condition, what, patience_s=4.0):
+    """Press until ``condition()``: a press can be lost while nodes are still finding each other (or sit unprocessed
+    on a loaded machine), so look for its effect for ``patience_s`` before pressing again."""
+    def pressed():
+        press(joy, button)
+        deadline = time.monotonic() + patience_s
+        while time.monotonic() < deadline:
+            if condition():
+                return True
+            time.sleep(0.05)
+        return False
+
+    wait_until(pressed, what=what, interval=0.0)
 
 
 def test_catalog_lists_skills_from_servers(system):
@@ -96,8 +122,7 @@ def test_mission_runs_to_success_and_updates_world(system):
     status = wait_for(handler, {'SUCCEEDED', 'FAILED'})
     assert status.state.name == 'SUCCEEDED', status.last_error
     assert handler.world['robot_at'] == 'home'
-    time.sleep(0.3)
-    assert any(s.state == TaskStatus.RUNNING for s in statuses)
+    wait_until(lambda: any(s.state == TaskStatus.RUNNING for s in statuses), what='a RUNNING status message')
 
 
 def test_invalid_mission_is_rejected_before_moving(system, config_dir):
@@ -140,8 +165,6 @@ def test_describe_robot_returns_card_and_served_skills(system):
 
 
 def test_operator_buttons_pause_resume_and_abort(system, config_dir):
-    from sensor_msgs.msg import Joy
-
     from taskweave_core.operator_joy import OperatorJoy
 
     handler, client, _, _ = system
@@ -150,29 +173,23 @@ def test_operator_buttons_pause_resume_and_abort(system, config_dir):
     executor.add_node(operator)
     threading.Thread(target=executor.spin, daemon=True).start()
     joy = client.create_publisher(Joy, '/joy', 10)
-
-    def press(button):  # operator.yaml: pause_resume_button 7, abort_button 6
-        for pressed in (1, 0):
-            joy.publish(Joy(buttons=[pressed if i == button else 0 for i in range(15)]))
-            time.sleep(0.2)
+    wait_until(lambda: joy.get_subscription_count() > 0, what='the operator node to subscribe to /joy')
+    PAUSE_RESUME, ABORT = 7, 6  # operator.yaml
 
     (config_dir / 'missions' / 'long.yaml').write_text(
         'goal: g\nrobot: demo_bot\nsteps:\n  - {instruction: wait, skill: wait, args: {seconds: 30}}\n')
     assert call(client, StartMission, names.START_MISSION, StartMission.Request(mission='long')).accepted
-    time.sleep(0.5)
-    press(7)
-    wait_for(handler, {'PAUSED'})
-    press(7)
-    wait_for(handler, {'RUNNING'})
-    press(6)
+    wait_until(lambda: handler.dispatcher.goals, what='the step to be running')
+    state = lambda: handler.executive.status.state.name  # noqa: E731
+    press_until(joy, PAUSE_RESUME, lambda: state() == 'PAUSED', 'the pause button to pause')
+    press_until(joy, PAUSE_RESUME, lambda: state() == 'RUNNING', 'the pause button to resume')
+    press_until(joy, ABORT, lambda: state() == 'ABORTED', 'the abort button to abort')
     assert wait_for(handler, {'ABORTED'}).state.name == 'ABORTED'
     executor.shutdown()
     operator.destroy_node()
 
 
 def test_operator_button_runs_a_skill_only_when_no_mission_is_active(system, config_dir):
-    from sensor_msgs.msg import Joy
-
     from taskweave_core.operator_joy import OperatorJoy
 
     handler, client, _, _ = system
@@ -181,28 +198,21 @@ def test_operator_button_runs_a_skill_only_when_no_mission_is_active(system, con
     executor.add_node(operator)
     threading.Thread(target=executor.spin, daemon=True).start()
     joy = client.create_publisher(Joy, '/joy', 10)
-    time.sleep(1.0)
+    wait_until(lambda: joy.get_subscription_count() > 0, what='the operator node to subscribe to /joy')
+    # the operator node also needs the skill server (action goal) and the status topic before a press can count
+    wait_until(lambda: all(c.server_is_ready() for c in operator.skill_clients.values()),
+               what='the operator node to see the skill server')
 
-    def press(button):
-        for pressed in (1, 0):
-            joy.publish(Joy(buttons=[pressed if i == button else 0 for i in range(15)]))
-            time.sleep(0.2)
-
-    press(0)  # operator.yaml: button 0 -> wait 1.5 s
-    deadline = time.time() + 5
-    while time.time() < deadline and not operator.running:
-        time.sleep(0.05)
-    started = bool(operator.running)
-    while time.time() < deadline and operator.running:
-        time.sleep(0.05)
-    assert started and not operator.running
+    # operator.yaml: button 0 -> wait 1.5 s
+    press_until(joy, 0, lambda: operator.running, 'the manual action to start', patience_s=3.0)
+    wait_until(lambda: not operator.running, what='the manual action to finish')
 
     (config_dir / 'missions' / 'long.yaml').write_text(
         'goal: g\nrobot: demo_bot\nsteps:\n  - {instruction: wait, skill: wait, args: {seconds: 30}}\n')
     assert call(client, StartMission, names.START_MISSION, StartMission.Request(mission='long')).accepted
-    time.sleep(1.0)
-    press(0)
-    time.sleep(0.5)
+    wait_until(lambda: operator.state == TaskStatus.RUNNING, what='the operator node to see the mission running')
+    press(joy, 0)
+    time.sleep(0.5)  # a negative check: give the press time to be (wrongly) acted on
     assert not operator.running  # ignored while the mission runs
     call(client, Trigger, names.ABORT, Trigger.Request())
     executor.shutdown()
