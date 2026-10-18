@@ -23,6 +23,7 @@ setup(
         'skill_server = taskweave_core.skill_server:main',
         'operator_joy = taskweave_core.operator_joy:main',
         'teach = taskweave_core.teach:main',
+        'speed_gate = taskweave_core.speed_gate:main',
         'taskweave = taskweave_core.cli:entry',
     ]},
 )

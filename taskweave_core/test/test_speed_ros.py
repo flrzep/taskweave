@@ -134,3 +134,26 @@ def test_a_percent_only_call_leaves_test_mode_alone(system):
     assert not handler.speed.test_mode                                  # set_test_mode true: false is applied
     call(client, SetSpeedOverride, names.SET_SPEED_OVERRIDE, request(percent=0.0, test_mode=True, set_test_mode=False))
     assert not handler.speed.test_mode                                  # set_test_mode false: test_mode is ignored
+
+
+def test_override_is_published_at_startup_without_a_change(system):
+    handler, _, client, seen, _ = system
+    assert until(lambda: seen), 'nothing on the latched override topic although nothing was changed'
+    assert (seen[0].percent, seen[0].test_mode) == (100.0, False)
+    late = []                                   # a node (the speed gate) that starts later gets it as well
+    latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+    client.create_subscription(SpeedOverride, names.SPEED_OVERRIDE, late.append, latched)
+    assert until(lambda: late) and late[0].percent == 100.0
+
+
+def test_initial_parameter_value_is_what_startup_publishes(config_dir):
+    with RosRig() as ros:
+        params = [Parameter('config_dir', value=str(config_dir)), Parameter('robot', value='demo_bot'),
+                  Parameter('speed_override_percent', value=35.0)]
+        ros.add(TaskHandler(parameter_overrides=params))
+        client = ros.add(rclpy.create_node('late_client'))
+        ros.spin(4)
+        seen = []
+        client.create_subscription(SpeedOverride, names.SPEED_OVERRIDE, seen.append,
+                                   QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        assert until(lambda: seen) and seen[0].percent == 35.0
