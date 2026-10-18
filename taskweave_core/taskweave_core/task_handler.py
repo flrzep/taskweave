@@ -4,6 +4,9 @@ Parameters:
   config_dir (string)        taskweave config directory
   robot (string)             robot profile this handler drives; missions for other robots are rejected
   timeout_grace_s (double)   extra time after a step's timeout before the handler cancels it (default 2.0)
+  server_wait_s (double)     how long a step waits for its skill server to be discovered before it is rejected
+                             (default 5.0; a client is created at the first use of a skill or at the catalog refresh, and
+                             discovery needs a moment, e.g. right after a restart). 0 = do not wait
   status_rate_hz (double)    periodic status publishing while a mission is active (default 2.0)
   speed_override_percent (double)  global speed override 1-100 (default 100; not persisted). Set through the
                              service set_speed_override (the single write path; setting the parameter goes through it)
@@ -64,13 +67,42 @@ class RosDispatcher:
         if info is None:
             self._report(token, Outcome.REJECTED, f'skill {step.skill!r} is not in the catalog')
             return
-        client = self.clients.get(info.action_name)
-        if client is None:
-            client = ActionClient(self.node, RunSkill, info.action_name, callback_group=self.node.group)
-            self.clients[info.action_name] = client
-        if not client.server_is_ready():
-            self._report(token, Outcome.REJECTED, f'skill server for {step.skill!r} is not available')
+        client = self.client_for(info.action_name)
+        if client.server_is_ready():
+            self._send(token, step, client)
             return
+        # Discovery has not matched yet. Wait off the caller's thread: dispatch runs inside the executive's lock, in an
+        # executor callback, and blocking there would stall abort/pause and the timers. A cancel in the meantime is kept
+        # in pending_cancel and applied when the goal is accepted.
+        threading.Thread(target=self._wait_and_send, args=(token, step, client), daemon=True).start()
+
+    def client_for(self, action_name: str) -> ActionClient:
+        with self.lock:
+            client = self.clients.get(action_name)
+            if client is None:
+                client = ActionClient(self.node, RunSkill, action_name, callback_group=self.node.group)
+                self.clients[action_name] = client
+            return client
+
+    def ensure_clients(self, catalog: dict) -> None:
+        """Create the clients of all catalog skills now, so that their discovery starts before the first step."""
+        for info in catalog.values():
+            self.client_for(info.action_name)
+
+    def _wait_and_send(self, token: int, step: Step, client: ActionClient) -> None:
+        wait_s = max(0.0, float(self.node.get_parameter('server_wait_s').value))
+        try:
+            ready = client.wait_for_server(timeout_sec=wait_s)
+        except Exception as error:  # e.g. the node is being shut down
+            self._report(token, Outcome.REJECTED, f'skill server for {step.skill!r} could not be checked: {error}')
+            return
+        if not ready:
+            self._report(token, Outcome.REJECTED,
+                         f'skill server for {step.skill!r} is not available (waited {wait_s:g} s)')
+            return
+        self._send(token, step, client)
+
+    def _send(self, token: int, step: Step, client: ActionClient) -> None:
         goal = RunSkill.Goal(step_id=step.id, skill=step.skill, instruction=step.instruction,
                              args_json=json.dumps(step.args), timeout_s=float(step.timeout_s))
         future = client.send_goal_async(
@@ -120,6 +152,7 @@ class TaskHandler(Node):
         self.declare_parameter('config_dir', '')
         self.declare_parameter('robot', '')
         self.declare_parameter('timeout_grace_s', 2.0)
+        self.declare_parameter('server_wait_s', 5.0)
         self.declare_parameter('status_rate_hz', 2.0)
         self.declare_parameter('speed_override_percent', MAX_PERCENT)
         self.declare_parameter('speed_test_percent', 10.0)
@@ -179,6 +212,7 @@ class TaskHandler(Node):
             finally:
                 self.destroy_client(client)
         self.catalog = catalog
+        self.dispatcher.ensure_clients(catalog)
         return catalog
 
     def _validate(self, plan: Plan) -> list[str]:
