@@ -5,8 +5,8 @@ the catalog, every argument object matches the skill's JSON Schema, every point 
 in config (object points also fit the robot's tools), and ``replan_from`` targets exist.
 
 Skills mark point arguments in their schema with ``"x-taskweave-point": "base_target" | "joint_pose" | "tool_pose"
-| "object_point" | "instance_point" | "instance_contact" | "via_target" | "joint_pose_only" | "joint_group"``, at
-any depth (nested objects, oneOf variants, list items).
+| "object_point" | "instance_point" | "instance_contact" | "via_target" | "joint_pose_only" | "joint_group"
+| "held_pose" | "held_object"``, at any depth (nested objects, oneOf variants, list items).
 Values that contain placeholders are only checked once their values are known (at step start): the skip is by path,
 so a placeholder may stand for a scalar, one vec3 component or a whole field. So are points on an object an earlier
 step of the plan puts down (an argument ``place_as: <name>``, e.g. gripper): it does not exist yet.
@@ -342,6 +342,14 @@ def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
             return check_point('instance_point', text, store, robot)
         elif kind == 'instance_contact':  # <instance>/<contact>: where a held object is put
             store.instance_contact(str(value))
+        elif kind == 'held_pose':  # a held pose of the robot for any object type (the held type is known at run time)
+            names = sorted({name for poses in store.held_poses(robot).values() for name in poses})
+            if str(value) not in names:
+                return (f'robot {robot!r} has no held pose {value!r} (robots/{robot}/held_poses.yaml; it has: '
+                        f'{", ".join(names) or "none"})')
+        elif kind == 'held_object':  # the placed object a skill acts on while it is held
+            if str(value) not in store.object_instances():
+                return f'unknown placed object {value!r}: held objects are placed objects of cell/objects.yaml'
         else:
             return f'unknown point kind {kind!r} in skill schema'
     except KeyError as error:
