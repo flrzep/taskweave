@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import wait_ready, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('nav2_msgs')
@@ -25,7 +26,7 @@ from taskweave_interfaces.action import RunSkill  # noqa: E402
 FIXTURE = Path(__file__).parent / 'fixtures' / 'config'
 NAV2_CONFIG = """implementations:
   - {name: navigate_nav2, type: script, class: "taskweave_skills.nav2:Nav2NavigateTo",
-     params: {server_timeout_s: 1.0, handover_distance: 0.3}}
+     params: {server_timeout_s: 20.0, handover_distance: 0.3}}
 max_linear: 0.6
 stuck_timeout_s: 2.0
 """
@@ -88,8 +89,12 @@ def system(tmp_path):
     for node in (sim, nav2, server, client, *costmaps):
         executor.add_node(node)
     threading.Thread(target=executor.spin, daemon=True).start()
-    time.sleep(0.3)
     nav2.costmaps = costmaps
+    skill = server.skills['navigate_to']
+    wait_ready(server, *skill.costmaps.values())
+    wait_until(lambda: sim.pub.get_subscription_count() > 0, what='the skill server to subscribe to the odometry')
+    wait_until(lambda: skill.client.server_is_ready(), what='the Nav2 action server')
+    nav2.skill = skill
     yield sim, nav2, client
     executor.shutdown()
     for node in (sim, nav2, server, client, *costmaps):
@@ -99,14 +104,12 @@ def system(tmp_path):
 
 def run(client, target, timeout_s=20.0):
     action = ActionClient(client, RunSkill, names.skill_action('navigate_to'))
-    assert action.wait_for_server(timeout_sec=5)
+    assert action.wait_for_server(timeout_sec=30)
     future = action.send_goal_async(RunSkill.Goal(step_id='t', skill='navigate_to',
                                                   args_json=json.dumps({'target': target}), timeout_s=timeout_s))
-    while not future.done():
-        time.sleep(0.02)
+    wait_until(future.done, what='the goal to be accepted')
     result = future.result().get_result_async()
-    while not result.done():
-        time.sleep(0.05)
+    wait_until(result.done, timeout=timeout_s + 30, what='the skill result')
     return result.result().result
 
 
@@ -142,8 +145,8 @@ def test_the_first_drive_after_a_restart_clears_a_limit_nav2_may_still_hold(syst
     _, nav2, client = system
     received = []
     client.create_subscription(SpeedLimit, '/speed_limit', received.append, 10)
-    time.sleep(0.3)
+    wait_until(lambda: nav2.skill.speed_limit.get_subscription_count() > 0, what='the speed limit subscription match')
     result = run(client, 'dock')
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
-    time.sleep(0.2)
+    wait_until(lambda: received, what='the speed limit message')
     assert received and received[0].percentage and received[0].speed_limit == 0.0

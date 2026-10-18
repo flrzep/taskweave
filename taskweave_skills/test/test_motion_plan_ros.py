@@ -2,10 +2,10 @@
 
 import shutil
 import threading
-import time
 from types import SimpleNamespace
 
 import pytest
+from conftest import wait_ready
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('moveit_msgs')
@@ -93,7 +93,8 @@ def system(tmp_path):
     for node in (sim, planner, server, client):
         executor.add_node(node)
     threading.Thread(target=executor.spin, daemon=True).start()
-    time.sleep(0.3)
+    planning = server.skills['move_to_pose'].planner
+    wait_ready(server, planning.client, planning.validity)
     yield sim, planner, client, seen
     executor.shutdown()
     for node in (sim, planner, server, client):

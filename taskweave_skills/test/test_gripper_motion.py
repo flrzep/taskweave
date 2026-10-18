@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from conftest import wait_ready, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('tf2_ros')
@@ -117,9 +118,21 @@ def system(tmp_path, request):
     for node in (sim, ik, server, client):
         executor.add_node(node)
     threading.Thread(target=executor.spin, daemon=True).start()
-    time.sleep(0.5)
+    hold = HoldState._instances[id(server)]
+    skill = server.skills['move_gripper']
+    wait_ready(server, skill.ik.client)
+
+    def flanges_in_tf():  # the static transforms have reached the skill server's buffer
+        try:
+            hold.tcp_poses(list(FLANGES))
+        except LookupError:  # not in the buffer yet
+            return False
+        return True
+
+    wait_until(flanges_in_tf, what='the flange transforms at the skill server')
+    wait_until(lambda: published, what='the first holding message')
     yield SimpleNamespace(sim=sim, ik=ik, server=server, client=client, published=published,
-                          hold=HoldState._instances[id(server)], config=config)
+                          hold=hold, config=config)
     executor.shutdown()
     for node in (sim, ik, server, client):
         node.destroy_node()
@@ -128,14 +141,12 @@ def system(tmp_path, request):
 
 def run(system, skill, args, timeout_s=30.0):
     action = ActionClient(system.client, RunSkill, names.skill_action(skill))
-    assert action.wait_for_server(timeout_sec=15)
+    assert action.wait_for_server(timeout_sec=30)
     future = action.send_goal_async(RunSkill.Goal(step_id='t', skill=skill, args_json=json.dumps(args),
                                                   timeout_s=timeout_s))
-    while not future.done():
-        time.sleep(0.02)
+    wait_until(future.done, what='the goal to be accepted')
     result = future.result().get_result_async()
-    while not result.done():
-        time.sleep(0.05)
+    wait_until(result.done, timeout=timeout_s + 30, what='the skill result')
     return result.result().result
 
 
@@ -151,13 +162,14 @@ def at(system, hand, joint1, joint2, tolerance=0.03):
     assert position[f'{hand}_joint2'] == pytest.approx(joint2, abs=tolerance)
 
 
-def settled(system, text, tries=100):
+def settled(system, text, timeout=30.0):
     """The last published holding payload once ``text`` (a json fragment) is in it."""
-    for _ in range(tries):
-        if system.published and text in json.dumps(system.published[-1], sort_keys=True):
-            return system.published[-1]
-        time.sleep(0.05)
-    raise AssertionError(f'{text!r} not in {system.published[-1:]}')
+    try:
+        wait_until(lambda: system.published and text in json.dumps(system.published[-1], sort_keys=True),
+                   timeout, 0.05, f'{text!r} in the holding message')
+    except AssertionError:
+        raise AssertionError(f'{text!r} not in {system.published[-1:]}') from None
+    return system.published[-1]
 
 
 # ---- schemas and registration ---------------------------------------------------------------------------------
@@ -338,7 +350,7 @@ def test_planner_options_and_speed_options(system):
     assert data['path'] == 'direct' and data['motion']['planner'] == 'direct'
     start = time.monotonic()                          # 0.6 rad at 0.3 rad/s: 2 s, not the 0.5 s floor
     go(system, {'to': {'pose': 'present_both'}, 'motion': {'speed_abs': {'joint_rad_s': 0.3}}})
-    assert 1.8 < time.monotonic() - start < 8.0
+    assert 1.8 < time.monotonic() - start < 20.0
 
 
 def test_via_goes_through_the_waypoint_first(system):

@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import wait_until
 
 rclpy = pytest.importorskip('rclpy')
 
@@ -36,7 +37,8 @@ class BaseSim(Node):
         self.cmd = Twist()
         self.holonomic = holonomic
         self.pub = self.create_publisher(Odometry, f'/{prefix}/odom', 10)
-        self.create_subscription(Twist, f'/{prefix}/cmd_vel', lambda m: setattr(self, 'cmd', m), 10)
+        self.cmd_topic = f'/{prefix}/cmd_vel'
+        self.create_subscription(Twist, self.cmd_topic, lambda m: setattr(self, 'cmd', m), 10)
         self.create_timer(0.02, self.step)
 
     def step(self):
@@ -70,7 +72,8 @@ def system(request, tmp_path):
     for node in (sim, server, teach, client):
         executor.add_node(node)
     threading.Thread(target=executor.spin, daemon=True).start()
-    time.sleep(0.3)
+    wait_until(lambda: sim.pub.get_subscription_count() > 0, what='the skill server to subscribe to the odometry')
+    wait_until(lambda: sim.count_publishers(sim.cmd_topic) > 0, what='the skill server to advertise cmd_vel')
     yield sim, client, config
     executor.shutdown()
     for node in (sim, server, teach, client):
@@ -80,14 +83,12 @@ def system(request, tmp_path):
 
 def run_skill(client, skill, args, timeout_s=20.0):
     action = ActionClient(client, RunSkill, names.skill_action(skill))
-    assert action.wait_for_server(timeout_sec=5)
+    assert action.wait_for_server(timeout_sec=30)
     goal = RunSkill.Goal(step_id='t', skill=skill, args_json=json.dumps(args), timeout_s=timeout_s)
     handle_future = action.send_goal_async(goal)
-    while not handle_future.done():
-        time.sleep(0.02)
+    wait_until(handle_future.done, what='the goal to be accepted')
     result_future = handle_future.result().get_result_async()
-    while not result_future.done():
-        time.sleep(0.05)
+    wait_until(result_future.done, timeout=timeout_s + 30, what='the skill result')
     return result_future.result().result
 
 
@@ -111,8 +112,7 @@ def test_blocked_path_fails_as_stuck_and_stops(system):
     sim, client, _ = system
     result = run_skill(client, 'navigate_to', {'target': 'behind_wall'})
     assert result.outcome == RunSkill.Result.FAILED and 'no progress' in result.message
-    time.sleep(0.2)
-    assert sim.cmd.linear.x == 0.0
+    wait_until(lambda: sim.cmd.linear.x == 0.0, what='the base to be told to stop')
 
 
 def test_timeout(system):
@@ -125,10 +125,9 @@ def test_teach_then_drive_back(system):
     sim, client, config = system
     assert run_skill(client, 'navigate_to', {'target': 'dock'}).outcome == RunSkill.Result.SUCCEEDED
     teach = client.create_client(TeachPoint, names.TEACH_POINT)
-    assert teach.wait_for_service(timeout_sec=5)
+    assert teach.wait_for_service(timeout_sec=30)
     future = teach.call_async(TeachPoint.Request(name='taught_dock', kind='location'))
-    while not future.done():
-        time.sleep(0.02)
+    wait_until(future.done, what='the teach answer')
     assert future.result().success, future.result().message
     assert 'taught_dock' in (config / 'cell' / 'locations.yaml').read_text()
     assert run_skill(client, 'navigate_to', {'target': 'home'}).outcome == RunSkill.Result.SUCCEEDED
@@ -140,7 +139,10 @@ def test_teach_then_drive_back(system):
 def test_drive_straight_forward_and_back_keeps_the_heading(system):
     sim, client, _ = system
     sim.yaw = 0.5
-    time.sleep(0.2)  # odometry with the new heading
+    seen = []  # the odometry with the new heading has been published (and so reaches the skill server too)
+    client.create_subscription(Odometry, sim.pub.topic_name, lambda m: seen.append(m.pose.pose.orientation.z), 10)
+    wait_until(lambda: seen and seen[-1] == pytest.approx(math.sin(0.25), abs=1e-3), what='odometry at the new heading')
+    time.sleep(0.2)  # a few more messages for the server (a delivery delay, not a decision)
     result = run_skill(client, 'drive_straight', {'distance_m': 0.4})
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     assert sim.x == pytest.approx(0.4 * math.cos(0.5), abs=0.04) and sim.y == pytest.approx(0.4 * math.sin(0.5), abs=0.04)

@@ -4,6 +4,7 @@ import threading
 import time
 
 import pytest
+from conftest import wait_until
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('tf2_ros')
@@ -59,7 +60,10 @@ def pad(config_dir):
         executor.add_node(node)
     threading.Thread(target=executor.spin, daemon=True).start()
     joy = client.create_publisher(Joy, '/joy', 10)
-    time.sleep(0.5)
+    wait_until(lambda: joy.get_subscription_count() > 0, what='the operator node to subscribe to /joy')
+    wait_until(lambda: seen['mode'], what='the latched pad mode at the test node')
+    wait_until(lambda: operator.tf.can_transform(operator.base_frame, 'left_link7', rclpy.time.Time()),
+               what='the flange transform at the operator node')
 
     def send(buttons=(), axes=(0.0,) * 6):
         joy.publish(Joy(axes=list(axes), buttons=[1 if i in buttons else 0 for i in range(15)]))
@@ -75,7 +79,8 @@ def pad(config_dir):
 def test_drive_mode_passes_the_pad_on(pad):
     operator, send, seen, _ = pad
     send(buttons=(4,), axes=(0.0, 1.0, 0, 0, 0, 0))
-    assert operator.mode == 'drive' and seen['drive'] and not seen['twist']
+    wait_until(lambda: seen['drive'], what='the pad passed on in drive mode')
+    assert operator.mode == 'drive' and not seen['twist']
     assert seen['mode'][-1] == 'drive'
 
 
@@ -83,28 +88,30 @@ def test_tool_mode_jogs_only_with_the_enable_button_and_blocks_the_base(pad):
     operator, send, seen, _ = pad
     send(buttons=(13,))
     send()
-    assert operator.mode == 'left' and seen['mode'][-1] == 'left'
+    wait_until(lambda: operator.mode == 'left' and seen['mode'][-1] == 'left', what='the left arm mode')
     drive_before = len(seen['drive'])
     send(axes=(0.0, 1.0, 0, 0, 0, 0))  # stick without enable: nothing moves
+    time.sleep(0.3)  # a negative check: give the message time to be (wrongly) acted on
     assert not seen['twist']
     send(buttons=(4,), axes=(0.0, 1.0, 0, 0, 0, 0))  # enable + left stick up: forward
+    wait_until(lambda: seen['twist'], what='the jog twist')
     twist = seen['twist'][-1]
     assert twist.header.frame_id == operator.base_frame and twist.twist.linear.x == pytest.approx(0.1)
     send()  # enable released: one stop command
-    assert seen['twist'][-1].twist.linear.x == 0.0
+    wait_until(lambda: seen['twist'][-1].twist.linear.x == 0.0, what='the stop command')
     assert len(seen['drive']) == drive_before  # the base got nothing in the tool mode
     assert operator._for_mode(operator.actions[0])['args'] == {'seconds': 0.1, 'note': 'left'}
     send(buttons=(8,))
-    assert operator.mode == 'drive'
+    wait_until(lambda: operator.mode == 'drive', what='the drive mode')
 
 
 def test_a_running_mission_puts_the_pad_back_to_drive_and_locks_modes(pad):
     operator, send, seen, status = pad
     send(buttons=(13,))
     send()
-    assert operator.mode == 'left'
+    wait_until(lambda: operator.mode == 'left', what='the left arm mode')
     status.publish(TaskStatus(state=TaskStatus.RUNNING))
-    time.sleep(0.3)
-    assert operator.mode == 'drive'
+    wait_until(lambda: operator.mode == 'drive', what='the mission to put the pad back to drive')
     send(buttons=(13,))
+    time.sleep(0.3)  # a negative check: modes stay locked while the mission runs
     assert operator.mode == 'drive'

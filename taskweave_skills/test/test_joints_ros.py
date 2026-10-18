@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import wait_ready, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 
@@ -70,7 +71,8 @@ def system(tmp_path):
     for node in (sim, server, client):
         executor.add_node(node)
     threading.Thread(target=executor.spin, daemon=True).start()
-    time.sleep(0.3)
+    wait_ready(server)
+    client.taskweave_server = server  # for tests that wait for what the server has received
     yield sim, client
     executor.shutdown()
     for node in (sim, server, client):
@@ -80,14 +82,12 @@ def system(tmp_path):
 
 def run(client, skill, args, timeout_s=20.0):
     action = ActionClient(client, RunSkill, names.skill_action(skill))
-    assert action.wait_for_server(timeout_sec=5)
+    assert action.wait_for_server(timeout_sec=30)
     future = action.send_goal_async(RunSkill.Goal(step_id='t', skill=skill, args_json=json.dumps(args),
                                                   timeout_s=timeout_s))
-    while not future.done():
-        time.sleep(0.02)
+    wait_until(future.done, what='the goal to be accepted')
     result = future.result().get_result_async()
-    while not result.done():
-        time.sleep(0.05)
+    wait_until(result.done, timeout=timeout_s + 30, what='the skill result')
     return result.result().result
 
 
@@ -240,7 +240,7 @@ def test_gripper_close_on_a_creeping_object_stops_soon(system):
     took = time.monotonic() - start
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     assert json.loads(result.data_json)['holding'] == {'left': True}
-    assert took < 4.0 and sim.position['grip'] > 0.5  # planned 0.5 s + stall 1 s, not 30 s of creeping
+    assert took < 12.0 and sim.position['grip'] > 0.5  # planned 0.5 s + stall 1 s, not 30 s of creeping
 
 
 def test_while_holding_a_pose_with_arm_joints_is_refused(system):

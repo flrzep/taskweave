@@ -22,6 +22,16 @@ def transform(sec: int, x: float) -> TransformStamped:
     return t
 
 
+def publish_clock(node, clock, sec: int, timeout: float = 30.0) -> None:
+    """Publish /clock until the node's sim clock shows ``sec``: the first message can be lost while the publisher and
+    the node's own subscription are still finding each other."""
+    deadline = time.monotonic() + timeout
+    while node.get_clock().now().nanoseconds // 10**9 != sec:
+        assert time.monotonic() < deadline, f'sim clock did not reach {sec} s'
+        clock.publish(Clock(clock=Time(sec=sec)))
+        rclpy.spin_once(node, timeout_sec=0.05)
+
+
 def test_a_clock_jump_back_clears_the_buffer():
     rclpy.init()
     try:
@@ -30,10 +40,7 @@ def test_a_clock_jump_back_clears_the_buffer():
         tf, _listener = tf_util.buffer(node)
 
         def tick(sec: int) -> None:
-            clock.publish(Clock(clock=Time(sec=sec)))
-            deadline = time.time() + 2.0
-            while time.time() < deadline and node.get_clock().now().nanoseconds // 10**9 != sec:
-                rclpy.spin_once(node, timeout_sec=0.05)
+            publish_clock(node, clock, sec)
             for _ in range(5):
                 rclpy.spin_once(node, timeout_sec=0.02)
 
@@ -60,9 +67,9 @@ def test_a_late_transform_of_the_old_run_is_cleared_too():
             while time.time() < deadline:
                 rclpy.spin_once(node, timeout_sec=0.02)
 
-        clock.publish(Clock(clock=Time(sec=100)))
+        publish_clock(node, clock, 100)
         spin(0.5)
-        clock.publish(Clock(clock=Time(sec=3)))  # simulator restarted
+        publish_clock(node, clock, 3)  # simulator restarted
         spin(0.3)
         tf.set_transform(transform(99, 5.0), 'test')  # the old run's, still in flight
         spin(0.4)  # the re-clear drops it

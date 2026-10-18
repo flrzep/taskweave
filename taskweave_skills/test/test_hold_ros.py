@@ -2,11 +2,11 @@
 
 import json
 import threading
-import time
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from conftest import wait_until
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('tf2_ros')
@@ -22,6 +22,14 @@ from taskweave_skills.hold import TOPIC, HoldState  # noqa: E402
 ROBOT = SimpleNamespace(base={'frame': 'base_link'}, data={'tool_frames': {
     'left': {'link': 'left_link7', 'xyz': [0.1, 0, 0], 'rpy': [0, 0, 0]},
     'right': {'link': 'right_link7', 'xyz': [0.1, 0, 0], 'rpy': [0, 0, 0]}}})
+
+
+def tf_ready(state):
+    try:
+        state.tcp_poses(['left', 'right'])
+    except LookupError:
+        return False
+    return True
 
 
 @pytest.fixture
@@ -43,7 +51,8 @@ def hold():
     executor.add_node(node)
     threading.Thread(target=executor.spin, daemon=True).start()
     state = HoldState(node, ROBOT)
-    time.sleep(0.5)
+    wait_until(lambda: seen, what='the first (latched) holding message')
+    wait_until(lambda: tf_ready(state), what='the flange transforms in the buffer')
     yield state, seen
     executor.shutdown()
     node.destroy_node()
@@ -60,13 +69,13 @@ def test_grasp_only_at_a_reached_point_then_release(hold):
     assert state.grasp(['left', 'right']) == 'crate_1'
     held = state.held()
     assert held['tcp_in_object']['left'][:3, 3] == pytest.approx([0.0, 0.2, 0.0])  # TCP 0.1 ahead of the flange
-    time.sleep(0.2)
+    wait_until(lambda: seen[-1].get('tools') == ['left', 'right'], what='the hold to be published')
     assert seen[-1] == {'object': 'crate_1', 'point': 'crate_1/rails', 'tools': ['left', 'right'],
                         'links': ['left_link7', 'right_link7'],     # the legacy keys (the sim's magic grasp reads them)
                         'holds': [{'object': 'crate_1', 'point': 'crate_1/rails', 'hands': ['left', 'right'],
                                    'links': ['left_link7', 'right_link7']}]}
     assert state.release(['right']) == 'crate_1' and state.held() is None
-    time.sleep(0.2)
+    wait_until(lambda: seen[-1] == {}, what='the release to be published')
     assert seen[-1] == {}
 
 
@@ -77,7 +86,7 @@ def test_a_simulator_reset_ends_the_hold(hold):
     assert state.grasp(['left', 'right']) == 'crate_1'
     state._on_reset(None)  # what the clock's jump callback calls when sim time goes back
     assert state.held() is None
-    time.sleep(0.2)
+    wait_until(lambda: seen[-1] == {}, what='the reset to be published')
     assert seen[-1] == {}
     assert state.grasp(['left', 'right']) is None  # the reached point is gone too: no grasp without a new approach
 
@@ -96,7 +105,7 @@ def test_a_partial_close_is_a_hold_of_the_hands_that_closed(hold):
     assert state.close_hands(['left']) == {'crate_1': {'hands': ['left'], 'new': True}}
     assert state.hand_holds == {'left': 'crate_1'} and state.held()['hands'] == ['left']
     assert state.held()['tools'] == ['left']                                        # the legacy view
-    time.sleep(0.2)
+    wait_until(lambda: seen[-1].get('tools') == ['left'], what='the partial hold to be published')
     assert seen[-1]['tools'] == ['left'] and seen[-1]['links'] == ['left_link7']
     assert seen[-1]['holds'] == [{'object': 'crate_1', 'point': 'crate_1/rails', 'hands': ['left'],
                                   'links': ['left_link7']}]
@@ -113,10 +122,10 @@ def test_hands_hold_different_objects_and_open_one_by_one(hold):
     assert state.close_hands(['left', 'right']).keys() == {'crate_1', 'crate_2'}
     assert state.hand_holds == {'left': 'crate_1', 'right': 'crate_2'} and len(state.held_all()) == 2
     assert state.hold_of('right')['object'] == 'crate_2' and state.hold_of('nobody') is None
-    time.sleep(0.2)
+    wait_until(lambda: len(seen[-1].get('holds', ())) == 2, what='both holds to be published')
     assert seen[-1]['object'] == 'crate_1' and [h['object'] for h in seen[-1]['holds']] == ['crate_1', 'crate_2']
     assert state.open_hands(['left']) == {'crate_1': {'hands': ['left'], 'released': True}}
-    time.sleep(0.2)
+    wait_until(lambda: seen[-1].get('object') == 'crate_2', what='the first hold to be released')
     assert seen[-1]['object'] == 'crate_2' and seen[-1]['tools'] == ['right']     # the first hold is the other one now
     assert state.open_hands(['left']) == {}                                       # nothing to let go of
 
