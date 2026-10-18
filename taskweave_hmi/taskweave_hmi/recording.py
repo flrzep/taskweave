@@ -10,7 +10,8 @@ One recording at a time, in its own folder ``<recordings_dir>/<id>/``:
 Recordings are big (camera images: ~0.15 GB per sim second), so they do not pile up: starting one deletes the older
 ones beyond the newest ``keep - 1`` (keep 1: each recording replaces the last), except those marked keep (a ``.keep``
 file in the folder). It does not start with less than ``min_free_gb`` free. A light recording (no bag, no video: only
-meta.json) deletes nothing.
+meta.json, e.g. a smoke test) deletes only older light ones beyond the newest ``LIGHT_KEEP - 1``; marked ones always
+stay.
 
 Video recorder contract (frame-sim: scripts/recorder.py): the HMI writes ``<recordings_dir>/control.json``
 ``{"id", "cmd": "start"|"stop", "dir", "options"}``; the recorder answers in ``<dir>/status.json`` with ``state``
@@ -40,6 +41,7 @@ SUFFIXES = ('.mp4', '.csv', '.json', '.yaml', '.log')  # files of a recording th
 VIEWS = ('fixed', 'follow')  # the simulator's videos (<id>_fixed.mp4), listed first
 KEEP_FILE = '.keep'
 POST_TIMEOUT_S = 3600.0
+LIGHT_KEEP = 20  # light recordings kept (a few KB each): they only clutter the list
 END_STATES = ('succeeded', 'failed', 'aborted', 'idle')
 QUALITY = {'ray_trace': 'RAY_TRACE', 'path_trace': 'PATH_TRACE'}
 BAG_EXCLUDE = (r'.*/_action/.*|/rosout|/parameter_events|.*/transition_event|.*/bond|.*costmap_raw.*|.*_updates'
@@ -127,6 +129,12 @@ def files(folder: Path) -> list[str]:
                   key=order)
 
 
+def is_light(folder: Path) -> bool:
+    """A finished recording without bag and video (its meta.json says so)."""
+    opts = (read_json(folder / 'meta.json') or {}).get('options') or {}
+    return opts.get('bag') is False and opts.get('video') is False
+
+
 def read_json(path: Path) -> dict | None:
     try:
         return json.loads(path.read_text())
@@ -177,7 +185,7 @@ class Recorder:
             if folder.exists():
                 raise RecordingError(f'{rec_id} exists already')
             self.dir.mkdir(parents=True, exist_ok=True)
-            deleted = self._prune() if opts['bag'] or opts['video'] else []
+            deleted = self._prune() if opts['bag'] or opts['video'] else self._prune(light=True)
             free = shutil.disk_usage(self.dir).free / 1e9
             if free < self.min_free_gb:
                 raise RecordingError(f'only {free:.0f} GB free (at least {self.min_free_gb:g} GB needed): delete '
@@ -201,13 +209,17 @@ class Recorder:
             if plan_id and plan_id not in rec['plan_ids']:
                 rec['plan_ids'].append(plan_id)
 
-    def _prune(self) -> list[str]:
-        """Make room for a new recording: delete the older ones beyond the newest keep - 1, except marked ones."""
-        if self.keep <= 0:
+    def _prune(self, light: bool = False) -> list[str]:
+        """Make room for a new recording: delete the older ones beyond the newest keep - 1, except marked ones.
+        ``light``: only light recordings, beyond the newest LIGHT_KEEP - 1."""
+        keep = LIGHT_KEEP if light else self.keep
+        if keep <= 0:
             return []
         folders = [folder for folder in self._folders() if not (folder / KEEP_FILE).exists()]
+        if light:
+            folders = [folder for folder in folders if is_light(folder)]
         deleted = []
-        for folder in folders[self.keep - 1:]:
+        for folder in folders[keep - 1:]:
             try:
                 shutil.rmtree(folder)
                 deleted.append(folder.name)
