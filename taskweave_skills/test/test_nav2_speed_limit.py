@@ -121,3 +121,18 @@ def test_the_override_goes_to_nav2_as_a_percentage():
     Nav2NavigateTo._limit_speed(s, 0.5)
     Nav2NavigateTo._limit_speed(s, 1.0)
     assert s.sent == [{'percentage': True, 'speed_limit': 50.0}, {'percentage': True, 'speed_limit': 0.0}]
+
+
+def test_time_allowances_stretch_by_one_over_the_override():
+    client = FakeClient()   # at 10 % a drive takes 10x as long: its stuck check must wait 10x as long
+    s = skill(client, nominal_time={'progress_checker.movement_time_allowance': 20.0})
+    for o in (1.0, 0.5, 0.1):
+        limit(s, o)
+    assert [r['progress_checker.movement_time_allowance'] for r in client.requests] == [20.0, 40.0, 200.0]
+
+
+def test_time_allowances_alone_create_the_parameter_requests():
+    client = FakeClient()
+    s = skill(client, nominal_time={'progress_checker.movement_time_allowance': 20.0}, nominal_accel={})
+    limit(s, 0.25)
+    assert client.requests == [{'progress_checker.movement_time_allowance': 80.0}]

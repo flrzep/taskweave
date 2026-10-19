@@ -37,6 +37,9 @@ Parameters (``skills/navigate_to.yaml``): the direct controller's (see ``navigat
                                 (m/s^2, rad/s^2, same numbers as the Nav2 params). Not read back from the controller (it
                                 may still hold scaled values after a restart). Empty: accelerations are not touched
   min_accel_scale: 0.01         floor of o^2 on the accelerations (never zero)
+  nominal_time: {}              time allowances on the controller node (full names, no prefix), scaled by 1/o with
+                                the accelerations, e.g. {progress_checker.movement_time_allowance: 20.0}: at 10 % a
+                                drive takes 10x as long, so its stuck check waits 10x as long (unchanged at 100 %)
 """
 
 from __future__ import annotations
@@ -56,7 +59,7 @@ NAV2_DEFAULTS = {'action': 'navigate_to_pose', 'frame': 'map', 'server_timeout_s
                  'costmaps': '/global_costmap/global_costmap,/local_costmap/local_costmap',
                  'speed_limit_topic': '/speed_limit', 'speed_limit': True,
                  'controller_node': '/controller_server', 'controller_param_prefix': 'FollowPath',
-                 'nominal_accel': {}, 'min_accel_scale': 0.01}
+                 'nominal_accel': {}, 'min_accel_scale': 0.01, 'nominal_time': {}}
 POLL_S = 0.05
 
 
@@ -137,7 +140,7 @@ class Nav2NavigateTo(NavigateTo):
         from .hold import HoldState
         self.hold = HoldState.for_node(node, robot)
         self.SetParameters = SetParameters
-        if self.nav['nominal_accel']:
+        if self.nav['nominal_accel'] or self.nav['nominal_time']:
             self.accel_client = node.create_client(SetParameters, f'{self.nav["controller_node"]}/set_parameters',
                                                    callback_group=ReentrantCallbackGroup())
         self.costmaps = {name: node.create_client(SetParameters, f'{name}/set_parameters',
@@ -245,9 +248,11 @@ class Nav2NavigateTo(NavigateTo):
 
     def _scale_accel(self, percent: float) -> None:
         """MPPI's accelerations at nominal x o^2 through the controller server's parameter service (not configured:
-        untouched). An unavailable service is a warning (once per outage), not a failure; the next call retries."""
+        untouched), and the time allowances of nominal_time at nominal / o. An unavailable service is a warning
+        (once per outage), not a failure; the next call retries."""
         nominal = self.nav.get('nominal_accel') or {}
-        if not nominal or self.accel_client is None or percent == self._accel_sent:
+        times = self.nav.get('nominal_time') or {}
+        if not (nominal or times) or self.accel_client is None or percent == self._accel_sent:
             return
         if not self.accel_client.service_is_ready():
             if not self._accel_warned:
@@ -263,6 +268,9 @@ class Nav2NavigateTo(NavigateTo):
         request = self.SetParameters.Request()
         request.parameters = [Parameter(name=f'{prefix}.{key}', value=ParameterValue(
             type=ParameterType.PARAMETER_DOUBLE, double_value=float(value) * factor)) for key, value in nominal.items()]
+        stretch = 1.0 / max(percent / 100.0, self.nav['min_accel_scale'])   # time scales by 1/o
+        request.parameters += [Parameter(name=key, value=ParameterValue(
+            type=ParameterType.PARAMETER_DOUBLE, double_value=float(value) * stretch)) for key, value in times.items()]
         future = self.accel_client.call_async(request)
         self._accel_sent = percent
         future.add_done_callback(self._accel_done)
