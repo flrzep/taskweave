@@ -28,6 +28,7 @@ import numpy as np
 from sensor_msgs.msg import JointState
 
 from taskweave_core.config.limits import velocity_limits
+from taskweave_core.node_cache import for_node
 from taskweave_core.skill import Skill, SkillResult
 
 SWING_STRAIGHT_STEPS = 20  # samples of the eased straight move that follows an elbow swing (_swing_first)
@@ -126,12 +127,10 @@ class JointInterface:
 
     @classmethod
     def for_node(cls, node, profile) -> JointInterface:
-        key = id(node)
-        if key not in cls._instances:
-            cls._instances[key] = cls(node, profile.role('joints'))
-        return cls._instances[key]
+        return for_node(cls._instances, node, lambda n: cls(n, profile.role('joints')))
 
     def __init__(self, node, topics: dict):
+        self.node = node
         self.lock = threading.Lock()
         self.positions: dict[str, float] = {}
         self.velocities: dict[str, float] = {}
@@ -229,8 +228,11 @@ class _JointSkill(Skill):
         if ik is not None:
             hands |= {tool for tool in ik.groups
                       if any(re.fullmatch(ik.joint_pattern.format(tool=tool), n) for n in touched)}
-        elif not groups:
-            hands |= {g.removesuffix('_arm') for g in names}
+        else:   # joints in no group (or no groups at all) cannot be told apart: any hand's arm may be among them
+            grouped = {n for members in groups.values() for n in members}
+            gripped = {g.get('joint') for g in (self.robot.data.get('grippers') or {}).values()}
+            if touched - grouped - gripped:
+                hands |= {g.removesuffix('_arm') for g in names}
         return hands
 
     def _holding_refusal(self, hands=(), joints=()):

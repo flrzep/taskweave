@@ -74,12 +74,14 @@ class FakeIk(Node):
         super().__init__('fake_ik')
         self.requests, self.need_lift = [], None
         self.blocked = set()          # sides ('left', 'right') whose targets are out of reach
+        self.unreachable = None       # (side, xyz) -> True: that one flange target is out of reach
         self.create_service(GetPositionIK, '/compute_ik', self.ik)
 
     def ik(self, request, response):
         ik = request.ik_request
         start = dict(zip(ik.robot_state.joint_state.name, ik.robot_state.joint_state.position, strict=True))
         pose = ik.pose_stamped.pose
+        request_xyz = (pose.position.x, pose.position.y, pose.position.z)
         self.requests.append({'group': ik.group_name, 'xyz': (pose.position.x, pose.position.y, pose.position.z),
                               'q': (pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z),
                               'start': start})
@@ -87,6 +89,7 @@ class FakeIk(Node):
         response.solution.joint_state.name = [f'{side}_joint1', f'{side}_joint2']
         response.solution.joint_state.position = [pose.position.x, pose.position.z]
         reachable = self.need_lift is None or abs(start.get('lift', -1.0) - self.need_lift) < 1e-6
+        reachable = reachable and not (self.unreachable and self.unreachable(side, tuple(request_xyz)))
         response.error_code.val = 1 if reachable and side not in self.blocked else -31
         return response
 
@@ -304,6 +307,17 @@ def test_a_hand_that_holds_something_is_refused(system):
     assert run(system, 'grip', {'action': 'close'}).outcome == OK
     result, _ = go(system, {'to': {'by': [0, 0, 0.1]}}, REJECTED)
     assert result.message.startswith('left holds box_1; right holds box_1: the hand and its arm stay with the object')
+
+
+def test_a_close_that_cannot_register_the_hold_fails(system):
+    go(system, {'to': {'point': 'box_1/rim'}})
+
+    def no_tf(_tools):
+        raise LookupError('no transform')
+    system.hold.tcp_poses = no_tf
+    result = run(system, 'grip', {'action': 'close'})
+    assert result.outcome == FAILED and 'hold not registered' in result.message
+    assert not system.hold.hand_holds
 
 
 def test_the_free_arm_moves_while_the_other_hand_holds(system):
@@ -619,6 +633,38 @@ def test_any_one_with_no_hand_able_is_rejected_with_a_reason_per_hand(system):
     assert go(system, {'to': {'pose': 'present_left'}, 'hands': 'any_one'})[1]['hands'] == ['left']
 
 
+def far_from(goal):
+    return lambda side, xyz: side == 'left' and sum(abs(a - b) for a, b in zip(xyz, goal, strict=True)) > 0.02
+
+
+def test_any_one_probes_the_approach_start_and_the_via_legs(system):             # P3 M1
+    go(system, {**RIM, 'hands': ['left']})
+    goal = system.ik.requests[-1]['xyz']
+    system.ik.unreachable = far_from(goal)                  # left reaches the grasp itself, nothing else
+    park(system, 'left', 0.6, 0.35)
+    assert go(system, {**RIM, 'hands': 'any_one'})[1]['hands'] == ['left']
+    near = {'to': {'point': 'box_1/rim'}, 'hands': 'any_one'}
+    _, data = go(system, {**near, 'motion': {'approach_m': 0.2}})          # the pre-grasp is out of reach for left
+    assert data['hands'] == ['right']
+    assert data['choice']['candidates']['left']['feasible'] is False
+    park(system, 'left', 0.6, 0.35)
+    _, data = go(system, {**RIM, 'hands': 'any_one', 'motion': {'approach_m': 0, 'via': ['pose:present_both']}})
+    assert data['hands'] == ['right']                                      # left cannot reach the via pose either
+
+
+def test_the_probed_motion_counts_the_torso_too(system):                       # P3 M2
+    skill = system.server.skills['move_gripper']
+    park(system, 'left', 0.0, 0.0)
+    args = {'to': {'pose': 'present_both'}, 'hands': 'any_one'}  # sets lift 0.1, left to 0.6, 0.4
+    probe = skill._probe(args, skill._target_for(args, ['left']))
+    assert probe.feasible and probe.motion_rad == pytest.approx(0.6 + 0.4 + 0.1)
+
+
+def test_a_via_pose_with_nothing_for_the_target_hand_adds_no_leg(system):
+    go(system, {'to': {'pose': 'present_both'}, 'hands': ['right'], 'motion': {'via': ['pose:present_left']}})
+    at(system, 'right', 0.6, 0.4)
+
+
 def test_a_holding_hand_is_never_chosen(system):
     skill = system.server.skills['move_gripper']
     go(system, {**RIM, 'hands': ['left']})
@@ -660,6 +706,14 @@ def test_grip_close_any_one_never_counts_the_holding_hand_as_reached(system):   
     # open any_one still names the one holding hand
     hold_by_registry(system, 'left', 'pile_1')
     assert system.hold.hand_holds['left'] == 'box_1'
+
+
+def test_grip_open_any_one_with_two_holding_hands_names_the_holding_hands(system):
+    hold_by_registry(system, 'left')
+    hold_by_registry(system, 'right', 'pile_1')
+    result = run(system, 'grip', {'action': 'open', 'hands': 'any_one'})
+    assert result.outcome == REJECTED and 'left and right holds an object' in result.message, result.message
+    assert set(system.hold.hand_holds) == {'left', 'right'}
 
 
 def test_a_holding_gripper_joint_is_refused_like_the_arm_joints(system):          # M9

@@ -30,6 +30,8 @@ import threading
 
 import numpy as np
 
+from taskweave_core.node_cache import for_node
+
 TOPIC = '/taskweave/holding'
 
 
@@ -38,9 +40,7 @@ class HoldState:
 
     @classmethod
     def for_node(cls, node, robot) -> HoldState:
-        if id(node) not in cls._instances:
-            cls._instances[id(node)] = cls(node, robot)
-        return cls._instances[id(node)]
+        return for_node(cls._instances, node, lambda n: cls(n, robot))
 
     def __init__(self, node, robot, reset_jump_s: float = 0.5):
         """``reset_jump_s``: sim time going back by more than this is a simulator reset."""
@@ -251,6 +251,9 @@ class HoldState:
             hold = self.holds.get(name) if name else next(iter(self.holds.values()), None)
             if hold is not None:
                 hold['object_in_base'] = object_in_base
+                for hand in [h for h, info in self.reached.items()
+                             if info['instance'] == hold['object'] and h not in hold['hands']]:
+                    del self.reached[hand]    # that hand reached the object where it was: it is no longer there
 
     def _publish(self) -> None:
         with self.lock:

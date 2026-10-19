@@ -179,3 +179,15 @@ def test_an_unchanged_first_link_publishes_no_released_in_between(hold):
     payloads = published(state)
     state.open_hands(['right'])
     assert len(payloads) == 1 and payloads[0]['tools'] == ['left']
+
+
+def test_a_hand_left_at_a_point_of_a_moved_object_does_not_join_the_hold(hold):
+    state, _ = hold
+    obj = np.eye(4)
+    state.reach(['left', 'right'], 'crate_1/rails', 'crate_1', obj)
+    assert state.close_hands(['left']) == {'crate_1': {'hands': ['left'], 'new': True}}
+    moved = np.eye(4)
+    moved[:3, 3] = [0.3, 0.0, 0.2]
+    state.moved(moved, 'crate_1')           # the crate went away with the left hand: right is no longer at its point
+    assert state.reached_hands(['right']) == {}
+    assert state.close_hands(['right']) == {} and state.hand_holds == {'left': 'crate_1'}

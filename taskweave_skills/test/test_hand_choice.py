@@ -16,8 +16,8 @@ def test_infeasible_hands_lose_then_least_motion_then_profile_order():
     assert target == 'target_right' and report['chosen'] == 'right'
     probes['target_right'] = Probe(False, 0.0, 'no IK solution for right')
     target, report = choose(HANDS, {}, build, probes.get)
-    assert target == 'target_left' and report['candidates']['right'] == {'feasible': False,
-                                                                         'reason': 'no IK solution for right'}
+    assert target == 'target_left' and report['candidates']['right'] == {
+        'feasible': False, 'motion_rad': None, 'repeatable': None, 'reason': 'no IK solution for right'}
     probes = {'target_left': Probe(True, 1.0), 'target_right': Probe(True, 1.0)}
     assert [choose(HANDS, {}, build, probes.get)[1]['chosen'] for _ in range(3)] == ['left'] * 3
     assert choose(['right', 'left'], {}, build, probes.get)[1]['chosen'] == 'right'      # the profile's order
@@ -49,3 +49,23 @@ def test_motions_within_the_tolerance_are_equal_and_the_profile_order_decides():
     assert choose(['right', 'left'], {}, build, swapped.get, tolerance_rad=0.05)[1]['chosen'] == 'right'
     far = {'target_left': Probe(True, 1.3), 'target_right': Probe(True, 1.0)}
     assert choose(HANDS, {}, build, far.get, tolerance_rad=0.05)[1]['chosen'] == 'right'        # least motion
+
+
+def test_a_failed_target_is_passed_on_not_turned_into_a_refusal():
+    result = choose(HANDS, {}, lambda hand: SkillResult.failed('where is the robot? no TF'), lambda t: Probe())
+    assert result.outcome is Outcome.FAILED and result.message == 'where is the robot? no TF'
+
+
+def test_a_hand_that_needed_the_global_search_comes_after_repeatable_ones():
+    probes = {'target_left': Probe(True, 2.0), 'target_right': Probe(True, 0.5, repeatable=False)}
+    _, report = choose(HANDS, {}, build, probes.get)
+    assert report['chosen'] == 'left' and report['candidates']['right']['repeatable'] is False
+    probes['target_left'] = Probe(True, 2.0, repeatable=False)           # none repeatable: the least motion again
+    assert choose(HANDS, {}, build, probes.get)[1]['chosen'] == 'right'
+
+
+def test_every_candidate_has_the_same_keys():
+    probes = {'target_left': Probe(True, 2.0), 'target_right': Probe(False, 0.0, 'no IK')}
+    _, report = choose(HANDS, {}, build, probes.get)
+    keys = {tuple(sorted(candidate)) for candidate in report['candidates'].values()}
+    assert keys == {('feasible', 'motion_rad', 'reason', 'repeatable')}

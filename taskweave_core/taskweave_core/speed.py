@@ -16,6 +16,8 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 
+from .node_cache import for_node
+
 DEFAULT_SLEW_PER_S = 2.0   # fraction/s: 10 % -> 100 % in about 0.5 s (spec Q3)
 MIN_PERCENT, MAX_PERCENT = 1.0, 100.0
 TEST_PERCENT, CAP_PERCENT = 10.0, 50.0
@@ -71,15 +73,10 @@ class SpeedOverride:
     first message. ``clock(start)`` makes a WorkClock that follows it."""
 
     _instances: dict = {}
-    _instances_lock = threading.Lock()
 
     @classmethod
     def for_node(cls, node) -> SpeedOverride:
-        with cls._instances_lock:
-            key = id(node)
-            if key not in cls._instances or cls._instances[key].node is not node:
-                cls._instances[key] = cls(node)
-            return cls._instances[key]
+        return for_node(cls._instances, node, cls)
 
     def __init__(self, node=None):
         self.node = node

@@ -295,29 +295,45 @@ class MoveGripper(_PointMotion):
         return target
 
     def _probe(self, args: dict, target: Target, ctx=None):
-        """Can IK put ``target``'s tool where it goes, and how far would the arm move? A solve with the profile's
-        choose settings and no motion (torso auto: also at the other lift heights, like the move itself)."""
+        """Can IK put ``target``'s tool where it goes, and how far would the arm (and the torso) move? Solves what the
+        move itself would: the via legs, the approach start, the target; with the profile's choose settings and no
+        motion (torso auto: also at the other lift heights, like the move itself). A straight line (mode linear) keeps
+        the lift and the pose's joints, so it is probed with neither."""
         from .hand_choice import Probe
         from .ik import IkError
 
         if self.ik is None or not target.tools:
             return Probe()
         m = motion.values(motion.resolve(self.config, self.robot.name, self.name, args, target.data))
-        torso = m.get('torso', 'keep') == 'auto' and self.lift_joint
-        lifts = [{**target.joints, self.lift_joint: float(v)} for v in self.lift_values] if torso else []
+        linear = m.get('mode', DEFAULT_MODE) == 'linear'
+        legs = self._via(m.get('via') or [], target)
+        if isinstance(legs, SkillResult):
+            return Probe(False, 0.0, legs.message)
+        approach = 0.0 if linear or not target.before else float(m.get('approach_m', 0.0))
+        goals = [(leg.tools, leg.joints) for leg in legs if leg.tools]
+        if approach > 0:
+            goals.append((target.before(approach), target.joints))
+        goals.append((target.tools, target.joints))
         self._refresh_ik()
         start = self._start()
         stop = (lambda: ctx.should_stop) if ctx is not None else (lambda: False)
-        first = None
-        for fixed in [target.joints, *lifts]:
-            try:
-                arm = self.ik.solve(target.tools, fixed, stop, current=start, elbow=m.get('elbow'))
-            except IkError as error:
-                first = first or error
-                continue
-            moved = sum(abs(value - start[name]) for name, value in arm.items() if name in (start or {}))
-            return Probe(True, float(moved))
-        return Probe(False, 0.0, str(first))
+        for tools, joints in goals:
+            fixeds = [{} if linear else joints]
+            if m.get('torso', 'keep') == 'auto' and self.lift_joint and not linear:
+                fixeds += [{**joints, self.lift_joint: float(v)} for v in self.lift_values]
+            first = None
+            for fixed in fixeds:
+                try:
+                    arm = self.ik.solve(tools, fixed, stop, current=start, elbow=m.get('elbow'))
+                except IkError as error:
+                    first = first or error
+                    continue
+                break
+            else:
+                return Probe(False, 0.0, str(first))
+        moved = sum(abs(value - start[name]) for name, value in {**fixed, **arm}.items() if name in (start or {}))
+        repeatable = not any(self.ik.last.get(tool, {}).get('global') for tool in target.tools)
+        return Probe(True, float(moved), repeatable=repeatable)
 
     def _select(self, rule, defined, what: str):
         """The hands to move: ``rule`` (auto: all the target defines; all; names) among those ``defined``."""
@@ -406,7 +422,8 @@ class MoveGripper(_PointMotion):
                 except KeyError as error:
                     return SkillResult.rejected(str(error.args[0]))
                 tools = {hand: tool for hand, tool in pose['tools'].items() if hand in target.hands}
-                legs.append(Target(f'via {entry}', target.hands, tools, joints=pose['joints']))
+                if tools or pose['joints']:      # nothing for these hands: no leg to move
+                    legs.append(Target(f'via {entry}', target.hands, tools, joints=pose['joints']))
             else:
                 leg = self._point_target(entry, 0.0, target.hands)
                 if isinstance(leg, SkillResult):
@@ -517,7 +534,7 @@ class Grip(_FingerMotion):
             if action == 'close':      # a holding hand is at its point still, but closing it again is no reach
                 at_point = {hand: info for hand, info in at_point.items() if hand not in self.hold.hand_holds}
             holding = self.hold.hand_holds if action == 'open' else {}
-            if len([h for h in self.hands if h in holding]) == 1:
+            if any(h in holding for h in self.hands):    # name the holding hands (several: ambiguous)
                 return one_hand(rule, holding, self.hands, 'holds an object')
             return one_hand(rule, at_point, self.hands, 'is at an object point (move_gripper to.point first)')
         if rule == 'all' or (rule == 'auto' and action == 'opening'):
@@ -543,19 +560,23 @@ class Grip(_FingerMotion):
         if grip_m:
             message += ' (grip ' + ', '.join(f'{h} {value * 1000:.0f} mm' for h, value in grip_m.items()) + ')'
         if action == 'close':
-            message += self._close(hands, state)
+            text, unregistered = self._close(hands, state)
+            if unregistered:   # the fingers closed on the part, but no hold exists: later motions would ignore it
+                return SkillResult.failed(message + text, holding=holding, opening_mm=measured, hands=hands,
+                                          world_state=state)
+            message += text
         elif action == 'open':
             message += self._open(args, hands, state)
         else:
             holding = {hand: hand in self.hold.hand_holds for hand in hands}
         return SkillResult.succeeded(message, holding=holding, opening_mm=measured, hands=hands, world_state=state)
 
-    def _close(self, hands: list, state: dict) -> str:
-        """The registry after a close: hands at an object point hold that object."""
+    def _close(self, hands: list, state: dict) -> tuple[str, bool]:
+        """The registry after a close: hands at an object point hold that object. (message, hold not registered)."""
         try:
             grasped = self.hold.close_hands(hands)
         except LookupError as error:
-            return f'; hold not registered: where is the gripper? {error}'
+            return f'; hold not registered: where is the gripper? {error}', True
         message = ''
         for name, info in grasped.items():
             message += f'; {" and ".join(info["hands"])} hold {name}'
@@ -565,7 +586,7 @@ class Grip(_FingerMotion):
                     message += f'; {self.config.take_object(name)}'  # one off its stack (object state)
                 except (KeyError, ValueError) as error:
                     message += f'; object state not updated: {error}'
-        return message
+        return message, False
 
     def _place_as_refusal(self, args: dict, hands: list):
         """REJECTED if ``place_as`` (one name) would place several objects: more than one hold lets go whole."""
