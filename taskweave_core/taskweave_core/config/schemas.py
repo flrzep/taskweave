@@ -723,4 +723,5 @@ def hands_schema(hand_names=(), rules=HAND_RULES) -> dict:
             'x-taskweave-widget': 'hands',
             'description': 'Which hands: a hand name or a list of names; "auto": the hands the target defines (or, '
                            'for a held object, the hands holding it); "any_one": one free hand that can take the '
-                           'target; "all": every hand.'}
+                           'target (move_gripper: an IK-feasible hand with the least joint motion, named in the '
+                           'result; grip: the one hand at an object point); "all": every hand.'}

@@ -70,6 +70,7 @@ class FakeIk(Node):
     def __init__(self):
         super().__init__('fake_ik')
         self.requests, self.need_lift = [], None
+        self.blocked = set()          # sides ('left', 'right') whose targets are out of reach
         self.create_service(GetPositionIK, '/compute_ik', self.ik)
 
     def ik(self, request, response):
@@ -83,7 +84,7 @@ class FakeIk(Node):
         response.solution.joint_state.name = [f'{side}_joint1', f'{side}_joint2']
         response.solution.joint_state.position = [pose.position.x, pose.position.z]
         reachable = self.need_lift is None or abs(start.get('lift', -1.0) - self.need_lift) < 1e-6
-        response.error_code.val = 1 if reachable else -31
+        response.error_code.val = 1 if reachable and side not in self.blocked else -31
         return response
 
 
@@ -172,7 +173,7 @@ def test_the_schemas_pass_the_oneof_rule_and_carry_the_robots_hands(system):
     skill = system.server.skills['move_gripper']
     move, grip = skill.args_schema['properties'], system.server.skills['grip'].args_schema['properties']
     assert move['hands']['anyOf'][0]['enum'] == ['auto', 'any_one', 'all', 'left', 'right']
-    assert grip['hands']['anyOf'][0]['enum'] == ['auto', 'all', 'left', 'right']
+    assert grip['hands']['anyOf'][0]['enum'] == ['auto', 'any_one', 'all', 'left', 'right']
     assert [v['required'] for v in move['to']['oneOf']] == [['point'], ['pose'], ['by'], ['at']]
     assert skill.implementation == 'script:ik_planned'                       # arms.bimanual comes first
     assert skill.args_schema['x-taskweave-resources'] == ['hands', 'torso']
@@ -186,7 +187,8 @@ def test_an_ambiguous_or_misplaced_target_is_rejected_with_the_nested_path(syste
     assert result.outcome == REJECTED and 'places no tools' in result.message
     assert run(system, 'move_gripper', {'to': {'by': [0, 0, 1]}, 'motion': {'mode': 'sideways'}}).outcome == REJECTED
     assert run(system, 'grip', {'action': 'opening'}).outcome == REJECTED         # opening_mm is required
-    assert run(system, 'grip', {'action': 'close', 'hands': 'any_one'}).outcome == REJECTED
+    result = run(system, 'grip', {'action': 'close', 'hands': 'any_one'})      # no hand is at an object point
+    assert result.outcome == REJECTED and 'no hand is at an object point' in result.message
 
 
 # ---- targets x modes --------------------------------------------------------------------------------------------
@@ -251,7 +253,6 @@ def test_a_hand_alone_takes_the_points_alone_pose_else_the_pairs(system):
     go(system, {'to': {'point': 'box_1/rim'}, 'hands': 'right', 'motion': {'approach_m': 0}})   # no alone pose: pair's
     at(system, 'right', 0.6, 0.3)
     assert set(system.hold.reached_hands()) == {'left', 'right'}
-    go(system, {'to': {'point': 'box_1/rim'}, 'hands': 'any_one'}, REJECTED)
 
 
 def test_a_hand_that_moves_elsewhere_is_no_longer_at_its_point(system):
@@ -525,3 +526,88 @@ def test_the_cell_pack_examples_in_docs_load_into_the_skills_parameters():
                                     'torso_fallback': {'joint': 'lift', 'values': [0.0]}, 'max_joint_speed': 1.0})
     # old keys stay
     assert flat == {'tcp_speed': 0.2, 'lift_joint': 'lift', 'lift_values': [0.0], 'max_joint_speed': 1.0}
+
+
+# ---- hands any_one / auto (T3.1) -------------------------------------------------------------------------------
+def park(system, hand, joint1, joint2):
+    """Put a hand's joints at a place (sim and target) and wait until the skill sees them."""
+    sim = system.sim
+    for name, value in ((f'{hand}_joint1', joint1), (f'{hand}_joint2', joint2)):
+        sim.position[name] = sim.target[name] = value
+    joints = system.server.skills['move_gripper'].joints
+
+    def seen():
+        state = joints.snapshot(1.0) or {}
+        return (abs(state.get(f'{hand}_joint1', 9) - joint1) < 1e-6
+                and abs(state.get(f'{hand}_joint2', 9) - joint2) < 1e-6)
+    wait_until(seen, what=f'the {hand} joints at {joint1}, {joint2}')
+
+
+RIM = {'to': {'point': 'box_1/rim'}, 'motion': {'approach_m': 0}}
+
+
+def test_any_one_takes_the_only_reachable_hand_and_reports_it(system):
+    system.ik.blocked = {'left'}
+    result, data = go(system, {**RIM, 'hands': 'any_one'})
+    assert data['hands'] == ['right'] and data['choice']['chosen'] == 'right'
+    assert 'any_one chose right' in result.message and set(system.hold.reached_hands()) == {'right'}
+    assert data['choice']['candidates']['left']['feasible'] is False
+    at(system, 'right', 0.6, 0.3)                                      # the pair's pose: this point has no right alone
+    system.ik.blocked = {'right'}
+    park(system, 'right', 0.0, 0.0)
+    _, data = go(system, {**RIM, 'hands': 'any_one'})
+    assert data['hands'] == ['left']
+    at(system, 'left', 0.6, 0.35)                                      # left's alone pose
+
+
+def test_any_one_takes_the_least_joint_motion_and_ties_go_to_the_profile_order(system):
+    park(system, 'right', 0.6, 0.3)                                    # right already stands at its pair pose
+    _, data = go(system, {**RIM, 'hands': 'any_one'})
+    assert data['hands'] == ['right']
+    cands = data['choice']['candidates']
+    assert cands['right']['motion_rad'] < cands['left']['motion_rad']
+    park(system, 'left', 0.6, 0.35)
+    park(system, 'right', 0.0, 0.0)
+    assert go(system, {**RIM, 'hands': 'any_one'})[1]['hands'] == ['left']
+    for _ in range(2):                                                 # equal motion: always the first hand
+        park(system, 'left', 0.0, 0.0)
+        park(system, 'right', 0.0, 0.0)
+        assert go(system, {'to': {'pose': 'present_both'}, 'hands': 'any_one'})[1]['hands'] == ['left']
+
+
+def test_any_one_with_no_hand_able_is_rejected_with_a_reason_per_hand(system):
+    system.ik.blocked = {'left', 'right'}
+    result, _ = go(system, {**RIM, 'hands': 'any_one'}, REJECTED)
+    assert 'no hand can take it' in result.message and 'left: no IK solution' in result.message
+    assert 'right: no IK solution' in result.message
+    system.ik.blocked = {'left'}                                       # present_left: only left has the pose
+    result, _ = go(system, {'to': {'pose': 'present_left'}, 'hands': 'any_one'}, REJECTED)
+    assert 'left: no IK solution' in result.message
+    assert 'right: pose present_left has no tool poses for right' in result.message
+    system.ik.blocked = set()
+    assert go(system, {'to': {'pose': 'present_left'}, 'hands': 'any_one'})[1]['hands'] == ['left']
+
+
+def test_a_holding_hand_is_never_chosen(system):
+    skill = system.server.skills['move_gripper']
+    go(system, {**RIM, 'hands': ['left']})
+    assert run(system, 'grip', {'action': 'close', 'hands': 'left'}).outcome == OK
+    chosen = skill._target({'to': {'by': [0, 0, 0.1]}, 'hands': 'any_one'})        # the choice alone, not the motion
+    assert chosen.hands == ['right']
+    system.hold.reach(['right'], 'box_1/knob', 'box_1', np.eye(4))
+    system.hold.close_hands(['right'])                                              # both hands in the hold now
+    refused = skill._target({'to': {'by': [0, 0, 0.1]}, 'hands': 'any_one'})
+    assert refused.outcome.name == 'REJECTED' and 'left: holds box_1' in refused.message
+    assert 'right: holds box_1' in refused.message
+
+
+def test_auto_takes_the_one_hand_a_point_defines_and_grip_any_one_the_hand_at_a_point(system):
+    go(system, {**RIM, 'hands': 'auto'})                                                 # both hands at the point
+    result = run(system, 'grip', {'action': 'close', 'hands': 'any_one'})
+    assert result.outcome == REJECTED and 'ambiguous' in result.message and 'left and right' in result.message
+    go(system, {'to': {'by': [0, 0, 0.0]}, 'hands': ['left']})                          # left leaves the point
+    _, data = go(system, {'to': {'point': 'box_1/knob'}, 'motion': {'approach_m': 0}})     # only a right_tool
+    assert data['hands'] == ['right'] and 'choice' not in data     # auto: the one hand that has a pose
+    result = run(system, 'grip', {'action': 'close', 'hands': 'any_one'})
+    assert result.outcome == OK and json.loads(result.data_json)['hands'] == ['right']
+    assert run(system, 'grip', {'action': 'open', 'hands': 'any_one'}).outcome == OK     # the one holding hand
