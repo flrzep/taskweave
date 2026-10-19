@@ -17,6 +17,7 @@ taskweave runs robot tasks on ROS 2 Jazzy, driven entirely by YAML.
 | `taskweave_core/taskweave_core/` | `config/` (store, schemas, packs, overlay, migrate*, slim), `planner.py`, `executive.py`, `task_handler.py`, `skill.py` (base class), `skill_server.py`, `validation.py`, `motion.py` (motion option resolution), `speed.py`, `speed_gate.py`, `smoke.py`, `teach.py`, `operator_joy.py`, `cli.py` |
 | `taskweave_skills/taskweave_skills/` | the generic skills: `basic` (wait), `navigate`, `drive`, `joint_motion`, `gripper_motion`, `object_motion`; helpers `joints`, `ik`, `chain`, `cartesian`, `motion_plan`, `hold`, `points`, `tcp_jog`, `nav2` |
 | `taskweave_hmi/taskweave_hmi/` | web HMI (`server.py`, `web/*.js`): status, control, mission editor, teach, record |
+| `taskweave_bringup/` | launch files `taskweave_bringup.launch.py` (taskweave, HMI, optional Nav2/MoveIt), `taskweave_nav2.launch.py`, `taskweave_moveit.launch.py`; `taskweave_bringup/` (`nav2.py`, `moveit.py`, `hmi.py`, `robot_files.py`: the logic, testable without launching), `config/nav2_params.yaml` (default Nav2 tuning) |
 | `taskweave_robots/<robot>/` | robot packs (`pack.yaml`, `profile.yaml`, `embodiment.yaml`, `poses.yaml`, `moveit/` ...), installed to `share/taskweave_robots/` |
 | `docs/` | `architecture.md`, `configuration.md`, `missions.md`, `skills.md` (generated), `pack_switchover.md`, `examples/` |
 | `tools/gen_skills_doc.py` | generates `docs/skills.md` (needs ROS sourced, see "Add a skill" step 6) |
@@ -39,7 +40,7 @@ source /opt/ros/jazzy/setup.bash && source ~/tw_ws/install/setup.bash
 export ROS_DOMAIN_ID=77                       # never the domain of a live robot
 export TASKWEAVE_ROBOT_PACKS=$PWD/taskweave_robots   # the robot packs of this checkout (tests read the source)
 export TASKWEAVE_STRICT_AGNOSTIC=zero         # test_agnostic: any robot/cell name or tuning number in code fails
-for p in taskweave_core taskweave_hmi taskweave_skills taskweave_robots; do
+for p in taskweave_core taskweave_hmi taskweave_skills taskweave_bringup taskweave_robots; do
   (cd $p && python3 -m pytest -q test)        # or: colcon test --packages-select $p
 done
 ```
@@ -57,9 +58,17 @@ done
   `python -m ruff check .`. It needs no ROS, so a laptop will do; the ROS container may have no pip. Keep new code
   clean; the repo is not auto-formatted, so do not run `ruff format` over existing files.
 
+### A new ROS package
+`package.xml` (every runtime dependency as `exec_depend` with its rosdep key: CI runs `rosdep install`), `setup.py` /
+`setup.cfg` / `resource/<name>` (copy `taskweave_hmi`), a `test/` folder, and its name in: the test loop above,
+`ruff.toml` `known-first-party`, and `PACKAGES` in `taskweave_core/test/test_agnostic.py` if it holds code that must stay
+robot-agnostic. CI builds and tests every package it finds (`colcon build`, `colcon test`), so it needs no workflow
+change. Launch files go to `share/<name>/launch` through `data_files` in `setup.py`; keep their logic in the package (as
+`taskweave_bringup` does) so tests can build launch descriptions without launching.
+
 ## Rules
 1. **No robot, cell or object names and no tuning numbers in code.** `taskweave_core/test/test_agnostic.py` scans
-   `taskweave_core`, `taskweave_skills` and `taskweave_hmi` for forbidden words (robot, cell and object names), unnamed
+   `taskweave_core`, `taskweave_skills`, `taskweave_hmi` and `taskweave_bringup` for forbidden words (robot, cell and object names), unnamed
    numbers in the skill and motion modules, module tuning constants and fixed joint indices. `zero` mode fails on any
    finding. Numbers go to config: a skill yaml, a robot's `motion_tuning`, a schema `default`.
 2. **Config-driven.** A new behaviour is a config key with a schema and a default, not a constant. Schemas live in

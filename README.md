@@ -130,6 +130,7 @@ examples, common errors) and [docs/skills.md](docs/skills.md) (every skill and i
 | [`taskweave_core/`](taskweave_core) | Config loader, schemas and migrations, planners, task handler, skill server base class, speed override, smoke test, CLI |
 | [`taskweave_skills/`](taskweave_skills) | Generic, robot-agnostic skills: `wait`, `navigate_to`, `drive_straight`, `move_joints`, `move_gripper`, `move_object`, `set_posture`, `grip` |
 | [`taskweave_hmi/`](taskweave_hmi) | Web HMI: live mission status and control, validated mission editor, teaching, recording |
+| [`taskweave_bringup/`](taskweave_bringup) | Launch files: taskweave + HMI + Nav2 + MoveIt of any robot pack (`taskweave_bringup.launch.py`, `taskweave_nav2.launch.py`, `taskweave_moveit.launch.py`) |
 | [`taskweave_robots/`](taskweave_robots) | Robot packs (profile, embodiment, poses, MoveIt files), one folder per model |
 | [`docs/missions.md`](docs/missions.md) | Writing missions: file anatomy, targets, hands, motion options, examples, common errors |
 | [`docs/skills.md`](docs/skills.md) | Skill reference (generated from the skill classes: `python3 tools/gen_skills_doc.py`) |
@@ -168,6 +169,18 @@ ros2 run taskweave_hmi hmi_server --ros-args -p config_dir:=/path/to/cell -p rob
 ```
 
 The HMI (default port 8090) has no login: bind it to a trusted network only (for example a Tailscale address).
+
+`taskweave_bringup` starts the same plus the HMI, and optionally Nav2 and MoveIt, with the robot's values taken from its
+robot pack (footprint, driving limits and topics for Nav2, the `moveit/` folder for MoveIt). What belongs to a simulator
+or to hardware (clock handling, sensor bridges, the Nav2 map and the transform that attaches it, recording tools) stays
+in the application's own launch file, which includes this one:
+
+```bash
+ros2 launch taskweave_bringup taskweave_bringup.launch.py config_dir:=/path/to/cell robot:=<robot>     hmi_host:=<address> nav2:=true map:=/path/to/map.yaml moveit:=true
+```
+
+Nav2's tuning (MPPI, costmap layers) is the packaged `taskweave_bringup/config/nav2_params.yaml`; a robot pack's or the
+cell pack's `robots/<robot>/nav2_params.yaml` replaces it, as a whole file or as `~override: keys` over it.
 `taskweave` below is `ros2 run taskweave_core taskweave`.
 
 ```bash

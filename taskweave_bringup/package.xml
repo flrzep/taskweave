@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypelocation="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>taskweave_bringup</name>
+  <version>0.1.0</version>
+  <description>taskweave bring-up: launch files that start taskweave, the web HMI, Nav2 and MoveIt for any robot pack, with robot and cell data from the packs. Simulator or hardware parts stay with the application.</description>
+  <maintainer email="f.rzepczyk@gmail.com">Florian Rzepczyk</maintainer>
+  <license>TBD</license>
+
+  <exec_depend>taskweave_core</exec_depend>
+  <exec_depend>taskweave_skills</exec_depend>   <!-- nav2_parameters: the robot-pack-to-Nav2 mapping -->
+  <exec_depend>taskweave_hmi</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <!-- the nodes taskweave_nav2.launch.py starts -->
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_planner</exec_depend>
+  <exec_depend>nav2_controller</exec_depend>
+  <exec_depend>nav2_behaviors</exec_depend>
+  <exec_depend>nav2_bt_navigator</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <exec_depend>nav2_mppi_controller</exec_depend>
+  <exec_depend>nav2_navfn_planner</exec_depend>
+  <exec_depend>nav2_costmap_2d</exec_depend>
+  <!-- the node taskweave_moveit.launch.py starts, and its OMPL planning pipeline -->
+  <exec_depend>moveit_ros_move_group</exec_depend>
+  <exec_depend>moveit_planners_ompl</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

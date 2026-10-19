@@ -1,0 +1,244 @@
+# Default Nav2 tuning of taskweave_bringup (taskweave_nav2.launch.py). Sim or hardware time via the launch argument
+# use_sim_time (written into every node section). Frames: map = the frame of the cell pack's map, odom -> base_link from
+# the robot. taskweave's navigate_to (implementation navigate_nav2) sends NavigateToPose and does the last centimetres
+# itself.
+# Filled in at launch from config: footprint and padding, inflation, driving limits and motion model (the robot pack's
+# navigation.yaml and base type, taskweave_skills.nav2.nav2_parameters), base frame, odom topic, map file.
+# Replace it for a robot or a cell with robots/<robot>/nav2_params.yaml (whole file, or `~override: keys` over this one).
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: map
+    robot_base_frame: base_link
+    odom_topic: /odom
+    bt_loop_duration: 10
+    default_server_timeout: 20
+    wait_for_service_timeout: 1000
+    navigators: ["navigate_to_pose", "navigate_through_poses"]
+    navigate_to_pose:
+      plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
+    navigate_through_poses:
+      plugin: "nav2_bt_navigator::NavigateThroughPosesNavigator"
+
+controller_server:
+  ros__parameters:
+    use_sim_time: true
+    controller_frequency: 20.0          # sim time
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 0.5
+    progress_checker_plugins: ["progress_checker"]
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.2
+      movement_time_allowance: 20.0     # sim s; the base accelerates slowly
+    general_goal_checker:               # coarse: navigate_to finishes the last centimetres with its direct controller
+      plugin: "nav2_controller::SimpleGoalChecker"
+      stateful: true
+      xy_goal_tolerance: 0.10
+      yaw_goal_tolerance: 0.15
+    FollowPath:
+      plugin: "nav2_mppi_controller::MPPIController"
+      time_steps: 56
+      model_dt: 0.05
+      batch_size: 2000
+      iteration_count: 1
+      vx_std: 0.4                       # wider sampling: reaches vx_max sooner (15 Oct, was 0.2)
+      vy_std: 0.2
+      wz_std: 0.5
+      vx_max: 2.0                       # navigation.yaml driving overrides vx_max, vx_min, wz_max at start
+      vx_min: -0.8
+      vy_max: 0.5
+      wz_max: 1.5
+      ax_max: 2.0                       # 15 Oct, was 1.0
+      ax_min: -2.0
+      ay_max: 1.0
+      az_max: 2.0
+      temperature: 0.3
+      gamma: 0.015
+      motion_model: "Omni"
+      visualize: false
+      regenerate_noises: false
+      transform_tolerance: 1.0          # sim s; the sim's TF arrives up to ~0.5 s late at times (2026-10-13)
+      prune_distance: 6.0               # > vx_max x time_steps x model_dt (2.0 x 2.8 s); was 1.7
+      enforce_path_inversion: false
+      critics: ["ConstraintCritic", "CostCritic", "GoalCritic", "GoalAngleCritic", "PathAlignCritic",
+                "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic", "TwirlingCritic"]
+      ConstraintCritic: {enabled: true, cost_power: 1, cost_weight: 4.0}
+      GoalCritic: {enabled: true, cost_power: 1, cost_weight: 5.0, threshold_to_consider: 1.4}
+      GoalAngleCritic: {enabled: true, cost_power: 1, cost_weight: 3.0, threshold_to_consider: 0.5}
+      CostCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.81
+        critical_cost: 300.0
+        consider_footprint: true
+        collision_cost: 1000000.0
+        near_goal_distance: 1.0
+        trajectory_point_step: 2
+      PathAlignCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 14.0
+        max_path_occupancy_ratio: 0.05
+        trajectory_point_step: 4
+        threshold_to_consider: 0.5
+        offset_from_furthest: 20
+        use_path_orientations: false
+      PathFollowCritic: {enabled: true, cost_power: 1, cost_weight: 5.0, offset_from_furthest: 5, threshold_to_consider: 1.4}
+      PathAngleCritic:                  # mode 2 = any heading; navigation.yaml driving.prefer_forward > 0 sets mode 0
+        enabled: true
+        cost_power: 1
+        cost_weight: 2.0
+        offset_from_furthest: 4
+        threshold_to_consider: 0.5
+        max_angle_to_furthest: 1.0
+        mode: 2
+      PreferForwardCritic:              # penalises reversing; weight from navigation.yaml driving.prefer_forward
+        enabled: true
+        cost_power: 1
+        cost_weight: 0.0
+        threshold_to_consider: 0.5
+      TwirlingCritic: {enabled: true, twirling_cost_power: 1, twirling_cost_weight: 10.0}
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: true
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: base_link
+      transform_tolerance: 1.0          # sim s; also used by controller_server for the path end pose
+      rolling_window: true
+      width: 8                          # the 2.8 s MPPI horizon at 2 m/s reaches 5.6 m (was 5)
+      height: 8
+      resolution: 0.05
+      footprint: "[[0.3, 0.3], [0.3, -0.3], [-0.3, -0.3], [-0.3, 0.3]]"   # replaced from the robot profile
+      # Obstacles a camera sees can come in through the static layer if the application keeps the map topic live.
+      # Static map only (2026-10-13). The head-camera obstacle layer below is off: its tf2 message filter deadlocked
+      # controller_server when a cloud arrived before its (late) TF (tf2_ros lock-order bug in Jazzy; TF listener
+      # stuck in testTransformableRequests, obstacle layer in waitForTransform), and it marked the high rack's beam
+      # (1.63-1.97 m) as a wall across the upright gaps. Before re-enabling: publish the clouds in the costmap's
+      # global frame (no TF wait) and keep max_obstacle_height below the beams.
+      plugins: ["static_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        footprint_clearing_enabled: true    # the head camera sees the robot's own arms
+        observation_sources: head_cloud head_clear   # head_clear: floor points too, so cells clear again
+        head_cloud:
+          topic: /head_camera/points
+          data_type: "PointCloud2"
+          min_obstacle_height: 0.08         # floor
+          max_obstacle_height: 1.9
+          obstacle_max_range: 4.0
+          raytrace_max_range: 5.0
+          marking: true
+          clearing: true
+          expected_update_rate: 0.0
+          inf_is_valid: false
+        head_clear:                         # clearing only: rays to every point incl. the floor free cells
+          topic: /head_camera/points       # (marks left by things that moved away, e.g. the robot's own arms)
+          data_type: "PointCloud2"
+          min_obstacle_height: -1.0
+          max_obstacle_height: 2.5
+          raytrace_max_range: 5.0
+          marking: false
+          clearing: true
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.65         # above the largest circumscribed radius (set it above the robot's circumscribed radius)
+        cost_scaling_factor: 5.0        # gentle decay: paths keep to the middle of gaps (10 let them hug the rack uprights)
+      always_send_full_costmap: true
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: true
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: base_link
+      transform_tolerance: 1.0          # sim s; also used by controller_server for the path end pose
+      resolution: 0.05
+      track_unknown_space: false
+      footprint: "[[0.3, 0.3], [0.3, -0.3], [-0.3, -0.3], [-0.3, 0.3]]"   # replaced from the robot profile
+      plugins: ["static_layer", "inflation_layer"]   # obstacle layer off, see local_costmap
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        footprint_clearing_enabled: true
+        observation_sources: head_cloud head_clear   # head_clear: floor points too, so cells clear again
+        head_cloud:
+          topic: /head_camera/points
+          data_type: "PointCloud2"
+          min_obstacle_height: 0.08
+          max_obstacle_height: 1.9
+          obstacle_max_range: 4.0
+          raytrace_max_range: 5.0
+          marking: true
+          clearing: true
+        head_clear:                         # clearing only: rays to every point incl. the floor free cells
+          topic: /head_camera/points       # (marks left by things that moved away, e.g. the robot's own arms)
+          data_type: "PointCloud2"
+          min_obstacle_height: -1.0
+          max_obstacle_height: 2.5
+          raytrace_max_range: 5.0
+          marking: false
+          clearing: true
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.65         # above the largest circumscribed radius (set it above the robot's circumscribed radius)
+        cost_scaling_factor: 5.0        # gentle decay: paths keep to the middle of gaps (10 let them hug the rack uprights)
+      always_send_full_costmap: true
+
+map_server:
+  ros__parameters:
+    use_sim_time: true
+    yaml_filename: ""                   # set at launch: outputs/nav/cell_map.yaml
+
+planner_server:
+  ros__parameters:
+    use_sim_time: true
+    expected_planner_frequency: 1.0
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner::NavfnPlanner"
+      tolerance: 0.3                    # a goal next to an obstacle may sit in inscribed cost
+      use_astar: true
+      allow_unknown: true
+
+behavior_server:
+  ros__parameters:
+    use_sim_time: true
+    local_costmap_topic: local_costmap/costmap_raw
+    global_costmap_topic: global_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_footprint_topic: global_costmap/published_footprint
+    cycle_frequency: 10.0
+    behavior_plugins: ["spin", "backup", "wait"]
+    spin:
+      plugin: "nav2_behaviors::Spin"
+    backup:
+      plugin: "nav2_behaviors::BackUp"
+    wait:
+      plugin: "nav2_behaviors::Wait"
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_link
+    transform_tolerance: 1.0          # sim s; the sim's TF arrives up to ~0.5 s late at times (2026-10-13)
+    simulate_ahead_time: 2.0
+    max_rotational_vel: 1.0
+    min_rotational_vel: 0.2
+    rotational_acc_lim: 2.0
