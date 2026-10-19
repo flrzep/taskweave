@@ -27,11 +27,15 @@ class FakeMoveIt(Node):
         self.ik_requests = []
         self.measured = lambda: 0.0
         self.solution = None
+        self.failing = set()      # groups with no solution
         self.create_service(GetPositionIK, '/compute_ik', self.ik)
         self.create_service(GetPositionFK, '/compute_fk', self.fk)
 
     def ik(self, request, response):
         self.ik_requests.append(request.ik_request)
+        if request.ik_request.group_name in self.failing:
+            response.error_code.val = -31
+            return response
         start = dict(zip(request.ik_request.robot_state.joint_state.name,
                          request.ik_request.robot_state.joint_state.position, strict=True))
         side = 'right' if request.ik_request.group_name.startswith('right') else 'left'
@@ -57,11 +61,13 @@ class FakeMoveIt(Node):
         return response
 
 
-def robot(choose=None, flip=False):
+def robot(choose=None, flip=False, fallback=False):
     ik = {'groups': {'left': 'left_arm'}, 'joints': '{tool}_joint[1-7]', 'timeout_s': 0.1,
           'seeds': [{'left_joint1': 0.5}, {'left_joint1': -0.5}]}
     if choose is not None:
         ik['choose'] = choose
+    if fallback:
+        ik['fallback_groups'] = {'left': 'left_arm_global'}
     return SimpleNamespace(base={'frame': 'base_link'}, data={
         'ik': ik, 'tool_frames': {'left': {'link': 'left_link7', 'xyz': [0, 0, 0], 'rpy': [0, 0, 0], 'flip': flip}},
         'arms': {'left': {'elbow': {'shoulder': 'left_link2', 'elbow': 'left_link4', 'wrist': 'left_link6'}}}})
@@ -266,3 +272,13 @@ def test_every_seed_is_tried_with_the_other_arms_where_they_are_now(moveit):
     assert len(starts) >= 3
     assert all(s.get('right_joint1') == pytest.approx(0.2) and s.get('right_joint2') == pytest.approx(0.3)
                for s in starts), starts
+
+
+def test_a_global_search_answer_is_marked_not_repeatable(moveit):
+    fake, node = moveit
+    ik = IkClient(node, robot({}, fallback=True))
+    ik.solve({'left': TARGET}, {})
+    assert 'global' not in ik.last['left']
+    fake.failing = {'left_arm'}                      # no local descent converges: the global group answers
+    ik.solve({'left': TARGET}, {})
+    assert ik.last['left']['global'] is True

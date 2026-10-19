@@ -348,7 +348,7 @@ class IkClient:
                           for start in self._starts(tool)]
             fallback = [(self.fallback_groups[tool], {}, self.fallback_timeout_s)] if tool in self.fallback_groups \
                 else []
-            candidates, response = [], None
+            candidates, response, searched = [], None, False
             for attempts in (local, fallback):  # the global search only if no local descent converged
                 if attempts is fallback and fallback:
                     self.node.get_logger().warning(f'IK for {tool}: no local descent converged, global search '
@@ -364,6 +364,7 @@ class IkClient:
                     if candidates and self.choose is None:
                         break
                 if candidates:
+                    searched = attempts is fallback
                     break
             if not candidates:
                 if response is not None and response.error_code.val == FRAME_TRANSFORM_FAILURE:
@@ -376,6 +377,8 @@ class IkClient:
             _, arm = self._best(tool, candidates, {**fixed, **result}, current or {}, image)
             if why:
                 self._jump_warning(tool, arm, positions, why)
+            if searched:
+                self.last[tool]['global'] = True      # the global search's answer is not repeatable
             chosen[tool] = arm
             result.update(arm)
         return result

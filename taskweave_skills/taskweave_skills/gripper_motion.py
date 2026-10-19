@@ -316,7 +316,8 @@ class MoveGripper(_PointMotion):
                 first = first or error
                 continue
             moved = sum(abs(value - start[name]) for name, value in arm.items() if name in (start or {}))
-            return Probe(True, float(moved))
+            repeatable = not any(self.ik.last.get(tool, {}).get('global') for tool in target.tools)
+            return Probe(True, float(moved), repeatable=repeatable)
         return Probe(False, 0.0, str(first))
 
     def _select(self, rule, defined, what: str):

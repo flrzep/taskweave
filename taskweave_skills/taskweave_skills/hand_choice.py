@@ -5,7 +5,8 @@ Pure selection logic, no ROS: the skill supplies what is robot-specific (buildin
 Rule, in this order:
     1. only free hands (a hand in a hold is never a candidate);
     2. only hands the target can apply to (``build`` returns a target; else its reason is reported);
-    3. IK-feasible hands first (``probe``: a solve with the profile's ik.choose settings, no motion);
+    3. IK-feasible hands first (``probe``: a solve with the profile's ik.choose settings, no motion), those whose
+       solution needed no global search (not repeatable) before those that did;
     4. then the least joint motion from the current state, motions within a tolerance of the least counting as equal
        (a near-tie is noise, not a reason);
     5. then the profile's hand order (the same answer every time).
@@ -22,10 +23,12 @@ from taskweave_core.skill import Outcome, SkillResult
 
 @dataclass
 class Probe:
-    """What trying a target on one hand showed: IK feasible, joint motion (rad, sum over the arm), why not."""
+    """What trying a target on one hand showed: IK feasible, joint motion (rad, sum over the arm), why not, and
+    whether the solution is repeatable (False: IK needed its global search, whose answer varies)."""
     feasible: bool = True
     motion_rad: float = 0.0
     reason: str = ''
+    repeatable: bool = True
 
 
 def choose(hands: list[str], busy: dict[str, str], build, probe,
@@ -57,10 +60,12 @@ def choose(hands: list[str], busy: dict[str, str], build, probe,
     if not found:
         text = '; '.join(f'{hand}: {why}' for hand, why in reasons.items())
         return SkillResult.rejected(f'hands any_one: no hand can take it ({text})')
-    least = min(item[2].motion_rad for item in found)
-    near = [item for item in found if item[2].motion_rad <= least + tolerance_rad]   # profile order kept
+    steady = [item for item in found if item[2].repeatable] or found     # a global search's motion is no basis
+    least = min(item[2].motion_rad for item in steady)
+    near = [item for item in steady if item[2].motion_rad <= least + tolerance_rad]   # profile order kept
     for hand, _, result in found:
-        report['candidates'][hand] = {'feasible': True, 'motion_rad': float(result.motion_rad)}
+        report['candidates'][hand] = {'feasible': True, 'motion_rad': float(result.motion_rad),
+                                      'repeatable': result.repeatable}
     report['chosen'], report['tolerance_rad'] = near[0][0], float(tolerance_rad)
     return near[0][1], report
 

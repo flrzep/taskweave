@@ -54,3 +54,11 @@ def test_motions_within_the_tolerance_are_equal_and_the_profile_order_decides():
 def test_a_failed_target_is_passed_on_not_turned_into_a_refusal():
     result = choose(HANDS, {}, lambda hand: SkillResult.failed('where is the robot? no TF'), lambda t: Probe())
     assert result.outcome is Outcome.FAILED and result.message == 'where is the robot? no TF'
+
+
+def test_a_hand_that_needed_the_global_search_comes_after_repeatable_ones():
+    probes = {'target_left': Probe(True, 2.0), 'target_right': Probe(True, 0.5, repeatable=False)}
+    _, report = choose(HANDS, {}, build, probes.get)
+    assert report['chosen'] == 'left' and report['candidates']['right']['repeatable'] is False
+    probes['target_left'] = Probe(True, 2.0, repeatable=False)           # none repeatable: the least motion again
+    assert choose(HANDS, {}, build, probes.get)[1]['chosen'] == 'right'
