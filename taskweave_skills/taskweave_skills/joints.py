@@ -422,17 +422,21 @@ class _PoseMotion(_JointSkill):
             if start is None:
                 return SkillResult.failed(f'no joint states on {self.joints.state_topic}'), 0
             stop = lambda: ctx.should_stop  # noqa: E731
+            keep = self._held_joints(start, goal)
+            keeping = {'keep': keep} if keep else {}      # a planner is told only when something is held
             try:
                 if planner == 'direct':
                     if not self.planner.free(start, goal, stop):
                         return SkillResult.failed(f'{label}: straight move blocked (planner direct)'), 0
                 elif planner == 'planned' or elbow is None or not self.planner.direct:
-                    path, self.path_kind = self.planner.plan(start, goal, stop), 'planned'
+                    path, self.path_kind = self.planner.plan(start, goal, stop, **keeping), 'planned'
                 elif not self.planner.free(start, goal, stop):
                     path = self._swing_first(ctx, start, goal, elbow)
                     self.path_kind = 'swing_first'
+                    if path and keep and self.planner.violation(path, keep):   # a swing that moves a holding arm
+                        path = None
                     if not path:
-                        path, self.path_kind = self.planner.plan(start, goal, stop), 'planned'
+                        path, self.path_kind = self.planner.plan(start, goal, stop, **keeping), 'planned'
             except PlanError as error:
                 return SkillResult.failed(f'{label}: {error}'), 0
             if path is not None and self.path_kind == 'planned':
@@ -441,6 +445,18 @@ class _PoseMotion(_JointSkill):
         if result is not None:
             return result, 0
         return None, max(abs(goal[n] - final[n]) for n in goal)
+
+    def _held_joints(self, start: dict, goal: dict) -> dict[str, float]:
+        """{joint: its value now} of every holding hand's arm and gripper that this motion does not mean to move: the
+        planner keeps them where they are (a planned path may swing any joint of its group), and a path that moves one
+        anyway is refused. A hand whose joints change in ``goal`` (move_object's own hands) is not kept."""
+        holding = set(self.hold.hand_holds)
+        if not holding:
+            return {}
+        changed = {n for n, value in goal.items() if n in start and abs(value - start[n]) > self.p.position_tolerance}
+        keep_hands = holding - self._hands_moved(changed)
+        return {n: float(value) for n, value in start.items()
+                if n not in changed and self._hands_moved({n}) & keep_hands}
 
     def _slowed(self, path):
         """A planned path as it is played (move_gripper stretches it to its speed fraction)."""

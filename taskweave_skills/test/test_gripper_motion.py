@@ -717,3 +717,47 @@ def test_the_holds_follow_the_hands_when_a_move_stalls_after_a_lift_change(syste
     result = run(system, 'move_gripper', {'to': {'by': [0.1, 0, 0]}, 'hands': ['right']})
     assert result.outcome == FAILED, result.message
     assert object_x(system) == pytest.approx(0.0, abs=1e-6), 'the hold was not followed after the failed move_gripper'
+
+
+class StubPlanner:
+    """Stands in for the MotionPlanner: records the ``keep`` of every plan() call and plans nothing (straight move)."""
+    direct = False
+
+    def __init__(self):
+        self.keeps = []
+
+    def plan(self, start, goal, should_stop=None, keep=None):
+        self.keeps.append(dict(keep or {}))
+
+    def free(self, start, goal, should_stop=None):
+        return True
+
+
+def test_a_planned_move_keeps_the_holding_arms_where_they_are(system):                 # C1
+    stub = StubPlanner()
+    for name in ('move_gripper', 'move_joints'):
+        system.server.skills[name].planner = stub
+    planned = {'planner': 'planned'}
+    go(system, {'to': {'by': [0.1, 0, 0]}, 'hands': ['right'], 'motion': planned})
+    assert stub.keeps[-1] == {}                                     # nothing held: the planner is not constrained
+    hold_by_registry(system, 'left')
+    go(system, {'to': {'by': [0.1, 0, 0]}, 'hands': ['right'], 'motion': planned})
+    assert stub.keeps[-1] == {'left_joint1': 0.0, 'left_joint2': 0.0, 'left_grip': 1.0}     # the left arm and hand
+    result = run(system, 'move_joints', {'joints': {'lift': 0.1}, 'motion': planned})       # a torso move
+    assert result.outcome == OK, result.message
+    assert set(stub.keeps[-1]) == {'left_joint1', 'left_joint2', 'left_grip'}
+    hold_by_registry(system, 'right', 'pile_1')
+    result = run(system, 'move_joints', {'joints': {'lift': 0.0}, 'motion': planned})
+    assert set(stub.keeps[-1]) == {'left_joint1', 'left_joint2', 'left_grip', 'right_joint1', 'right_joint2',
+                                   'right_grip'}
+
+
+def test_move_object_keeps_the_arm_of_another_hold_but_moves_its_own_hands(system):    # C1
+    stub = StubPlanner()
+    system.server.skills['move_object'].planner = stub
+    hold_by_registry(system, 'left', 'box_1')
+    hold_by_registry(system, 'right', 'pile_1')
+    result = run(system, 'move_object', {'to': {'by': [0.0, 0.0, 0.05]}, 'object': 'box_1',
+                                         'motion': {'mode': 'free', 'planner': 'planned'}})
+    assert result.outcome == OK, result.message
+    assert set(stub.keeps[-1]) == {'right_joint1', 'right_joint2', 'right_grip'}, stub.keeps

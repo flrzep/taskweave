@@ -274,7 +274,7 @@ ROBOT_PROFILE = {
                 'validity_service': {'type': 'string'},
                 **{k: {'type': 'number', 'exclusiveMinimum': 0}
                    for k in ('direct_step_rad', 'escape_max_rad', 'escape_speed', 'goal_tolerance_rad',
-                             'check_timeout_s', 'answer_margin_s')},
+                             'hold_tolerance_rad', 'check_timeout_s', 'answer_margin_s')},
             },
             'additionalProperties': False,
         },

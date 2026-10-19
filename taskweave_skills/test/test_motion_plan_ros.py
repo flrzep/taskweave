@@ -35,6 +35,7 @@ class FakePlanner(Node):
         self.fail_first = 0  # answer this many requests with a pipeline failure first
         self.requests = []
         self.free = False
+        self.wander = None  # a joint the planned path swings out (j1: always)
         self.touching = None  # state -> {(body, body): depth} it touches, overrides free
         self.checked = []
         self.create_service(GetMotionPlan, '/plan_kinematic_path', self.plan)
@@ -62,7 +63,7 @@ class FakePlanner(Node):
         start = dict(zip(r.start_state.joint_state.name, r.start_state.joint_state.position, strict=True))
         goal = {c.joint_name: c.position for c in r.goal_constraints[0].joint_constraints}
         names = list(goal)
-        detour = [-0.5 if n == 'j1' else start[n] for n in names]
+        detour = [-0.5 if n == 'j1' else 0.7 if n == self.wander else start[n] for n in names]
         points = [([start[n] for n in names], 0.0), (detour, 0.6), ([goal[n] for n in names], 1.5)]
         trajectory = response.motion_plan_response.trajectory.joint_trajectory
         trajectory.joint_names = names
@@ -89,7 +90,7 @@ def system(tmp_path):
         client.create_subscription(JointState, '/arm/joint_states', lambda m: seen.update(
             j1_min=min(seen['j1_min'], dict(zip(m.name, m.position, strict=False)).get('j1', 0.0))), 10)
         ros.spin(8)
-        planning = server.skills['move_joints'].planner
+        planning = planner.motion_planner = server.skills['move_joints'].planner
         wait_ready(server, planning.client, planning.validity)
         yield sim, planner, client, seen
 
@@ -197,3 +198,20 @@ def test_after_the_escape_the_rest_is_planned(system):
     assert start['j1'] == pytest.approx(0.2, abs=0.031)  # planned from the first free state
     assert path.at(0.0)['j1'] == 0.0 and path.at(path.duration)['j1'] == pytest.approx(1.0)
     assert min(p[path.names.index('j1')] for p in path.points) == pytest.approx(-0.5)  # then the planner's detour
+
+
+def test_held_joints_are_path_constraints_and_a_path_that_wanders_them_is_rejected(system):     # C1
+    from taskweave_skills.motion_plan import PlanError
+
+    _, fake, _, _ = system
+    planner = fake.motion_planner
+    start, goal = {'j1': 0.0, 'j2': 0.0, 'lift': 0.0}, {'j1': 1.0, 'j2': 0.0}
+    assert planner.plan(start, goal, keep={'j2': 0.0}) is not None
+    constraints = fake.requests[-1].path_constraints.joint_constraints
+    assert [(c.joint_name, c.position) for c in constraints] == [('j2', 0.0)]
+    assert constraints[0].tolerance_above == constraints[0].tolerance_below == planner.hold_tolerance > 0
+    fake.wander = 'j2'                                   # the planner ignores the constraint
+    with pytest.raises(PlanError, match=r'j2.*held'):
+        planner.plan(start, goal, keep={'j2': 0.0})
+    assert planner.plan(start, goal) is not None         # nothing held: the path may swing j2 (no constraints)
+    assert not fake.requests[-1].path_constraints.joint_constraints
