@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="top">
 <header class="bar">
   <div class="brand">
     <!-- P3 logo (P3_Logo_2024.svg, Wikimedia Commons), inline so it takes the theme colour -->
@@ -31,6 +32,7 @@
   <button role="tab" data-view="record" aria-selected="false" hidden>Record</button>
   <button role="tab" data-view="log" aria-selected="false">Log</button>
 </nav>
+</div>
 
 <main>
   <!-- RUN -->
@@ -247,7 +249,6 @@
     </details>
   </section>
 
-  <!-- LOG -->
   <!-- RECORD -->
   <section id="view-record" class="view" hidden>
     <div class="card status rec-live">
@@ -289,6 +290,7 @@
     </div>
   </section>
 
+  <!-- LOG -->
   <section id="view-log" class="view" hidden>
     <div class="card"><div class="label">Events</div><ol id="log" class="log"></ol></div>
   </section>
