@@ -673,6 +673,14 @@ def test_grip_close_any_one_never_counts_the_holding_hand_as_reached(system):   
     assert system.hold.hand_holds['left'] == 'box_1'
 
 
+def test_grip_open_any_one_with_two_holding_hands_names_the_holding_hands(system):
+    hold_by_registry(system, 'left')
+    hold_by_registry(system, 'right', 'pile_1')
+    result = run(system, 'grip', {'action': 'open', 'hands': 'any_one'})
+    assert result.outcome == REJECTED and 'left and right holds an object' in result.message, result.message
+    assert set(system.hold.hand_holds) == {'left', 'right'}
+
+
 def test_a_holding_gripper_joint_is_refused_like_the_arm_joints(system):          # M9
     hold_by_registry(system, 'left')
     before = dict(system.sim.position)

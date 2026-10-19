@@ -518,7 +518,7 @@ class Grip(_FingerMotion):
             if action == 'close':      # a holding hand is at its point still, but closing it again is no reach
                 at_point = {hand: info for hand, info in at_point.items() if hand not in self.hold.hand_holds}
             holding = self.hold.hand_holds if action == 'open' else {}
-            if len([h for h in self.hands if h in holding]) == 1:
+            if any(h in holding for h in self.hands):    # name the holding hands (several: ambiguous)
                 return one_hand(rule, holding, self.hands, 'holds an object')
             return one_hand(rule, at_point, self.hands, 'is at an object point (move_gripper to.point first)')
         if rule == 'all' or (rule == 'auto' and action == 'opening'):
