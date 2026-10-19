@@ -19,7 +19,7 @@ taskweave runs robot tasks on ROS 2 Jazzy, driven entirely by YAML.
 | `taskweave_hmi/taskweave_hmi/` | web HMI (`server.py`, `web/*.js`): status, control, mission editor, teach, record |
 | `taskweave_robots/<robot>/` | robot packs (`pack.yaml`, `profile.yaml`, `embodiment.yaml`, `poses.yaml`, `moveit/` ...), installed to `share/taskweave_robots/` |
 | `docs/` | `architecture.md`, `configuration.md`, `missions.md`, `skills.md` (generated), `pack_switchover.md`, `examples/` |
-| `tools/gen_skills_doc.py` | generates `docs/skills.md` |
+| `tools/gen_skills_doc.py` | generates `docs/skills.md` (needs ROS sourced, see "Add a skill" step 6) |
 | `*/test/` | pytest suites per package; config fixtures in `*/test/fixtures/config` |
 
 ## Build
@@ -52,7 +52,10 @@ done
   task handler.
 - Config fixtures use neutral robots (`demo_bot`; `duo_bot`, `diff_bot`, `omni_bot`, `arm_bot`) and a `box` object. Copy a fixture
   into `tmp_path`, never edit it in place.
-- Lint: `ruff check .` (`ruff.toml`: line length 120, single quotes, rules E F W I B UP). Keep new code clean; the repo is not auto-formatted, so do not run `ruff format` over existing files.
+- Lint: `ruff check .` from the repo root (`ruff.toml`: line length 120, single quotes, rules E F W I B UP). CI runs it
+  pinned; run the same version anywhere you have Python: `python -m pip install --user ruff==0.17.1`, then
+  `python -m ruff check .`. It needs no ROS, so a laptop will do; the ROS container may have no pip. Keep new code
+  clean; the repo is not auto-formatted, so do not run `ruff format` over existing files.
 
 ## Rules
 1. **No robot, cell or object names and no tuning numbers in code.** `taskweave_core/test/test_agnostic.py` scans
@@ -69,7 +72,11 @@ done
    the config that uses a new key.
 5. **Fail before moving.** Anything checkable statically (skills, args, points) is checked in `validation.py`.
 6. **Speed override.** Skills run on work time (`ctx.work_now()`, `ctx.work_clock()`), never on plain `time`, so the
-   override scales moves and timeouts.
+   override scales moves and timeouts. Two clocks exist on the skill context: node time (`ctx.elapsed()`, `ctx.sleep()`:
+   sim time when `use_sim_time` is set, not scaled) and work time (`ctx.work_now()`: node time integrated at the
+   effective override, which is also what the step timeout counts). The one exception is `wait`: it runs on node time on
+   purpose (the spec says waiting is not scaled), so ten seconds stay ten seconds at 10 %. A skill that moves, or waits
+   for a move, uses work time; use node time only for something that really takes wall or sim time (a sensor delay).
 7. Python 3.12, type hints where they help, docstrings that say why, line length 120.
 
 ## How-tos
@@ -80,25 +87,63 @@ done
    `x-taskweave-point`, units with `x-taskweave-unit`; reuse `hands_schema`, `motion_schema(keys)`, `VEC3` from
    `config/schemas.py`), `needs`, `achieves`, `default_timeout_s`, `setup(node, config, robot, params)`,
    `execute(ctx, args)` returning `SkillResult.succeeded/failed/rejected`. Check `ctx.should_stop` in loops and return
-   `ctx.interrupted()`. Implement `stop()` so cancel leaves the hardware safe.
+   `ctx.interrupted()`. Implement `stop()` so cancel leaves the hardware safe. Clocks: rule 6.
+   **Discovery:** `taskweave_skills.shipped_skills()` finds every `Skill` subclass with a `name` in any module of the
+   package, so the class needs no registration. The docs generator and the doc tests use that one list.
 2. A new point kind needs a branch in `validation.check_point`.
-3. Skill yaml: `docs/examples/skills/<name>.yaml` and the matching entry in `config/skill_templates.py` (keep them in
-   step: `test_migrate_skills`) with `implementations: [{name, type: script, class: "module:Class", requires: ...}]`,
-   speeds, tolerances. `requires` lists `capabilities` (embodiment vocabulary), `embodiments`, `cameras`, `action_space`.
-4. Tests: schema validation (`oneof_problems` helper for `oneOf`), the argument checks, a ROS test with `RosRig`
-   against a fake robot (see `test_joints_ros.py`), and a speed test if it moves.
-5. Docs: add an example step to `docs/examples/skill_steps.yaml`, then regenerate the reference:
-   `python3 tools/gen_skills_doc.py` (needs ROS sourced, no running graph). The tests fail on a stale `docs/skills.md`.
+3. Skill yaml, two copies that must stay equal (`test_migrate_skills` checks it): `docs/examples/skills/<name>.yaml`
+   and the string in `taskweave_core/taskweave_core/config/skill_templates.py` (add it to `TEMPLATES`). **Every
+   shipped skill has both**, also one with no parameters (`wait`); `test_skills_doc.py` fails without them. Content:
+   `implementations: [{name, type: script, class: "module:Class", requires: ...}]`, speeds, tolerances. `requires`
+   lists `capabilities` (embodiment vocabulary), `embodiments`, `cameras`, `action_space`.
+4. Serving: the skill server serves the names listed in the launch argument `skills:`. Add the name to the list in the
+   README "Usage" launch command (the one place that lists them; `test_skills_doc.py` checks that it names every
+   shipped skill), and give a cell that uses it a `skills/<name>.yaml` (start from the example above).
+5. Tests: schema validation (`oneof_problems` from `taskweave_core/taskweave_core/validation.py` checks the `oneOf` variants of a
+   schema, see `test_tool_pose.py`), the argument checks, a ROS test with `RosRig` against a fake robot (see
+   `test_joints_ros.py`), and a speed test if it moves.
+6. Docs: add an example step to `docs/examples/skill_steps.yaml` (validated by `test_docs_examples.py`), then regenerate
+   the reference. The generator imports the skill modules, so it needs ROS sourced and `taskweave_core` and
+   `taskweave_skills` importable (no running graph, no robot):
+   ```bash
+   source /opt/ros/jazzy/setup.bash && source ~/tw_ws/install/setup.bash     # the built workspace; or, unbuilt:
+   export PYTHONPATH=$PWD/taskweave_core:$PWD/taskweave_skills:$PYTHONPATH   # (taskweave_interfaces must be built)
+   python3 tools/gen_skills_doc.py            # write docs/skills.md; --check only compares, --stdout prints
+   ```
+   The tests fail on a stale `docs/skills.md`. Without ROS the import fails with a missing `rclpy` or `moveit_msgs`.
 
 ### Add a robot pack
-1. Folder `taskweave_robots/<robot>/` with `pack.yaml` (`name` = folder, `version`, `schema_version: 1`, `description`).
-2. `profile.yaml` (base type `holonomic | differential | fixed`, topics, `joints`, `grippers`, `tool_frames`, `ik`,
-   optional `planning`, `motion_tuning`), `embodiment.yaml` (capabilities, tools, arms), `poses.yaml` (joint poses and
-   tool poses, e.g. `home`), optional `navigation.yaml`, `sim.yaml`, `pose_targets.yaml`, `skill_overrides.yaml`.
-3. `moveit/` for arms with a motion planner: URDF, SRDF, `kinematics.yaml`, `joint_limits.yaml`, collision meshes.
-4. Validate: `python3 -m pytest taskweave_robots/test` (every pack gets the generic mission), and with a cell
+A pack is a folder `taskweave_robots/<robot>/`. The packs are data only: nothing about a cell (stances, held poses,
+object points belong to the cell pack).
+1. `pack.yaml`: `name` (= the folder), `version`, `schema_version: 1`, `description`. Required.
+2. `profile.yaml` (how the hardware is reached) and `embodiment.yaml` (what the robot is), both required:
+   - profile required: `name`, `base` with `type` (`holonomic | differential | fixed`), `cmd_vel`, `odom`, `frame`.
+   - embodiment required: `name`, `summary`, `capabilities` (words of `embodiment.CAPABILITIES`, e.g. `base.differential`,
+     `arms.bimanual`, `gripper.parallel`; the base capability must match `base.type`, `check` reports a mismatch);
+     optional `base`, `torso`, `arms`, `tools`, `cameras` descriptions (unknown values `~`). Each `tools` entry needs
+     a `grippers.<name>` in the profile.
+   - `poses.yaml` with a `home` pose: optional for loading, but `test_robot_packs.py` runs the generic mission with it.
+3. What each optional part enables (all are optional; a pack with none of them is valid, but limited):
+
+   | Profile / pack part | Enables |
+   |---|---|
+   | `joints` (`command`, `state`; `linear`, `groups`, `limits`) | `move_joints` and named joint poses. `groups`: `move_joints only`. `limits`: joint -> `[lower, upper]` laid over the URDF's, checked before a move (docs/configuration.md); none from either source = unchecked |
+   | `grippers` | `grip`, hands for every arm skill |
+   | `tool_frames` + `ik` (+ `arms.<tool>.elbow`) | `move_gripper`, `move_object`, `set_posture`, tool poses in `poses.yaml`, elbow control. Needs `moveit/` and a MoveIt `GetPositionIK` service behind `ik.service` |
+   | `planning` + `moveit/` (URDF, SRDF, `kinematics.yaml`, `joint_limits.yaml`, collision meshes) | collision-free paths (`motion.planner`), URDF-based straight lines, velocity limits |
+   | `navigation.yaml`, `base.footprint`, `base.limits` | the driving envelope for Nav2, base speed caps |
+   | `motion_tuning`, `skill_overrides.yaml` | arm motion step sizes and this robot's speeds per skill (all default) |
+   | `sim.yaml`, `pose_targets.yaml` | inputs of the simulator application, no taskweave schema |
+
+   A pack **without** `ik` and `moveit/` is valid: it drives, takes joint poses and grips, but `move_gripper` /
+   `move_object` reject (no `ik`) and nothing is planned around obstacles. Add the parts as the hardware needs them.
+4. Install: the CMake install copies every folder at install time, so a new pack folder is picked up by the next
+   `colcon build --packages-select taskweave_robots` (no reconfigure, no GLOB). If an older build tree still ignores
+   it, remove `build/taskweave_robots` once. The tests read the source folder, so they need no build; hidden and
+   cache folders next to the packs are ignored.
+5. Validate: `python3 -m pytest taskweave_robots/test` (every pack gets the generic mission), and with a cell
    `taskweave check <cell>`, `taskweave describe <cell> <robot>` and `taskweave config files <cell> <robot>`.
-   No cell content in a pack: stances, held poses and object points belong to the cell.
+   `docs/examples/cell` is a ready cell (robot `duo_bot` inside it): `taskweave check docs/examples/cell`.
 
 ### Add a cell pack (an application's config)
 1. `pack.yaml` with `name`, `version`, `schema_version: 3`; `system.yaml` with `robot_packs: [..]` if packs live outside
@@ -113,9 +158,15 @@ done
    Check: `taskweave check <cell>`. Details: [docs/configuration.md](docs/configuration.md).
 
 ### Write a mission
-See [docs/missions.md](docs/missions.md). Put it in `<cell>/missions/<name>.yaml`; validate with `taskweave check <cell>`
-and in the HMI editor, which checks arguments against the live skill catalog. Add a regression example to
-`docs/examples/missions/` if it teaches something (`test_docs_examples.py` validates those against the skills).
+See [docs/missions.md](docs/missions.md). Put it in `<cell>/missions/<name>.yaml`. Validate in layers:
+- `taskweave check <cell>` (offline) checks file schemas, robot/embodiment consistency, skill yamls and that every mission
+  expands. It does **not** check skill arguments, nor whether a point, contact, stance or pose a step names exists:
+  those need the skills' argument schemas.
+- The HMI editor and the task handler check them against the live skill catalog before a start.
+- A test does the same offline: `test_docs_examples.py` builds the catalog from the skill classes and runs
+  `validate_plan` on every example. Add a mission that teaches something to `docs/examples/missions/` and to the list in
+  that test (the docs must show it verbatim); it runs against `docs/examples/cell` (robot `duo_bot`, a copy of the
+  skills test fixture's).
 
 ### Speed override and test mode
 - Service `/taskweave/task_handler/set_speed_override` (`SetSpeedOverride`: `percent`, `test_percent`, `set_test_mode`,
