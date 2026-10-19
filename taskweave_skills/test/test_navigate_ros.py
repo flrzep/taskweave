@@ -2,7 +2,6 @@
 
 import json
 import math
-import time
 from pathlib import Path
 
 import pytest
@@ -62,13 +61,16 @@ def system(request, tmp_path):
         params = [Parameter('config_dir', value=str(config)), Parameter('robot', value=robot)]
         sim = ros.add(BaseSim(prefix, holonomic))
         # production path: skill names resolved through config/skills/<name>.yaml implementations
-        ros.add(SkillServer(parameter_overrides=params
-                            + [Parameter('skills', value=['navigate_to', 'wait', 'drive_straight'])]))
+        server = ros.add(SkillServer(parameter_overrides=params
+                                     + [Parameter('skills', value=['navigate_to', 'wait', 'drive_straight'])]))
         ros.add(Teach(parameter_overrides=params))
         client = ros.add(rclpy.create_node('test_client'))
         ros.spin(8)
         wait_until(lambda: sim.pub.get_subscription_count() > 0, what='the skill server to subscribe to the odometry')
         wait_until(lambda: sim.count_publishers(sim.cmd_topic) > 0, what='the skill server to advertise cmd_vel')
+        wait_until(lambda: all(server.skills[n]._current() is not None for n in ('navigate_to', 'drive_straight')),
+                   what='the first odometry at the skills')
+        client.taskweave_server = server
         yield sim, client, config
 
 
@@ -132,7 +134,9 @@ def test_drive_straight_forward_and_back_keeps_the_heading(system):
     seen = []  # the odometry with the new heading has been published (and so reaches the skill server too)
     client.create_subscription(Odometry, sim.pub.topic_name, lambda m: seen.append(m.pose.pose.orientation.z), 10)
     wait_until(lambda: seen and seen[-1] == pytest.approx(math.sin(0.25), abs=1e-3), what='odometry at the new heading')
-    time.sleep(0.2)  # a few more messages for the server (a delivery delay, not a decision)
+    skill = client.taskweave_server.skills['drive_straight']
+    wait_until(lambda: (pose := skill._current()) is not None and abs(pose.yaw - 0.5) < 1e-3,
+               what='the new heading at the skill')   # the server has it too, not just the test's subscriber
     result = run_skill(client, 'drive_straight', {'distance_m': 0.4})
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     assert sim.x == pytest.approx(0.4 * math.cos(0.5), abs=0.04)
@@ -177,10 +181,12 @@ def fast_system(tmp_path):
             f.write('speed: 1.2\nmax_linear: 1.5\nmax_angular: 2.5\n')
         params = [Parameter('config_dir', value=str(config)), Parameter('robot', value='diff_bot')]
         sim = ros.add(BaseSim('diff', False))
-        ros.add(SkillServer(parameter_overrides=params + [Parameter('skills', value=['drive_straight'])]))
+        server = ros.add(SkillServer(parameter_overrides=params + [Parameter('skills', value=['drive_straight'])]))
         client = ros.add(rclpy.create_node('test_client'))
         ros.spin(8)
-        time.sleep(0.3)
+        wait_until(lambda: sim.pub.get_subscription_count() > 0, what='the skill server to subscribe to the odometry')
+        wait_until(lambda: server.skills['drive_straight']._current() is not None,
+                   what='the first odometry at the skill')
         yield sim, client
 
 

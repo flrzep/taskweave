@@ -27,6 +27,7 @@ NAV2_CONFIG = """implementations:
      params: {server_timeout_s: 20.0, handover_distance: 0.3}}
 max_linear: 0.6
 stuck_timeout_s: 2.0
+odom_timeout_s: 30.0
 """
 
 
@@ -90,6 +91,7 @@ def system(tmp_path):
         wait_ready(server, *skill.costmaps.values())
         wait_until(lambda: sim.pub.get_subscription_count() > 0, what='the skill server to subscribe to the odometry')
         wait_until(lambda: skill.client.server_is_ready(), what='the Nav2 action server')
+        wait_until(lambda: skill._current() is not None, what='the first odometry at the skill')
         nav2.skill = skill
         client.taskweave_server = server
         yield sim, nav2, client
