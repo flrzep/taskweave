@@ -126,7 +126,10 @@ function recItem(r, key) {
     } else if (!r.active) parts.push(el('p', { class: 'muted small-text', text: 'No videos in this recording.' }));
     const links = r.files.filter((f) => f !== 'status.json')
       .map((f) => el('a', { href: url(f), download: f.startsWith(r.id) ? f : `${r.id}_${f}`, text: f }));
-    if (r.bag) links.push(el('span', { class: 'muted mono', text: `bag/ on the box: ${r.id}/bag` }));
+    if (!r.active) {  // everything in one file, bag included: to this computer's downloads
+      links.unshift(el('a', { class: 'btn small', href: `/recordings/${encodeURIComponent(r.id)}.tar`, download: `${r.id}.tar`,
+        text: `Download all (.tar, ${gb(r.bytes)})` }));
+    }
     parts.push(el('div', { class: 'rec-files' }, links));
     if (!r.active) {
       const keepBox = el('input', { type: 'checkbox' });

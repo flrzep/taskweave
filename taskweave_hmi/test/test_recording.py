@@ -1,6 +1,7 @@
 """Record tab backend: options, folders, files and byte ranges (no ROS, no simulator)."""
 
 import json
+import tarfile
 import threading
 from datetime import datetime
 
@@ -98,6 +99,26 @@ def test_list_file_and_delete(tmp_path):
     assert [r['id'] for r in recorder.recordings()] == ['20261016_120000_a']
     with pytest.raises(RecordingError):
         recorder.delete('20261016_130000_b')
+
+
+def test_archive_packs_the_whole_finished_recording(tmp_path):
+    folder = make(tmp_path, '20261016_120000_a', {'mission': 'm'}, files=['20261016_120000_a_fixed.mp4'])
+    (folder / 'bag').mkdir()
+    (folder / 'bag' / 'bag_0.mcap').write_bytes(b'mcap')
+    (folder / recording.KEEP_FILE).touch()
+    recorder = Recorder(FakeBridge(), str(tmp_path))
+    _, members = recorder.archive('20261016_120000_a')
+    assert [name for _, name in members] == ['20261016_120000_a/20261016_120000_a_fixed.mp4',
+                                             '20261016_120000_a/bag/bag_0.mcap', '20261016_120000_a/meta.json']
+    with tarfile.open(tmp_path / 'out.tar', 'w') as tar:   # what the server streams
+        for path, name in members:
+            tar.add(path, arcname=name, recursive=False)
+    with tarfile.open(tmp_path / 'out.tar') as tar:
+        assert tar.extractfile('20261016_120000_a/bag/bag_0.mcap').read() == b'mcap'
+    recorder.active = {'id': '20261016_120000_a'}
+    for rec_id in ('20261016_120000_a', '20261016_130000_x', '..'):   # still running, unknown, not a name
+        with pytest.raises(RecordingError):
+            recorder.archive(rec_id)
 
 
 def test_start_refuses_a_second_recording_and_a_running_mission(tmp_path, monkeypatch):

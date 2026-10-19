@@ -291,6 +291,20 @@ class Recorder:
             raise RecordingError(f'{rec_id} has no {name}')
         return path
 
+    def archive(self, rec_id: str) -> tuple[Path, list[tuple[Path, str]]]:
+        """A finished recording's folder and its files as (path, name in the archive), every file below it (bag
+        included) under ``<id>/``, without the keep marker: what the Record tab's Download all packs into one tar."""
+        check_id(rec_id)
+        with self.lock:
+            if self.active and self.active['id'] == rec_id:
+                raise RecordingError('the recording is still running: download it when it has finished')
+        folder = self.dir / rec_id
+        if not folder.is_dir():
+            raise RecordingError(f'no recording {rec_id}')
+        members = [(path, f'{rec_id}/{path.relative_to(folder).as_posix()}') for path in sorted(folder.rglob('*'))
+                   if path.is_file() and not path.is_symlink() and path.name != KEEP_FILE]
+        return folder, members
+
     def delete(self, rec_id: str) -> None:
         check_id(rec_id)
         with self.lock:
