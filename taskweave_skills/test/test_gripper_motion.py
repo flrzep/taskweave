@@ -666,3 +666,15 @@ def test_a_holding_gripper_joint_is_refused_like_the_arm_joints(system):        
     assert result.outcome == REJECTED and 'left holds box_1' in result.message, result.message
     assert system.sim.position == before and system.hold.hand_holds == {'left': 'box_1'}
     assert run(system, 'move_joints', {'joints': {'right_grip': 0.5}}).outcome == OK     # the free hand's gripper
+
+
+def test_place_as_refuses_to_place_two_holds_with_one_name(system):               # M6
+    hold_by_registry(system, 'left', 'box_1')
+    hold_by_registry(system, 'right', 'pile_1')
+    before = dict(system.sim.position)
+    result = run(system, 'grip', {'action': 'open', 'hands': 'all', 'place_as': 'box_9'})
+    assert result.outcome == REJECTED and 'box_1' in result.message and 'pile_1' in result.message, result.message
+    assert system.sim.position == before and set(system.hold.hand_holds) == {'left', 'right'}
+    assert 'box_9' not in system.server.config.object_instances()
+    result = run(system, 'grip', {'action': 'open', 'hands': ['left'], 'place_as': 'box_9'})   # one hold: fine
+    assert result.outcome == OK and 'placed box_9' in result.message, result.message

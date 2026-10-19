@@ -470,6 +470,9 @@ class Grip(_FingerMotion):
                     return SkillResult.rejected(f'{hand} holds {holding[hand]}: open it with action open, or move the '
                                                 f'object first')
         grippers = {hand: self.robot.role(f'grippers.{hand}') for hand in hands}
+        ambiguous = self._place_as_refusal(args, hands)
+        if ambiguous is not None:
+            return ambiguous
         opening = None if args.get('opening_mm') is None else float(args['opening_mm']) / 1000.0
         if opening is not None:
             for hand in hands:
@@ -560,6 +563,17 @@ class Grip(_FingerMotion):
                 except (KeyError, ValueError) as error:
                     message += f'; object state not updated: {error}'
         return message
+
+    def _place_as_refusal(self, args: dict, hands: list):
+        """REJECTED if ``place_as`` (one name) would place several objects: more than one hold lets go whole."""
+        if args['action'] != 'open' or not args.get('place_as'):
+            return None
+        whole = [h['object'] for h in self.hold.held_all() if set(h['hands']) <= set(hands)
+                 and set(h['hands']) & set(hands)]
+        if len(whole) > 1:
+            return SkillResult.rejected(f'place_as {args["place_as"]} names one object, but {" and ".join(whole)} '
+                                        'would both be released: open the hands of one object per step')
+        return None
 
     def _open(self, args: dict, hands: list, state: dict) -> str:
         """The registry after an open: hands let go; ``place_as`` records the object when the last hands let go."""
