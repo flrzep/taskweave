@@ -223,6 +223,8 @@ export class Viewer3D {
 
   _buildRobot(model) {
     const loader = new URDFLoader();
+    // robot packs made from sim assets carry only <collision> meshes (tools/export_collision.py): show those then
+    if (!/<visual[\s>]/.test(model.urdf)) { loader.parseVisual = false; loader.parseCollision = true; }
     const pending = [];
     // STLs through one cached STLLoader, all with the one metal material; Collada the default way
     loader.loadMeshCb = (path, manager, done) => {
