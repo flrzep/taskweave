@@ -2,12 +2,14 @@ cmake_minimum_required(VERSION 3.8)
 project(taskweave_robots NONE)
 find_package(ament_cmake REQUIRED)
 
-# every folder with a pack.yaml is a robot pack: installed to share/taskweave_robots/<robot>/
-file(GLOB pack_files RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/*/pack.yaml)
-foreach(pack_file ${pack_files})
-  get_filename_component(robot ${pack_file} DIRECTORY)
-  install(DIRECTORY ${robot} DESTINATION share/${PROJECT_NAME})
-endforeach()
+# Every folder is installed to share/taskweave_robots/<robot>/, except the tests, caches and hidden folders. The copy
+# happens at install time, so a new pack folder needs no CMake reconfigure (no configure-time GLOB).
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/ DESTINATION share/${PROJECT_NAME}
+        PATTERN "test" EXCLUDE
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN ".*" EXCLUDE
+        PATTERN "CMakeLists.txt" EXCLUDE
+        PATTERN "package.xml" EXCLUDE)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
