@@ -46,7 +46,7 @@ def test_slew_limits_how_fast_the_effective_override_follows():
         t += 0.02
         clock(t)
         values.append(clock.o)
-    steps = [b - a for a, b in zip([0.1, *values], values)]
+    steps = [b - a for a, b in zip([0.1, *values], values, strict=False)]
     assert values[0] > 0.1                        # takes effect within one control cycle
     assert max(steps) <= 2.0 * 0.02 + 1e-12       # smooth: at most the slew per cycle
     assert values[-1] == 1.0                      # 10 -> 100 % in about 0.45 s

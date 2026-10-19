@@ -18,10 +18,10 @@ old move_object) were removed with the migration to the new skill model (taskwea
 
 from __future__ import annotations
 
+import functools
 import math
 import threading
 import time
-import functools
 from dataclasses import dataclass, field, fields
 
 import numpy as np
@@ -55,7 +55,8 @@ class Params:
 
     @classmethod
     def from_config(cls, params: dict) -> Params:
-        known = {f.name for f in fields(cls)} - {'linear_joints', 'velocity_limits'}  # robot-specific: profile joints.linear
+        # robot-specific: profile joints.linear
+        known = {f.name for f in fields(cls)} - {'linear_joints', 'velocity_limits'}
         unknown = set(params) - known
         if unknown:
             raise ValueError(f'unknown joint skill parameters: {", ".join(sorted(unknown))}')
@@ -313,7 +314,8 @@ class _PoseMotion(_JointSkill):
             if urdf.is_file():  # straight lines on the URDF chains, away from joint limits (cartesian.linear_path)
                 group = (robot.data.get('planning') or {}).get('group')
                 tools = self.ik.attach_chains(urdf, group)
-                node.get_logger().info(f'{self.name}: straight lines on the URDF chains of {", ".join(tools) or "no tool"}')
+                tool_names = ', '.join(tools) or 'no tool'
+                node.get_logger().info(f'{self.name}: straight lines on the URDF chains of {tool_names}')
         if robot.data.get('planning'):
             from .motion_plan import MotionPlanner
             self.planner = MotionPlanner(node, robot)
@@ -592,7 +594,8 @@ class _ObjectMotion(_PointMotion):
         instances = self.config.object_instances()
         held = instances.get(hold['object'])
         if held is None:
-            return SkillResult.rejected(f'the held {hold["object"]} is not in cell/objects.yaml: its contacts are unknown')
+            return SkillResult.rejected(f'the held {hold["object"]} is not in cell/objects.yaml: '
+                                        'its contacts are unknown')
         try:
             target, contact = self.config.instance_contact(args['to'])
             mine = self.config.object_contact(held.object, args['contact'])

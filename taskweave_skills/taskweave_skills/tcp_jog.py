@@ -225,7 +225,8 @@ class TcpJog(Node):
         try:
             transform = self.tf.lookup_transform(self.base, self.ik.tools[tool]['link'], rclpy.time.Time()).transform
         except Exception as error:  # noqa: BLE001 - several tf2 exception types
-            self.get_logger().warning(f'jog {tool}: no transform {self.base} -> flange: {error}', throttle_duration_sec=2)
+            self.get_logger().warning(f'jog {tool}: no transform {self.base} -> flange: {error}',
+                                      throttle_duration_sec=2)
             return None
         return pose_matrix(transform.translation, transform.rotation)
 
@@ -305,7 +306,8 @@ class TcpJog(Node):
         joints = self.ik.step(tool, jog['target'], {**current, swivel: current[swivel] + angle})
         if joints is None:
             if not jog['blocked']:
-                self.get_logger().warning(f'jog {tool}: elbow stopped (joint limit, collision or no way to keep the TCP)')
+                self.get_logger().warning(
+                    f'jog {tool}: elbow stopped (joint limit, collision or no way to keep the TCP)')
             jog['blocked'] = True
             return
         jog['blocked'] = False

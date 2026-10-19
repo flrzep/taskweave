@@ -93,7 +93,8 @@ class OperatorJoy(Node):
         services = (('pause', names.PAUSE), ('resume', names.RESUME), ('abort', names.ABORT))
         self.triggers = {name: self.create_client(Trigger, service) for name, service in services}
         self.teach_button = config.get('teach', {}).get('button')
-        self.teach_hold = config.get('teach', {}).get('hold_button', {**JOG_DEFAULTS, **config.get('jog', {})}['enable_button'])
+        self.teach_hold = config.get('teach', {}).get(
+            'hold_button', {**JOG_DEFAULTS, **config.get('jog', {})}['enable_button'])
         self.notice_pub = self.create_publisher(String, names.OPERATOR_NOTICE, 10)
         self.teach_client = self.create_client(TeachPoint, names.TEACH_POINT) if self.teach_button is not None else None
         self.teach_target = ''  # the arm position open in the HMI (JSON), '' = none
@@ -252,7 +253,8 @@ class OperatorJoy(Node):
             return
         tools = [] if self.mode == DRIVE else [self.mode]
         if self.teach_target and self.teach_request_pub.get_subscription_count():
-            self.get_logger().info(f'teach into the HMI position {self.teach_target} ({", ".join(tools) or "all tools"})')
+            self.get_logger().info(
+                f'teach into the HMI position {self.teach_target} ({", ".join(tools) or "all tools"})')
             self.teach_request_pub.publish(String(data=json.dumps({'tools': tools})))
             return
         if not point:

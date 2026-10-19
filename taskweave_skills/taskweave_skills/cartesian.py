@@ -6,7 +6,8 @@ before anything moves. With the robot's URDF chains (IkClient.attach_chains) eac
 damped least squares, iterated until the flange is on the line) while the arm's spare freedom (the elbow, its null
 space) moves joints that are within the limit margin back toward mid-range, so a straight line does not end up pinned
 at a joint limit; each step is then checked for collisions. Without chains, each step is one local IK descent from the
-previous step's joints (IkClient.step), which keeps the configuration it starts in. The joint waypoints are timed so no TCP
+previous step's joints (IkClient.step), which keeps the configuration it starts in. The joint waypoints are timed so
+no TCP
 exceeds ``speed`` (m/s) / ``turn`` (rad/s) and returned as a motion_plan.Trajectory for the joint skills to stream.
 """
 
@@ -15,6 +16,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+
 from taskweave_core.config.tuning import motion_tuning
 
 from .ik import rpy_matrix, tcp_matrix
@@ -210,7 +212,7 @@ def linear_path(ik, starts: dict, goals: dict, current: dict, speed: float, turn
 def _chain_path(ik, starts: dict, goals: dict, current: dict, state: dict, speed: float, turn: float,
                 step_m: float, step_rad: float, elbow=None) -> Trajectory:
     """linear_path on the URDF chains (see the module docstring)."""
-    from .ik import IkError, LIMIT_MARGIN_DEG
+    from .ik import LIMIT_MARGIN_DEG, IkError
 
     margin = math.radians(float((getattr(ik, 'choose', None) or {}).get('limit_margin_deg', LIMIT_MARGIN_DEG)))
     tuning = tuning_of(ik)
@@ -257,7 +259,7 @@ def elbow_swing_path(ik, tools: list[str], current: dict, state: dict, side, joi
     joint at its limit (margin) or the robot in collision. Returns (Trajectory or None if nothing moved, {tool:
     (deviation before, after in degrees, why it stopped short or '' if it got there)}). Raises PathError without
     chains or for an arm without an elbow description (profile arms.<tool>.elbow)."""
-    from .ik import IkError, LIMIT_MARGIN_DEG
+    from .ik import LIMIT_MARGIN_DEG, IkError
 
     chains = getattr(ik, 'chains', {})
     if not all(tool in chains for tool in tools):

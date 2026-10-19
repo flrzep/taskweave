@@ -4,8 +4,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from taskweave_core import motion
-from taskweave_core.config import ConfigError, ConfigStore
-from taskweave_core.config import schemas
+from taskweave_core.config import ConfigError, ConfigStore, schemas
 
 SKILL = """
 motion: {mode: free, planner: auto, approach_m: 0.10, torso: auto}

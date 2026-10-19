@@ -21,7 +21,8 @@ HTTP API (JSON):
                                    ?rename_from=<old> saves mission <old> as <name> (old file removed)
   DELETE /api/missions/<name>      remove the mission file (a running mission keeps its plan)
   POST /api/missions/<name>/validate
-  GET  /api/missions/<name>/plan   the plan a start would run now (includes expanded, facts filled): step ids to start at
+  GET  /api/missions/<name>/plan   the plan a start would run now (includes expanded, facts filled): step ids to
+                                   start at
   POST /api/start {mission[, start_step]}  start a mission (at a step id: the first cycle begins there, robot and
                                    objects as they are); POST /api/pause | /api/resume | /api/abort
   GET  /api/skills                 skill catalog;  GET /api/points  named points for argument pickers (the store's

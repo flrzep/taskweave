@@ -20,7 +20,11 @@
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>python3-jsonschema</exec_depend>
   <exec_depend>python3-ruamel.yaml</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>   <!-- installed robot packs (config.packs); optional at run time -->
   <test_depend>python3-pytest</test_depend>
+  <test_depend>builtin_interfaces</test_depend>
+  <test_depend>rosgraph_msgs</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

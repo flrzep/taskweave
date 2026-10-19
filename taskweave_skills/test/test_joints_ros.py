@@ -127,7 +127,7 @@ def test_a_blocked_move_swings_the_elbows_first_then_goes_straight(tmp_path):
     hand = [np.linalg.norm(chain.fk(s)[:3, 3] - chain.fk(START)[:3, 3]) for s in states]
     turn = next(i for i, h in enumerate(hand) if h > 1e-3)                     # the hands stay while the elbows swing
     assert elbow_deviation_of(chain, states[turn - 1], 'down') < math.radians(120)
-    assert all(b >= a - 1e-9 for a, b in zip(trajectory.times, trajectory.times[1:]))
+    assert all(b >= a - 1e-9 for a, b in zip(trajectory.times, trajectory.times[1:], strict=False))
     skill.planner = SimpleNamespace(free=lambda start, end, stop: False)      # blocked from there too: planner's turn
     assert skill._swing_first(ctx, dict(START), goal, 'down') is None
     skill.planner = SimpleNamespace(free=lambda start, end, stop: True)
@@ -220,7 +220,8 @@ def test_the_old_skills_are_not_in_joints_py_any_more():
     from taskweave_skills import joints
 
     assert [c.__name__ for c in vars(joints).values()
-            if isinstance(c, type) and issubclass(c, Skill) and c is not Skill and (c.name or 'execute' in vars(c))] == []
+            if isinstance(c, type) and issubclass(c, Skill) and c is not Skill
+            and (c.name or 'execute' in vars(c))] == []
     for old in ('MoveToPose', 'GoToPoint', 'MoveObject', 'Gripper'):
         assert not hasattr(joints, old)
         with pytest.raises(ValueError, match='was removed.*taskweave config migrate-skills'):

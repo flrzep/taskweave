@@ -132,7 +132,8 @@ MISSION = {
             'properties': {'description': {'type': 'string'},
                            'point': {'enum': ['base_target', 'joint_pose', 'tool_pose', 'object_point',
                                               'instance_point', 'instance_contact', 'instance']}}}},
-        # facts each cycle starts from, filled into the steps as {name} (MissionFilePlanner): fullest = the placed object
+        # facts each cycle starts from, filled into the steps as {name} (MissionFilePlanner): fullest = the
+        # placed object
         # of this type with the most items left, among instance names matching the glob. When a fact finds nothing
         # (e.g. every stack is empty) the mission is complete.
         'facts': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {
@@ -445,7 +446,8 @@ ROBOT_OBJECT_POINTS = {
     'additionalProperties': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {
         'type': 'object', 'additionalProperties': False, 'properties': {
             'elbow': {'enum': ELBOW_SIDES},
-            'grip_m': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {'type': 'number', 'minimum': 0}},
+            'grip_m': {'type': 'object', 'propertyNames': NAME,
+                       'additionalProperties': {'type': 'number', 'minimum': 0}},
         }}},
 }
 

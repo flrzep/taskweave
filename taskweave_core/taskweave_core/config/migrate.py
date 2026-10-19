@@ -145,8 +145,10 @@ def split_robot_packs(cell: Path, robot_packs: Path | None, dry_run: bool, say) 
                 continue
             label = f'robots/{robot}/{name}{"/" if here.is_dir() else ""}'
             base = next((p.path / name for p in robot_packs_found if (p.path / name).exists()), None)
-            foreign = packs.foreign(here, cell, search + ([packs.Location(target, 'env', True)] if target else []), base)
-            if foreign:     # a symlink into a robot pack (or out of the cell pack): deleting or moving it would hit that
+            foreign = packs.foreign(here, cell, search + ([packs.Location(target, 'env', True)] if target else []),
+                                    base)
+            # a symlink into a robot pack (or out of the cell pack): deleting or moving it would hit that
+            if foreign:
                 say(f'skip    {label}  {foreign} (not touched)')
                 keep_folder = True
                 continue
@@ -158,7 +160,8 @@ def split_robot_packs(cell: Path, robot_packs: Path | None, dry_run: bool, say) 
                     stuck.append(label)
                     keep_folder = True
                     continue
-                say(f'{do}remove  {label}  (same as {base}' + (', partly removed already' if relation == 'subset' else '')
+                say(f'{do}remove  {label}  (same as {base}'
+                    + (', partly removed already' if relation == 'subset' else '')
                     + ')')
                 gone.add(name)
                 if not dry_run:
@@ -239,7 +242,8 @@ def migrate(cell: str | Path, robot_packs: str | Path | None = None, name: str |
     if version == packs.CELL_SCHEMA:
         say(f'{cell}: cell pack schema {version}, nothing to do')
         return 0
-    say(f'{cell}: cell pack schema {version} -> {packs.CELL_SCHEMA}' + (' (dry run: nothing is changed)' if dry_run else ''))
+    dry = ' (dry run: nothing is changed)' if dry_run else ''
+    say(f'{cell}: cell pack schema {version} -> {packs.CELL_SCHEMA}{dry}')
     pack = cell / packs.PACK_FILE
     blocked = pack.is_symlink() or (not os.access(pack, os.W_OK) if pack.exists() else not os.access(cell, os.W_OK))
     if blocked:     # pack.yaml is written last: without it a run would leave a half-migrated cell

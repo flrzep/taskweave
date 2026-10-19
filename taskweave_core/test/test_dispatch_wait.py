@@ -36,7 +36,8 @@ def rig(config_dir):
         handler.executive = SimpleNamespace(on_result=lambda token, outcome, message='', data=None:
                                             results.append((token, outcome, message)),
                                             on_feedback=lambda *a: None, tick=lambda: None, status=Status())
-        handler.catalog = {n: SimpleNamespace(name=n, action_name=names.skill_action(n)) for n in ('late_skill', 'ghost_skill')}
+        handler.catalog = {n: SimpleNamespace(name=n, action_name=names.skill_action(n))
+                           for n in ('late_skill', 'ghost_skill')}
         executor = ros.spin(8)
         yield handler, executor, results, params, ros.nodes
 
@@ -69,7 +70,8 @@ def test_first_dispatch_before_the_server_exists_waits_for_it(rig):
 def test_dispatch_is_rejected_clearly_when_the_server_never_appears(rig):
     handler, _, results, _, _ = rig
     handler.set_parameters([Parameter('server_wait_s', value=0.5)])
-    handler.dispatcher.dispatch(1, step('ghost_skill'), 1)  # a skill nobody serves (a name of its own: no stale discovery)
+    # a skill nobody serves (a name of its own: no stale discovery)
+    handler.dispatcher.dispatch(1, step('ghost_skill'), 1)
     result = wait_result(results, 10)
     assert result is not None, 'no result'
     assert result[1] == Outcome.REJECTED

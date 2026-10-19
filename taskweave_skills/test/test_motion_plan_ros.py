@@ -155,7 +155,8 @@ def test_trajectory_reversed():
 
 
 def test_trajectory_then():
-    path = Trajectory(['a'], [0.0, 1.0], [[0.0], [1.0]]).then(Trajectory(['a', 'b'], [0.0, 2.0], [[1.0, 5.0], [3.0, 6.0]]))
+    path = Trajectory(['a'], [0.0, 1.0], [[0.0], [1.0]]).then(
+        Trajectory(['a', 'b'], [0.0, 2.0], [[1.0, 5.0], [3.0, 6.0]]))
     assert path.names == ['a', 'b'] and path.times == [0.0, 1.0, 3.0]
     assert path.points == [[0.0, 5.0], [1.0, 5.0], [3.0, 6.0]]  # b holds its first value while only a moves
 

@@ -11,7 +11,8 @@ envelope reaches into the bin the arms reach over), Nav2 would see it in collisi
 then first backs straight out until the footprint is clear (depart.py), after checking the strip behind it is free.
 
 While the robot holds an object (hold.py) and navigation.yaml has a ``carry_envelope`` (the robot plus the carried
-object), the costmaps get that footprint for the drive and the departure check uses it; otherwise the envelope. With a carry
+object), the costmaps get that footprint for the drive and the departure check uses it; otherwise the envelope. With
+a carry
 envelope the footprint is set on every goal, so a costmap restart (clock_guard) cannot leave the wrong one.
 
 Parameters (``skills/navigate_to.yaml``): the direct controller's (see ``navigate.py``), plus
@@ -26,7 +27,8 @@ Parameters (``skills/navigate_to.yaml``): the direct controller's (see ``navigat
   depart_slack_s: 5.0           backing out fails after this plus 3x the time it takes at depart_speed
   costmaps: /global_costmap/global_costmap,/local_costmap/local_costmap   nodes whose footprint follows the hold
   speed_limit_topic: /speed_limit   Nav2 controller_server's nav2_msgs/SpeedLimit topic
-  speed_limit: true             true: the global speed override goes to Nav2: velocities as a SpeedLimit percentage (100 %
+  speed_limit: true             true: the global speed override goes to Nav2: velocities as a SpeedLimit percentage
+                                (100 %
                                 = 'no limit') and, if nominal_accel is set, MPPI's accelerations at nominal x o^2 (time
                                 scaling by 1/o: a velocity cap alone does nothing to drives that stay below it). False:
                                 only 'no limit' and the nominal accelerations are sent, once. Followed during a drive

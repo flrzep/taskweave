@@ -33,7 +33,8 @@ def wait_ready(server, *clients):
 
 
 def connect(node, action_type, name, timeout=90.0, attempt_s=5.0):
-    """An ActionClient whose server is visible. A client that has not found the server after ``attempt_s`` is replaced by
+    """An ActionClient whose server is visible. A client that has not found the server after ``attempt_s`` is
+    replaced by
     a fresh one (new endpoints are announced again), which gets over a discovery that was lost under load; the deadline
     is generous."""
     from rclpy.action import ActionClient
@@ -121,7 +122,8 @@ class RosRig:
 def one_ros_context():
     """One rclpy context for the whole session. The ROS tests call rclpy.init()/shutdown() around every test; creating
     and destroying a DDS participant per test makes discovery slow and now and then lost on a loaded machine (an action
-    server that stays invisible to a node of the same process), so init happens once and the per-test calls do nothing."""
+    server that stays invisible to a node of the same process), so init happens once and the per-test calls do
+    nothing."""
     try:
         import rclpy
     except ImportError:

@@ -13,7 +13,7 @@ pytest.importorskip('rclpy')
 pytest.importorskip('tf2_ros')
 pytest.importorskip('moveit_msgs')
 
-from test_gripper_motion import FLANGES, system, run  # noqa: E402, F401  (the fixture is used by name)
+from test_gripper_motion import FLANGES, run, system  # noqa: E402, F401
 
 from taskweave_core.validation import oneof_problems, validate_args  # noqa: E402
 from taskweave_interfaces.action import RunSkill  # noqa: E402

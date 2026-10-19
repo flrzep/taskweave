@@ -5,7 +5,8 @@
 - ``SpeedOverride``: one per node; follows the handler's latched topic ``/taskweave/speed_override``. Skills never
   read the parameter.
 - ``WorkClock``: work time = the integral of the effective override over node time. The effective override follows
-  the target: up at a slew of at most ``slew_per_s`` (fraction/s), down at once (a decrease is a safety matter). Phase-clock playback, scaled stall/settle/stuck checks
+  the target: up at a slew of at most ``slew_per_s`` (fraction/s), down at once (a decrease is a safety matter).
+  Phase-clock playback, scaled stall/settle/stuck checks
   and step timeouts all run on it. At a constant override o it is exactly ``(now - start) * o``, so at 100 % it is
   bit-identical to plain elapsed time.
 """

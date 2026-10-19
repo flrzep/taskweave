@@ -85,7 +85,8 @@ def base_limits(store: ConfigStore, robot: str) -> dict[str, float]:
 
 
 def capped_by(wanted: dict[str, float], limits: dict[str, float]) -> dict[str, float]:
-    """The entries of ``wanted`` that exceed their limit, as ``{key: limit}`` (the ``motion.capped`` of a step result)."""
+    """The entries of ``wanted`` that exceed their limit, as ``{key: limit}`` (the ``motion.capped`` of a step
+    result)."""
     return {key: limits[key] for key, value in wanted.items() if key in limits and value > limits[key] + 1e-12}
 
 

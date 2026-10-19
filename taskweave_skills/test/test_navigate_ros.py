@@ -62,7 +62,8 @@ def system(request, tmp_path):
         params = [Parameter('config_dir', value=str(config)), Parameter('robot', value=robot)]
         sim = ros.add(BaseSim(prefix, holonomic))
         # production path: skill names resolved through config/skills/<name>.yaml implementations
-        ros.add(SkillServer(parameter_overrides=params + [Parameter('skills', value=['navigate_to', 'wait', 'drive_straight'])]))
+        ros.add(SkillServer(parameter_overrides=params
+                            + [Parameter('skills', value=['navigate_to', 'wait', 'drive_straight'])]))
         ros.add(Teach(parameter_overrides=params))
         client = ros.add(rclpy.create_node('test_client'))
         ros.spin(8)
@@ -134,7 +135,8 @@ def test_drive_straight_forward_and_back_keeps_the_heading(system):
     time.sleep(0.2)  # a few more messages for the server (a delivery delay, not a decision)
     result = run_skill(client, 'drive_straight', {'distance_m': 0.4})
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
-    assert sim.x == pytest.approx(0.4 * math.cos(0.5), abs=0.04) and sim.y == pytest.approx(0.4 * math.sin(0.5), abs=0.04)
+    assert sim.x == pytest.approx(0.4 * math.cos(0.5), abs=0.04)
+    assert sim.y == pytest.approx(0.4 * math.sin(0.5), abs=0.04)
     assert sim.yaw == pytest.approx(0.5, abs=0.03)
     result = run_skill(client, 'drive_straight', {'distance_m': -0.4})   # backs out without turning round
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message

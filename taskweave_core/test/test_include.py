@@ -49,7 +49,8 @@ def test_the_store_expands_mission_files(config_dir):
     missions.mkdir(exist_ok=True)
     (missions / 'part.yaml').write_text('goal: part\nparams: {seconds: {}}\n'
                                         'steps:\n- {instruction: wait, skill: wait, args: {seconds: "{seconds}"}}\n')
-    (missions / 'whole.yaml').write_text('goal: whole\nsteps:\n- {instruction: part, include: part, with: {seconds: 2}}\n')
+    (missions / 'whole.yaml').write_text(
+        'goal: whole\nsteps:\n- {instruction: part, include: part, with: {seconds: 2}}\n')
     (missions / 'broken.yaml').write_text('goal: broken\nsteps:\n- {instruction: part, include: nothing}\n')
     store = ConfigStore(config_dir)
     assert store.expanded_mission('whole')['steps'][0]['args'] == {'seconds': 2}  # a whole placeholder keeps the type

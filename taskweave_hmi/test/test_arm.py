@@ -34,10 +34,10 @@ def test_hand_numbers_convert_both_ways():
     assert hand['xyz'] == [0.6, 0.2, 0.4] and math.isclose(hand['rpy'][1], math.pi / 2, abs_tol=1e-3)
     back = arm.target_from_hand(hand)
     for key in ('tcp', 'approach', 'closing'):
-        assert all(math.isclose(a, b, abs_tol=1e-3) for a, b in zip(back[key], target[key]))
+        assert all(math.isclose(a, b, abs_tol=1e-3) for a, b in zip(back[key], target[key], strict=True))
     tilted = {'tcp': [0.1, 0.0, 0.2], 'approach': [0, 0.7071, -0.7071], 'closing': [1, 0, 0]}
     again = arm.target_from_hand(arm.hand_from_target(tilted))
-    assert all(math.isclose(a, b, abs_tol=1e-3) for a, b in zip(again['approach'], tilted['approach']))
+    assert all(math.isclose(a, b, abs_tol=1e-3) for a, b in zip(again['approach'], tilted['approach'], strict=True))
 
 
 def test_overview_lists_robot_poses_and_object_points_alike(store):
@@ -53,7 +53,8 @@ def test_saving_numbers_writes_each_kind_to_its_file(store):
     hand = {'xyz': [0.5, 0.2, 0.4], 'rpy': [0.0, math.pi / 2, 0.0]}
     arm.save(store, ROBOT, 'robot', 'reach', {'hands': {'left': hand}, 'joints': {'lift': 0.25}, 'elbow': 'down'}, ARGS)
     pose = store.named_pose(ROBOT, 'reach')
-    assert pose['tools']['left']['tcp'] == [0.5, 0.2, 0.4] and pose['joints'] == {'lift': 0.25} and pose['elbow'] == 'down'
+    assert pose['tools']['left']['tcp'] == [0.5, 0.2, 0.4] and pose['joints'] == {'lift': 0.25}
+    assert pose['elbow'] == 'down'
     arm.save(store, ROBOT, 'box', 'top_grasp', {'hands': {'left': hand}, 'approach_m': 0.12, 'elbow': None}, ARGS)
     point = store.object_point('box', 'top_grasp')
     assert list(point['left_tool'].xyz) == [0.5, 0.2, 0.4] and point['approach_m'] == 0.12

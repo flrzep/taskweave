@@ -33,8 +33,7 @@ from taskweave_core.config.schemas import ELBOW_SIDES, VEC3, hands_schema, motio
 from taskweave_core.skill import SkillResult
 
 from .gripper_motion import RESOURCES, MoveGripper, Target, hands_arg
-from .joints import SWING_STRAIGHT_STEPS, interpolate
-from .joints import _ObjectMotion
+from .joints import SWING_STRAIGHT_STEPS, _ObjectMotion, interpolate
 
 OBJECT_MODE = 'linear'                    # the mode of move_object whose yaml has no ``motion.mode``
 HOLD_RULES = ('auto', 'all')              # hands words of the held-object skills: the hold's hands, all hands

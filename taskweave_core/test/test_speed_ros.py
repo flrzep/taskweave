@@ -41,7 +41,8 @@ def system(config_dir):
     with RosRig() as ros:
         params = [Parameter('config_dir', value=str(config_dir)), Parameter('robot', value='demo_bot')]
         handler = ros.add(TaskHandler(parameter_overrides=params))
-        server = ros.add(SkillServer(skills=[NavigateTo(), Wait()], node_name='test_skills', parameter_overrides=params))
+        server = ros.add(SkillServer(skills=[NavigateTo(), Wait()], node_name='test_skills',
+                                     parameter_overrides=params))
         client = ros.add(rclpy.create_node('test_client'))
         ros.spin(8)
         seen = []

@@ -121,9 +121,10 @@ class ConfigStore:
         keyed = robot_file is not None and overlay.is_keyed(data)
         if keyed:  # a keyed cell override: laid over the robot pack's file, the result is validated
             if base is None:    # not over {}: the delta alone is not a file (and would hide a missing/misnamed pack)
+                labels = ', '.join(p.label for p in self.robot_packs(robot_file[0])) or 'no robot pack'
                 raise ConfigError(path, f'keyed override ({overlay.MARKER}: {overlay.KEYS}), but no robot pack has '
                                         f'{robot_file[0]}/{robot_file[1]} (looked in '
-                                        f'{", ".join(p.label for p in self.robot_packs(robot_file[0])) or "no robot pack"})')
+                                        f'{labels})')
             data = overlay.overlay(self._read_yaml(base), data, robot_file[1])
         if data is None:
             data = default if default is not None else {}
@@ -326,7 +327,8 @@ class ConfigStore:
             elif 'object' in change:
                 data[name] = change
             elif name in data and 'count' in change:
-                data[name] = {**data[name], 'stack': {'pitch': 0.0, **data[name].get('stack', {}), 'count': change['count']}}
+                data[name] = {**data[name],
+                              'stack': {'pitch': 0.0, **data[name].get('stack', {}), 'count': change['count']}}
         return {name: ObjectInstance(name, entry['object'], Pose2D.from_dict(entry), float(entry.get('z', 0.0)),
                                      int(entry.get('stack', {}).get('count', 1)),
                                      float(entry.get('stack', {}).get('pitch', 0.0)))
@@ -511,7 +513,8 @@ class ConfigStore:
         placed = []  # <instance>/<point>: a point on one placed object (go_to_point)
         for name, instance in sorted(self.object_instances().items()):
             try:
-                placed += [f'{name}{VARIANT_SEPARATOR}{point}' for point in self.object(instance.object).get('points', {})]
+                placed += [f'{name}{VARIANT_SEPARATOR}{point}'
+                           for point in self.object(instance.object).get('points', {})]
             except ConfigError:
                 continue
         contacts = []  # <instance>/<contact>: where a held object can be put (move_object to)
