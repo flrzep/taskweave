@@ -1,0 +1,12 @@
+# From galbot_s1: the G1 grippers end within 2 cm of the Ge103In ones in home.
+# Room the path planner (Nav2) keeps around the Galbot S1 while driving; editable in the HMI (Robot tab), applied live.
+# envelope: the robot in its driving pose (home, measured 13 Oct from the collision meshes in the sim: grippers 0.90 m
+# ahead, chassis 0.30 m back, 0.50 m left, 0.57 m right), from base_link (m).
+envelope: {front: 0.9, back: 0.3, left: 0.5, right: 0.6}
+# carry_envelope (the robot plus a carried object, while it holds one) is about the objects of a cell: it comes from
+# the cell pack (robots/galbot_s1_g1gripper/navigation.yaml), not from here.
+padding: 0.1              # added around the envelope
+inflation_radius: 0.65    # cost gradient beyond the envelope: paths keep away from obstacles where there is room
+# driving: speed limits (m/s, rad/s); sideways only for a holonomic base (the S1 is differential); prefer_forward =
+# weight for facing along the path and not reversing (0 = no preference)
+driving: {max_forward: 2.0, max_reverse: 0.8, max_turn: 1.5, sideways: false, max_sideways: 0.0, prefer_forward: 4.0}

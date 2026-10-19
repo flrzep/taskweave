@@ -1,0 +1,42 @@
+# IK solver per planning group: pick_ik in local mode, i.e. gradient descent from the start state. taskweave starts
+# it from each seed posture in the robot profile (ik.seeds), then from the current state, so a named pose always gets
+# the same arm configuration (global mode picks one at random among the 7-DoF arm's many). minimal_displacement_weight
+# keeps the descent near the seed; pick_ik counts that cost against cost_threshold, so cost_threshold is high and
+# accuracy comes from the position/orientation thresholds. *_global: the same arms with a global search (several
+# random starts), used when no local descent reaches the target; its answer is not repeatable.
+left_arm:
+  kinematics_solver: pick_ik/PickIkPlugin
+  kinematics_solver_timeout: 0.2
+  mode: local
+  position_threshold: 0.001
+  orientation_threshold: 0.01
+  cost_threshold: 100.0
+  minimal_displacement_weight: 0.005
+  gd_step_size: 0.0001
+right_arm:
+  kinematics_solver: pick_ik/PickIkPlugin
+  kinematics_solver_timeout: 0.2
+  mode: local
+  position_threshold: 0.001
+  orientation_threshold: 0.01
+  cost_threshold: 100.0
+  minimal_displacement_weight: 0.005
+  gd_step_size: 0.0001
+left_arm_global:
+  kinematics_solver: pick_ik/PickIkPlugin
+  kinematics_solver_timeout: 0.2
+  mode: global
+  position_threshold: 0.001
+  orientation_threshold: 0.01
+  cost_threshold: 100.0
+  minimal_displacement_weight: 0.005
+  gd_step_size: 0.0001
+right_arm_global:
+  kinematics_solver: pick_ik/PickIkPlugin
+  kinematics_solver_timeout: 0.2
+  mode: global
+  position_threshold: 0.001
+  orientation_threshold: 0.01
+  cost_threshold: 100.0
+  minimal_displacement_weight: 0.005
+  gd_step_size: 0.0001

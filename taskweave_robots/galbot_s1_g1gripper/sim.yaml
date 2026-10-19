@@ -1,0 +1,34 @@
+# The sim build of the robot in frame-sim-2 (/data/frame-sim-2/config/robots/galbot_s1_g1gripper/sim.yaml, 16 Oct),
+# copied for the record: no joint_limits override, so the sim enforces the vendor limits (as moveit/robot.urdf).
+# How the Galbot S1 with Galbot G1 grippers is built into the Isaac Sim scene (sim only; scripts/base_builder.py).
+# Asset: assets/galbot/Galbot_S1_G1Gripper (tools/build_s1_g1_gripper.py): the unchanged S1 (galbot_s1) referenced,
+# its Ge103In grippers switched off, the G1 gripper on each link7 flange (concentric, flush, fingers closing along z).
+# Its sensor layer references FaSim sensor files that are not in the repo (mid360, d435), so those mounts are empty
+# and the cameras below are added instead.
+asset_file: assets/galbot/Galbot_S1_G1Gripper/Galbot_S1_G1Gripper.usda   # relative to the frame-sim workspace
+prim: Galbot_S1                 # referenced at /World/Robot/<prim>
+root_joint: root_joint          # floating base: created, and the articulation root moved onto it
+create_root_joint: true
+base_link: base_link            # column base (articulation root, a direct child); the chassis hangs 0.55 m below it
+spawn_height: 0.588             # wheels reach 0.583 m below base_link: base_link this high puts them 5 mm clear
+deactivate:                     # the asset's own ROS graphs (joint states, odometry, steering wheel controller on
+  - Graph                       # /cmd_vel) would duplicate ours: ros_graphs.py and base_controller.py
+  - SteeringChassis/Graph
+drives:                         # drive overrides by joint name (USD units: angular per degree). The G1 asset's
+  left_gripper_joint:  {stiffness: 100.0, damping: 10.0, max_force: 50.0}   # gripper drive (k 10, 5 Nm) is too weak
+  right_gripper_joint: {stiffness: 100.0, damping: 10.0, max_force: 50.0}   # (as in galbot_g1/sim.yaml)
+cameras:                        # mount = pose of the camera body in the parent link frame (USD camera: -z forward).
+                                # Zero-pose frames (reference/galbot_s1_model.json): head_link2 x = world X,
+                                # y = world Z, z = -world Y; left/right_link7 -x = approach, +z = finger side.
+  head_camera:                  # in front of the face plate (head meshes end 0.16 m ahead), forward and 20 deg down
+    model: d435
+    parent: head_link2
+    mount: {xyz: [0.17, 0.06, 0.0], axes: [[0, 0, 1], [0.342, 0.940, 0], [-0.940, 0.342, 0]]}
+  left_wrist_camera:            # on the asset's camera stand (link7 +y side, 0.08-0.15 m ahead of the flange)
+    model: d405
+    parent: left_link7
+    wrist: {approach: -x, side: +y, offset: 0.06, forward: 0.12, tilt_deg: 20.0}
+  right_wrist_camera:           # mirrored stand on the -y side
+    model: d405
+    parent: right_link7
+    wrist: {approach: -x, side: -y, offset: 0.06, forward: 0.12, tilt_deg: 20.0}
