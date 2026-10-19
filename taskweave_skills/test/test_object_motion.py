@@ -13,7 +13,7 @@ pytest.importorskip('rclpy')
 pytest.importorskip('tf2_ros')
 pytest.importorskip('moveit_msgs')
 
-from test_gripper_motion import FLANGES, run, system  # noqa: E402, F401
+from test_gripper_motion import FLANGES, hold_by_registry, object_x, run, shifted, system  # noqa: E402, F401
 
 from taskweave_core.validation import oneof_problems, validate_args  # noqa: E402
 from taskweave_interfaces.action import RunSkill  # noqa: E402
@@ -332,3 +332,12 @@ def test_the_docs_examples_load():
         assert key in flat and extra['accel']
         assert Params.from_config(flat).position_tolerance == 0.03
     assert math.isclose(Params.from_config({'grip_drift_m': 0.05}).grip_drift_m, 0.05)
+
+
+def test_a_lift_segment_of_a_held_pose_updates_the_other_hold_too(system):       # I2
+    hold_by_registry(system, 'left', 'box_1')
+    hold_by_registry(system, 'right', 'pile_1')
+    shifted(system, 'pile_1')                                  # the registry's pile_1 is off: only a follow fixes it
+    move(system, {'pose': 'carry'}, object='box_1', motion={'mode': 'linear'})
+    assert system.sim.position['lift'] == pytest.approx(0.1, abs=0.03)
+    assert object_x(system, 'pile_1') == pytest.approx(0.0, abs=1e-6), 'the other hold was not followed'

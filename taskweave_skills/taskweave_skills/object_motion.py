@@ -246,9 +246,13 @@ class MoveObject(_HeldMotion):
         label, worst, kind = f'{hold["object"]} to {name}', 0.0, 'direct'
         hand = hold['hands'][0]
         if pose['joints']:
+            others = [h for h in self.hold.held_all() if h['object'] != hold['object']]
             result, worst = self._go(ctx, pose['joints'], f'{label} (joints)', planner=planner)
+            failed = self._follow_holds(others, f'{label} (joints)')   # the lift moved the other holds' base frame too
             if result is not None:
                 return result
+            if failed is not None:
+                return failed
             kind = self.path_kind
             try:    # the arms kept their joints: the object moved with them
                 tcp = self.hold.tcp_poses([hand])[hand]
