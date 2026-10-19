@@ -508,6 +508,8 @@ class Grip(_FingerMotion):
         if rule == 'any_one':
             from .hand_choice import one_hand
             at_point = self.hold.reached_hands(self.hands)
+            if action == 'close':      # a holding hand is at its point still, but closing it again is no reach
+                at_point = {hand: info for hand, info in at_point.items() if hand not in self.hold.hand_holds}
             holding = self.hold.hand_holds if action == 'open' else {}
             if len([h for h in self.hands if h in holding]) == 1:
                 return one_hand(rule, holding, self.hands, 'holds an object')

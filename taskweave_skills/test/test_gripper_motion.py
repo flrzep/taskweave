@@ -639,3 +639,21 @@ def test_auto_takes_the_one_hand_a_point_defines_and_grip_any_one_the_hand_at_a_
     result = run(system, 'grip', {'action': 'close', 'hands': 'any_one'})
     assert result.outcome == OK and json.loads(result.data_json)['hands'] == ['right']
     assert run(system, 'grip', {'action': 'open', 'hands': 'any_one'}).outcome == OK     # the one holding hand
+
+
+# ---- P3 review fixes ---------------------------------------------------------------------------------------------
+def hold_by_registry(system, hand, instance='box_1', point='rim'):
+    """``hand`` holds ``instance`` (the registry, without moving the sim)."""
+    system.hold.reach([hand], f'{instance}/{point}', instance, np.eye(4))
+    system.hold.close_hands([hand])
+
+
+def test_grip_close_any_one_never_counts_the_holding_hand_as_reached(system):     # I1
+    hold_by_registry(system, 'left')
+    system.hold.reach(['right'], 'box_1/knob', 'box_1', np.eye(4))
+    result = run(system, 'grip', {'action': 'close', 'hands': 'any_one'})
+    assert result.outcome == OK, result.message
+    assert json.loads(result.data_json)['hands'] == ['right']
+    # open any_one still names the one holding hand
+    hold_by_registry(system, 'left', 'pile_1')
+    assert system.hold.hand_holds['left'] == 'box_1'
