@@ -1,18 +1,25 @@
-from glob import glob
+import os
 
 from setuptools import find_packages, setup
 
 PACKAGE = 'taskweave_hmi'
 
+
+def tree(folder: str) -> list[tuple[str, list[str]]]:
+    """data_files entries for every file below ``folder`` (data_files takes files, not folders: web/vendor/ nests)."""
+    return [(f'share/{PACKAGE}/{os.path.relpath(path, PACKAGE)}', [os.path.join(path, file) for file in files])
+            for path, _, files in os.walk(folder) if files]
+
+
 setup(
     name=PACKAGE,
     version='0.1.0',
     packages=find_packages(exclude=['test']),
-    package_data={PACKAGE: ['web/*']},
+    package_data={PACKAGE: ['web/**/*']},
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + PACKAGE]),
         ('share/' + PACKAGE, ['package.xml']),
-        ('share/' + PACKAGE + '/web', glob('taskweave_hmi/web/*')),
+        *tree(f'{PACKAGE}/web'),
     ],
     install_requires=['setuptools'],
     zip_safe=False,

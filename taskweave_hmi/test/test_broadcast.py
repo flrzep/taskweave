@@ -84,3 +84,21 @@ def test_a_pose_test_runs_move_joints_or_move_gripper_and_pickers_list_held_pose
     names = bridge.point_names()
     assert names['held poses'] == ['carry', 'up']
     assert names['via targets'] == ['pose:home', 'pose:reach', 'bin_a/grasp']
+
+
+def test_a_planning_scene_answer_replaces_the_cached_collision_objects():
+    from types import SimpleNamespace
+
+    bridge = bridge_with()
+    bridge.cell_frame, bridge.scene_sent, bridge.frame_pose = 'world', 1.0, lambda frame: None
+    bridge.collision = {'objects': [], 'skipped': 0, 'updated': None}
+    box = SimpleNamespace(type=1, dimensions=[1.0, 2.0, 3.0])
+    origin = SimpleNamespace(position=SimpleNamespace(x=0.0, y=0.0, z=0.0),
+                             orientation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0))
+    table = SimpleNamespace(id='table', header=SimpleNamespace(frame_id='world'), pose=origin, primitives=[box],
+                            primitive_poses=[origin], meshes=[], planes=[])
+    answer = SimpleNamespace(scene=SimpleNamespace(world=SimpleNamespace(collision_objects=[table])))
+    bridge._scene_received(SimpleNamespace(result=lambda: answer))
+    assert bridge.scene_sent == 0.0 and bridge.collision['updated'] is not None
+    assert bridge.collision['objects'] == [{'id': 'table', 'type': 'box', 'size': [1.0, 2.0, 3.0],
+                                            'xyz': [0.0, 0.0, 0.0], 'quat': [1.0, 0.0, 0.0, 0.0]}]

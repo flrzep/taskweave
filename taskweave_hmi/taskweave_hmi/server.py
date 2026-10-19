@@ -36,6 +36,13 @@ HTTP API (JSON):
   GET  /api/robot                  joint poses (with the missions using each), navigation clearance, footprint
   GET  /api/robot/joints           current joint positions
   GET  /api/robot/tools            current tool targets {tool: {tcp, approach, closing}} (MoveIt forward kinematics)
+  GET  /api/robot/model            {robot, urdf, root_link, tool_frames, grippers} for the 3D view: the URDF with mesh
+                                   files at /robot/meshes/<file> (404 without a URDF; scene.py)
+  GET  /api/robot/base             the base pose in the cell from TF {frame, child, xyz, quat: [w, x, y, z], stamp}
+                                   (503 without the transform)
+  GET  /api/scene                  {frame, objects, skipped, placed, locations, points, updated}: MoveIt's world
+                                   collision objects (fetched every 10 s; [] and updated null without move_group) and
+                                   the config's placed objects, locations and object points (scene.py)
   PUT  /api/robot/poses/<name>     {joints[, rename, create]};  DELETE the same
   PUT  /api/robot/navigation       {envelope: {front, back, left, right}, padding, inflation_radius, driving}: checked
                                    against the robot's base, saved and applied to the running costmaps
@@ -57,6 +64,8 @@ HTTP API (JSON):
   DELETE /api/recordings/<id>;  PUT /api/recordings/<id>/keep {keep}  exempt it from replacement
   GET  /recordings/<id>/<file>     a recording's video or data file (byte ranges)
   GET  /recordings/<id>.tar        the whole recording (bag included) as one tar, streamed (finished recordings)
+  GET  /robot/meshes/<file>        an STL file from the URDF's meshes/ folder (plain .stl file names only)
+  GET  /vendor/<path>              the 3D view's vendored libraries (three.js, urdf-loader) below web/vendor/
 Missions and points are edited between runs (409 while a mission runs) and are used at the next start.
 """
 
@@ -83,11 +92,12 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
+from rclpy.time import Time
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
-from taskweave_core import names
+from taskweave_core import names, tf_util
 from taskweave_core.config import ConfigError, ConfigStore, Pose2D
 from taskweave_core.planner import MissionFilePlanner
 from taskweave_core.speed import SpeedOverride
@@ -99,22 +109,27 @@ from taskweave_interfaces.srv import ListSkills, StartMission, TeachPoint
 from taskweave_skills.ik import pose_matrix, tool_target
 from taskweave_skills.nav2 import nav2_parameters
 
-from . import arm, held, missions, points, recording, robot
+from . import arm, held, missions, points, recording, robot, scene
 
 WEB = Path(__file__).parent / 'web'
 STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
 CALL_TIMEOUT_S = 5.0
-STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'graph.js', 'record.js', 'style.css')
+STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'graph.js', 'record.js', 'viewer3d.js', 'style.css')
+VENDOR = WEB / 'vendor'  # the 3D view's libraries, served below /vendor/
 MANUAL_SKILL_TIMEOUT_S = 120.0  # work time (sim time x speed override), as the skill's own timeout
 DRIVE_TIMEOUT_S = 300.0  # a drive across the cell
 NAV_COSTMAPS = ['/local_costmap/local_costmap', '/global_costmap/global_costmap']  # Nav2 defaults
 NAV_CONTROLLER = '/controller_server'
 FK_SERVICE = '/compute_fk'  # MoveIt move_group
+SCENE_SERVICE = '/get_planning_scene'  # MoveIt move_group
+SCENE_PERIOD_S = 10.0  # how often the 3D view's collision objects are fetched
+SCENE_GIVE_UP_S = 30.0  # a fetch with no answer by then is dropped (move_group gone mid-call)
 OUTCOMES = ['succeeded', 'failed', 'timeout', 'canceled', 'rejected']
 CONTENT_TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
                  '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.mp4': 'video/mp4',
                  '.csv': 'text/csv; charset=utf-8', '.json': 'application/json', '.log': 'text/plain; charset=utf-8',
-                 '.yaml': 'text/plain; charset=utf-8'}
+                 '.yaml': 'text/plain; charset=utf-8', '.stl': 'model/stl', '.txt': 'text/plain; charset=utf-8',
+                 '.md': 'text/plain; charset=utf-8'}
 CHUNK = 1 << 20
 
 
@@ -236,6 +251,18 @@ class Bridge(Node):
             keep=self.get_parameter('recordings_keep').value,
             min_free_gb=self.get_parameter('recording_min_free_gb').value,
             post=self.get_parameter('recording_post').value) if directory else None
+        # 3D view: the base pose from TF; MoveIt's collision objects fetched by a timer (HTTP threads read the copy)
+        self.tf, self.tf_listener = tf_util.buffer(self)  # cleared when sim time jumps back
+        self.cell_frame = self._cell_frame()
+        self.collision: dict = {'objects': [], 'skipped': 0, 'updated': None}
+        self.scene_sent = 0.0  # monotonic time of the fetch in flight, 0: none
+        try:
+            from moveit_msgs.srv import GetPlanningScene
+        except ImportError:  # no MoveIt installed: no collision objects
+            self.scene_client = None
+        else:
+            self.scene_client = self.create_client(GetPlanningScene, SCENE_SERVICE, callback_group=self.group)
+            self.create_timer(SCENE_PERIOD_S, self._fetch_scene, callback_group=self.group)
 
     # ---- ROS -> state ------------------------------------------------------------
     def _broadcast(self, kind: str, data) -> None:
@@ -283,6 +310,73 @@ class Bridge(Node):
         if not self.joints or time.monotonic() - self.joints_stamp > MAX_POSE_AGE_S:
             raise TimeoutError('no current joint states')
         return dict(self.joints)
+
+    def _cell_frame(self) -> str:
+        """The cell frame as the teach node takes it: move_gripper's cell_frame, else 'world'."""
+        try:
+            return self.config.skill_config('move_gripper').get('cell_frame', 'world')
+        except (ConfigError, KeyError):
+            return 'world'
+
+    def frame_pose(self, frame: str) -> scene.Transform | None:
+        """Where ``frame`` is in the cell frame now (TF): position, quaternion x, y, z, w; None if TF lacks it."""
+        from tf2_ros import TransformException
+
+        try:
+            t = self.tf.lookup_transform(self.cell_frame, frame, Time()).transform
+        except TransformException:
+            return None
+        return ((t.translation.x, t.translation.y, t.translation.z),
+                (t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w))
+
+    def base_transform(self) -> dict:
+        """The robot base's pose in the cell from TF (the 3D view places the robot model with it)."""
+        from tf2_ros import TransformException
+
+        child = self.config.robot(self.robot).base['frame']
+        try:
+            stamped = self.tf.lookup_transform(self.cell_frame, child, Time())
+        except TransformException as error:
+            raise TimeoutError(f'no transform {self.cell_frame} -> {child}: {error}') from error
+        t, stamp = stamped.transform, stamped.header.stamp
+        return {'frame': self.cell_frame, 'child': child,
+                'xyz': [t.translation.x, t.translation.y, t.translation.z],
+                'quat': [t.rotation.w, t.rotation.x, t.rotation.y, t.rotation.z],
+                'stamp': stamp.sec + stamp.nanosec * 1e-9}
+
+    def _fetch_scene(self) -> None:
+        """Ask move_group for the world collision objects; the answer replaces the copy /api/scene serves."""
+        from moveit_msgs.msg import PlanningSceneComponents
+        from moveit_msgs.srv import GetPlanningScene
+
+        if not self.scene_client.service_is_ready():
+            self.collision = {'objects': [], 'skipped': 0, 'updated': None}
+            return
+        if self.scene_sent and time.monotonic() - self.scene_sent < SCENE_GIVE_UP_S:
+            return  # the last one is still on its way
+        request = GetPlanningScene.Request()
+        request.components.components = PlanningSceneComponents.WORLD_OBJECT_GEOMETRY
+        self.scene_sent = time.monotonic()
+        self.scene_client.call_async(request).add_done_callback(self._scene_received)
+
+    def _scene_received(self, future) -> None:
+        self.scene_sent = 0.0
+        try:
+            response = future.result()
+        except Exception as error:  # noqa: BLE001 - keep the last copy; the next fetch tries again
+            self.get_logger().warning(f'{SCENE_SERVICE}: {error}')
+            return
+        if response is None:
+            return
+        objects, skipped = scene.collision_objects(response.scene.world.collision_objects, self.cell_frame,
+                                                   self.frame_pose)
+        self.collision = {'objects': objects, 'skipped': skipped, 'updated': time.time()}
+
+    def scene_view(self) -> dict:
+        """The 3D view's scene: the last fetched collision objects and the config's points (scene.py)."""
+        collision = self.collision
+        return {'frame': self.cell_frame, 'objects': collision['objects'], 'skipped': collision['skipped'],
+                **scene.config_scene(self.config), 'updated': collision['updated']}
 
     def check_idle(self) -> None:
         with self.lock:
@@ -662,10 +756,18 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if method == 'GET' and (path == '/' or (len(parts) == 1 and parts[0] in STATIC_FILES)):
                 file = WEB / ('index.html' if path == '/' else parts[0])
+                if not file.is_file():  # listed but not there (e.g. viewer3d.js in a build without the 3D view)
+                    return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
                 return self._send(HTTPStatus.OK, file.read_bytes(), CONTENT_TYPES[file.suffix])
             if (method == 'GET' and len(parts) == 2 and parts[0] == 'recordings' and parts[1].endswith('.tar')
                     and bridge.recorder is not None):
                 return self._archive(unquote(parts[1])[:-len('.tar')])
+            if method == 'GET' and len(parts) >= 2 and parts[0] == 'vendor':
+                file = scene.vendor_file(VENDOR, [unquote(p) for p in parts[1:]])
+                return self._file(file) if file else self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
+            if method == 'GET' and len(parts) == 3 and parts[:2] == ['robot', 'meshes']:
+                file = scene.mesh_file(bridge.config, bridge.robot, unquote(parts[2]))
+                return self._file(file) if file else self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
             if method == 'GET' and len(parts) == 3 and parts[0] == 'recordings' and bridge.recorder is not None:
                 return self._file(bridge.recorder.file(unquote(parts[1]), unquote(parts[2])))
             if parts[:1] != ['api']:
@@ -741,6 +843,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(bridge.joint_positions())
             if method == 'GET' and route == ['robot', 'tools']:
                 return self._json(bridge.tool_targets())
+            if method == 'GET' and route == ['robot', 'model']:
+                model = scene.robot_model(bridge.config, bridge.robot)
+                if model is None:
+                    error = f'robot {bridge.robot} has no URDF (robots/{bridge.robot}/moveit/robot.urdf)'
+                    return self._json({'error': error}, HTTPStatus.NOT_FOUND)
+                return self._json(model)
+            if method == 'GET' and route == ['robot', 'base']:
+                return self._json(bridge.base_transform())
+            if method == 'GET' and route == ['scene']:
+                return self._json(bridge.scene_view())
             if method in ('PUT', 'DELETE') and len(route) == 3 and route[:2] == ['robot', 'poses']:
                 bridge.check_idle()
                 name = unquote(route[2])
