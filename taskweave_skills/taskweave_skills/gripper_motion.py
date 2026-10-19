@@ -82,13 +82,15 @@ class Target:
 
 class MoveGripper(_PointMotion):
     name = 'move_gripper'
-    description = ('Move the gripper (TCP) of one or more hands to a target with nothing held: a point on a placed '
+    description = ('Move the gripper (TCP) of one or more hands to a target: a point on a placed '
                    'object (to.point, offset_m stops short along its approach), a named tool pose of this robot '
                    '(to.pose), an offset from where the hands are now (to.by, with turn and tilt) or an absolute '
                    'pose (to.at, one hand). mode free: collision-free path in joint space (with a planner), the last '
                    'approach_m of a point in a straight line; mode linear: the TCPs on straight lines. motion sets '
                    'speed, elbow side, planner and the like; its defaults come from the skill, the robot and the '
-                   'point. Arriving at a point with no offset makes closing the grippers a grasp of that object.')
+                   'point. Arriving at a point with no offset makes closing the grippers a grasp of that object. '
+                   'A hand that holds an object stays with it (REJECTED, naming the hand); the free hand may move '
+                   'meanwhile.')
     args_schema = {
         'type': 'object',
         'required': ['to'],
@@ -128,7 +130,8 @@ class MoveGripper(_PointMotion):
             'motion': motion_schema(),
         },
     }
-    needs = ["the robot stands where the target is in reach (e.g. at the object's stance)", 'no object held']
+    needs = ["the robot stands where the target is in reach (e.g. at the object's stance)",
+             'the moving hands hold nothing']
     achieves = ['gripper at the target']
     default_timeout_s = 60.0
 
@@ -143,9 +146,6 @@ class MoveGripper(_PointMotion):
 
     # ---- running -------------------------------------------------------------
     def execute(self, ctx, args):
-        refusal = self._holding_refusal()
-        if refusal is not None:
-            return refusal
         target = self._target(args)
         if isinstance(target, SkillResult):
             return target
@@ -157,6 +157,11 @@ class MoveGripper(_PointMotion):
         legs = self._via(m.get('via') or [], target)
         if isinstance(legs, SkillResult):
             return legs
+        holds = self.hold.held_all()
+        refusal = self._holding_refusal(hands={h for leg in [*legs, target] for h in (*leg.hands, *leg.tools)},
+                                        joints={n for leg in [*legs, target] for n in leg.joints})
+        if refusal is not None:
+            return refusal
         self.hold.leave(target.hands)      # these hands go elsewhere: no longer at a point
         self._refresh_ik()
         saved = self.p, self.tcp_speed, self.tcp_turn, self.plan_scale
@@ -168,6 +173,9 @@ class MoveGripper(_PointMotion):
                     return result
         finally:
             self.p, self.tcp_speed, self.tcp_turn, self.plan_scale = saved
+        failed = self._follow_holds(holds, label)   # a lift may have moved the held objects' base frame
+        if failed is not None:
+            return failed
         miss = self._misses(target, m.get('tolerance'))
         if miss:
             return SkillResult.failed(f'{label}: {miss}')

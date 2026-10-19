@@ -97,7 +97,7 @@ def system(tmp_path, request):
         sim, ik = ros.add(DuoSim()), ros.add(FakeIk())
         server = SkillServer(parameter_overrides=[
             Parameter('config_dir', value=str(config)), Parameter('robot', value='duo_bot'),
-            Parameter('skills', value=['move_gripper', 'grip', 'move_object', 'set_posture'])])
+            Parameter('skills', value=['move_gripper', 'grip', 'move_object', 'set_posture', 'move_joints'])])
         ros.add(server)
         client = ros.add(rclpy.create_node('test_client'))
         tf, transforms = StaticTransformBroadcaster(client), []
@@ -299,7 +299,35 @@ def test_a_hand_that_holds_something_is_refused(system):
     go(system, {'to': {'point': 'box_1/rim'}})
     assert run(system, 'grip', {'action': 'close'}).outcome == OK
     result, _ = go(system, {'to': {'by': [0, 0, 0.1]}}, REJECTED)
-    assert result.message == 'holding box_1 with left and right: move it with move_object, or open the gripper first'
+    assert result.message.startswith('left holds box_1; right holds box_1: the hand and its arm stay with the object')
+
+
+def test_the_free_arm_moves_while_the_other_hand_holds(system):
+    go(system, {'to': {'point': 'box_1/rim'}, 'hands': ['left'], 'motion': {'approach_m': 0}})
+    assert run(system, 'grip', {'action': 'close', 'hands': ['left']}).outcome == OK
+    assert system.hold.hand_holds == {'left': 'box_1'}
+    _, data = go(system, {'to': {'by': [0.1, 0, 0.1]}, 'hands': ['right']})              # explicit hand
+    assert data['hands'] == ['right'] and system.ik.requests[-1]['group'] == 'right_arm'
+    _, data = go(system, {'to': {'pose': 'present_right'}})                              # auto: the pose's one hand
+    assert data['hands'] == ['right']
+    result = run(system, 'move_joints', {'joints': {'right_joint1': 0.3, 'right_joint2': 0.2}})   # its arm group
+    assert result.outcome == OK, result.message
+    assert run(system, 'grip', {'action': 'close', 'hands': ['right']}).outcome == OK     # grip with the free hand
+    assert run(system, 'grip', {'action': 'open', 'hands': ['right']}).outcome == OK
+    assert system.hold.hand_holds == {'left': 'box_1'}
+    # the holding hand and its arm stay with the object: rejected, naming the hand, nothing moved
+    before = dict(system.sim.position)
+    for skill, args in (('move_gripper', {'to': {'by': [0, 0, 0.1]}, 'hands': ['left']}),
+                        ('move_gripper', {'to': {'by': [0, 0, 0.1]}}),                  # auto: both hands
+                        ('move_joints', {'joints': {'left_joint1': 0.2}}),
+                        ('move_joints', {'joints': {'left_joint1': 0.2, 'right_joint1': 0.1, 'lift': 0.1}})):
+        result = run(system, skill, args)
+        assert result.outcome == REJECTED and 'left holds box_1' in result.message, (skill, result.message)
+    assert system.sim.position == before
+    # the torso moves, and the hold follows it
+    result = run(system, 'move_joints', {'joints': {'lift': 0.1}})
+    assert result.outcome == OK, result.message
+    assert system.hold.hand_holds == {'left': 'box_1'}
 
 
 # ---- motion options ---------------------------------------------------------------------------------------------

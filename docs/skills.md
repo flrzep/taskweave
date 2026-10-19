@@ -32,7 +32,7 @@ override applies on top.
 
 | Skill | Purpose |
 |---|---|
-| [`move_gripper`](#move_gripper) | Move the gripper (TCP) of one or more hands to a target with nothing held: a point on a placed object (to.point, offset_m stops short along its approach), a named tool pose of this robot (to.pose), an offset from where the hands are now (to.by, with turn and tilt) or an absolute pose (to.at, one hand). |
+| [`move_gripper`](#move_gripper) | Move the gripper (TCP) of one or more hands to a target: a point on a placed object (to.point, offset_m stops short along its approach), a named tool pose of this robot (to.pose), an offset from where the hands are now (to.by, with turn and tilt) or an absolute pose (to.at, one hand). |
 | [`grip`](#grip) | Open or close the fingers of one or more hands, or set their opening in mm. |
 | [`move_joints`](#move_joints) | Move joint groups (torso, head, an arm) to a named joint pose or to given joint values and hold them. |
 | [`move_object`](#move_object) | Move the object held with the grippers (grip close at its point first) with the hands that hold it: every hand keeps its grip, locked in orientation and distance to the object. |
@@ -43,17 +43,18 @@ override applies on top.
 
 ## `move_gripper`
 
-Move the gripper (TCP) of one or more hands to a target with nothing held: a point on a placed object (to.point,
-offset_m stops short along its approach), a named tool pose of this robot (to.pose), an offset from where the hands
-are now (to.by, with turn and tilt) or an absolute pose (to.at, one hand). mode free: collision-free path in joint
-space (with a planner), the last approach_m of a point in a straight line; mode linear: the TCPs on straight lines.
-motion sets speed, elbow side, planner and the like; its defaults come from the skill, the robot and the point.
-Arriving at a point with no offset makes closing the grippers a grasp of that object.
+Move the gripper (TCP) of one or more hands to a target: a point on a placed object (to.point, offset_m stops short
+along its approach), a named tool pose of this robot (to.pose), an offset from where the hands are now (to.by, with
+turn and tilt) or an absolute pose (to.at, one hand). mode free: collision-free path in joint space (with a planner),
+the last approach_m of a point in a straight line; mode linear: the TCPs on straight lines. motion sets speed, elbow
+side, planner and the like; its defaults come from the skill, the robot and the point. Arriving at a point with no
+offset makes closing the grippers a grasp of that object. A hand that holds an object stays with it (REJECTED, naming
+the hand); the free hand may move meanwhile.
 
 - Class: `taskweave_skills.gripper_motion:MoveGripper`
 - Default timeout: 60 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
 - Uses: `hands`, `torso`
-- Needs: the robot stands where the target is in reach (e.g. at the object's stance); no object held
+- Needs: the robot stands where the target is in reach (e.g. at the object's stance); the moving hands hold nothing
 - Achieves: gripper at the target
 
 ### Implementation and requires
@@ -249,8 +250,9 @@ All optional (Motion (advanced)). Defaults are those of the skill yaml, the robo
 
 Move joint groups (torso, head, an arm) to a named joint pose or to given joint values and hold them. `only` restricts
 the move to some groups, `motion.via` passes waypoints first, `motion.speed` slows the step. With a motion planner the
-path avoids collisions; without one it is a straight joint-space move. While an object is held, moves of arm joints
-are refused; torso and head are allowed (the arms keep their joints and the object moves with them).
+path avoids collisions; without one it is a straight joint-space move. A hand that holds an object stays with it: a
+move of its arm joints is REJECTED, naming the hand. The other arm, torso and head may move (the holding arm keeps its
+joints and the object moves with it).
 
 - Class: `taskweave_skills.joint_motion:MoveJoints`
 - Default timeout: 60 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
