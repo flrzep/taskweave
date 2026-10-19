@@ -678,3 +678,14 @@ def test_place_as_refuses_to_place_two_holds_with_one_name(system):             
     assert 'box_9' not in system.server.config.object_instances()
     result = run(system, 'grip', {'action': 'open', 'hands': ['left'], 'place_as': 'box_9'})   # one hold: fine
     assert result.outcome == OK and 'placed box_9' in result.message, result.message
+
+
+@pytest.mark.parametrize('hands', [['right'], 'any_one'])
+def test_a_via_pose_leg_moves_only_the_target_hands(system, hands):               # M7
+    hold_by_registry(system, 'left')
+    left_before = {k: v for k, v in system.sim.position.items() if k.startswith('left')}
+    system.sim.history.clear()
+    go(system, {'to': {'pose': 'present_right'}, 'hands': hands, 'motion': {'via': ['pose:present_both']}})
+    assert system.ik.requests and {r['group'] for r in system.ik.requests} == {'right_arm'}
+    assert {k: v for k, v in system.sim.position.items() if k.startswith('left')} == left_before
+    assert not any(k.startswith('left') for h in system.sim.history for k in h)

@@ -403,7 +403,8 @@ class MoveGripper(_PointMotion):
                     pose = self.config.named_pose(self.robot.name, entry[len(VIA_POSE):])
                 except KeyError as error:
                     return SkillResult.rejected(str(error.args[0]))
-                legs.append(Target(f'via {entry}', target.hands, pose['tools'], joints=pose['joints']))
+                tools = {hand: tool for hand, tool in pose['tools'].items() if hand in target.hands}
+                legs.append(Target(f'via {entry}', target.hands, tools, joints=pose['joints']))
             else:
                 leg = self._point_target(entry, 0.0, target.hands)
                 if isinstance(leg, SkillResult):
