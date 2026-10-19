@@ -42,6 +42,7 @@ TOLERANCE_PARAMS = {'position': 'position_tolerance', 'settle_s': 'settle_s', 's
                     'state_timeout_s': 'state_timeout_s'}
 DEFAULT_MODE = 'free'     # the mode of a skill whose yaml has no ``motion.mode``
 VIA_POSE = 'pose:'        # motion.via entry: a named pose of this robot; else <instance>/<point>
+GRIP_RULES = ('auto', 'any_one', 'all')   # grip's hands rule words
 RESOURCES = 'x-taskweave-resources'   # what a step uses (the live plan graph)
 
 
@@ -78,6 +79,7 @@ class Target:
     data: dict = field(default_factory=dict)           # the target's own motion data (motion.resolve layer 3)
     before: Callable[[float], dict] | None = None      # the tools this far further back along their approach
     reached: tuple | None = None                       # (point, instance name, object_in_base): hold.reach on arrival
+    choice: dict | None = None                         # hands any_one: which hand was chosen and why (hand_choice)
 
 
 class MoveGripper(_PointMotion):
@@ -88,7 +90,9 @@ class MoveGripper(_PointMotion):
                    'pose (to.at, one hand). mode free: collision-free path in joint space (with a planner), the last '
                    'approach_m of a point in a straight line; mode linear: the TCPs on straight lines. motion sets '
                    'speed, elbow side, planner and the like; its defaults come from the skill, the robot and the '
-                   'point. Arriving at a point with no offset makes closing the grippers a grasp of that object.')
+                   'point. Arriving at a point with no offset makes closing the grippers a grasp of that object. '
+                   'hands any_one picks one free hand that can take the target (IK-feasible first, then the least '
+                   'joint motion); the chosen hand is in the result (data.hands).')
     args_schema = {
         'type': 'object',
         'required': ['to'],
@@ -146,7 +150,7 @@ class MoveGripper(_PointMotion):
         refusal = self._holding_refusal()
         if refusal is not None:
             return refusal
-        target = self._target(args)
+        target = self._target(args, ctx)
         if isinstance(target, SkillResult):
             return target
         m = motion.values(motion.resolve(self.config, self.robot.name, self.name, args, target.data))
@@ -173,8 +177,11 @@ class MoveGripper(_PointMotion):
             return SkillResult.failed(f'{label}: {miss}')
         if target.reached:       # at the point itself: closing the grippers now grasps this object
             self.hold.reach(target.hands, *target.reached)
-        return SkillResult.succeeded(f'at {label} (max error {worst:.3f})', world_state={'arm_pose': label},
-                                     hands=target.hands, mode=mode, path=kind, max_error=float(worst), motion=m)
+        picked = {'choice': target.choice} if target.choice else {}
+        chosen = f' (any_one chose {target.hands[0]})' if target.choice else ''
+        return SkillResult.succeeded(f'at {label}{chosen} (max error {worst:.3f})', world_state={'arm_pose': label},
+                                     hands=target.hands, mode=mode, path=kind, max_error=float(worst), motion=m,
+                                     **picked)
 
     def _leg(self, ctx, leg: Target, m: dict, mode: str, planner: str, final: bool):
         """One leg to ``leg``'s tools: (failure or None, worst joint error, label, path kind)."""
@@ -243,10 +250,14 @@ class MoveGripper(_PointMotion):
         return f'{", ".join(late)} (tolerance {tolerance:g} m)' if late else None
 
     # ---- targets ---------------------------------------------------------------
-    def _target(self, args: dict):
-        to, rule = args['to'], hands_arg(args.get('hands'))
+    def _target(self, args: dict, ctx=None):
+        rule = hands_arg(args.get('hands'))
         if rule == 'any_one':
-            return SkillResult.rejected('hands any_one is not available yet: name the hand or hands')
+            return self._any_one(args, ctx)
+        return self._target_for(args, rule)
+
+    def _target_for(self, args: dict, rule):
+        to = args['to']
         if 'point' in to:
             target = self._point_target(to['point'], float(to.get('offset_m', 0.0)), rule)
             if isinstance(target, Target):
@@ -255,6 +266,44 @@ class MoveGripper(_PointMotion):
         if 'pose' in to:
             return self._pose_target(to['pose'], rule)
         return self._relative_target(to, rule)
+
+    def _any_one(self, args: dict, ctx=None):
+        """hands any_one: the target on the one free hand that can take it (hand_choice.choose: IK-feasible, then the
+        least joint motion, then profile order). A hand in a hold is never chosen."""
+        from .hand_choice import choose
+
+        picked = choose(self.hands, self.hold.hand_holds, lambda hand: self._target_for(args, [hand]),
+                        lambda target: self._probe(args, target, ctx))
+        if isinstance(picked, SkillResult):
+            return picked
+        target, report = picked
+        target.choice = report
+        return target
+
+    def _probe(self, args: dict, target: Target, ctx=None):
+        """Can IK put ``target``'s tool where it goes, and how far would the arm move? A solve with the profile's
+        choose settings and no motion (torso auto: also at the other lift heights, like the move itself)."""
+        from .hand_choice import Probe
+        from .ik import IkError
+
+        if self.ik is None or not target.tools:
+            return Probe()
+        m = motion.values(motion.resolve(self.config, self.robot.name, self.name, args, target.data))
+        torso = m.get('torso', 'keep') == 'auto' and self.lift_joint
+        lifts = [{**target.joints, self.lift_joint: float(v)} for v in self.lift_values] if torso else []
+        self._refresh_ik()
+        start = self._start()
+        stop = (lambda: ctx.should_stop) if ctx is not None else (lambda: False)
+        first = None
+        for fixed in [target.joints, *lifts]:
+            try:
+                arm = self.ik.solve(target.tools, fixed, stop, current=start, elbow=m.get('elbow'))
+            except IkError as error:
+                first = first or error
+                continue
+            moved = sum(abs(value - start[name]) for name, value in arm.items() if name in (start or {}))
+            return Probe(True, float(moved))
+        return Probe(False, 0.0, str(first))
 
     def _select(self, rule, defined, what: str):
         """The hands to move: ``rule`` (auto: all the target defines; all; names) among those ``defined``."""
@@ -358,7 +407,8 @@ class Grip(_FingerMotion):
                    'one hand of a two-hand point; opening takes hands out of their hold, and a hold left with no '
                    'hands is released. opening sets the finger gap (opening_mm) and leaves the holds alone. open '
                    'with place_as records where the released object now is, as a placed object of that name '
-                   '(object state). Closing on an object takes it off its stack in the object state.')
+                   '(object state). Closing on an object takes it off its stack in the object state. '
+                   'hands any_one is the one hand at an object point (rejected if none or both).')
     args_schema = {
         'type': 'object',
         'required': ['action'],
@@ -367,7 +417,7 @@ class Grip(_FingerMotion):
         'properties': {
             'action': {'enum': ['open', 'close', 'opening'], 'description': 'open / close, or opening: go to '
                                                                             'opening_mm.'},
-            'hands': hands_schema((), ('auto', 'all')),
+            'hands': hands_schema((), GRIP_RULES),
             'opening_mm': {'type': 'number', 'minimum': 0, 'x-taskweave-unit': 'mm',
                            'x-taskweave-show-if': {'action': ['opening', 'open', 'close']},
                            'description': 'opening: required, the finger gap. close: stay this wide (default: the '
@@ -392,13 +442,15 @@ class Grip(_FingerMotion):
         self.hold.on_reset.append(config.clear_object_state)  # a sim reset puts every object back
         self.hands = list(robot.data.get('grippers', {}))
         self.args_schema = copy.deepcopy(self.args_schema)
-        self.args_schema['properties']['hands'] = hands_schema(self.hands, ('auto', 'all'))
+        self.args_schema['properties']['hands'] = hands_schema(self.hands, GRIP_RULES)
 
     def execute(self, ctx, args):
         action = args['action']
         if action == 'opening' and args.get('opening_mm') is None:
             return SkillResult.rejected('opening_mm needed with action opening')
         hands = self._hands(hands_arg(args.get('hands')), action)
+        if isinstance(hands, SkillResult):
+            return hands
         if action == 'opening':
             holding = self.hold.hand_holds
             for hand in hands:
@@ -439,7 +491,15 @@ class Grip(_FingerMotion):
 
     def _hands(self, rule, action: str) -> list:
         """The hands to act on: names, all, or auto (close: the hands at an object point; open: the holding hands;
-        else all)."""
+        else all). any_one: the one hand at an object point (open: the one holding hand, else the one at a point), else
+        REJECTED as ambiguous."""
+        if rule == 'any_one':
+            from .hand_choice import one_hand
+            at_point = self.hold.reached_hands(self.hands)
+            holding = self.hold.hand_holds if action == 'open' else {}
+            if len([h for h in self.hands if h in holding]) == 1:
+                return one_hand(rule, holding, self.hands, 'holds an object')
+            return one_hand(rule, at_point, self.hands, 'is at an object point (move_gripper to.point first)')
         if rule == 'all' or (rule == 'auto' and action == 'opening'):
             return list(self.hands)
         if rule != 'auto':
