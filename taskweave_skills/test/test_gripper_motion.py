@@ -660,6 +660,11 @@ def test_the_probed_motion_counts_the_torso_too(system):                       #
     assert probe.feasible and probe.motion_rad == pytest.approx(0.6 + 0.4 + 0.1)
 
 
+def test_a_via_pose_with_nothing_for_the_target_hand_adds_no_leg(system):
+    go(system, {'to': {'pose': 'present_both'}, 'hands': ['right'], 'motion': {'via': ['pose:present_left']}})
+    at(system, 'right', 0.6, 0.4)
+
+
 def test_a_holding_hand_is_never_chosen(system):
     skill = system.server.skills['move_gripper']
     go(system, {**RIM, 'hands': ['left']})
