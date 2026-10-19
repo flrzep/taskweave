@@ -331,7 +331,7 @@ class MoveGripper(_PointMotion):
                 break
             else:
                 return Probe(False, 0.0, str(first))
-        moved = sum(abs(value - start[name]) for name, value in arm.items() if name in (start or {}))
+        moved = sum(abs(value - start[name]) for name, value in {**fixed, **arm}.items() if name in (start or {}))
         repeatable = not any(self.ik.last.get(tool, {}).get('global') for tool in target.tools)
         return Probe(True, float(moved), repeatable=repeatable)
 

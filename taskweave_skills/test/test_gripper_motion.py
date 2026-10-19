@@ -652,6 +652,14 @@ def test_any_one_probes_the_approach_start_and_the_via_legs(system):            
     assert data['hands'] == ['right']                                      # left cannot reach the via pose either
 
 
+def test_the_probed_motion_counts_the_torso_too(system):                       # P3 M2
+    skill = system.server.skills['move_gripper']
+    park(system, 'left', 0.0, 0.0)
+    args = {'to': {'pose': 'present_both'}, 'hands': 'any_one'}  # sets lift 0.1, left to 0.6, 0.4
+    probe = skill._probe(args, skill._target_for(args, ['left']))
+    assert probe.feasible and probe.motion_rad == pytest.approx(0.6 + 0.4 + 0.1)
+
+
 def test_a_holding_hand_is_never_chosen(system):
     skill = system.server.skills['move_gripper']
     go(system, {**RIM, 'hands': ['left']})
