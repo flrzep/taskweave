@@ -251,6 +251,9 @@ class HoldState:
             hold = self.holds.get(name) if name else next(iter(self.holds.values()), None)
             if hold is not None:
                 hold['object_in_base'] = object_in_base
+                for hand in [h for h, info in self.reached.items()
+                             if info['instance'] == hold['object'] and h not in hold['hands']]:
+                    del self.reached[hand]    # that hand reached the object where it was: it is no longer there
 
     def _publish(self) -> None:
         with self.lock:
