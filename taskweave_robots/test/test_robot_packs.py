@@ -20,8 +20,18 @@ from taskweave_core.validation import validate_plan
 
 ROBOTS = Path(__file__).resolve().parents[1]
 PACKS = sorted(p.parent.name for p in ROBOTS.glob('*/pack.yaml'))
-FOLDERS = sorted(p.name for p in ROBOTS.iterdir() if p.is_dir() and p.name not in ('test', '__pycache__'))
 PACK_CONTENT = set(packs.ROBOT_PACK_FILES) | {packs.PACK_FILE}
+
+
+def pack_folders(root: Path) -> list[str]:
+    """The folders of ``root`` that are (meant to be) robot packs. Not these: hidden folders (.pytest_cache, .git),
+    test/ and __pycache__, or a folder that holds neither a pack.yaml nor any robot pack file (a cache, a leftover).
+    A folder with a profile.yaml but no pack.yaml stays in: that is a pack nobody finished."""
+    return sorted(p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith('.')
+                  and p.name not in ('test', '__pycache__') and any((p / f).exists() for f in PACK_CONTENT))
+
+
+FOLDERS = pack_folders(ROBOTS)
 
 CELL_POSE = 'cell_grasp_approach'   # stands for a pose made for one cell's objects (cell pack, not robot pack)
 CARRY = {'front': 1.2, 'back': 0.3, 'left': 0.5, 'right': 0.6}
@@ -91,6 +101,20 @@ def test_every_pack_has_a_valid_pack_yaml(folder):
     pack = packs.read_pack(ROBOTS / folder)    # validated against schemas.PACK
     assert pack is not None, f'{folder}/ has no pack.yaml (CMakeLists installs only folders with one)'
     assert pack['name'] == folder and pack['schema_version'] == packs.ROBOT_SCHEMA and pack.get('description')
+
+
+def test_stray_folders_are_not_packs(tmp_path):
+    """A cache or a build leftover next to the packs (.pytest_cache, .git, __pycache__, an empty folder) must not
+    fail the suite; a folder with robot files but no pack.yaml is an unfinished pack and still counts."""
+    for name in ('.pytest_cache', '.git', '__pycache__', 'test', 'leftover'):
+        (tmp_path / name).mkdir()
+    (tmp_path / 'leftover' / 'notes.txt').write_text('x')
+    (tmp_path / 'good').mkdir()
+    (tmp_path / 'good' / 'pack.yaml').write_text('name: good\n')
+    (tmp_path / 'unfinished').mkdir()
+    (tmp_path / 'unfinished' / 'profile.yaml').write_text('name: unfinished\n')
+    (tmp_path / 'a_file.txt').write_text('x')
+    assert pack_folders(tmp_path) == ['good', 'unfinished']
 
 
 @pytest.mark.parametrize('robot', PACKS)
