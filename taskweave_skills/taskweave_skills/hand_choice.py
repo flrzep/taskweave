@@ -6,8 +6,9 @@ Rule, in this order:
     1. only free hands (a hand in a hold is never a candidate);
     2. only hands the target can apply to (``build`` returns a target; else its reason is reported);
     3. IK-feasible hands first (``probe``: a solve with the profile's ik.choose settings, no motion);
-    4. then the least joint motion from the current state;
-    5. then the profile's hand order (a stable sort: the same answer every time).
+    4. then the least joint motion from the current state, motions within a tolerance of the least counting as equal
+       (a near-tie is noise, not a reason);
+    5. then the profile's hand order (the same answer every time).
 If no hand is left, the result says why for every hand.
 """
 
@@ -27,12 +28,14 @@ class Probe:
     reason: str = ''
 
 
-def choose(hands: list[str], busy: dict[str, str], build, probe) -> tuple[Any, dict] | SkillResult:
+def choose(hands: list[str], busy: dict[str, str], build, probe,
+           tolerance_rad: float = 0.0) -> tuple[Any, dict] | SkillResult:
     """(the chosen hand's target, the report) or a REJECTED naming a reason per hand.
 
     ``hands``: the robot's hands in profile order. ``busy``: {hand: object} for hands in a hold. ``build(hand)``: the
     target for that hand alone, or a SkillResult (REJECTED) saying why it has none. ``probe(target)``: a ``Probe``.
-    The report is {'chosen': hand, 'candidates': {hand: {'feasible', 'motion_rad', 'reason'}}}."""
+    ``tolerance_rad``: motions this close to the least one are equal (the profile order then decides).
+    The report is {'chosen': hand, 'tolerance_rad', 'candidates': {hand: {'feasible', 'motion_rad', 'reason'}}}."""
     reasons: dict[str, str] = {}
     found: list[tuple[str, Any, Probe]] = []
     for hand in hands:
@@ -52,11 +55,12 @@ def choose(hands: list[str], busy: dict[str, str], build, probe) -> tuple[Any, d
     if not found:
         text = '; '.join(f'{hand}: {why}' for hand, why in reasons.items())
         return SkillResult.rejected(f'hands any_one: no hand can take it ({text})')
-    found.sort(key=lambda item: item[2].motion_rad)       # stable: equal motion keeps the profile order
+    least = min(item[2].motion_rad for item in found)
+    near = [item for item in found if item[2].motion_rad <= least + tolerance_rad]   # profile order kept
     for hand, _, result in found:
         report['candidates'][hand] = {'feasible': True, 'motion_rad': float(result.motion_rad)}
-    report['chosen'] = found[0][0]
-    return found[0][1], report
+    report['chosen'], report['tolerance_rad'] = near[0][0], float(tolerance_rad)
+    return near[0][1], report
 
 
 def one_hand(rule: str, picked: dict, hands: list[str], what: str) -> list[str] | SkillResult:
