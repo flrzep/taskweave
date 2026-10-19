@@ -201,6 +201,20 @@ def test_object_type_may_carry_simulator_keys(config_dir):
         ConfigStore(config_dir).object('crate')
 
 
+def test_object_type_collision_shapes(config_dir):
+    path = config_dir / 'objects' / 'crate.yaml'
+    for text in ('{box: [0.06, 0.06, 0.1], xyz: [0, 0, 0.05], rpy: [0, 0, 1.57]}',
+                 '{cylinder: {radius: 0.03, height: 0.2}}',
+                 '[{box: [0.1, 0.1, 0.1]}, {cylinder: {radius: 0.03, height: 0.2}, xyz: [0, 0, 0.1]}]'):
+        path.write_text('name: crate\ncollision: ' + text + '\n')
+        assert ConfigStore(config_dir).object('crate')['collision']
+    for bad in ('{}', '{box: [1, 2]}', '{box: [0, 1, 1]}', '{box: [1, 1, 1], cylinder: {radius: 1, height: 1}}',
+                '{cylinder: {radius: 1}}', '{sphere: 1}', '{box: [1, 1, 1], xyz: [0, 0]}', '[]', '3'):
+        path.write_text('name: crate\ncollision: ' + bad + '\n')
+        with pytest.raises(ConfigError, match='collision'):
+            ConfigStore(config_dir).object('crate')
+
+
 def turned_shelf(config_dir):
     """shelf_c lies turned 180 deg; shelves are declared 180 deg symmetric (e.g. a frame in a front row)."""
     (config_dir / 'objects' / 'shelf.yaml').write_text(

@@ -193,6 +193,8 @@ ROBOT_PROFILE = {
                 'type': 'object',
                 'properties': {'joint': {'type': 'string'}, 'open': FINITE, 'closed': FINITE,
                                'action': {'type': 'string'},
+                               # links that may touch a held object (default: the hand's tool frame link)
+                               'links': {'type': 'array', 'items': {'type': 'string'}, 'uniqueItems': True},
                                # joint distance from open beyond which the gripper is closed on a part (HMI capture)
                                'closed_from': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.1},
                                # [joint, finger opening m] rows, measured: a point's grip_m -> joint (gripper.py)
@@ -272,6 +274,8 @@ ROBOT_PROFILE = {
                 'joints': {'type': 'string'},   # regex: the group's joints; those not in a goal are held
                 'direct': {'type': 'boolean'},  # a straight joint move when it is free (taskweave_skills.motion_plan)
                 'validity_service': {'type': 'string'},
+                'scene_service': {'type': 'string'},  # held objects' collision shapes (default /apply_planning_scene)
+                'scene_timeout_s': {'type': 'number', 'exclusiveMinimum': 0},   # a scene call gives up after this
                 **{k: {'type': 'number', 'exclusiveMinimum': 0}
                    for k in ('direct_step_rad', 'escape_max_rad', 'escape_speed', 'goal_tolerance_rad',
                              'hold_tolerance_rad', 'check_timeout_s', 'answer_margin_s')},
@@ -398,6 +402,22 @@ STANCES = {
     'additionalProperties': False,
 }
 
+# one collision shape of an object type (metres, object frame): a box [x, y, z] centred on its frame or a cylinder
+# (axis along z, centred), moved by xyz / rpy
+COLLISION_SHAPE = {
+    'type': 'object',
+    'oneOf': [{'required': ['box']}, {'required': ['cylinder']}],
+    'properties': {
+        'box': {'type': 'array', 'items': {'type': 'number', 'exclusiveMinimum': 0}, 'minItems': 3, 'maxItems': 3},
+        'cylinder': {'type': 'object', 'required': ['radius', 'height'], 'additionalProperties': False,
+                     'properties': {'radius': {'type': 'number', 'exclusiveMinimum': 0},
+                                    'height': {'type': 'number', 'exclusiveMinimum': 0}}},
+        'xyz': {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3},
+        'rpy': {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3},
+    },
+    'additionalProperties': False,
+}
+
 OBJECT = {
     'type': 'object',
     'required': ['name'],
@@ -413,6 +433,9 @@ OBJECT = {
         # how the simulator integration shows and handles this object (e.g. a box size, what a hold does): taskweave
         # skills never read it; the keys are the simulator's own
         'sim': {'type': 'object'},
+        # what the object is for MoveIt while a hand holds it: one shape or a list of them (see COLLISION_SHAPE);
+        # without it a held object is not in the planning scene
+        'collision': {'anyOf': [COLLISION_SHAPE, {'type': 'array', 'minItems': 1, 'items': COLLISION_SHAPE}]},
         'points': {
             'type': 'object',
             'propertyNames': NAME,

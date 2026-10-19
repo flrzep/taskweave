@@ -17,7 +17,8 @@ pytest.importorskip('tf2_ros')
 pytest.importorskip('moveit_msgs')
 
 from geometry_msgs.msg import TransformStamped  # noqa: E402
-from moveit_msgs.srv import GetPositionIK  # noqa: E402
+from moveit_msgs.msg import CollisionObject  # noqa: E402
+from moveit_msgs.srv import ApplyPlanningScene, GetPositionIK  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from rclpy.qos import DurabilityPolicy, QoSProfile  # noqa: E402
@@ -33,6 +34,7 @@ from taskweave_skills.hold import TOPIC, HoldState  # noqa: E402
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'config'
 OK, FAILED, REJECTED = RunSkill.Result.SUCCEEDED, RunSkill.Result.FAILED, RunSkill.Result.REJECTED
+ADD, REMOVE = CollisionObject.ADD, CollisionObject.REMOVE
 OVERRIDE = 'move_gripper: {motion: {approach_m: 0.2}}\n'   # a robot override of the skill's approach_m
 FLANGES = {'left': (0.5, 0.2, 0.3), 'right': (0.5, -0.2, 0.3)}   # where the test's TF puts the hands (identity turn)
 
@@ -94,6 +96,25 @@ class FakeIk(Node):
         return response
 
 
+class FakeScene(Node):
+    """/apply_planning_scene: keeps every diff it gets; ``success`` is its answer."""
+
+    def __init__(self):
+        super().__init__('fake_scene')
+        self.requests, self.success = [], True
+        self.service = self.create_service(ApplyPlanningScene, '/apply_planning_scene', self.apply)
+
+    def apply(self, request, response):
+        self.requests.append(request.scene)
+        response.success = self.success
+        return response
+
+    def attached(self):
+        """[(operation, link, object id, touch links)] of every attached-object change received so far."""
+        return [(a.object.operation, a.link_name, a.object.id, list(a.touch_links))
+                for scene in self.requests for a in scene.robot_state.attached_collision_objects]
+
+
 @pytest.fixture
 def system(tmp_path, request):
     with RosRig() as ros:
@@ -101,7 +122,7 @@ def system(tmp_path, request):
         shutil.copytree(FIXTURE, config)
         if getattr(request, 'param', None):
             (config / 'robots' / 'duo_bot' / 'skill_overrides.yaml').write_text(request.param)
-        sim, ik = ros.add(DuoSim()), ros.add(FakeIk())
+        sim, ik, scene = ros.add(DuoSim()), ros.add(FakeIk()), ros.add(FakeScene())
         server = SkillServer(parameter_overrides=[
             Parameter('config_dir', value=str(config)), Parameter('robot', value='duo_bot'),
             Parameter('skills', value=['move_gripper', 'grip', 'move_object', 'set_posture', 'move_joints'])])
@@ -133,7 +154,7 @@ def system(tmp_path, request):
 
         wait_until(flanges_in_tf, what='the flange transforms at the skill server')
         wait_until(lambda: published, what='the first holding message')
-        yield SimpleNamespace(sim=sim, ik=ik, server=server, client=client, published=published,
+        yield SimpleNamespace(sim=sim, ik=ik, scene=scene, server=server, client=client, published=published,
                               hold=hold, config=config)
 
 
@@ -469,6 +490,69 @@ def test_close_at_a_point_holds_with_the_hands_that_closed(system):
     run(system, 'grip', {'action': 'close', 'hands': ['right']})          # the other hand joins the hold
     assert system.hold.held()['hands'] == ['left', 'right'] and len(system.hold.held_all()) == 1
     assert settled(system, '"hands": ["left", "right"]')['tools'] == ['left', 'right']
+
+
+def with_collision(system, text):
+    """The test cell's box gets this ``collision`` entry."""
+    path = system.config / 'objects' / 'box.yaml'
+    path.write_text(path.read_text() + f'collision: {text}\n')
+
+
+def test_a_held_object_with_collision_shapes_is_attached_and_detached(system):
+    with_collision(system, '{box: [0.06, 0.06, 0.1], xyz: [0, 0, 0.05]}')
+    go(system, {'to': {'point': 'box_1/rim'}})
+    system.sim.object_at = {'left_grip': 0.5}
+    assert run(system, 'grip', {'action': 'close', 'hands': ['left']}).outcome == OK
+    assert system.scene.attached() == [(ADD, 'left_link7', 'box_1', ['left_link7'])]       # ADD
+    scene = system.scene.requests[0]
+    assert scene.is_diff and scene.robot_state.is_diff
+    obj = scene.robot_state.attached_collision_objects[0].object
+    assert obj.header.frame_id == 'left_link7' and obj.primitives[0].dimensions == pytest.approx([0.06, 0.06, 0.1])
+    p = obj.primitive_poses[0].position   # box_1 at (0.6, 0, 0), link at (0.5, 0.2, 0.3), no turn, centre 5 cm up
+    assert (p.x, p.y, p.z) == pytest.approx((0.1, -0.2, -0.25), abs=1e-3)
+    assert obj.primitive_poses[0].orientation.w == 1.0
+    run(system, 'grip', {'action': 'close', 'hands': ['right']})          # the other hand joins: re-attached
+    assert system.scene.attached()[1:] == [(REMOVE, 'left_link7', 'box_1', []),
+                                           (ADD, 'left_link7', 'box_1', ['left_link7', 'right_link7'])]
+    run(system, 'grip', {'action': 'open', 'hands': ['left']})            # still held by the right hand
+    assert system.server.skills['grip'].collision.attached == {'box_1': 'right_link7'}      # now on the right hand
+    assert system.scene.attached()[-1] == (ADD, 'right_link7', 'box_1', ['right_link7'])
+    count = len(system.scene.requests)
+    assert run(system, 'grip', {'action': 'open', 'hands': ['right']}).outcome == OK
+    assert system.scene.attached()[-1][0] == REMOVE and len(system.scene.requests) == count + 2   # then world
+    assert system.scene.requests[-1].world.collision_objects[0].id == 'box_1'
+    assert system.scene.requests[-1].world.collision_objects[0].operation == REMOVE               # REMOVE
+    assert system.server.skills['grip'].collision.attached == {}
+
+
+def test_no_collision_shapes_send_nothing(system):
+    go(system, {'to': {'point': 'box_1/rim'}, 'hands': ['left']})
+    assert run(system, 'grip', {'action': 'close', 'hands': ['left']}).outcome == OK
+    assert system.hold.hand_holds == {'left': 'box_1'}
+    assert run(system, 'grip', {'action': 'open', 'hands': ['left']}).outcome == OK
+    assert system.scene.requests == [] and system.server.skills['grip'].collision is None
+
+
+@pytest.mark.parametrize('how', ['refused', 'no_service'])
+def test_a_scene_failure_never_fails_the_grip(system, how):
+    with_collision(system, '{cylinder: {radius: 0.03, height: 0.2}}')
+    if how == 'refused':
+        system.scene.success = False
+    else:
+        system.scene.destroy_service(system.scene.service)
+    go(system, {'to': {'point': 'box_1/rim'}, 'hands': ['left']})
+    result = run(system, 'grip', {'action': 'close', 'hands': ['left']})
+    assert result.outcome == OK, result.message
+    assert system.hold.hand_holds == {'left': 'box_1'}
+    assert run(system, 'grip', {'action': 'open', 'hands': ['left']}).outcome == OK
+
+
+def test_touch_links_are_the_grippers_links_else_the_tool_frame_link():
+    from taskweave_skills.collision import HoldCollision
+    collision = HoldCollision.__new__(HoldCollision)
+    collision.robot = SimpleNamespace(data={'grippers': {'left': {'links': ['l_finger_a', 'l_finger_b']}, 'right': {}}})
+    collision.hold = SimpleNamespace(tool_frames={'left': {'link': 'l7'}, 'right': {'link': 'r7'}})
+    assert collision._links(['left', 'right']) == ['l_finger_a', 'l_finger_b', 'r7']
 
 
 def test_close_auto_takes_the_hands_at_a_point_and_uses_the_points_grip(system):

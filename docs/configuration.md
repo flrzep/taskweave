@@ -300,6 +300,18 @@ contacts:                     # frames where this object meets another (move_obj
 An object type may carry a `sim:` object (free-form, e.g. `sim: {box: [0.06, 0.06, 0.1], on_hold: pull_release}`): it is for the
 simulator integration (what to draw, what a hold does), taskweave skills never read it.
 
+`collision:` makes a held object a collision object for MoveIt (without it the free arm can plan through what the other
+hand holds). One shape or a list, in metres, in the object frame:
+`collision: {box: [0.06, 0.06, 0.10], xyz: [0, 0, 0.05]}` or `{cylinder: {radius: 0.03, height: 0.2}}`, each with an
+optional `xyz` and `rpy` (radians) that place the shape. **A shape's origin is its centre** (a cylinder's axis is z), so a
+box whose object frame is at its bottom centre needs `xyz: [0, 0, height / 2]`. When a grip closes on the object,
+`grip` attaches the shapes to the first holding hand's tool frame link through the `/apply_planning_scene` service
+(posed as the object is relative to that link at that moment); when the last hand opens, they are detached and removed
+(also on a simulator reset). The links allowed to touch it are the holding hands' profile `grippers.<hand>.links` (a list;
+default the hand's tool frame link). Profile `planning.scene_service` (default `/apply_planning_scene`) and
+`planning.scene_timeout_s` (default 2.0) set the service and how long a call may take. If the service is missing or
+refuses, `grip` logs a warning and carries on. An object type without `collision` sends nothing.
+
 Tool poses are canonical-TCP poses relative to the object, so they hold for any robot that can reach them.
 `<role>_tool` names the robot tool (`left_tool` is `tools.left`). Validation checks tool type and grip width against
 the robot's tools.

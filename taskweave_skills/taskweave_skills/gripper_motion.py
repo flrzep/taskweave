@@ -33,6 +33,7 @@ from taskweave_core.config.schemas import HAND_RULES, VEC3, hands_schema, motion
 from taskweave_core.gripper import joint_for_opening, opening_for_joint, opening_table
 from taskweave_core.skill import SkillResult
 
+from .collision import HoldCollision, shapes_of
 from .joints import _FingerMotion, _JointSkill, _PointMotion
 
 # skills/<skill>.yaml (spec 2.2) -> the joint skill parameter names
@@ -472,6 +473,7 @@ class Grip(_FingerMotion):
         self.cell_frame = params.pop('cell_frame', 'world')  # TF frame of the cell (place_as)
         _JointSkill.setup(self, node, config, robot, params)
         self.hold.on_reset.append(config.clear_object_state)  # a sim reset puts every object back
+        self.collision = None   # HoldCollision, made when a held object has collision shapes
         self.hands = list(robot.data.get('grippers', {}))
         self.args_schema = copy.deepcopy(self.args_schema)
         self.args_schema['properties']['hands'] = hands_schema(self.hands, GRIP_RULES)
@@ -581,12 +583,26 @@ class Grip(_FingerMotion):
         for name, info in grasped.items():
             message += f'; {" and ".join(info["hands"])} hold {name}'
             state['held_object'] = state.get('held_object') or name
+            self._attach_collision(name)   # before take_object: a taken single object has no instance any more
             if info['new']:
                 try:
                     message += f'; {self.config.take_object(name)}'  # one off its stack (object state)
                 except (KeyError, ValueError) as error:
                     message += f'; object state not updated: {error}'
         return message, False
+
+    def _attach_collision(self, name: str) -> None:
+        """The held object's collision shapes (object type ``collision``) go to MoveIt's planning scene, if any."""
+        if self.collision is not None and name in self.collision.attached:   # again, with the hands now (the object
+            self.collision.attach(name)                                       # may be gone from the cell's state)
+            return
+        try:
+            shapes = shapes_of(self.config.object(self.config.object_instances()[name].object).get('collision'))
+        except (KeyError, ValueError):
+            return
+        if shapes:
+            self.collision = self.collision or HoldCollision.for_node(self.node, self.robot, self.hold)
+            self.collision.attach(name, shapes)
 
     def _place_as_refusal(self, args: dict, hands: list):
         """REJECTED if ``place_as`` (one name) would place several objects: more than one hold lets go whole."""
@@ -612,6 +628,11 @@ class Grip(_FingerMotion):
                     f'; nothing held, {args["place_as"]} not placed'
         let_go = self.hold.open_hands(hands)
         for name, info in let_go.items():
+            if self.collision is not None and name in self.collision.attached:
+                if info['released']:
+                    self.collision.detach(name)
+                else:
+                    self._attach_collision(name)   # the object hangs on the hands left
             message += f'; {" and ".join(info["hands"])} let go of {name}' + (' (released)' if info['released'] else '')
         if let_go:
             remaining = self.hold.held_all()
