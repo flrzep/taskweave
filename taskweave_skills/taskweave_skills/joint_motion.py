@@ -111,7 +111,8 @@ class MoveJoints(_PoseMotion):
                 worst = max(worst, error)
         finally:
             self.p = self.base_p
-        failed = self._follow_holds(holds, label)   # the torso may have moved: each object went with its hands
+            # the torso may have moved, however the motion ended (failed, interrupted): each object went with its hands
+            failed = self._follow_holds(holds, label)
         if failed is not None:
             return failed
         stats = ctx.work.stats()

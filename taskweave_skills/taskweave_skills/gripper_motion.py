@@ -174,6 +174,7 @@ class MoveGripper(_PointMotion):
         self._refresh_ik()
         saved = self.p, self.tcp_speed, self.tcp_turn, self.plan_scale
         self._speeds(m)
+        label = target.label
         try:
             for leg in [*legs, target]:
                 result, worst, label, kind = self._leg(ctx, leg, m, mode, planner, leg is target)
@@ -181,7 +182,8 @@ class MoveGripper(_PointMotion):
                     return result
         finally:
             self.p, self.tcp_speed, self.tcp_turn, self.plan_scale = saved
-        failed = self._follow_holds(holds, label)   # a lift may have moved the held objects' base frame
+            # a lift may have moved the held objects' base frame, however the motion ended (failed, interrupted)
+            failed = self._follow_holds(holds, label)
         if failed is not None:
             return failed
         miss = self._misses(target, m.get('tolerance'))

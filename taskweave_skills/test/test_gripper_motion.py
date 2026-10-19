@@ -45,6 +45,7 @@ class DuoSim(Node):
         self.position = {'left_joint1': 0.0, 'left_joint2': 0.0, 'right_joint1': 0.0, 'right_joint2': 0.0,
                          'lift': 0.0, 'left_grip': 1.0, 'right_grip': 1.0}
         self.target, self.object_at, self.history = dict(self.position), {}, []
+        self.frozen = set()           # joints that do not move (a stalled joint)
         self.pub = self.create_publisher(JointState, '/duo/joint_states', 10)
         self.create_subscription(JointState, '/duo/joint_command', self.command, 10)
         self.create_timer(0.02, self.step)
@@ -55,6 +56,8 @@ class DuoSim(Node):
 
     def step(self):
         for name, target in self.target.items():
+            if name in self.frozen:
+                continue
             current = self.position[name]
             new = current + max(-0.06, min(0.06, target - current))
             if name in self.object_at and target < self.object_at[name]:
@@ -689,3 +692,28 @@ def test_a_via_pose_leg_moves_only_the_target_hands(system, hands):             
     assert system.ik.requests and {r['group'] for r in system.ik.requests} == {'right_arm'}
     assert {k: v for k, v in system.sim.position.items() if k.startswith('left')} == left_before
     assert not any(k.startswith('left') for h in system.sim.history for k in h)
+
+
+def shifted(system, name='box_1', by=1.0):
+    """The registry's pose of a held object, moved away from where its hands say it is."""
+    pose = np.eye(4)
+    pose[0, 3] = by
+    system.hold.moved(pose, name)
+
+
+def object_x(system, name='box_1'):
+    return float(system.hold.hold_of(next(iter(system.hold.holds[name]['hands'])))['object_in_base'][0, 3])
+
+
+def test_the_holds_follow_the_hands_when_a_move_stalls_after_a_lift_change(system):      # I3
+    hold_by_registry(system, 'left')
+    shifted(system)
+    system.sim.frozen = {'lift'}                       # the torso moves nowhere: the move stalls
+    result = run(system, 'move_joints', {'joints': {'lift': 0.1}})
+    assert result.outcome == FAILED, result.message
+    assert object_x(system) == pytest.approx(0.0, abs=1e-6), 'the hold was not followed after the failed move'
+    shifted(system)
+    system.sim.frozen = {'right_joint1'}
+    result = run(system, 'move_gripper', {'to': {'by': [0.1, 0, 0]}, 'hands': ['right']})
+    assert result.outcome == FAILED, result.message
+    assert object_x(system) == pytest.approx(0.0, abs=1e-6), 'the hold was not followed after the failed move_gripper'
