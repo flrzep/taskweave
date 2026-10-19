@@ -1,6 +1,7 @@
 """Agnostic-code checks: how far the code is from robot-, cell- and object-agnostic (all of that belongs in YAML).
 
-Each check counts findings in the non-test code of taskweave_core, taskweave_skills and taskweave_hmi:
+Each check counts findings in the non-test code of taskweave_core, taskweave_skills, taskweave_hmi and
+taskweave_bringup:
 names (robot/cell/object words, code and comments counted apart), unnamed numbers in the skill and motion
 modules, module tuning constants (to move into config) and arm structure assumptions (fixed joint indices).
 
@@ -57,7 +58,7 @@ ALGORITHM = {
 }
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGES = ['taskweave_core', 'taskweave_skills', 'taskweave_hmi']
+PACKAGES = ['taskweave_core', 'taskweave_skills', 'taskweave_hmi', 'taskweave_bringup']
 MOTION = sorted((ROOT / 'taskweave_skills' / 'taskweave_skills').glob('*.py')) + [
     ROOT / 'taskweave_hmi' / 'taskweave_hmi' / 'arm.py']
 SHOW = int(os.environ.get('TASKWEAVE_AGNOSTIC_SHOW', 10))
