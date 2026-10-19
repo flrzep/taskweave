@@ -28,6 +28,7 @@ import numpy as np
 from sensor_msgs.msg import JointState
 
 from taskweave_core.config.limits import velocity_limits
+from taskweave_core.node_cache import for_node
 from taskweave_core.skill import Skill, SkillResult
 
 SWING_STRAIGHT_STEPS = 20  # samples of the eased straight move that follows an elbow swing (_swing_first)
@@ -126,12 +127,10 @@ class JointInterface:
 
     @classmethod
     def for_node(cls, node, profile) -> JointInterface:
-        key = id(node)
-        if key not in cls._instances:
-            cls._instances[key] = cls(node, profile.role('joints'))
-        return cls._instances[key]
+        return for_node(cls._instances, node, lambda n: cls(n, profile.role('joints')))
 
     def __init__(self, node, topics: dict):
+        self.node = node
         self.lock = threading.Lock()
         self.positions: dict[str, float] = {}
         self.velocities: dict[str, float] = {}
