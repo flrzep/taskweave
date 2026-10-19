@@ -127,7 +127,8 @@ export class Viewer3D {
 
     const accent = this._accent();
     this._mats = {
-      metal: new THREE.MeshPhongMaterial({ color: 0x9ea4ab, specular: 0x4a4a4a, shininess: 40 }),
+      // light enough to read on the dark view background (--viewer-bg), in both themes
+      metal: new THREE.MeshPhongMaterial({ color: 0xc9ced6, specular: 0x5a5a5a, shininess: 40, emissive: 0x23262e }),
       ghost: new THREE.MeshPhongMaterial({ color: accent, transparent: true, opacity: 0.35, depthWrite: false }),
       box: new THREE.MeshLambertMaterial({ color: BOX_COLOUR, transparent: true, opacity: 0.18, depthWrite: false }),
       edge: new THREE.LineBasicMaterial({ color: BOX_COLOUR, transparent: true, opacity: 0.7 }),
@@ -217,7 +218,7 @@ export class Viewer3D {
     this._poll();
     await meshes;
     if (this._disposed) return this;
-    this.fit();
+    if (this.robot) this.fitRobot(); else this.fit();  // the robot is what one looks for first; Fit shows the cell
     return this;
   }
 
@@ -613,6 +614,17 @@ export class Viewer3D {
     this.scene.updateMatrixWorld();  // the base's matrix may not have been rendered yet
     const box = this._sceneBounds.clone();
     [this.robot, this.markers].forEach((object) => { if (object) box.expandByObject(object); });
+    this._frame(box);
+  }
+
+  // The robot with a metre around it: what is within its reach.
+  fitRobot() {
+    if (!this.robot) { this.fit(); return; }
+    this.scene.updateMatrixWorld();
+    this._frame(new THREE.Box3().setFromObject(this.robot).expandByScalar(1.0));
+  }
+
+  _frame(box) {
     if (box.isEmpty()) box.set(new THREE.Vector3(-1, -1, 0), new THREE.Vector3(1, 1, 1));
     const center = box.getCenter(new THREE.Vector3());
     const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.5);
@@ -657,8 +669,9 @@ export class Viewer3D {
       tools.append(node);
       return node;
     };
-    button('Fit', 'Frame the robot and the cell', () => this.fit());
-    this._followButton = button('Follow robot', 'Keep the robot in the middle as it drives', () => this.setFollow(!this.followRobot));
+    button('Robot', 'Frame the robot and what is within its reach', () => this.fitRobot());
+    button('Cell', 'Frame the robot and the whole cell', () => this.fit());
+    this._followButton = button('Follow', 'Keep the robot in the middle as it drives', () => this.setFollow(!this.followRobot));
     this._followButton.setAttribute('aria-pressed', 'false');
     this._labelsButton = button('Labels', 'Show or hide the names', () => this.setLabels(!this.labelsOn));
     this._labelsButton.setAttribute('aria-pressed', 'true');

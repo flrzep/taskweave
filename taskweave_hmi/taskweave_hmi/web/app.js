@@ -463,7 +463,7 @@ function setPointsBusy(text) {
 async function refreshPose() {
   const { ok, data } = await api('GET', '/api/robot_pose');
   const text = ok
-    ? `${fmt(data.pose)}  ·  nearest ${data.relative[0]?.instance ?? '–'} (${data.relative[0]?.distance ?? '–'} m)`
+    ? fmt(data.pose) + (data.relative[0] ? `  ·  nearest ${data.relative[0].instance} (${data.relative[0].distance} m)` : '')
     : (data.error || 'no robot pose');
   ['robot-pose', 'teach-pose'].forEach((id) => { $(id).textContent = text; $(id).classList.toggle('muted', !ok); });
   return ok ? data : null;
