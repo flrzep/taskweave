@@ -11,6 +11,13 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <!-- the pack tests load the packs through taskweave_core and check them against the skills -->
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>taskweave_core</test_depend>
+  <test_depend>taskweave_skills</test_depend>
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>python3-yaml</test_depend>
+
   <export>
     <build_type>ament_cmake</build_type>
   </export>
