@@ -56,6 +56,7 @@ HTTP API (JSON):
   POST /api/recordings/start {mission, name, cycles, reset, bag, camera, video, quality, max_min};  POST .../stop
   DELETE /api/recordings/<id>;  PUT /api/recordings/<id>/keep {keep}  exempt it from replacement
   GET  /recordings/<id>/<file>     a recording's video or data file (byte ranges)
+  GET  /recordings/<id>.tar        the whole recording (bag included) as one tar, streamed (finished recordings)
 Missions and points are edited between runs (409 while a mission runs) and are used at the next start.
 """
 
@@ -64,6 +65,7 @@ from __future__ import annotations
 import json
 import queue
 import shutil
+import tarfile
 import threading
 import time
 from collections import deque
@@ -611,6 +613,24 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
+    def _archive(self, rec_id: str) -> None:
+        """A recording as an uncompressed tar, written while it is read (bag and videos are compressed already; no
+        copy on the box's disk). No Content-Length: the connection closes at the end."""
+        _folder, members = self.bridge.recorder.archive(rec_id)
+        self.send_response(HTTPStatus.OK)
+        self.send_header('Content-Type', 'application/x-tar')
+        self.send_header('Content-Disposition', f'attachment; filename="{rec_id}.tar"')
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        self.close_connection = True
+        try:
+            with tarfile.open(fileobj=self.wfile, mode='w|') as tar:
+                for path, name in members:
+                    tar.add(path, arcname=name, recursive=False)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # the browser cancelled the download
+        self.bridge.get_logger().info(f'HMI sent recording {rec_id} ({len(members)} files)')
+
     def _recordings(self, method: str, route: list[str]):
         recorder = self.bridge.recorder
         if recorder is None:
@@ -639,6 +659,9 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'GET' and (path == '/' or (len(parts) == 1 and parts[0] in STATIC_FILES)):
                 file = WEB / ('index.html' if path == '/' else parts[0])
                 return self._send(HTTPStatus.OK, file.read_bytes(), CONTENT_TYPES[file.suffix])
+            if (method == 'GET' and len(parts) == 2 and parts[0] == 'recordings' and parts[1].endswith('.tar')
+                    and bridge.recorder is not None):
+                return self._archive(unquote(parts[1])[:-len('.tar')])
             if method == 'GET' and len(parts) == 3 and parts[0] == 'recordings' and bridge.recorder is not None:
                 return self._file(bridge.recorder.file(unquote(parts[1]), unquote(parts[2])))
             if parts[:1] != ['api']:
