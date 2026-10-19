@@ -7,7 +7,17 @@
 const NAV_FIELDS = ['front', 'back', 'left', 'right'];
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+// The 3D view (viewer3d.js, an ES module: it runs after these classic scripts) is made the first time the tab opens.
+let viewer3d = null;
+function startViewer() {
+  if (viewer3d || !window.Viewer3D) return;
+  viewer3d = new window.Viewer3D($('viewer3d'));
+  viewer3d.load();
+}
+window.addEventListener('viewer3d-ready', () => { if (robotVisible) startViewer(); });
+
 async function loadRobot() {
+  startViewer();
   const { ok, data } = await api('GET', '/api/robot');
   if (!ok) { message($('nav-msg'), data.error || (data.problems || []).join('\n'), true); return; }
   state.robotData = data;
