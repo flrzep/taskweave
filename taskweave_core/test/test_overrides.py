@@ -113,7 +113,8 @@ def test_the_cache_follows_the_pack_file_and_the_override(cell):
 def test_save_writes_only_the_delta(cell):
     root, pack = cell
     store = ConfigStore(root)
-    override(root, 'navigation.yaml', '~override: keys\npadding: 0.2\n')              # a cell override exists: edits go there
+    # a cell override exists: edits go there
+    override(root, 'navigation.yaml', '~override: keys\npadding: 0.2\n')
     path = store.save_navigation(ROBOT, {'driving': {'max_forward': 0.7}})
     assert path == root / 'robots' / ROBOT / 'navigation.yaml'
     assert yaml.safe_load(path.read_text()) == {'~override': 'keys', 'padding': 0.2, 'driving': {'max_forward': 0.7}}
@@ -179,7 +180,8 @@ def test_source_info_counts_the_keys(cell):
     store = ConfigStore(root)
     source = store.robot_file_source(ROBOT, 'navigation.yaml')
     assert source['source'] == 'robot pack' and source['override'] is None and source['override_count'] == 0
-    override(root, 'navigation.yaml', '~override: keys\ndriving: {max_forward: 0.9, sideways: true}\npadding: ~delete\n')
+    override(root, 'navigation.yaml',
+             '~override: keys\ndriving: {max_forward: 0.9, sideways: true}\npadding: ~delete\n')
     source = store.robot_file_source(ROBOT, 'navigation.yaml')
     assert source['source'] == 'override' and source['override'] == 'keys' and source['pack']      # old keys stay
     assert source['override_keys'] == ['driving.max_forward', 'driving.sideways', 'padding']

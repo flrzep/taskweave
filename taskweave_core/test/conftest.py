@@ -136,7 +136,8 @@ class RosRig:
 def one_ros_context():
     """One rclpy context for the whole session. The ROS tests call rclpy.init()/shutdown() around every test; creating
     and destroying a DDS participant per test makes discovery slow and now and then lost on a loaded machine (an action
-    server that stays invisible to a node of the same process), so init happens once and the per-test calls do nothing."""
+    server that stays invisible to a node of the same process), so init happens once and the per-test calls do
+    nothing."""
     try:
         import rclpy
     except ImportError:

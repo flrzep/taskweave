@@ -17,6 +17,10 @@
   <exec_depend>taskweave_interfaces</exec_depend>
   <exec_depend>taskweave_skills</exec_depend>   <!-- nav2_parameters -->
   <exec_depend>python3-ruamel.yaml</exec_depend>
+  <exec_depend>python3-jsonschema</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>moveit_msgs</exec_depend>   <!-- GetPositionFK (server.py) -->
+  <exec_depend>simulation_interfaces</exec_depend>   <!-- recording: reset the simulation (SetSimulationState) -->
   <test_depend>python3-pytest</test_depend>
 
   <export>

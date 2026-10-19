@@ -523,4 +523,5 @@ def test_the_cell_pack_examples_in_docs_load_into_the_skills_parameters():
     assert flat['max_joint_speed'] == 1.5
     flat, extra = translate_params({'speed': {'tcp_m_s': 0.2}, 'motion': {'mode': 'linear'},
                                     'torso_fallback': {'joint': 'lift', 'values': [0.0]}, 'max_joint_speed': 1.0})
-    assert flat == {'tcp_speed': 0.2, 'lift_joint': 'lift', 'lift_values': [0.0], 'max_joint_speed': 1.0}   # old keys stay
+    # old keys stay
+    assert flat == {'tcp_speed': 0.2, 'lift_joint': 'lift', 'lift_values': [0.0], 'max_joint_speed': 1.0}

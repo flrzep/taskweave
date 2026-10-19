@@ -132,12 +132,12 @@ def test_a_change_during_the_move_takes_effect_within_a_cycle_and_is_smooth(monk
     i = next(k for k, t in enumerate(times) if t >= 2.0)
     before = j1[i - 1] - j1[i - 2]
     assert j1[i + 1] - j1[i] > before                     # faster within one control cycle
-    phase_steps = [(b - a) for a, b in zip(times, times[1:])]
+    phase_steps = [(b - a) for a, b in zip(times, times[1:], strict=False)]
     assert max(phase_steps) == pytest.approx(period)
     # tau never jumps: its increment per cycle rises by at most the slew (2.0/s) times the cycle
     taus = [interpolate_inverse(v) for v in j1[i - 10:] if 0.001 < v < 0.9]
-    increments = [b - a for a, b in zip(taus, taus[1:])]
-    rises = [b - a for a, b in zip(increments, increments[1:])]
+    increments = [b - a for a, b in zip(taus, taus[1:], strict=False)]
+    rises = [b - a for a, b in zip(increments, increments[1:], strict=False)]
     assert max(rises) <= 2.0 * period * period + 1e-6
 
 

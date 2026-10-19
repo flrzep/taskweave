@@ -72,7 +72,8 @@ def expand_includes(mission: dict, load: Callable[[str], dict], _depth: int = 0,
         unknown, missing = sorted(set(values) - set(params)), sorted(set(params) - set(values))
         if unknown or missing:
             raise IncludeError(f'step {step_id}: mission {name!r} ' + '; '.join(
-                ([f'has no parameter {", ".join(unknown)} (it takes: {", ".join(params) or "none"})'] if unknown else [])
+                ([f'has no parameter {", ".join(unknown)} (it takes: {", ".join(params) or "none"})']
+                 if unknown else [])
                 + ([f'needs {", ".join(missing)}'] if missing else [])))
         expanded = expand_includes(inner, load, _depth + 1, (*_stack, name))
         inner_defaults = inner.get('defaults', {})

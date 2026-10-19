@@ -50,7 +50,8 @@ def pose_error(target: np.ndarray, current: np.ndarray) -> np.ndarray:
     if angle < 1e-9:
         omega = np.zeros(3)
     else:
-        vector = np.array([rotation[2, 1] - rotation[1, 2], rotation[0, 2] - rotation[2, 0], rotation[1, 0] - rotation[0, 1]])
+        vector = np.array([rotation[2, 1] - rotation[1, 2], rotation[0, 2] - rotation[2, 0],
+                           rotation[1, 0] - rotation[0, 1]])
         omega = vector / (2 * math.sin(angle)) * angle if angle < math.pi - 1e-6 else _axis_at_pi(rotation) * angle
     return np.concatenate([target[:3, 3] - current[:3, 3], omega])
 
@@ -85,7 +86,8 @@ class Chain:
             xyz = [float(v) for v in (origin.get('xyz', '0 0 0') if origin is not None else '0 0 0').split()]
             rpy = [float(v) for v in (origin.get('rpy', '0 0 0') if origin is not None else '0 0 0').split()]
             axis_element = element.find('axis')
-            axis = np.array([float(v) for v in (axis_element.get('xyz') if axis_element is not None else '1 0 0').split()])
+            axis_text = axis_element.get('xyz') if axis_element is not None else '1 0 0'
+            axis = np.array([float(v) for v in axis_text.split()])
             norm = np.linalg.norm(axis)
             joints.append(Joint(element.get('name'), element.get('type'), rpy_matrix(xyz, rpy),
                                 axis / norm if norm > 0 else axis, link))

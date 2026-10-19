@@ -88,7 +88,8 @@ def test_the_old_mission_is_invalid_and_the_migrated_one_validates(cell):
     store = ConfigStore(cell, check_schema=False)
     plan = Plan.from_mission(store.expanded_mission('old'), 'old', robot=ROBOT)
     before = validate_plan(plan, catalog(store), store)
-    assert before and all('taskweave config migrate-skills' in p for p in before if 'was removed' in p or 'takes its' in p)
+    assert before and all('taskweave config migrate-skills' in p
+                          for p in before if 'was removed' in p or 'takes its' in p)
     assert migrate_skills_only(cell, False, lambda line: None) == 0
     store = ConfigStore(cell)
     plan = Plan.from_mission(store.expanded_mission('old'), 'old', robot=ROBOT)

@@ -34,7 +34,7 @@ def _interpolate(table: list[tuple[float, float]], value: float, source: int) ->
     target = 1 - source
     if value <= rows[0][source]:
         return rows[0][target]
-    for (a, b) in zip(rows, rows[1:]):
+    for (a, b) in zip(rows, rows[1:], strict=False):
         if value <= b[source]:
             span = b[source] - a[source]
             fraction = 0.0 if span == 0 else (value - a[source]) / span

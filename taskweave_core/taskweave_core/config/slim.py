@@ -1,5 +1,6 @@
 """``taskweave config slim CELL_DIR [--dry-run]``: rewrite whole-file cell overrides of robot pack files as keyed
-overrides (overlay.py), i.e. only the keys that differ from the robot pack's file. What a robot loads changes only for pack keys an old whole-file copy lacks: it gets the pack's.
+overrides (overlay.py), i.e. only the keys that differ from the robot pack's file. What a robot loads changes only
+for pack keys an old whole-file copy lacks: it gets the pack's.
 
 Per robots/<robot>/<file> of overlay.MERGED_FILES that a robot pack also has:
   whole file, differs   rewritten as a keyed override; prints the keys it drops (equal to the pack's). Pack keys the
@@ -19,7 +20,8 @@ from .store import ConfigError, ConfigStore
 
 
 def slim(cell: str | Path, dry_run: bool = False, say=print) -> int:
-    """Slim every whole-file override in the cell pack. Returns an exit code (2: not a cell pack, 1: unreadable file or one that cannot be removed)."""
+    """Slim every whole-file override in the cell pack. Returns an exit code (2: not a cell pack, 1: unreadable file
+    or one that cannot be removed)."""
     cell = Path(cell).expanduser().resolve()
     if not cell.is_dir():
         say(f'{cell}: no such directory')

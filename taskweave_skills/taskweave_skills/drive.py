@@ -124,7 +124,8 @@ class DriveStraight(NavigateTo):
             time.sleep(1.0 / self.p.rate_hz)
 
     def _towards(self, reference: str):
-        """(forward, sideways) to the base target ``reference`` in the robot's frame, or a SkillResult if it does not lie
+        """(forward, sideways) to the base target ``reference`` in the robot's frame, or a SkillResult if it does not
+        lie
         straight ahead or behind with the same heading (sideways only for a holonomic base)."""
         pose = self._current()
         if pose is None:
@@ -138,7 +139,8 @@ class DriveStraight(NavigateTo):
         sideways = -math.sin(pose.yaw) * dx + math.cos(pose.yaw) * dy
         turn = abs(wrap_angle(target.yaw - pose.yaw))
         if turn > self.to_turn:
-            return SkillResult.rejected(f'{reference} faces {math.degrees(turn):.0f} deg away from the robot\'s heading: '
+            return SkillResult.rejected(f'{reference} faces {math.degrees(turn):.0f} deg away from the robot\'s '
+                                        'heading: '
                                         'drive_straight keeps the heading (navigate_to there first)')
         if self.base['type'] != 'holonomic':
             if abs(sideways) > self.to_offset:

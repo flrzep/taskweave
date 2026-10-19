@@ -213,7 +213,8 @@ def test_origin_of_nested_includes_names_the_chain_and_the_outermost_step(store)
 
 
 def test_origin_of_a_problem_from_a_param_placeholder(store):
-    blocks = {'inner': {'goal': 'i', 'params': {'where': {}}, 'steps': [_step(FINE), _step({'to': {'point': '{where}'}})]}}
+    blocks = {'inner': {'goal': 'i', 'params': {'where': {}},
+                        'steps': [_step(FINE), _step({'to': {'point': '{where}'}})]}}
     mission = {'goal': 'g', 'steps': [{'instruction': 'x', 'include': 'inner', 'with': {'where': 'box_1/nope'}}]}
     [problem] = _problems(store, mission, blocks)
     assert problem['origin'] == {'step': 0, 'include': 'inner', 'inner_path': ['steps', 1, 'args', 'to', 'point']}

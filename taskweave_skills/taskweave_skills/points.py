@@ -104,5 +104,6 @@ def moved_object(obj: np.ndarray, by=None, at=None, turn_deg: float = 0.0, tilt_
     pivot, back = np.eye(4), np.eye(4)
     pivot[:3, 3], back[:3, 3] = obj[:3, 3], -obj[:3, 3]
     shift = np.eye(4)
-    shift[:3, 3] = (np.array(at, dtype=float) - obj[:3, 3]) if at is not None else np.array(by or (0, 0, 0), dtype=float)
+    shift[:3, 3] = ((np.array(at, dtype=float) - obj[:3, 3]) if at is not None
+                    else np.array(by or (0, 0, 0), dtype=float))
     return shift @ pivot @ rotate @ back @ obj

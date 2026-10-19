@@ -43,7 +43,7 @@ def swing_node(ik):
 
     node = TcpJog.__new__(TcpJog)  # only _swing: no ROS node
     node.ik, node.held_tools, node.sent = ik, set(), []
-    node.command = SimpleNamespace(publish=lambda msg: node.sent.append(dict(zip(msg.name, msg.position))))
+    node.command = SimpleNamespace(publish=lambda msg: node.sent.append(dict(zip(msg.name, msg.position, strict=True))))
     node.JointState = lambda name, position: SimpleNamespace(name=name, position=position)
     node.warnings = []
     node.get_logger = lambda: SimpleNamespace(warning=lambda text, **k: node.warnings.append(text))

@@ -75,7 +75,8 @@ def test_object_points_are_listed_and_their_settings_saved(store):
     top = next(p for p in points.object_points(store, 'box', {}) if p['name'] == 'top_grasp')
     assert top['approach_m'] is None and top['elbow'] is None and top['tools']['left']['xyz'] == [0.0, 0.1, 0.2]
     points.save_object_point(store, 'box', 'top_grasp', {'approach_m': 0.15, 'elbow': 'down',
-                                                         'tools': {'left': {'xyz': [0, 0.1, 0.22], 'rpy': [0, 1.5, 0]}}})
+                                                         'tools': {'left': {'xyz': [0, 0.1, 0.22],
+                                                                  'rpy': [0, 1.5, 0]}}})
     top = next(p for p in points.object_points(store, 'box', {}) if p['name'] == 'top_grasp')
     assert top['approach_m'] == 0.15 and top['elbow'] == 'down' and top['tools']['left']['xyz'] == [0.0, 0.1, 0.22]
     with pytest.raises(points.PointError, match='elbow'):

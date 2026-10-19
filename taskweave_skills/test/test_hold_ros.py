@@ -102,7 +102,8 @@ def test_a_partial_close_is_a_hold_of_the_hands_that_closed(hold):
     assert seen[-1]['tools'] == ['left'] and seen[-1]['links'] == ['left_link7']
     assert seen[-1]['holds'] == [{'object': 'crate_1', 'point': 'crate_1/rails', 'hands': ['left'],
                                   'links': ['left_link7']}]
-    assert state.close_hands(['left', 'right']) == {'crate_1': {'hands': ['right'], 'new': False}}   # left holds already
+    # left holds already
+    assert state.close_hands(['left', 'right']) == {'crate_1': {'hands': ['right'], 'new': False}}
     assert state.held()['hands'] == ['left', 'right'] and set(state.held()['tcp_in_object']) == {'left', 'right'}
     assert state.held()['tcp_in_object']['right'][:3, 3] == pytest.approx([0.0, -0.2, 0.0])
 

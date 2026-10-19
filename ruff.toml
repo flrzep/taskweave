@@ -9,3 +9,11 @@ known-first-party = ["taskweave_core", "taskweave_skills", "taskweave_hmi"]
 
 [format]
 quote-style = "single"
+
+[lint.per-file-ignores]
+# pytest idiom: a fixture imported from a sibling test module is requested by name as a test argument,
+# which ruff reads as redefining the import.
+"**/test/*.py" = ["F811"]
+# The skill templates embed YAML text that tests compare byte for byte with docs/examples/skills/*.yaml
+# (comments included); wrapping a line there would put the two out of step.
+"taskweave_core/taskweave_core/config/skill_templates.py" = ["E501"]

@@ -20,8 +20,8 @@ Profile section ``planning`` (without it, joint skills move straight in joint sp
       answer_margin_s: 10.0           # the planning service must answer within timeout_s plus this
 
 A sampling planner's path wanders (the arms swing out and back) even where the straight move is free, so the straight
-move is tried first. The planner checks the robot against itself and the planning scene; the trajectory comes back timed, and the joint
-skills stream it as position targets. Goal joints outside the group are moved straight alongside.
+move is tried first. The planner checks the robot against itself and the planning scene; the trajectory comes back
+timed, and the joint skills stream it as position targets. Goal joints outside the group are moved straight alongside.
 
 A start that already touches something (e.g. an elbow at a rack upright after driving) cannot be planned from. Then the
 robot moves straight toward the goal while it touches only what it touched at the start, no deeper, until it is clear
@@ -93,7 +93,8 @@ ERRORS = {-1: 'planning failed', -2: 'invalid motion plan', -4: 'control failed'
           -10: 'start state in collision', -11: 'start state violates path constraints',
           -12: 'goal in collision', -13: 'goal violates path constraints', -14: 'goal constraints violated',
           -15: 'invalid group name', -16: 'invalid goal constraints', -17: 'invalid robot state',
-          -31: 'no IK solution', 99999: 'planner failed (see the move_group log, e.g. start state outside joint limits)'}
+          -31: 'no IK solution',
+          99999: 'planner failed (see the move_group log, e.g. start state outside joint limits)'}
 CHECK_POLL_S = 0.002  # poll period of the state validity requests in flight
 MIN_SPAN = 1e-3  # rad or m, the shortest span a straight move is timed for (no zero-length trajectory)
 
@@ -134,7 +135,8 @@ class MotionPlanner:
         self.escape_speed = float(spec['escape_speed'])
 
     def plan(self, start: dict[str, float], goal: dict[str, float], should_stop=lambda: False) -> Trajectory | None:
-        """Trajectory from ``start`` to ``goal``, or None if the straight joint-space move is free; raises PlanError. Only the goal joints' start values are sent, on top
+        """Trajectory from ``start`` to ``goal``, or None if the straight joint-space move is free; raises PlanError.
+        Only the goal joints' start values are sent, on top
         of the planner's own current state: the state topic can carry joints the planner's model lacks (e.g. a
         simulator's base joints), and MoveIt rejects unknown names."""
         from moveit_msgs.msg import Constraints, JointConstraint, RobotState
@@ -159,8 +161,9 @@ class MotionPlanner:
         if self.direct and self._free(start, goal, should_stop):
             return None
         start = {name: start[name] for name in goal if name in start}
-        r.start_state = RobotState(joint_state=JointState(name=list(start), position=[float(v) for v in start.values()]),
-                                   is_diff=True)  # keeps what MoveIt knows besides joints, e.g. the base pose from TF
+        # is_diff keeps what MoveIt knows besides joints, e.g. the base pose from TF
+        positions = [float(v) for v in start.values()]
+        r.start_state = RobotState(joint_state=JointState(name=list(start), position=positions), is_diff=True)
         r.goal_constraints = [Constraints(joint_constraints=[
             JointConstraint(joint_name=name, position=float(value), tolerance_above=self.goal_tolerance,
                             tolerance_below=self.goal_tolerance, weight=1.0) for name, value in goal.items()])]

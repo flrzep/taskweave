@@ -5,7 +5,8 @@ Parameters:
   robot (string)             robot profile this handler drives; missions for other robots are rejected
   timeout_grace_s (double)   extra time after a step's timeout before the handler cancels it (default 2.0)
   server_wait_s (double)     how long a step waits for its skill server to be discovered before it is rejected
-                             (default 5.0; a client is created at the first use of a skill or at the catalog refresh, and
+                             (default 5.0; a client is created at the first use of a skill or at the catalog
+                             refresh, and
                              discovery needs a moment, e.g. right after a restart). 0 = do not wait
   status_rate_hz (double)    periodic status publishing while a mission is active (default 2.0)
   speed_override_percent (double)  global speed override 1-100 (default 100; not persisted). Set through the

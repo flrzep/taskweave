@@ -244,7 +244,8 @@ def same_as_pack(old_config, tmp_path, monkeypatch):
         (folder / 'moveit' / name).parent.mkdir(exist_ok=True)
         (folder / 'moveit' / name).write_text(text)
     installed = robot_pack(tmp_path / 'installed', files={name: (folder / name).read_text()
-                                                          for name in ('profile.yaml', 'embodiment.yaml', 'poses.yaml')})
+                                                          for name in ('profile.yaml', 'embodiment.yaml',
+                                                                       'poses.yaml')})
     shutil.copytree(folder / 'moveit', installed / 'moveit')
     monkeypatch.setattr(packs, 'installed_location', lambda: installed.parent)
     return old_config

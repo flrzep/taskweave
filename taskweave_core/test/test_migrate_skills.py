@@ -335,7 +335,8 @@ def test_the_migrated_missions_load_as_plans_and_the_old_names_are_gone(cell):
     for name in store.mission_names():
         plan = Plan.from_mission(store.expanded_mission(name), name, robot=ROBOT)
         assert not {step.skill for step in plan.steps} & set(ms.OLD_SKILLS)
-    assert [step.id for step in Plan.from_mission(store.expanded_mission('outer'), 'outer', robot=ROBOT).steps][-6:] == [
+    plan = Plan.from_mission(store.expanded_mission('outer'), 'outer', robot=ROBOT)
+    assert [step.id for step in plan.steps][-6:] == [
         's1_s14', 's1_s15', 's1_s16', 'after_joints', 'after_tools', 's3']
 
 
@@ -363,7 +364,8 @@ def test_operator_actions_are_rewritten_with_their_arm_args(cell):
     text = (cell / 'operator.yaml').read_text()
     actions = yaml.safe_load(text)['joy']['actions']
     assert actions == [{'button': 0, 'skill': 'grip', 'args': {'hands': 'all', 'action': 'close'},
-                        'arm_args': {'hands': '{arm}'}}, {'button': 11, 'skill': 'move_joints', 'args': {'pose': 'home'}}]
+                        'arm_args': {'hands': '{arm}'}},
+                       {'button': 11, 'skill': 'move_joints', 'args': {'pose': 'home'}}]
     assert text.count('\n    - {button:') == 2 and '# cross' in text and '# d-pad up' in text and 'topic: /joy' in text
 
 
@@ -383,7 +385,8 @@ def test_skill_yamls_carry_the_cells_values_and_the_old_files_go(cell):
     assert grip['speed'] == {'joint_rad_s': 1.1} and grip['tolerances']['stall_timeout_s'] == 2.0
     assert grip['tolerances']['position'] == 0.02 and grip['tolerances']['state_timeout_s'] == 4.0
     joints = yaml.safe_load((skills / 'move_joints.yaml').read_text())
-    assert joints['speed'] == {'joint_rad_s': 0.8, 'joint_linear_m_s': 0.15} and joints['tolerances']['position'] == 0.01
+    assert joints['speed'] == {'joint_rad_s': 0.8, 'joint_linear_m_s': 0.15}
+    assert joints['tolerances']['position'] == 0.01
     assert joints['implementations'][0]['class'] == 'taskweave_skills.joint_motion:MoveJoints'
     move_object = yaml.safe_load((skills / 'move_object.yaml').read_text())
     assert move_object['speed'] == {'joint_rad_s': 1.3, 'joint_linear_m_s': 0.3, 'tcp_m_s': 0.04, 'tcp_rad_s': 0.25}
@@ -398,7 +401,8 @@ def test_skill_yamls_carry_the_cells_values_and_the_old_files_go(cell):
 def test_a_new_skill_yaml_that_exists_is_kept(cell):
     (cell / 'skills' / 'grip.yaml').write_text('implementations:\n  - {name: mine, type: script, class: "a:B"}\n')
     lines = run(cell)
-    assert 'mine' in (cell / 'skills' / 'grip.yaml').read_text() and (cell / 'skills' / 'gripper.yaml').exists()    # kept too, see below
+    # kept too, see below
+    assert 'mine' in (cell / 'skills' / 'grip.yaml').read_text() and (cell / 'skills' / 'gripper.yaml').exists()
     assert any('skills/grip.yaml  exists already' in line for line in lines)
 
 
@@ -424,13 +428,14 @@ def test_a_profile_without_groups_keeps_every_joint_and_says_so(cell):
 
 
 def test_comments_naming_old_skills_are_listed_not_edited(cell):
-    (cell / 'objects' / 'box.yaml').write_text('# tested with go_to_point\n' + (cell / 'objects' / 'box.yaml').read_text())
+    box_file = cell / 'objects' / 'box.yaml'
+    box_file.write_text('# tested with go_to_point\n' + box_file.read_text())
     lines = run(cell)
     assert any(line.startswith('comment objects/box.yaml:1: # tested with go_to_point') for line in lines)
     assert (cell / 'objects' / 'box.yaml').read_text().startswith('# tested with go_to_point')
 
 
-# ---- the command: dry run, idempotency, the schema chain --------------------------------------------------------------
+# ---- the command: dry run, idempotency, the schema chain -------------------------------------------------------------
 def tree(root):
     return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob('*')) if p.is_file()}
 
@@ -531,7 +536,8 @@ def test_an_unwritable_pack_yaml_stops_everything_with_a_clear_message(cell, mon
     before = tree(cell)
     blocked = cell / 'pack.yaml'
     real = os.access
-    monkeypatch.setattr(os, 'access', lambda path, mode, **kw: False if Path(path) == blocked else real(path, mode, **kw))
+    monkeypatch.setattr(os, 'access',
+                        lambda path, mode, **kw: False if Path(path) == blocked else real(path, mode, **kw))
     lines = []
     assert migrate(cell, None, None, False, lines.append) == 1
     assert any('pack.yaml is not writable' in line and 'nothing was changed' in line for line in lines), lines
@@ -594,7 +600,7 @@ def test_a_removed_implementation_class_names_the_command():
     assert ms.removed_class_message('taskweave_skills.gripper_motion', 'Grip') is None
 
 
-# ---- the templates are the docs examples ---------------------------------------------------------------------------------
+# ---- the templates are the docs examples -----------------------------------------------------------------------------
 def test_the_templates_are_the_docs_examples():
     docs = Path(__file__).resolve().parents[2] / 'docs' / 'examples' / 'skills'
     if not docs.is_dir():
