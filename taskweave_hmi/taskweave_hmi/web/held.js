@@ -1,8 +1,8 @@
 'use strict';
-// taskweave HMI, Teach tab: held poses (robots/<robot>/held_poses.yaml), where `move_object to: {pose: <name>}` takes
+// taskweave HMI, Teach tab, Carry poses: held poses (robots/<robot>/held_poses.yaml), where `move_object to: {pose: <name>}` takes
 // a held object: some joints first (e.g. the body), then the object's origin along straight lines through the waypoints (in
 // the robot's base frame). Typed in, not captured: a held object cannot be jogged. Uses app.js ($, el, api, message,
-// DEG, NAME_RE) and teach.js (teach, showJoint, unshowJoint, jointUnit, numberInput, failText, JOINT_SKIP).
+// DEG, NAME_RE), robot.js (JOINT_SKIP) and teach.js (teach, showJoint, unshowJoint, jointUnit, numberInput, failText).
 
 const heldOpen = new Set();  // `${type}/${name}` of the open editors, kept over reloads
 
@@ -12,7 +12,7 @@ function renderHeld() {
   const types = [...new Set([...data.object_types, ...held.map((h) => h.object_type)])];
   $('held-list').replaceChildren(...types.map((type) => {
     const list = el('ul', { class: 'points' }, held.filter((h) => h.object_type === type).map((h) => heldItem(h)));
-    const add = el('button', { class: 'btn small', text: '+ Held pose', 'data-edit': '' });
+    const add = el('button', { class: 'btn small', text: '+ Carry pose', 'data-edit': '' });
     add.addEventListener('click', () => {
       if (list.querySelector('.held-new')) return;
       const item = heldItem({ object_type: type, name: '', joints: {}, path: [], used_by: [] }, true);
@@ -38,7 +38,7 @@ function heldItem(h, isNew = false) {
   const key = `${h.object_type}/${h.name}`;
   const url = (name) => `/api/teach/held/${encodeURIComponent(h.object_type)}/${encodeURIComponent(name)}`;
   const head = el('button', { class: 'point-head', 'aria-expanded': 'false' },
-    el('b', { text: isNew ? 'New held pose' : h.name }), el('span', { class: 'mono', text: isNew ? '' : heldSummary(h) }),
+    el('b', { text: isNew ? 'New carry pose' : h.name }), el('span', { class: 'mono', text: isNew ? '' : heldSummary(h) }),
     h.used_by.length ? el('span', { class: 'used', text: `used by ${h.used_by.join(', ')}` }) : '');
   const msg = el('div', { class: 'msg', hidden: '' });
 
@@ -60,10 +60,11 @@ function heldItem(h, isNew = false) {
     jointPicker.replaceChildren(el('option', { value: '', text: '+ joint…' }), ...names.map((j) => el('option', { value: j, text: j })));
   };
   fillJointPicker();
-  jointPicker.addEventListener('change', () => {
+  jointPicker.addEventListener('change', async () => {
     const joint = jointPicker.value;
     if (!joint) return;
-    addJointRow(joint, teach.joints?.[joint] ?? 0);  // start from where the joint is now
+    const { ok, data: now } = await api('GET', '/api/robot/joints');
+    addJointRow(joint, ok ? now[joint] ?? 0 : 0);  // start from where the joint is now
     fillJointPicker();
     edited();
   });

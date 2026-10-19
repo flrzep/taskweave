@@ -177,6 +177,17 @@ details[open] summary { margin-bottom: 8px; }
 .segmented button { border: 0; background: none; color: var(--muted); font: 600 14px var(--sans); padding: 5px 12px; min-height: 32px;
                     border-radius: 4px; cursor: pointer; transition: background .15s, color .15s; }
 .segmented button[aria-pressed="true"] { background: var(--card); color: var(--accent); box-shadow: 0 0 0 1px var(--line); }
+/* Teach tab: the live pose, then one list at a time (sub-tabs, wrapping on a phone) */
+.teach-head { display: grid; gap: 4px; padding: 0 2px; }
+.segmented.teach-panes { display: flex; flex-wrap: wrap; }
+.segmented.teach-panes button { flex: 1 1 auto; }
+.segmented button[aria-selected="true"] { background: var(--card); color: var(--accent); box-shadow: 0 0 0 1px var(--line); }
+.teach-pane { display: grid; gap: 12px; min-width: 0; }
+li.empty { list-style: none; padding: 6px 2px; }
+/* Robot tab: settings below the live cards, closed until opened */
+.settings-head { margin-top: 8px; }
+details.card > summary.label { color: var(--fg); font: 600 15px var(--sans); padding: 0; }
+details.card[open] > summary.label { margin-bottom: 0; }
 .graph-box { display: grid; gap: 10px; }
 .plan-graph { width: 100%; height: auto; max-width: 540px; justify-self: center; overflow: visible;
   --g-edge: #c3c7d6; --g-fail: #e5566b; --g-loop: #0000ff; --g-ok: #0b7a4b; --g-bad: #c4122f; --g-warn: #d17a12;

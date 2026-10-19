@@ -37,9 +37,10 @@ document.querySelectorAll('.tabs button').forEach((button) => button.addEventLis
   document.querySelectorAll('.view').forEach((view) => show(view, view.id === `view-${button.dataset.view}`));
   if (button.dataset.view === 'missions' && !state.editing) loadMissions();
   pointsVisible = button.dataset.view === 'points';
-  if (pointsVisible) { loadPoints(); loadArm(); refreshPose(); }  // teach.js: arm positions, joints
+  robotVisible = button.dataset.view === 'robot';
+  if (pointsVisible) { loadPoints(); loadArm(); refreshPose(); }  // teach.js: poses and points
   else if (teach.open) { teach.open = null; setTeachTarget(null); }  // the pad teaches only into an open position
-  if (button.dataset.view === 'robot') loadRobot();  // robot.js
+  if (robotVisible) { loadRobot(); refreshPose(); }  // robot.js: live grippers and joints, settings
   if (button.dataset.view === 'record') loadRecordings();  // record.js
 }));
 
@@ -445,6 +446,7 @@ $('btn-back').addEventListener('click', () => {
 // ---------- points ----------
 // Locations (cell frame) and stance offsets (object frame) from config; yaw is shown in degrees, stored in radians.
 let pointsVisible = false;
+let robotVisible = false;
 let pointsBusy = '';
 const DEG = 180 / Math.PI;
 const fmt = (p) => `x ${p.x.toFixed(3)}  y ${p.y.toFixed(3)}  yaw ${(p.yaw * DEG).toFixed(1)}°`;
@@ -457,15 +459,27 @@ function setPointsBusy(text) {
   document.querySelectorAll('#view-points [data-edit], #view-robot [data-edit]').forEach((button) => { button.disabled = !!text; });
 }
 
+// The base pose, in the Robot tab and at the top of the Teach tab (what Capture would save for a location).
 async function refreshPose() {
   const { ok, data } = await api('GET', '/api/robot_pose');
-  $('robot-pose').textContent = ok
+  const text = ok
     ? `${fmt(data.pose)}  ·  nearest ${data.relative[0]?.instance ?? '–'} (${data.relative[0]?.distance ?? '–'} m)`
     : (data.error || 'no robot pose');
-  $('robot-pose').classList.toggle('muted', !ok);
+  ['robot-pose', 'teach-pose'].forEach((id) => { $(id).textContent = text; $(id).classList.toggle('muted', !ok); });
   return ok ? data : null;
 }
-setInterval(() => { if (pointsVisible && !document.hidden) refreshPose(); }, 2000);
+setInterval(() => { if ((pointsVisible || robotVisible) && !document.hidden) refreshPose(); }, 2000);
+
+// Teach sub-tabs: one list at a time; the choice is kept for this browser (a convenience only)
+function selectTeachPane(pane) {
+  document.querySelectorAll('#teach-panes button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.pane === pane)));
+  document.querySelectorAll('.teach-pane').forEach((node) => show(node, node.dataset.pane === pane));
+  try { localStorage.setItem('teach-pane', pane); } catch (_) { /* storage blocked: not kept */ }
+}
+document.querySelectorAll('#teach-panes button').forEach((b) => b.addEventListener('click', () => selectTeachPane(b.dataset.pane)));
+let savedPane = null;
+try { savedPane = localStorage.getItem('teach-pane'); } catch (_) { /* storage blocked */ }
+selectTeachPane(document.querySelector(`#teach-panes button[data-pane="${savedPane}"]`) ? savedPane : 'locations');
 
 async function loadPoints() {
   const { ok, data } = await api('GET', '/api/points/all');
@@ -513,7 +527,7 @@ function stanceCard(obj, data) {
     text: `${i.name}  ${fmt(i.pose)}${Object.entries(i.stances).map(([n, p]) => `\n  stance ${n.split('/')[1]}: ${fmt(p)}`).join('')}`,
   })));
   placed.style.whiteSpace = 'pre-wrap';
-  // one object, two views: where the robot stands, where the objects are (its points: Arm positions, teach.js)
+  // one object, two views: where the robot stands, where the objects are (its points: the Points list, teach.js)
   const panes = {
     stances: el('div', { class: 'pane' },
       el('div', { class: 'row between' }, el('p', { class: 'muted small-text', text: `Robot ${data.robot}: base pose in the object's frame, so every ${obj.object} follows · ${data.files.stances}` }), addVariant),
