@@ -43,6 +43,12 @@ class FakeHold:
     def __init__(self, hold=None):
         self.hold, self.cleared, self.moved_to = hold, 0, None
 
+    tool_frames = {'left': {}, 'right': {}}
+
+    @property
+    def hand_holds(self):
+        return {hand: self.hold['object'] for hand in self.hold['tools']} if self.hold else {}
+
     def held_all(self):
         return [{**self.hold, 'hands': list(self.hold['tools'])}] if self.hold else []
 
@@ -168,9 +174,9 @@ HOLD = {'object': 'box', 'point': 'box/top', 'tools': ['left'], 'object_in_base'
 def test_while_holding_arm_joints_are_refused_but_torso_is_allowed(monkeypatch, tmp_path):
     rig = Rig(monkeypatch, tmp_path, hold=dict(HOLD))
     result = rig.run({'pose': 'ready'})
-    assert result.outcome == Outcome.REJECTED and 'holding box' in result.message
+    assert result.outcome == Outcome.REJECTED and 'left holds box' in result.message
     result = rig.run({'joints': {'j1': 0.2, 'lift': 0.1}, 'only': ['torso', 'left_arm']})
-    assert result.outcome == Outcome.REJECTED and 'holding box' in result.message
+    assert result.outcome == Outcome.REJECTED and 'left holds box' in result.message
     result = rig.run({'pose': 'ready', 'motion': {'via': [{'j1': 0.3}]}, 'only': ['torso']})   # via: no torso, skipped
     assert result.outcome == Outcome.SUCCEEDED, result.message
     assert not any(c.get('j1') for _, c in rig.commands)
@@ -184,7 +190,7 @@ def test_while_holding_arm_joints_are_refused_but_torso_is_allowed(monkeypatch, 
 def test_arm_joint_of_a_via_waypoint_is_refused_while_holding(monkeypatch, tmp_path):
     rig = Rig(monkeypatch, tmp_path, hold=dict(HOLD))
     result = rig.run({'pose': 'lift_only', 'motion': {'via': [{'j2': 0.3}]}})
-    assert result.outcome == Outcome.REJECTED and 'holding box' in result.message and not rig.commands
+    assert result.outcome == Outcome.REJECTED and 'left holds box' in result.message and not rig.commands
 
 
 JOINT_5 = {'j1': 2.0}

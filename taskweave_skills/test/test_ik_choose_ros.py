@@ -249,3 +249,20 @@ def test_without_an_elbow_description_the_elbow_side_is_ignored_with_a_warning(m
     assert ik.solve({'left': TARGET}, {})['left_joint1'] == pytest.approx(0.5)    # no elbow cost: the first seed
     ik.solve({'left': TARGET}, {})
     assert len(warnings) == 1 and 'no arms.left.elbow' in warnings[0]               # said once
+
+
+def test_every_seed_is_tried_with_the_other_arms_where_they_are_now(moveit):
+    """The collision check of a solve sees the start state: a seed that names the holding arm's posture must not put
+    that arm at the seed's values (the free arm is then checked against the wrong place)."""
+    fake, node = moveit
+    spec = robot({})
+    spec.data['ik'].update({'groups': {'left': 'left_arm', 'right': 'right_arm'},
+                            'seeds': [{'left_joint1': 0.5, 'right_joint1': 9.0}, {'left_joint1': -0.5}]})
+    spec.data['tool_frames']['right'] = {'link': 'right_link7', 'xyz': [0, 0, 0], 'rpy': [0, 0, 0]}
+    current = {'left_joint1': 0.1, 'left_joint2': 0.0, 'right_joint1': 0.2, 'right_joint2': 0.3}
+    IkClient(node, spec).solve({'left': TARGET}, {}, current=current)
+    starts = [dict(zip(r.robot_state.joint_state.name, r.robot_state.joint_state.position, strict=True))
+              for r in fake.ik_requests]
+    assert len(starts) >= 3
+    assert all(s.get('right_joint1') == pytest.approx(0.2) and s.get('right_joint2') == pytest.approx(0.3)
+               for s in starts), starts

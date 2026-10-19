@@ -274,7 +274,7 @@ ROBOT_PROFILE = {
                 'validity_service': {'type': 'string'},
                 **{k: {'type': 'number', 'exclusiveMinimum': 0}
                    for k in ('direct_step_rad', 'escape_max_rad', 'escape_speed', 'goal_tolerance_rad',
-                             'check_timeout_s', 'answer_margin_s')},
+                             'hold_tolerance_rad', 'check_timeout_s', 'answer_margin_s')},
             },
             'additionalProperties': False,
         },
@@ -410,6 +410,9 @@ OBJECT = {
         # a placed object of this type is a place the next one comes to (e.g. a carrier waiting on a conveyor): taking
         # it, or gripping it to work it, leaves the placed object where it is
         'replenished': {'type': 'boolean'},
+        # how the simulator integration shows and handles this object (e.g. a box size, what a hold does): taskweave
+        # skills never read it; the keys are the simulator's own
+        'sim': {'type': 'object'},
         'points': {
             'type': 'object',
             'propertyNames': NAME,
@@ -723,4 +726,5 @@ def hands_schema(hand_names=(), rules=HAND_RULES) -> dict:
             'x-taskweave-widget': 'hands',
             'description': 'Which hands: a hand name or a list of names; "auto": the hands the target defines (or, '
                            'for a held object, the hands holding it); "any_one": one free hand that can take the '
-                           'target; "all": every hand.'}
+                           'target (move_gripper: an IK-feasible hand with the least joint motion, named in the '
+                           'result; grip: the one hand at an object point); "all": every hand.'}

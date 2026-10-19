@@ -16,8 +16,13 @@ Profile section ``planning`` (without it, joint skills move straight in joint sp
       escape_max_rad: 0.4             # start in collision: how far (largest joint change) the robot may move straight
       escape_speed: 0.2               # toward the goal while still touching (rad/s or m/s)
       goal_tolerance_rad: 0.001       # planned goal: each joint within this (rad or m)
+      hold_tolerance_rad: 0.01        # held joints (a holding arm) may stray this far from where they are (rad or m)
       check_timeout_s: 10.0           # the straight-move collision checks give up after this
       answer_margin_s: 10.0           # the planning service must answer within timeout_s plus this
+
+Joints that must stay where they are (the arm of a hand that holds an object: ``plan(..., keep={joint: value})``) go
+into the request as path constraints, and a returned trajectory where one of them leaves ``hold_tolerance_rad`` fails
+with a PlanError naming it (a planner may ignore a path constraint): the held object would be pulled along.
 
 A sampling planner's path wanders (the arms swing out and back) even where the straight move is free, so the straight
 move is tried first. The planner checks the robot against itself and the planning scene; the trajectory comes back
@@ -103,6 +108,7 @@ class MotionPlanner:
     # profile ``planning`` defaults (see the module doc)
     DEFAULTS = {'timeout_s': 5.0, 'attempts': 3, 'velocity_scale': 1.0, 'acceleration_scale': 1.0,
                 'direct_step_rad': 0.03, 'escape_max_rad': 0.4, 'escape_speed': 0.2, 'goal_tolerance_rad': 1e-3,
+                'hold_tolerance_rad': 1e-2,
                 'check_timeout_s': 10.0, 'answer_margin_s': 10.0}
 
     def __init__(self, node, robot):
@@ -119,6 +125,7 @@ class MotionPlanner:
         self.velocity_scale = float(spec['velocity_scale'])
         self.acceleration_scale = float(spec['acceleration_scale'])
         self.goal_tolerance = float(spec['goal_tolerance_rad'])
+        self.hold_tolerance = float(spec['hold_tolerance_rad'])
         self.check_timeout = float(spec['check_timeout_s'])
         self.answer_margin = float(spec['answer_margin_s'])
         # the planning group's joints (regex): those not in a goal stay where they are, else the planner may move
@@ -134,11 +141,32 @@ class MotionPlanner:
         self.escape_max = float(spec['escape_max_rad'])
         self.escape_speed = float(spec['escape_speed'])
 
-    def plan(self, start: dict[str, float], goal: dict[str, float], should_stop=lambda: False) -> Trajectory | None:
+    def violation(self, path: Trajectory, keep: dict[str, float]) -> str | None:
+        """Why ``path`` moves a joint of ``keep`` ({joint: value it must stay at}) further than hold_tolerance_rad
+        from that value, or None."""
+        for column, name in enumerate(path.names):
+            if name not in keep:
+                continue
+            for row in path.points:
+                if abs(row[column] - keep[name]) > self.hold_tolerance:
+                    return (f'the planned path moves {name} of a holding arm ({keep[name]:.3f} -> {row[column]:.3f}, '
+                            f'tolerance {self.hold_tolerance:g}): the held object would be pulled along')
+        return None
+
+    def plan(self, start: dict[str, float], goal: dict[str, float], should_stop=lambda: False,
+             keep: dict[str, float] | None = None) -> Trajectory | None:
         """Trajectory from ``start`` to ``goal``, or None if the straight joint-space move is free; raises PlanError.
-        Only the goal joints' start values are sent, on top
+        ``keep``: {joint: value} joints that stay where they are (a holding arm): path constraints, and a path that
+        moves one of them anyway is refused (see the module doc). Only the goal joints' start values are sent, on top
         of the planner's own current state: the state topic can carry joints the planner's model lacks (e.g. a
         simulator's base joints), and MoveIt rejects unknown names."""
+        path = self._plan(start, goal, should_stop, keep or {})
+        problem = self.violation(path, keep) if path is not None and keep else None
+        if problem:
+            raise PlanError(problem)
+        return path
+
+    def _plan(self, start: dict[str, float], goal: dict[str, float], should_stop, keep: dict[str, float]):
         from moveit_msgs.msg import Constraints, JointConstraint, RobotState
         from sensor_msgs.msg import JointState
 
@@ -156,7 +184,7 @@ class MotionPlanner:
             clear, prefix = escape
             if self.direct and self._free(clear, goal, should_stop):
                 return None  # the whole straight move: out of the contact, then free
-            rest = self.plan({**start, **clear}, goal, should_stop) or self._straight(clear, goal)
+            rest = self._plan({**start, **clear}, goal, should_stop, keep) or self._straight(clear, goal)
             return prefix.then(rest)
         if self.direct and self._free(start, goal, should_stop):
             return None
@@ -167,6 +195,11 @@ class MotionPlanner:
         r.goal_constraints = [Constraints(joint_constraints=[
             JointConstraint(joint_name=name, position=float(value), tolerance_above=self.goal_tolerance,
                             tolerance_below=self.goal_tolerance, weight=1.0) for name, value in goal.items()])]
+        held = {n: v for n, v in keep.items() if self.joints is None or self.joints.fullmatch(n)}
+        if held:   # the holding arms stay where they are all the way, not only at the goal
+            r.path_constraints = Constraints(joint_constraints=[
+                JointConstraint(joint_name=name, position=float(value), tolerance_above=self.hold_tolerance,
+                                tolerance_below=self.hold_tolerance, weight=1.0) for name, value in held.items()])
         for _ in range(self.tuning['tries']):  # a sampled path can fail MoveIt's final check: plan again
             response = self._call(request, should_stop)
             code = response.error_code.val

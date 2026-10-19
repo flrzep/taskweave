@@ -7,6 +7,9 @@ points:
     right_tool: {xyz: [0.0, -0.2, 0.3], rpy: [0.0, 3.14159265, 0.0]}
     alone:
       left_tool: {xyz: [0.0, 0.1, 0.35], rpy: [0.0, 3.14159265, 0.0]}
+  knob:                           # a single right_tool: auto means the right hand
+    tool_type: parallel_gripper
+    right_tool: {xyz: [0.0, -0.1, 0.3], rpy: [0.0, 3.14159265, 0.0]}
   rim_plain:                      # no approach_m of its own: the skill's (or the robot's) applies
     tool_type: parallel_gripper
     left_tool: {xyz: [0.0, 0.2, 0.3], rpy: [0.0, 3.14159265, 0.0]}

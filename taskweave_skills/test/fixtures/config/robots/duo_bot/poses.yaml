@@ -7,3 +7,5 @@ present_both:
   tools:
     left: {tcp: [0.6, 0.2, 0.4], approach: [1.0, 0.0, 0.0], closing: [0.0, 0.0, 1.0]}
     right: {tcp: [0.6, -0.2, 0.4], approach: [1.0, 0.0, 0.0], closing: [0.0, 0.0, 1.0]}
+present_right:
+  tools: {right: {tcp: [0.6, -0.2, 0.4], approach: [1.0, 0.0, 0.0], closing: [0.0, 0.0, 1.0]}}

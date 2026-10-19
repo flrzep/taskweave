@@ -210,13 +210,54 @@ class _JointSkill(Skill):
         if capped:
             self.__dict__.setdefault('_capped', {}).update(capped)
 
-    def _holding_refusal(self):
-        """A free-arm motion would pull the holding hands apart: refuse while something is held."""
-        holds = self.hold.held_all()
-        if not holds:
+    def _hands_moved(self, joints) -> set[str]:
+        """The hands whose arm has a joint in ``joints``: members of the ``<tool>_arm`` groups, else the ik joints
+        regex per tool. A robot with neither: every hand if ``joints`` is not empty."""
+        import re
+
+        from taskweave_core.config.limits import arm_group_names, joint_groups
+        touched = set(joints)
+        if not touched:
+            return set()
+        groups = joint_groups(self.config, self.robot.name)
+        names = arm_group_names(self.config, self.robot.name)
+        hands = {g.removesuffix('_arm') for g in names if touched & set(groups.get(g, ()))}
+        for hand, gripper in (self.robot.data.get('grippers') or {}).items():   # a gripper joint is its hand's
+            if gripper.get('joint') in touched:
+                hands.add(hand)
+        ik = getattr(self, 'ik', None)
+        if ik is not None:
+            hands |= {tool for tool in ik.groups
+                      if any(re.fullmatch(ik.joint_pattern.format(tool=tool), n) for n in touched)}
+        elif not groups:
+            hands |= {g.removesuffix('_arm') for g in names}
+        return hands
+
+    def _holding_refusal(self, hands=(), joints=()):
+        """REJECTED if the motion moves a hand that holds something: ``hands`` (hand names) or the arm joints in
+        ``joints``. The free arm may move while the other hand holds; None then."""
+        holding = self.hold.hand_holds
+        if not holding:
             return None
-        text = '; '.join(f'{hold["object"]} with {" and ".join(hold["tools"])}' for hold in holds)
-        return SkillResult.rejected(f'holding {text}: move it with move_object, or open the gripper first')
+        blocked = sorted((set(hands) | self._hands_moved(joints)) & set(holding))
+        if not blocked:
+            return None
+        text = '; '.join(f'{hand} holds {holding[hand]}' for hand in blocked)
+        free = sorted(set(self.hold.tool_frames) - set(holding))
+        return SkillResult.rejected(f'{text}: the hand and its arm stay with the object, move it with move_object, or '
+                                    f'open the gripper first' + (f' (free: {", ".join(free)})' if free else ''))
+
+    def _follow_holds(self, holds: list, label: str):
+        """After a motion that may have moved the base frame of the held objects (torso): each object moved with its
+        hands. A failure result, or None."""
+        for hold in holds:
+            tool = hold['hands'][0]
+            try:
+                tcp = self.hold.tcp_poses([tool])[tool]
+            except LookupError as error:
+                return SkillResult.failed(f'{label} reached, but where is the held object now? {error}')
+            self.hold.moved(tcp @ np.linalg.inv(hold['tcp_in_object'][tool]), hold['object'])
+        return None
 
     def _start(self) -> dict | None:
         """Every joint now, a joint at the goal its last move reached at exactly that goal (JointInterface.start)."""
@@ -381,17 +422,21 @@ class _PoseMotion(_JointSkill):
             if start is None:
                 return SkillResult.failed(f'no joint states on {self.joints.state_topic}'), 0
             stop = lambda: ctx.should_stop  # noqa: E731
+            keep = self._held_joints(start, goal)
+            keeping = {'keep': keep} if keep else {}      # a planner is told only when something is held
             try:
                 if planner == 'direct':
                     if not self.planner.free(start, goal, stop):
                         return SkillResult.failed(f'{label}: straight move blocked (planner direct)'), 0
                 elif planner == 'planned' or elbow is None or not self.planner.direct:
-                    path, self.path_kind = self.planner.plan(start, goal, stop), 'planned'
+                    path, self.path_kind = self.planner.plan(start, goal, stop, **keeping), 'planned'
                 elif not self.planner.free(start, goal, stop):
                     path = self._swing_first(ctx, start, goal, elbow)
                     self.path_kind = 'swing_first'
+                    if path and keep and self.planner.violation(path, keep):   # a swing that moves a holding arm
+                        path = None
                     if not path:
-                        path, self.path_kind = self.planner.plan(start, goal, stop), 'planned'
+                        path, self.path_kind = self.planner.plan(start, goal, stop, **keeping), 'planned'
             except PlanError as error:
                 return SkillResult.failed(f'{label}: {error}'), 0
             if path is not None and self.path_kind == 'planned':
@@ -400,6 +445,18 @@ class _PoseMotion(_JointSkill):
         if result is not None:
             return result, 0
         return None, max(abs(goal[n] - final[n]) for n in goal)
+
+    def _held_joints(self, start: dict, goal: dict) -> dict[str, float]:
+        """{joint: its value now} of every holding hand's arm and gripper that this motion does not mean to move: the
+        planner keeps them where they are (a planned path may swing any joint of its group), and a path that moves one
+        anyway is refused. A hand whose joints change in ``goal`` (move_object's own hands) is not kept."""
+        holding = set(self.hold.hand_holds)
+        if not holding:
+            return {}
+        changed = {n for n, value in goal.items() if n in start and abs(value - start[n]) > self.p.position_tolerance}
+        keep_hands = holding - self._hands_moved(changed)
+        return {n: float(value) for n, value in start.items()
+                if n not in changed and self._hands_moved({n}) & keep_hands}
 
     def _slowed(self, path):
         """A planned path as it is played (move_gripper stretches it to its speed fraction)."""

@@ -148,14 +148,31 @@ rule word.
 | Rule | Meaning |
 |---|---|
 | `auto` | The hands the target defines (a point with `left_tool` and `right_tool` uses both); for a held object, the hands that hold it. Default of `move_gripper` and `move_object`. |
-| `any_one` | One free hand that can take the target (`move_gripper` only). |
+| `any_one` | One hand: for `move_gripper` the free hand that can take the target (see below); for `grip` the one hand at an object point. |
 | `all` | Every hand. |
 
-`grip` takes `auto` and `all`; `move_object` and `set_posture` take `auto` (the holding hands) and `all`; `move_gripper` takes all three.
+`grip` and `move_gripper` take all three; `move_object` and `set_posture` take `auto` (the holding hands) and `all`.
+
+`move_gripper` with `any_one` chooses one hand, in this order:
+
+1. Only free hands count: a hand that holds an object is never chosen.
+2. Only hands the target can apply to: for a point, a hand with an `alone:` pose or a pose in the pair; for a named pose,
+   a hand the pose places; for `by` and `at`, every hand.
+3. Hands whose IK has a solution (the robot's `ik.choose` settings, no motion) come before those without.
+4. Of those, the hand with the least joint motion from where the arm is now.
+5. A tie goes to the first hand in the robot profile (`grippers` order), so the choice is repeatable.
+
+The chosen hand is in the message and in the result data (`data.hands`, plus `data.choice` with every candidate's
+motion or reason). If no hand can take the target the step is rejected with one reason per hand. `grip` with `any_one`
+takes the hand that is at an object point (closing, `opening`), or for `open` the one hand that holds something; with
+none or with both hands there it is rejected as ambiguous. `auto` on a point that only one free hand has a pose for (a
+single `right_tool`) means that hand.
 
 A one-hand step on a two-hand point uses the point's `alone:` poses. Closing hands at a point makes them hold the object,
 also one hand of a two-hand point; opening takes them out of the hold, and an object with no hands left is released.
 `move_object` keeps every holding hand locked to the object; `set_posture` defaults to the holding hands, else all.
+
+**The free arm moves while the other hand holds.** A hand that holds an object stays with it: `move_gripper` for that hand and `move_joints` on its arm joints (also as part of a whole-body pose or a `via`) are REJECTED, naming the holding hand. The other hand may `move_gripper`, `move_joints` its own arm group and `grip`; torso and head moves are allowed, and every hold follows them. The motion planner does not know the held object: the free arm's path is checked against the robot and the planning scene only, so the object itself is not avoided (objects have no collision shape in the config yet, `mesh` is the simulator's visual asset).
 
 ## The example cell
 
