@@ -32,7 +32,7 @@ override applies on top.
 
 | Skill | Purpose |
 |---|---|
-| [`move_gripper`](#move_gripper) | Move the gripper (TCP) of one or more hands to a target with nothing held: a point on a placed object (to.point, offset_m stops short along its approach), a named tool pose of this robot (to.pose), an offset from where the hands are now (to.by, with turn and tilt) or an absolute pose (to.at, one hand). |
+| [`move_gripper`](#move_gripper) | Move the gripper (TCP) of one or more hands to a target: a point on a placed object (to.point, offset_m stops short along its approach), a named tool pose of this robot (to.pose), an offset from where the hands are now (to.by, with turn and tilt) or an absolute pose (to.at, one hand). |
 | [`grip`](#grip) | Open or close the fingers of one or more hands, or set their opening in mm. |
 | [`move_joints`](#move_joints) | Move joint groups (torso, head, an arm) to a named joint pose or to given joint values and hold them. |
 | [`move_object`](#move_object) | Move the object held with the grippers (grip close at its point first) with the hands that hold it: every hand keeps its grip, locked in orientation and distance to the object. |
@@ -43,19 +43,18 @@ override applies on top.
 
 ## `move_gripper`
 
-Move the gripper (TCP) of one or more hands to a target with nothing held: a point on a placed object (to.point,
-offset_m stops short along its approach), a named tool pose of this robot (to.pose), an offset from where the hands
-are now (to.by, with turn and tilt) or an absolute pose (to.at, one hand). mode free: collision-free path in joint
-space (with a planner), the last approach_m of a point in a straight line; mode linear: the TCPs on straight lines.
-motion sets speed, elbow side, planner and the like; its defaults come from the skill, the robot and the point.
-Arriving at a point with no offset makes closing the grippers a grasp of that object. hands any_one picks one free
-hand that can take the target (IK-feasible first, then the least joint motion); the chosen hand is in the result
-(data.hands).
+Move the gripper (TCP) of one or more hands to a target: a point on a placed object (to.point, offset_m stops short
+along its approach), a named tool pose of this robot (to.pose), an offset from where the hands are now (to.by, with
+turn and tilt) or an absolute pose (to.at, one hand). mode free: collision-free path in joint space (with a planner),
+the last approach_m of a point in a straight line; mode linear: the TCPs on straight lines. motion sets speed, elbow
+side, planner and the like; its defaults come from the skill, the robot and the point. Arriving at a point with no
+offset makes closing the grippers a grasp of that object. A hand that holds an object stays with it (REJECTED, naming
+the hand); the free hand may move meanwhile.
 
 - Class: `taskweave_skills.gripper_motion:MoveGripper`
 - Default timeout: 60 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
 - Uses: `hands`, `torso`
-- Needs: the robot stands where the target is in reach (e.g. at the object's stance); no object held
+- Needs: the robot stands where the target is in reach (e.g. at the object's stance); the moving hands hold nothing
 - Achieves: gripper at the target
 
 ### Implementation and requires
@@ -81,7 +80,7 @@ implementations:
 | Argument | Type | Required | Default | Unit | Description |
 |---|---|---|---|---|---|
 | `to` | one of the variants below | yes | - | - | Where the gripper goes. |
-| `hands` | hands | no | - | - | Which hands: a hand name or a list of names; "auto": the hands the target defines (or, for a held object, the hands holding it); "any_one": one free hand that can take the target (move_gripper: an IK-feasible hand with the least joint motion, named in the result; grip: the one hand at an object point); "all": every hand. (rule words: `auto`, `any_one`, `all`) |
+| `hands` | hands | no | - | - | Which hands: a hand name or a list of names; "auto": the hands the target defines (or, for a held object, the hands holding it); "any_one": one free hand that can take the target; "all": every hand. (rule words: `auto`, `any_one`, `all`) |
 | `motion` | object (table below) | no | - | - | Options, see the table below. |
 
 ### `to` variants
@@ -182,8 +181,7 @@ Open or close the fingers of one or more hands, or set their opening in mm. Clos
 (move_gripper to.point with no offset) makes them hold that object, also one hand of a two-hand point; opening takes
 hands out of their hold, and a hold left with no hands is released. opening sets the finger gap (opening_mm) and
 leaves the holds alone. open with place_as records where the released object now is, as a placed object of that name
-(object state). Closing on an object takes it off its stack in the object state. hands any_one is the one hand at an
-object point (rejected if none or both).
+(object state). Closing on an object takes it off its stack in the object state.
 
 - Class: `taskweave_skills.gripper_motion:Grip`
 - Default timeout: 20 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
@@ -210,7 +208,7 @@ implementations:
 | Argument | Type | Required | Default | Unit | Description |
 |---|---|---|---|---|---|
 | `action` | one of `open`, `close`, `opening` | yes | - | - | open / close, or opening: go to opening_mm. |
-| `hands` | hands | no | - | - | Which hands: a hand name or a list of names; "auto": the hands the target defines (or, for a held object, the hands holding it); "any_one": one free hand that can take the target (move_gripper: an IK-feasible hand with the least joint motion, named in the result; grip: the one hand at an object point); "all": every hand. (rule words: `auto`, `any_one`, `all`) |
+| `hands` | hands | no | - | - | Which hands: a hand name or a list of names; "auto": the hands the target defines (or, for a held object, the hands holding it); "any_one": one free hand that can take the target; "all": every hand. (rule words: `auto`, `all`) |
 | `opening_mm` | number | no | - | mm | opening: required, the finger gap. close: stay this wide (default: the point's grip, else fully closed). open: open only this wide. (min 0; only with `action` = `opening` / `open` / `close`) |
 | `place_as` | string | no | - | - | With open: the released object is a placed object of this name now (object state). (only with `action` = `open`) |
 | `motion` | object (table below) | no | - | - | Options, see the table below. |
@@ -252,8 +250,9 @@ All optional (Motion (advanced)). Defaults are those of the skill yaml, the robo
 
 Move joint groups (torso, head, an arm) to a named joint pose or to given joint values and hold them. `only` restricts
 the move to some groups, `motion.via` passes waypoints first, `motion.speed` slows the step. With a motion planner the
-path avoids collisions; without one it is a straight joint-space move. While an object is held, moves of arm joints
-are refused; torso and head are allowed (the arms keep their joints and the object moves with them).
+path avoids collisions; without one it is a straight joint-space move. A hand that holds an object stays with it: a
+move of its arm joints is REJECTED, naming the hand. The other arm, torso and head may move (the holding arm keeps its
+joints and the object moves with it).
 
 - Class: `taskweave_skills.joint_motion:MoveJoints`
 - Default timeout: 60 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
@@ -367,7 +366,7 @@ implementations:
 |---|---|---|---|---|---|
 | `to` | one of the variants below | yes | - | - | Where the held object goes. |
 | `object` | string | no | - | - | Only needed when several objects are held: which one (placed-object name). (point kind `held_object`) |
-| `hands` | hands | no | - | - | Which hands: a hand name or a list of names; "auto": the hands the target defines (or, for a held object, the hands holding it); "any_one": one free hand that can take the target (move_gripper: an IK-feasible hand with the least joint motion, named in the result; grip: the one hand at an object point); "all": every hand. (rule words: `auto`, `all`) |
+| `hands` | hands | no | - | - | Which hands: a hand name or a list of names; "auto": the hands the target defines (or, for a held object, the hands holding it); "any_one": one free hand that can take the target; "all": every hand. (rule words: `auto`, `all`) |
 | `motion` | object (table below) | no | - | - | Options, see the table below. |
 
 ### `to` variants
@@ -485,7 +484,7 @@ implementations:
 |---|---|---|---|---|---|
 | `elbow` | one of `down`, `up`, `out`, `in`, `back`, `forward` | yes | - | - | The hands and any held object stay; the arms swing their elbows toward this side (robot frame, out = away from the body), as far as joint limits and collisions allow. |
 | `tolerance_deg` | number | no | - | deg | Fail if the elbows would stop further than this from the side (default: skill config elbow_tolerance_deg). (above 0) |
-| `hands` | hands | no | - | - | Which hands: a hand name or a list of names; "auto": the hands the target defines (or, for a held object, the hands holding it); "any_one": one free hand that can take the target (move_gripper: an IK-feasible hand with the least joint motion, named in the result; grip: the one hand at an object point); "all": every hand. (rule words: `auto`, `all`) |
+| `hands` | hands | no | - | - | Which hands: a hand name or a list of names; "auto": the hands the target defines (or, for a held object, the hands holding it); "any_one": one free hand that can take the target; "all": every hand. (rule words: `auto`, `all`) |
 | `motion` | object (table below) | no | - | - | Options, see the table below. |
 
 ### `motion` options

@@ -173,8 +173,9 @@ def test_a_hands_value_must_be_exactly_the_hands_of_the_hold(system):
     result, _ = move(system, {'by': [0, 0, 0.1]}, REJECTED, object='pile_1')
     assert result.message.startswith('pile_1 is not held')
     assert run(system, 'move_object', {'to': {'by': [0, 0, 0]}, 'hands': 'any_one'}).outcome == REJECTED
-    # a second object held by the right hand (put in the registry directly: move_gripper refuses while holding)
-    assert run(system, 'move_gripper', {'to': {'point': 'pile_1/rim'}, 'hands': ['right']}).outcome == REJECTED
+    # a second object held by the right hand (put in the registry directly): the free right hand could reach it,
+    # the left hand holds crate_1 and stays with it
+    assert run(system, 'move_gripper', {'to': {'point': 'pile_1/rim'}, 'hands': ['left']}).outcome == REJECTED
     system.hold.holds['pile_1'] = {'object': 'pile_1', 'point': 'pile_1/rim', 'hands': ['right'],
                                    'tcp_in_object': {'right': np.eye(4)}, 'object_in_base': np.eye(4)}
     result, _ = move(system, {'by': [0, 0, 0.1]}, REJECTED)

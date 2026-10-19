@@ -172,6 +172,8 @@ A one-hand step on a two-hand point uses the point's `alone:` poses. Closing han
 also one hand of a two-hand point; opening takes them out of the hold, and an object with no hands left is released.
 `move_object` keeps every holding hand locked to the object; `set_posture` defaults to the holding hands, else all.
 
+**The free arm moves while the other hand holds.** A hand that holds an object stays with it: `move_gripper` for that hand and `move_joints` on its arm joints (also as part of a whole-body pose or a `via`) are REJECTED, naming the holding hand. The other hand may `move_gripper`, `move_joints` its own arm group and `grip`; torso and head moves are allowed, and every hold follows them. The motion planner does not know the held object: the free arm's path is checked against the robot and the planning scene only, so the object itself is not avoided (objects have no collision shape in the config yet, `mesh` is the simulator's visual asset).
+
 ## The example cell
 
 The examples run against `docs/examples/cell`, a cell pack of its own: `taskweave check docs/examples/cell` works on it as it

@@ -15,8 +15,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-import numpy as np
-
 from taskweave_core import motion
 from taskweave_core.config.limits import arm_group_names, joint_groups, joint_limits, joint_problems
 from taskweave_core.config.schemas import motion_schema
@@ -65,8 +63,9 @@ class MoveJoints(_PoseMotion):
                    'them. `only` restricts the move to some groups, `motion.via` passes waypoints first, '
                    '`motion.speed` slows the step. With a motion planner the path avoids collisions; without one it '
                    'is a straight '
-                   'joint-space move. While an object is held, moves of arm joints are refused; torso and head are '
-                   'allowed (the arms keep their joints and the object moves with them).')
+                   'joint-space move. A hand that holds an object stays with it: a move of its arm joints is REJECTED, '
+                   'naming the hand. The other arm, torso and head may move (the holding arm keeps its joints and '
+                   'the object moves with it).')
     args_schema = _schema()
     needs = ['the motion path is free of obstacles']
     achieves = ['joints at the target']
@@ -96,8 +95,9 @@ class MoveJoints(_PoseMotion):
             return SkillResult.rejected(str(error))
         self._refresh_ik()
         holds = self.hold.held_all()
-        if holds and any(self._arm_joint_names(leg) for leg in legs):
-            return self._holding_refusal()
+        refusal = self._holding_refusal(joints={n for leg in legs for n in leg})
+        if refusal is not None:
+            return refusal
         self.hold.leave(list(self.hold.reached_hands()))   # the hands are no longer at an object point
         self._path_used, self._time_scale = 'direct', 1.0
         self.p = self._step_params(values)
@@ -111,13 +111,9 @@ class MoveJoints(_PoseMotion):
                 worst = max(worst, error)
         finally:
             self.p = self.base_p
-        for hold in holds:  # the arms kept their joints: each object moved with its hands (e.g. the lift)
-            tool = hold['hands'][0]
-            try:
-                tcp = self.hold.tcp_poses([tool])[tool]
-            except LookupError as error:
-                return SkillResult.failed(f'{label} reached, but where is the held object now? {error}')
-            self.hold.moved(tcp @ np.linalg.inv(hold['tcp_in_object'][tool]), hold['object'])
+        failed = self._follow_holds(holds, label)   # the torso may have moved: each object went with its hands
+        if failed is not None:
+            return failed
         stats = ctx.work.stats()
         data = {'hands': self._hands(legs), 'mode': 'free', 'path': self._path_used, 'max_error': round(worst, 4),
                 'speed': {**stats, 'scale': round(self._time_scale * stats['override_avg'] / 100.0, 4)}}
