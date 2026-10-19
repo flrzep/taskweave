@@ -228,8 +228,11 @@ class _JointSkill(Skill):
         if ik is not None:
             hands |= {tool for tool in ik.groups
                       if any(re.fullmatch(ik.joint_pattern.format(tool=tool), n) for n in touched)}
-        elif not groups:
-            hands |= {g.removesuffix('_arm') for g in names}
+        else:   # joints in no group (or no groups at all) cannot be told apart: any hand's arm may be among them
+            grouped = {n for members in groups.values() for n in members}
+            gripped = {g.get('joint') for g in (self.robot.data.get('grippers') or {}).values()}
+            if touched - grouped - gripped:
+                hands |= {g.removesuffix('_arm') for g in names}
         return hands
 
     def _holding_refusal(self, hands=(), joints=()):
