@@ -16,6 +16,8 @@ import time
 
 import numpy as np
 
+from taskweave_core.node_cache import for_node
+
 from .ik import quaternion, rpy_matrix
 
 POLL_S = 0.02   # wait for a scene answer in steps of this
@@ -43,9 +45,7 @@ class HoldCollision:
 
     @classmethod
     def for_node(cls, node, robot, hold) -> HoldCollision:
-        if id(node) not in cls._instances:
-            cls._instances[id(node)] = cls(node, robot, hold)
-        return cls._instances[id(node)]
+        return for_node(cls._instances, node, lambda n: cls(n, robot, hold))
 
     def __init__(self, node, robot, hold):
         self.node, self.robot, self.hold = node, robot, hold
