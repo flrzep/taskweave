@@ -38,7 +38,8 @@ def choose(hands: list[str], busy: dict[str, str], build, probe,
     ``hands``: the robot's hands in profile order. ``busy``: {hand: object} for hands in a hold. ``build(hand)``: the
     target for that hand alone, or a SkillResult (REJECTED) saying why it has none. ``probe(target)``: a ``Probe``.
     ``tolerance_rad``: motions this close to the least one are equal (the profile order then decides).
-    The report is {'chosen': hand, 'tolerance_rad', 'candidates': {hand: {'feasible', 'motion_rad', 'reason'}}}."""
+    The report is {'chosen': hand, 'tolerance_rad', 'candidates': {hand: {'feasible', 'motion_rad', 'repeatable',
+    'reason'}}}; every candidate has all four keys (motion_rad, repeatable None when not feasible)."""
     reasons: dict[str, str] = {}
     found: list[tuple[str, Any, Probe]] = []
     for hand in hands:
@@ -56,7 +57,8 @@ def choose(hands: list[str], busy: dict[str, str], build, probe,
             found.append((hand, target, result))
         else:
             reasons[hand] = result.reason or 'not reachable'
-    report = {'candidates': {hand: {'feasible': False, 'reason': why} for hand, why in reasons.items()}}
+    report = {'candidates': {hand: {'feasible': False, 'motion_rad': None, 'repeatable': None, 'reason': why}
+                             for hand, why in reasons.items()}}
     if not found:
         text = '; '.join(f'{hand}: {why}' for hand, why in reasons.items())
         return SkillResult.rejected(f'hands any_one: no hand can take it ({text})')
@@ -65,7 +67,7 @@ def choose(hands: list[str], busy: dict[str, str], build, probe,
     near = [item for item in steady if item[2].motion_rad <= least + tolerance_rad]   # profile order kept
     for hand, _, result in found:
         report['candidates'][hand] = {'feasible': True, 'motion_rad': float(result.motion_rad),
-                                      'repeatable': result.repeatable}
+                                      'repeatable': result.repeatable, 'reason': ''}
     report['chosen'], report['tolerance_rad'] = near[0][0], float(tolerance_rad)
     return near[0][1], report
 
