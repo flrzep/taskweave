@@ -65,8 +65,6 @@ needs no ROS nodes.
 ```bash
 cp -r ~/tw_ws/src/taskweave/docs/examples/cell ~/example_cell
 cp -r ~/tw_ws/src/taskweave/docs/examples/missions ~/example_cell/missions
-# ament installs the console scripts under lib/taskweave_core, which is not on PATH: add that folder
-export PATH="$PATH:$(ros2 pkg prefix taskweave_core)/lib/taskweave_core"
 taskweave check ~/example_cell
 ```
 

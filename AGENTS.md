@@ -31,9 +31,8 @@ mkdir -p ~/tw_ws/src && cd ~/tw_ws/src && git clone https://github.com/flrzep/ta
 cd ~/tw_ws && rosdep install --from-paths src -y --ignore-src
 colcon build && source install/setup.bash
 ```
-After the build `taskweave` is not on the PATH: ament installs console scripts under `lib/taskweave_core`, and colcon's
-ament_python build adds only its own environment hooks. Add `export PATH="$PATH:$(ros2 pkg prefix taskweave_core)/lib/taskweave_core"`,
-or use `python3 -m taskweave_core.cli` (same commands).
+After sourcing the install, `taskweave` is on the PATH (`taskweave_core/bin/taskweave`, a wrapper installed to `bin/`;
+the console scripts themselves sit in `lib/taskweave_core` for `ros2 run`). `python3 -m taskweave_core.cli` is the same command.
 `taskweave_skills` needs MoveIt messages (`moveit_msgs`) on the system; the task handler needs `jsonschema`, `pyyaml`,
 `numpy`.
 

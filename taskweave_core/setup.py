@@ -10,6 +10,7 @@ setup(
         ('share/ament_index/resource_index/packages', ['resource/' + PACKAGE]),
         ('share/' + PACKAGE, ['package.xml']),
         ('share/' + PACKAGE + '/launch', ['launch/taskweave.launch.py']),
+        ('bin', ['bin/taskweave']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

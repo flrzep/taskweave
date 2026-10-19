@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+"""taskweave CLI on the PATH (ament_python puts console scripts in lib/<pkg> for ros2 run)."""
+from taskweave_core.cli import entry
+
+raise SystemExit(entry())
