@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from taskweave_core.skill import SkillResult
+from taskweave_core.skill import Outcome, SkillResult
 
 
 @dataclass
@@ -44,6 +44,8 @@ def choose(hands: list[str], busy: dict[str, str], build, probe,
             continue
         target = build(hand)
         if isinstance(target, SkillResult):
+            if target.outcome is Outcome.FAILED:   # e.g. no TF: it is the same for every hand, not a refusal
+                return target
             reasons[hand] = target.message
             continue
         result = probe(target)

@@ -49,3 +49,8 @@ def test_motions_within_the_tolerance_are_equal_and_the_profile_order_decides():
     assert choose(['right', 'left'], {}, build, swapped.get, tolerance_rad=0.05)[1]['chosen'] == 'right'
     far = {'target_left': Probe(True, 1.3), 'target_right': Probe(True, 1.0)}
     assert choose(HANDS, {}, build, far.get, tolerance_rad=0.05)[1]['chosen'] == 'right'        # least motion
+
+
+def test_a_failed_target_is_passed_on_not_turned_into_a_refusal():
+    result = choose(HANDS, {}, lambda hand: SkillResult.failed('where is the robot? no TF'), lambda t: Probe())
+    assert result.outcome is Outcome.FAILED and result.message == 'where is the robot? no TF'
