@@ -49,8 +49,9 @@ turn and tilt) or an absolute pose (to.at, one hand). mode free: collision-free 
 the last approach_m of a point in a straight line; mode linear: the TCPs on straight lines. motion sets speed, elbow
 side, planner and the like; its defaults come from the skill, the robot and the point. Arriving at a point with no
 offset makes closing the grippers a grasp of that object. hands any_one picks one free hand that can take the target
-(IK-feasible first, then the least joint motion); the chosen hand is in the result (data.hands). A hand that holds an
-object stays with it (REJECTED, naming the hand); the free hand may move meanwhile.
+(IK-feasible first, then the least joint motion; motions within any_one_tolerance_rad count as equal, then the profile
+order); the chosen hand is in the result (data.hands, data.choice). A hand that holds an object stays with it
+(REJECTED, naming the hand); the free hand may move meanwhile.
 
 - Class: `taskweave_skills.gripper_motion:MoveGripper`
 - Default timeout: 60 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
