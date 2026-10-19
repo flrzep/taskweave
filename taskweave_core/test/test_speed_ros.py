@@ -158,3 +158,27 @@ def test_initial_parameter_value_is_what_startup_publishes(config_dir):
         client.create_subscription(SpeedOverride, names.SPEED_OVERRIDE, seen.append,
                                    QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         assert until(lambda: seen) and seen[0].percent == 35.0
+
+
+def test_one_request_can_leave_test_mode_and_raise_the_speed(system):
+    """Test mode is switched first, then the percent is clamped against the cap that now applies (none when off)."""
+    handler, _, client, seen, _ = system
+    request = SetSpeedOverride.Request
+    call(client, SetSpeedOverride, names.SET_SPEED_OVERRIDE, request(percent=80.0, test_mode=True, set_test_mode=True))
+    assert handler.speed.test_mode and handler.speed.percent == 50.0
+    response = call(client, SetSpeedOverride, names.SET_SPEED_OVERRIDE,
+                    request(percent=100.0, test_mode=False, set_test_mode=True))
+    assert response.ok and response.percent == 100.0
+    assert not handler.speed.test_mode and handler.speed.percent == 100.0
+    assert until(lambda: seen[-1].percent == 100.0 and not seen[-1].test_mode)
+    assert handler.get_parameter('speed_override_percent').value == 100.0
+
+
+def test_one_request_that_keeps_test_mode_on_is_clamped_to_the_cap(system):
+    handler, _, client, seen, _ = system
+    request = SetSpeedOverride.Request
+    call(client, SetSpeedOverride, names.SET_SPEED_OVERRIDE, request(percent=10.0, test_mode=True, set_test_mode=True))
+    response = call(client, SetSpeedOverride, names.SET_SPEED_OVERRIDE,
+                    request(percent=100.0, test_mode=True, set_test_mode=True))
+    assert response.ok and response.percent == 50.0 and handler.speed.test_mode
+    assert until(lambda: seen[-1].percent == 50.0 and seen[-1].test_mode)

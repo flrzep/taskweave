@@ -94,6 +94,25 @@ def test_test_mode_clamps_requests_to_the_cap():
     assert state.request(80.0)[2] == 80.0
 
 
+def test_one_request_can_leave_test_mode_and_raise_the_speed():
+    state = OverrideState()
+    state.request(10.0, test_mode=True)
+    ok, message, percent = state.request(100.0, test_mode=False)
+    assert ok and percent == 100.0 and not state.test_mode and 'clamped' not in message
+
+
+def test_one_request_that_keeps_test_mode_on_is_clamped():
+    state = OverrideState()
+    state.request(10.0, test_mode=True)
+    assert state.request(100.0, test_mode=True)[2] == 50.0 and state.test_mode
+
+
+def test_one_request_can_enter_test_mode_and_is_clamped_at_once():
+    state = OverrideState()
+    ok, message, percent = state.request(100.0, test_mode=True)
+    assert percent == 50.0 and state.test_mode
+
+
 def test_no_restore_over_a_change_during_the_run():
     state = OverrideState()
     state.request(test_mode=True, test_percent=20.0)
