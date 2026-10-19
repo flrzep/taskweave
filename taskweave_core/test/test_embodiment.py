@@ -103,3 +103,17 @@ def test_check_warns_about_an_ik_arm_without_an_elbow_description(config_dir, ca
     cli.check(str(config_dir))
     assert any(line.lstrip().startswith('warn') and 'left' in line and 'elbow' in line
                for line in capsys.readouterr().out.splitlines())
+
+
+def test_check_warns_about_arm_keys_taskweave_does_not_read():
+    """arms.<tool> is read for `elbow` and `swivel` only; the schema lets other keys through (a copy of an old profile
+    may carry group / tool_frame), so a typo would pass silently: check says it is ignored."""
+    from taskweave_core.embodiment import profile_warnings
+
+    elbow = {'shoulder': 'a', 'elbow': 'b', 'wrist': 'c'}
+    profile = {'arms': {'left': {'elbow': elbow, 'swivel': 'j3', 'tool_frame': 'left_tool'},
+                        'right': {'elbow': elbow, 'swivle': 'j3'}}}
+    found = profile_warnings(profile)
+    assert len(found) == 2 and 'arms.left.tool_frame' in found[0] and 'arms.right.swivle' in found[1]
+    assert 'elbow, swivel' in found[0] and 'ignored' in found[0]
+    assert profile_warnings({'arms': {'left': {'elbow': elbow, 'swivel': 'j3'}}}) == []
