@@ -222,6 +222,9 @@ class _JointSkill(Skill):
         groups = joint_groups(self.config, self.robot.name)
         names = arm_group_names(self.config, self.robot.name)
         hands = {g.removesuffix('_arm') for g in names if touched & set(groups.get(g, ()))}
+        for hand, gripper in (self.robot.data.get('grippers') or {}).items():   # a gripper joint is its hand's
+            if gripper.get('joint') in touched:
+                hands.add(hand)
         ik = getattr(self, 'ik', None)
         if ik is not None:
             hands |= {tool for tool in ik.groups
