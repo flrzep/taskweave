@@ -330,6 +330,10 @@ class IkClient:
             flip = allow_flip and self.choose is not None and self.tools[tool].get('flip')
             variants = [target, flipped(target)] if flip else [target]
             positions = {**(current or {}), **fixed, **result}
+            # a seed names the arm it solves; the other arms (the one holding an object) stay where they are now, so
+            # the collision check sees the real scene (arms solved earlier in this call override: ``result``)
+            others = {n: float(v) for n, v in (current or {}).items() if any(
+                re.fullmatch(self.joint_pattern.format(tool=t), n) for t in self.groups if t != tool)}
             continued, why = self._continue(tool, variants, positions)
             if continued is not None:  # the arm can get there as it is: no seed or search decides
                 chosen[tool] = continued
@@ -351,7 +355,7 @@ class IkClient:
                                                    f'({fallback[0][0]}): its answer is not repeatable')
                 for index, variant in enumerate(variants):
                     for group, seed, timeout_s in attempts:
-                        response = self._attempt(tool, group, variant, {**seed, **fixed, **result}, timeout_s,
+                        response = self._attempt(tool, group, variant, {**seed, **others, **fixed, **result}, timeout_s,
                                                  should_stop)
                         if response.error_code.val == SUCCESS:
                             candidates.append((index, self._arm(tool, response)))
