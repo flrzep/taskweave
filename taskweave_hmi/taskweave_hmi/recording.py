@@ -43,6 +43,7 @@ KEEP_FILE = '.keep'
 POST_TIMEOUT_S = 3600.0
 LIGHT_KEEP = 20  # light recordings kept (a few KB each): they only clutter the list
 END_STATES = ('succeeded', 'failed', 'aborted', 'idle')
+FINISH_PHASES = ('finishing', 'post-processing', 'done')  # after the recording itself: videos, bag, post-processing
 QUALITY = {'ray_trace': 'RAY_TRACE', 'path_trace': 'PATH_TRACE'}
 BAG_EXCLUDE = (r'.*/_action/.*|/rosout|/parameter_events|.*/transition_event|.*/bond|.*costmap_raw.*|.*_updates'
                r'|.*static_layer.*|/diagnostics|/behavior_tree_log|.*/preview/.*')
@@ -263,6 +264,8 @@ class Recorder:
             data['plan_ids'], data['events'] = list(rec['plan_ids']), len(rec['events'])
             data['active'] = self.active is not None
             data['ended'] = rec.get('ended')
+            # stop asked for or the end reached: what is left is finishing (minutes for long videos), Stop does nothing
+            data['stopping'] = bool(rec.get('stop')) or rec['phase'] in FINISH_PHASES
         folder = self.dir / data['id']
         data['video'] = read_json(folder / 'status.json')
         data['bytes'] = folder_size(folder)

@@ -5,7 +5,9 @@
 
 const rec = { open: new Set(), timer: null, missionsLoaded: false };
 const VIEW_NAMES = { fixed: 'Fixed view', follow: 'Following the robot', head_camera_color: 'Head camera',
-  head_camera_depth: 'Head camera depth (red near, blue far)' };
+  head_camera_depth: 'Head camera depth (red near, blue far)', left_wrist_camera_color: 'Left wrist camera',
+  left_wrist_camera_depth: 'Left wrist camera depth (red near, blue far)', right_wrist_camera_color: 'Right wrist camera',
+  right_wrist_camera_depth: 'Right wrist camera depth (red near, blue far)' };
 function videoName(file, id) {  // <id>_fixed.mp4 -> Fixed view; <id>_left_camera_color.mp4 -> left camera color
   const view = file.replace(/\.mp4$/, '').replace(`${id}_`, '');
   return VIEW_NAMES[view] || view.replace(/_/g, ' ');
@@ -61,21 +63,32 @@ async function refreshRecordings() {
   if (recVisible()) rec.timer = setTimeout(refreshRecordings, active ? 2000 : 10000);
 }
 
+// A stopped recording still running: what it is doing until it is done (encoding the sim's videos can take minutes).
+function finishingText(s) {
+  const v = s.video || {};
+  if (s.phase === 'post-processing') return 'stopped: camera videos from the bag (post-processing)';
+  if (s.phase === 'finishing' && v.state === 'encoding') return `stopped: the sim encodes its videos (${v.frames ?? '?'} frames)`;
+  if (s.phase === 'finishing') return 'stopped: finishing the videos and closing the bag';
+  return 'stopping…';
+}
+
 function renderRecStatus(s) {
   const active = !!s.active;
+  const finishing = active && !!s.stopping;
   const chip = $('rec-state');
   const failed = s.outcome && /error|failed|aborted/.test(s.outcome);
   const state = active ? 'running' : s.id ? (failed ? 'failed' : 'succeeded') : 'idle';
   chip.className = `chip ${state}`;
-  chip.textContent = active ? 'recording' : s.id ? 'finished' : 'idle';
+  chip.textContent = finishing ? 'finishing' : active ? 'recording' : s.id ? 'finished' : 'idle';
   $('rec-id').textContent = s.id || '';
   $('rec-title').textContent = !s.id ? 'Not recording'
     : `${s.options.mission || 'Free recording'}${active ? '' : ` — ${s.outcome || 'done'}`}`;
-  $('rec-stop').disabled = !active;
+  $('rec-stop').disabled = !active || finishing;
+  $('rec-stop').textContent = finishing ? 'Stopped: finishing…' : 'Stop recording';
   $('rec-start').disabled = active;
   show($('rec-now'), !!s.id);
   if (!s.id) return;
-  $('rec-phase').textContent = active ? s.phase : `ended after ${clock(s.wall_s)}`;
+  $('rec-phase').textContent = finishing ? finishingText(s) : active ? s.phase : `ended after ${clock(s.wall_s)}`;
   const v = s.video || {};
   const span = simSpan(v);
   const stats = [
@@ -178,7 +191,8 @@ $('rec-start').addEventListener('click', async () => {
 $('rec-stop').addEventListener('click', async () => {
   $('rec-stop').disabled = true;
   const r = await api('POST', '/api/recordings/stop');
-  message($('rec-msg'), r.ok ? 'stopping: the videos are encoded, then the bag is closed' : (r.data.error || (r.data.problems || []).join('\n')), !r.ok);
+  message($('rec-msg'), r.ok ? 'stopping: the sim encodes its videos, then the bag is closed and post-processed (can take minutes)'
+    : (r.data.error || (r.data.problems || []).join('\n')), !r.ok);
   refreshRecordings();
 });
 
