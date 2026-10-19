@@ -306,6 +306,17 @@ def test_a_hand_that_holds_something_is_refused(system):
     assert result.message.startswith('left holds box_1; right holds box_1: the hand and its arm stay with the object')
 
 
+def test_a_close_that_cannot_register_the_hold_fails(system):
+    go(system, {'to': {'point': 'box_1/rim'}})
+
+    def no_tf(_tools):
+        raise LookupError('no transform')
+    system.hold.tcp_poses = no_tf
+    result = run(system, 'grip', {'action': 'close'})
+    assert result.outcome == FAILED and 'hold not registered' in result.message
+    assert not system.hold.hand_holds
+
+
 def test_the_free_arm_moves_while_the_other_hand_holds(system):
     go(system, {'to': {'point': 'box_1/rim'}, 'hands': ['left'], 'motion': {'approach_m': 0}})
     assert run(system, 'grip', {'action': 'close', 'hands': ['left']}).outcome == OK

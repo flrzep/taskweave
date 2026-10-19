@@ -543,19 +543,23 @@ class Grip(_FingerMotion):
         if grip_m:
             message += ' (grip ' + ', '.join(f'{h} {value * 1000:.0f} mm' for h, value in grip_m.items()) + ')'
         if action == 'close':
-            message += self._close(hands, state)
+            text, unregistered = self._close(hands, state)
+            if unregistered:   # the fingers closed on the part, but no hold exists: later motions would ignore it
+                return SkillResult.failed(message + text, holding=holding, opening_mm=measured, hands=hands,
+                                          world_state=state)
+            message += text
         elif action == 'open':
             message += self._open(args, hands, state)
         else:
             holding = {hand: hand in self.hold.hand_holds for hand in hands}
         return SkillResult.succeeded(message, holding=holding, opening_mm=measured, hands=hands, world_state=state)
 
-    def _close(self, hands: list, state: dict) -> str:
-        """The registry after a close: hands at an object point hold that object."""
+    def _close(self, hands: list, state: dict) -> tuple[str, bool]:
+        """The registry after a close: hands at an object point hold that object. (message, hold not registered)."""
         try:
             grasped = self.hold.close_hands(hands)
         except LookupError as error:
-            return f'; hold not registered: where is the gripper? {error}'
+            return f'; hold not registered: where is the gripper? {error}', True
         message = ''
         for name, info in grasped.items():
             message += f'; {" and ".join(info["hands"])} hold {name}'
@@ -565,7 +569,7 @@ class Grip(_FingerMotion):
                     message += f'; {self.config.take_object(name)}'  # one off its stack (object state)
                 except (KeyError, ValueError) as error:
                     message += f'; object state not updated: {error}'
-        return message
+        return message, False
 
     def _place_as_refusal(self, args: dict, hands: list):
         """REJECTED if ``place_as`` (one name) would place several objects: more than one hold lets go whole."""
