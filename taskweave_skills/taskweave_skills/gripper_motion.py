@@ -295,30 +295,45 @@ class MoveGripper(_PointMotion):
         return target
 
     def _probe(self, args: dict, target: Target, ctx=None):
-        """Can IK put ``target``'s tool where it goes, and how far would the arm move? A solve with the profile's
-        choose settings and no motion (torso auto: also at the other lift heights, like the move itself)."""
+        """Can IK put ``target``'s tool where it goes, and how far would the arm (and the torso) move? Solves what the
+        move itself would: the via legs, the approach start, the target; with the profile's choose settings and no
+        motion (torso auto: also at the other lift heights, like the move itself). A straight line (mode linear) keeps
+        the lift and the pose's joints, so it is probed with neither."""
         from .hand_choice import Probe
         from .ik import IkError
 
         if self.ik is None or not target.tools:
             return Probe()
         m = motion.values(motion.resolve(self.config, self.robot.name, self.name, args, target.data))
-        torso = m.get('torso', 'keep') == 'auto' and self.lift_joint
-        lifts = [{**target.joints, self.lift_joint: float(v)} for v in self.lift_values] if torso else []
+        linear = m.get('mode', DEFAULT_MODE) == 'linear'
+        legs = self._via(m.get('via') or [], target)
+        if isinstance(legs, SkillResult):
+            return Probe(False, 0.0, legs.message)
+        approach = 0.0 if linear or not target.before else float(m.get('approach_m', 0.0))
+        goals = [(leg.tools, leg.joints) for leg in legs if leg.tools]
+        if approach > 0:
+            goals.append((target.before(approach), target.joints))
+        goals.append((target.tools, target.joints))
         self._refresh_ik()
         start = self._start()
         stop = (lambda: ctx.should_stop) if ctx is not None else (lambda: False)
-        first = None
-        for fixed in [target.joints, *lifts]:
-            try:
-                arm = self.ik.solve(target.tools, fixed, stop, current=start, elbow=m.get('elbow'))
-            except IkError as error:
-                first = first or error
-                continue
-            moved = sum(abs(value - start[name]) for name, value in arm.items() if name in (start or {}))
-            repeatable = not any(self.ik.last.get(tool, {}).get('global') for tool in target.tools)
-            return Probe(True, float(moved), repeatable=repeatable)
-        return Probe(False, 0.0, str(first))
+        for tools, joints in goals:
+            fixeds = [{} if linear else joints]
+            if m.get('torso', 'keep') == 'auto' and self.lift_joint and not linear:
+                fixeds += [{**joints, self.lift_joint: float(v)} for v in self.lift_values]
+            first = None
+            for fixed in fixeds:
+                try:
+                    arm = self.ik.solve(tools, fixed, stop, current=start, elbow=m.get('elbow'))
+                except IkError as error:
+                    first = first or error
+                    continue
+                break
+            else:
+                return Probe(False, 0.0, str(first))
+        moved = sum(abs(value - start[name]) for name, value in arm.items() if name in (start or {}))
+        repeatable = not any(self.ik.last.get(tool, {}).get('global') for tool in target.tools)
+        return Probe(True, float(moved), repeatable=repeatable)
 
     def _select(self, rule, defined, what: str):
         """The hands to move: ``rule`` (auto: all the target defines; all; names) among those ``defined``."""

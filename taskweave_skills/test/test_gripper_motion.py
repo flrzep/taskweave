@@ -74,12 +74,14 @@ class FakeIk(Node):
         super().__init__('fake_ik')
         self.requests, self.need_lift = [], None
         self.blocked = set()          # sides ('left', 'right') whose targets are out of reach
+        self.unreachable = None       # (side, xyz) -> True: that one flange target is out of reach
         self.create_service(GetPositionIK, '/compute_ik', self.ik)
 
     def ik(self, request, response):
         ik = request.ik_request
         start = dict(zip(ik.robot_state.joint_state.name, ik.robot_state.joint_state.position, strict=True))
         pose = ik.pose_stamped.pose
+        request_xyz = (pose.position.x, pose.position.y, pose.position.z)
         self.requests.append({'group': ik.group_name, 'xyz': (pose.position.x, pose.position.y, pose.position.z),
                               'q': (pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z),
                               'start': start})
@@ -87,6 +89,7 @@ class FakeIk(Node):
         response.solution.joint_state.name = [f'{side}_joint1', f'{side}_joint2']
         response.solution.joint_state.position = [pose.position.x, pose.position.z]
         reachable = self.need_lift is None or abs(start.get('lift', -1.0) - self.need_lift) < 1e-6
+        reachable = reachable and not (self.unreachable and self.unreachable(side, tuple(request_xyz)))
         response.error_code.val = 1 if reachable and side not in self.blocked else -31
         return response
 
@@ -628,6 +631,25 @@ def test_any_one_with_no_hand_able_is_rejected_with_a_reason_per_hand(system):
     assert 'right: pose present_left has no tool poses for right' in result.message
     system.ik.blocked = set()
     assert go(system, {'to': {'pose': 'present_left'}, 'hands': 'any_one'})[1]['hands'] == ['left']
+
+
+def far_from(goal):
+    return lambda side, xyz: side == 'left' and sum(abs(a - b) for a, b in zip(xyz, goal, strict=True)) > 0.02
+
+
+def test_any_one_probes_the_approach_start_and_the_via_legs(system):             # P3 M1
+    go(system, {**RIM, 'hands': ['left']})
+    goal = system.ik.requests[-1]['xyz']
+    system.ik.unreachable = far_from(goal)                  # left reaches the grasp itself, nothing else
+    park(system, 'left', 0.6, 0.35)
+    assert go(system, {**RIM, 'hands': 'any_one'})[1]['hands'] == ['left']
+    near = {'to': {'point': 'box_1/rim'}, 'hands': 'any_one'}
+    _, data = go(system, {**near, 'motion': {'approach_m': 0.2}})          # the pre-grasp is out of reach for left
+    assert data['hands'] == ['right']
+    assert data['choice']['candidates']['left']['feasible'] is False
+    park(system, 'left', 0.6, 0.35)
+    _, data = go(system, {**RIM, 'hands': 'any_one', 'motion': {'approach_m': 0, 'via': ['pose:present_both']}})
+    assert data['hands'] == ['right']                                      # left cannot reach the via pose either
 
 
 def test_a_holding_hand_is_never_chosen(system):
