@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>taskweave 3D viewer test</title>
+  <!-- For testing viewer3d.js against the real API (same origin); the HMI styles it in style.css. -->
+  <style>
+    html, body { margin: 0; height: 100%; font: 13px system-ui, sans-serif; }
+    #view { position: fixed; inset: 0; background: #eef0f3; --accent: #0000ff; }
+    .viewer3d-tools { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; }
+    .viewer3d-tools [aria-pressed="true"] { background: #cdd5ff; }
+    .viewer3d-note { align-self: center; color: #a33; }
+    .viewer3d-label { padding: 1px 4px; border-radius: 3px; background: #ffffffcc; white-space: nowrap; font-size: 11px; }
+    .viewer3d-label.active { color: var(--accent); font-weight: 600; }
+    #msg { position: fixed; left: 8px; bottom: 8px; padding: 2px 6px; background: #ffffffcc; }
+  </style>
+  <script type="importmap">
+  {"imports": {"three": "./vendor/three/three.module.min.js",
+               "three/addons/": "./vendor/three/addons/",
+               "three/examples/jsm/": "./vendor/three/addons/"}}
+  </script>
+</head>
+<body>
+  <div id="view"></div>
+  <div id="msg">loading</div>
+  <script type="module">
+    import { Viewer3D } from './viewer3d.js';
+
+    const msg = document.getElementById('msg');
+    const viewer = new Viewer3D(document.getElementById('view'));
+    viewer.onPick((hit) => { viewer.setHighlight(hit); msg.textContent = `${hit.kind}: ${hit.name}`; });
+    viewer.load().then(() => { msg.textContent = `model ${viewer.status.model}, scene ${viewer.status.scene}`; },
+      (error) => { msg.textContent = `failed: ${error}`; });
+    window.viewer = viewer;  // to try setGhost / focus from the console
+  </script>
+</body>
+</html>
