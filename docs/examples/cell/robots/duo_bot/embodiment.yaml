@@ -1,0 +1,9 @@
+name: duo_bot
+summary: Fixed test robot with a lift, two arms and two parallel grippers (IK by a fake MoveIt).
+capabilities: [base.fixed, torso.lift, arms.bimanual, gripper.parallel]
+arms:
+  left: {dof: 2, reach_m: 1.0, payload_kg: 1.0, tool: left}
+  right: {dof: 2, reach_m: 1.0, payload_kg: 1.0, tool: right}
+tools:
+  left: {type: parallel_gripper, stroke_m: 0.08, finger_length_m: 0.04}
+  right: {type: parallel_gripper, stroke_m: 0.08, finger_length_m: 0.04}
