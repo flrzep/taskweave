@@ -516,7 +516,9 @@ All optional (Motion (advanced)). Defaults are those of the skill yaml, the robo
 ## `navigate_to`
 
 Drive the robot base to a named location or stance and stop there, facing the stored heading. Direct path, no obstacle
-avoidance.
+avoidance. The Nav2 implementation (taskweave_skills.nav2:Nav2NavigateTo) plans around obstacles and drives its Nav2
+phase never slower than its param min_override (default 0.3): at a 10 % override Nav2 drives 30 %, the direct
+controller 10 %. The step result reports it as data.speed.nav2_override.
 
 - Class: `taskweave_skills.navigate:NavigateTo`
 - Default timeout: 120 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)

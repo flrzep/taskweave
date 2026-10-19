@@ -162,7 +162,9 @@ class SkillServer(Node):
         if not isinstance(result, SkillResult):
             result = SkillResult.failed(f'{skill.name}.execute returned {type(result).__name__}, not SkillResult')
         ctx.work_now()
-        result.data.setdefault('speed', ctx.work.stats())  # the override this step ran at (Record, smoke test)
+        speed = result.data.setdefault('speed', {})   # the override this step ran at (Record, smoke test)
+        for key, value in ctx.work.stats().items():   # a skill may add keys of its own (nav2_override)
+            speed.setdefault(key, value)
         return result
 
 

@@ -39,6 +39,13 @@ Parameters (``skills/navigate_to.yaml``): the direct controller's (see ``navigat
                                 (m/s^2, rad/s^2, same numbers as the Nav2 params). Not read back from the controller (it
                                 may still hold scaled values after a restart). Empty: accelerations are not touched
   min_accel_scale: 0.01         floor of o^2 on the accelerations (never zero)
+  min_override: 0.3             floor of the speed override for the Nav2 phase only (0 = no floor): the SpeedLimit,
+                                the accelerations (nominal x o^2) and the nominal_time allowances all use
+                                max(o, min_override). MPPI cannot do the fine final approach into a stance at 10 %
+                                (it stalled short of the goal); test mode at 10 % = arm motion 10 %, Nav2 drives
+                                30 %. Arms, torso, grippers, drive_straight and the direct controller after the
+                                handover follow the real override. The effective value is reported in the step
+                                result as data.speed.nav2_override (percent)
   nominal_time: {}              time allowances on the controller node (full names, no prefix), scaled by 1/o with
                                 the accelerations, e.g. {progress_checker.movement_time_allowance: 20.0}: at 10 % a
                                 drive takes 10x as long, so its stuck check waits 10x as long (unchanged at 100 %)
@@ -61,8 +68,16 @@ NAV2_DEFAULTS = {'action': 'navigate_to_pose', 'frame': 'map', 'server_timeout_s
                  'costmaps': '/global_costmap/global_costmap,/local_costmap/local_costmap',
                  'speed_limit_topic': '/speed_limit', 'speed_limit': True,
                  'controller_node': '/controller_server', 'controller_param_prefix': 'FollowPath',
-                 'nominal_accel': {}, 'min_accel_scale': 0.01, 'nominal_time': {}}
+                 'nominal_accel': {}, 'min_accel_scale': 0.01, 'nominal_time': {}, 'min_override': 0.3}
 POLL_S = 0.05
+
+
+def nav2_override(nav: dict, override: float) -> float:
+    """The override Nav2 is driven at (a fraction): ``max(override, min_override)``, and 1 when the speed limit is off
+    (Nav2 is then not slowed at all)."""
+    if not nav.get('speed_limit'):
+        return 1.0
+    return max(override, nav.get('min_override', 0.0))
 
 
 def nav2_parameters(navigation: dict, base: dict, controller: str = 'FollowPath', carrying: bool = False) -> dict:
@@ -238,9 +253,9 @@ class Nav2NavigateTo(NavigateTo):
         """Nav2's controller at the speed override: SpeedLimit as a percentage of its own limits (0 = no limit) and
         the accelerations at nominal x o^2. Sent when it changes (so a mid-drive override change is followed); the
         first call after start always sends (what Nav2 holds is unknown, e.g. after a restart during a slowed
-        drive), at 100 % as 'no limit' and the nominal accelerations. With speed_limit off only those are sent."""
-        if not self.nav.get('speed_limit'):
-            override = 1.0
+        drive), at 100 % as 'no limit' and the nominal accelerations. With speed_limit off only those are sent. The
+        override is floored at min_override (see the module doc)."""
+        override = nav2_override(self.nav, override)
         percent = min(100.0, round(100.0 * override, 1))
         self._scale_accel(percent)
         if percent == self._speed_sent:
@@ -304,6 +319,20 @@ class Nav2NavigateTo(NavigateTo):
         return True
 
     def execute(self, ctx, args):
+        self._nav2_min = None
+        result = self._navigate(ctx, args)
+        if self._nav2_min is not None:   # the Nav2 phase ran: say at what override
+            speed = result.data.setdefault('speed', {})
+            speed['nav2_override'] = round(100 * self._nav2_min, 1)
+        return result
+
+    def _nav2_limit(self, override: float) -> None:
+        """Nav2 follows the (floored) override; the lowest value of the phase goes into the step result."""
+        self._limit_speed(override)
+        effective = nav2_override(self.nav, override)
+        self._nav2_min = effective if self._nav2_min is None else min(self._nav2_min, effective)
+
+    def _navigate(self, ctx, args):
         if self.base['type'] == 'fixed':
             return SkillResult.rejected('robot base is fixed')
         target = self.config.base_target(args['target'], self.robot.name, self._current())
@@ -323,7 +352,7 @@ class Nav2NavigateTo(NavigateTo):
         self.remaining = math.nan
         clock = ctx.work_clock(self.p.override_slew_per_s)
         clock(ctx.now())
-        self._limit_speed(clock.o)
+        self._nav2_limit(clock.o)
         sent = self.client.send_goal_async(self._goal(target), feedback_callback=self._feedback)
         if not self._wait(ctx, sent):
             self.stop()
@@ -349,7 +378,7 @@ class Nav2NavigateTo(NavigateTo):
                 self.stop()  # close enough: the direct controller is faster and more precise than Nav2 here
                 return self._drive(ctx, target, args['target'])
             clock(ctx.now())
-            self._limit_speed(clock.o)
+            self._nav2_limit(clock.o)
             time.sleep(POLL_S)
         with self.goal_lock:
             self.goal_handle = None

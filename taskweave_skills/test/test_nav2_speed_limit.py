@@ -3,7 +3,7 @@ accelerations at nominal x o^2 through fake publishers and parameter clients. No
 
 from types import SimpleNamespace
 
-from taskweave_skills.nav2 import NAV2_DEFAULTS, Nav2NavigateTo
+from taskweave_skills.nav2 import NAV2_DEFAULTS, Nav2NavigateTo, nav2_override
 
 NOMINAL = {'ax_max': 2.0, 'ax_min': -2.0, 'az_max': 2.0}
 
@@ -41,7 +41,8 @@ class FakeLog:
 
 def skill(client=None, **nav):
     sent, log = [], FakeLog()
-    s = SimpleNamespace(nav={**NAV2_DEFAULTS, **nav}, _speed_sent=None, _accel_sent=None, _accel_warned=False,
+    s = SimpleNamespace(nav={**NAV2_DEFAULTS, 'min_override': 0.0, **nav}, _speed_sent=None, _accel_sent=None,
+                        _accel_warned=False,
                         speed_limit=SimpleNamespace(publish=sent.append), SpeedLimit=lambda **kw: kw, sent=sent,
                         accel_client=client, node=SimpleNamespace(get_logger=lambda: log), log=log,
                         SetParameters=__import__('rcl_interfaces.srv', fromlist=['SetParameters']).SetParameters)
@@ -136,3 +137,48 @@ def test_time_allowances_alone_create_the_parameter_requests():
     s = skill(client, nominal_time={'progress_checker.movement_time_allowance': 20.0}, nominal_accel={})
     limit(s, 0.25)
     assert client.requests == [{'progress_checker.movement_time_allowance': 80.0}]
+
+
+def test_the_floor_defaults_to_30_percent():
+    assert NAV2_DEFAULTS['min_override'] == 0.3
+
+
+def test_at_10_percent_nav2_drives_30_percent():
+    client = FakeClient()
+    nominal_time = {'progress_checker.movement_time_allowance': 20.0}
+    s = skill(client, min_override=0.3, nominal_accel=NOMINAL, nominal_time=nominal_time)
+    limit(s, 0.1)
+    assert s.sent == [{'percentage': True, 'speed_limit': 30.0}]
+    request = client.requests[0]
+    assert all(abs(request['FollowPath.' + k] - v * 0.09) < 1e-9 for k, v in NOMINAL.items())
+    assert abs(request['progress_checker.movement_time_allowance'] - 20.0 / 0.3) < 1e-9
+
+
+def test_at_50_percent_the_floor_does_not_matter():
+    client = FakeClient()
+    s = skill(client, min_override=0.3, nominal_accel=NOMINAL)
+    limit(s, 0.5)
+    assert s.sent == [{'percentage': True, 'speed_limit': 50.0}]
+    assert client.requests[0]['FollowPath.ax_max'] == 0.5
+
+
+def test_the_floor_is_configurable_and_zero_disables_it():
+    s = skill(min_override=0.5)
+    limit(s, 0.1)
+    assert s.sent[-1]['speed_limit'] == 50.0
+    s = skill(min_override=0.0)
+    limit(s, 0.1)
+    assert s.sent[-1]['speed_limit'] == 10.0
+
+
+def test_the_restore_to_no_limit_is_not_floored():
+    s = skill(min_override=0.3)
+    limit(s, 0.1)
+    limit(s, 1.0)
+    assert s.sent[-1] == {'percentage': True, 'speed_limit': 0.0}
+
+
+def test_nav2_override_reports_the_effective_value():
+    assert nav2_override({'min_override': 0.3, 'speed_limit': True}, 0.1) == 0.3
+    assert nav2_override({'min_override': 0.3, 'speed_limit': True}, 0.8) == 0.8
+    assert nav2_override({'min_override': 0.3, 'speed_limit': False}, 0.1) == 1.0   # Nav2 not slowed at all

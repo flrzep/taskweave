@@ -197,6 +197,11 @@ ros2 service call /taskweave/task_handler/set_speed_override taskweave_interface
 ros2 param set /task_handler speed_override_percent 50.0              # same path as the service
 ```
 
+Test mode at 10 % means arm motion at 10 % while Nav2 drives at 30 %: the Nav2 implementation of `navigate_to` floors
+the override for the Nav2 phase at its param `min_override` (default 0.3, `skills/navigate_to.yaml`; MPPI cannot do the
+fine final approach into a stance at 10 %). Arms, torso, grippers, `drive_straight` and the direct controller after the
+handover follow the real override. The step result reports the value as `data.speed.nav2_override` (percent).
+
 `percent: 0` leaves the value unchanged. Handler parameters `speed_test_percent` (default 10) and `speed_cap_percent`
 (default 50) set the test mode values. A base driven by Nav2 needs the `speed_gate` node between the planner and the
 base (`ros2 run taskweave_core speed_gate`).

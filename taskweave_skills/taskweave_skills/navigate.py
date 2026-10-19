@@ -126,7 +126,10 @@ def command(pose: Pose2D, target: Pose2D, base_type: str, p: Params, previous: t
 class NavigateTo(Skill):
     name = 'navigate_to'
     description = ('Drive the robot base to a named location or stance and stop there, '
-                   'facing the stored heading. Direct path, no obstacle avoidance.')
+                   'facing the stored heading. Direct path, no obstacle avoidance. The Nav2 implementation '
+                   '(taskweave_skills.nav2:Nav2NavigateTo) plans around obstacles and drives its Nav2 phase '
+                   'never slower than its param min_override (default 0.3): at a 10 % override Nav2 drives '
+                   '30 %, the direct controller 10 %. The step result reports it as data.speed.nav2_override.')
     args_schema = {
         'type': 'object',
         'required': ['target'],

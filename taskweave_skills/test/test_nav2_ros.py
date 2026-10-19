@@ -91,6 +91,7 @@ def system(tmp_path):
         wait_until(lambda: sim.pub.get_subscription_count() > 0, what='the skill server to subscribe to the odometry')
         wait_until(lambda: skill.client.server_is_ready(), what='the Nav2 action server')
         nav2.skill = skill
+        client.taskweave_server = server
         yield sim, nav2, client
 
 
@@ -141,3 +142,27 @@ def test_the_first_drive_after_a_restart_clears_a_limit_nav2_may_still_hold(syst
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     wait_until(lambda: received, what='the speed limit message')
     assert received and received[0].percentage and received[0].speed_limit == 0.0
+
+
+def test_at_10_percent_nav2_drives_30_and_the_direct_controller_stays_at_10(system):
+    """The Nav2 override floor: Nav2 gets 30 %, the handover to the direct controller follows the real 10 %."""
+    from nav2_msgs.msg import SpeedLimit
+    from rclpy.qos import DurabilityPolicy, QoSProfile
+
+    from taskweave_interfaces.msg import SpeedOverride
+
+    sim, nav2, client = system
+    received, top = [], []
+    client.create_subscription(SpeedLimit, '/speed_limit', received.append, 10)
+    wait_until(lambda: nav2.skill.speed_limit.get_subscription_count() > 0, what='the speed limit subscription match')
+    publisher = client.create_publisher(SpeedOverride, names.SPEED_OVERRIDE,
+                                        QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+    publisher.publish(SpeedOverride(percent=10.0, cap_percent=50.0, test_percent=10.0))
+    wait_until(lambda: client.taskweave_server.speed.fraction() == pytest.approx(0.1), what='the 10 % override')
+    sim.create_timer(0.02, lambda: top.append(abs(sim.cmd.linear.x)))   # the direct controller's commands
+    result = run(client, 'dock', timeout_s=60.0)
+    assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
+    assert [m.speed_limit for m in received if m.speed_limit][:1] == [30.0]
+    assert max(top) <= 0.6 * 0.1 + 1e-6                                   # max_linear 0.6 x the real 10 %
+    speed = json.loads(result.data_json)['speed']
+    assert speed['nav2_override'] == 30.0 and 'override_min' in speed

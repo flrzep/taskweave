@@ -56,6 +56,14 @@ Pick `abort` for steps whose failure leaves the robot in an unknown state (holdi
 harmless ones (a final drive home). Use `replan_from` to restart from a safe point: the step that drives to the
 object, not the one that grasps it.
 
+### Speed override and test mode
+
+The global speed override (README, "Speed override and test mode") scales every skill and, by 1/override, the step
+timeouts. One exception: the Nav2 phase of `navigate_to` never drives slower than its param `min_override` (default 0.3,
+set it in `skills/navigate_to.yaml`), because Nav2's controller cannot do the fine final approach into a stance at 10 %.
+So test mode at 10 % = arm motion 10 %, Nav2 drives 30 %. The direct controller after the handover, `drive_straight`,
+arms, torso and grippers follow the real override. The step result shows the Nav2 value as `data.speed.nav2_override`.
+
 ## Params, facts and placeholders
 
 A `{name}` in a string of a step (`instruction` or any argument, at any depth) is a **placeholder**. It is filled from
