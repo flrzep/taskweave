@@ -65,14 +65,15 @@ needs no ROS nodes.
 ```bash
 cp -r ~/tw_ws/src/taskweave/docs/examples/cell ~/example_cell
 cp -r ~/tw_ws/src/taskweave/docs/examples/missions ~/example_cell/missions
-# the entry point of taskweave_core is not on the PATH (ament installs scripts under lib/); a function is enough:
-taskweave() { ros2 run taskweave_core taskweave "$@"; }
+# ament installs the console scripts under lib/taskweave_core, which is not on PATH: add that folder
+export PATH="$PATH:$(ros2 pkg prefix taskweave_core)/lib/taskweave_core"
 taskweave check ~/example_cell
 ```
 
 It lists every file as `ok`, `warn` or an error; exit code 0 means the pack is valid. The two `warn` lines about a
-missing elbow description of `duo_bot` are expected (the neutral test robot has none). (Define the `taskweave` function in every shell
-that uses it; `ros2: command not found` means `~/tw_ws/install/setup.bash` is not sourced. The checkout's own copy,
+missing elbow description of `duo_bot` are expected (the neutral test robot has none). (Add the PATH line in every shell
+that uses it; `python3 -m taskweave_core.cli` (after sourcing the workspace) runs the same commands; `ros2: command not
+found` means `~/tw_ws/install/setup.bash` is not sourced. The checkout's own copy,
 `taskweave check ~/tw_ws/src/taskweave/docs/examples/cell`, works too.)
 
 ## 6. Start taskweave with the example cell
@@ -90,7 +91,7 @@ trusted network address only). Without a robot, a simulator or controllers, what
 - a mission made of `wait` steps runs and shows its status;
 - `taskweave status`, `describe`, `skills`, the speed override and pause / resume / abort work.
 
-In a second terminal (sourced the same way, same `ROS_DOMAIN_ID`, the `taskweave` function defined):
+In a second terminal (sourced the same way, same `ROS_DOMAIN_ID`, the PATH line added):
 
 ```bash
 taskweave skills

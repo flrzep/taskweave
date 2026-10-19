@@ -183,7 +183,9 @@ ros2 launch taskweave_bringup taskweave_bringup.launch.py config_dir:=/path/to/c
 
 Nav2's tuning (MPPI, costmap layers) is the packaged `taskweave_bringup/config/nav2_params.yaml`; a robot pack's or the
 cell pack's `robots/<robot>/nav2_params.yaml` replaces it, as a whole file or as `~override: keys` over it.
-`taskweave` below is `ros2 run taskweave_core taskweave`.
+`taskweave` below is the console script `taskweave_core` installs under `lib/taskweave_core`: add that folder to PATH
+(`export PATH="$PATH:$(ros2 pkg prefix taskweave_core)/lib/taskweave_core"`), or use `ros2 run taskweave_core taskweave`
+with the same arguments. `python3 -m taskweave_core.cli` is the module form of the same command.
 
 ```bash
 taskweave check /path/to/cell            # validate all config files offline (no ROS graph needed)

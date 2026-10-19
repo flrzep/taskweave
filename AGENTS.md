@@ -31,6 +31,9 @@ mkdir -p ~/tw_ws/src && cd ~/tw_ws/src && git clone https://github.com/flrzep/ta
 cd ~/tw_ws && rosdep install --from-paths src -y --ignore-src
 colcon build && source install/setup.bash
 ```
+After the build `taskweave` is not on the PATH: ament installs console scripts under `lib/taskweave_core`, and colcon's
+ament_python build adds only its own environment hooks. Add `export PATH="$PATH:$(ros2 pkg prefix taskweave_core)/lib/taskweave_core"`,
+or use `python3 -m taskweave_core.cli` (same commands).
 `taskweave_skills` needs MoveIt messages (`moveit_msgs`) on the system; the task handler needs `jsonschema`, `pyyaml`,
 `numpy`.
 
@@ -122,6 +125,44 @@ change. Launch files go to `share/<name>/launch` through `data_files` in `setup.
    ```
    The tests fail on a stale `docs/skills.md`. Without ROS the import fails with a missing `rclpy` or `moveit_msgs`.
 
+   `docs/examples/skill_steps.yaml` (no schema file; `test_docs_examples.py` and `tools/gen_skills_doc.py` read it):
+   - top level: one key per skill, the skill's name; its value is the list of example steps, in the order shown.
+   - each step: `instruction` (required; the text the reference shows), `skill` (required; must equal the key), `args`
+     (checked against the skill's `args_schema`, with the robot's hands filled in).
+   - mission-step keys are allowed too: `id`, `timeout_s`, `retries`, `on_failure` (`retry | replan | skip | abort`),
+     `replan_from`, `max_replans` (the `STEP` schema in `taskweave_core/taskweave_core/config/schemas.py`). `include` and
+     `with` are not (a step with `include` is not a skill call).
+   - the test builds a one-step mission from each step and runs `validate_plan` against `docs/examples/cell`.
+
+### Robot capabilities (`embodiment.CAPABILITIES`)
+The words of a robot's `embodiment.yaml` `capabilities` and of a skill implementation's `requires.capabilities`
+(`taskweave_core/taskweave_core/embodiment.py`; the schemas take their enum from it, so an unknown word is rejected).
+An implementation fits a robot when every `requires` word is in its embodiment (`embodiment.match`, which also checks
+`requires.embodiments`, `action_space` and `cameras`).
+
+| Capability | Meaning |
+|---|---|
+| `base.holonomic` | base translates in any direction and rotates |
+| `base.differential` | base drives forward/backward and rotates |
+| `base.fixed` | base does not move |
+| `torso.lift` | torso height can change |
+| `torso.pitch` | torso can lean forward |
+| `head.pan_tilt` | head camera can be pointed |
+| `arms.single` | one manipulator arm |
+| `arms.bimanual` | two manipulator arms that can work together |
+| `gripper.parallel` | parallel two-finger gripper |
+| `gripper.suction` | suction gripper |
+| `hand.dexterous` | multi-finger hand |
+| `camera.head.rgb` | colour camera on the head or body |
+| `camera.head.rgbd` | colour and depth camera on the head or body |
+| `camera.wrist.rgb` | colour camera on a wrist or tool |
+| `camera.wrist.rgbd` | colour and depth camera on a wrist or tool |
+| `lidar.2d` | planar laser scanner |
+| `lidar.3d` | 3D lidar |
+
+The base word must be the one for the profile's `base.type` (`embodiment.check_profile`; `taskweave check` reports a
+mismatch, and a second base word is a contradiction too).
+
 ### Add a robot pack
 A pack is a folder `taskweave_robots/<robot>/`. The packs are data only: nothing about a cell (stances, held poses,
 object points belong to the cell pack).
@@ -157,6 +198,23 @@ object points belong to the cell pack).
    `taskweave check <cell>`, `taskweave describe <cell> <robot>` and `taskweave config files <cell> <robot>`.
    `docs/examples/cell` is a ready cell (robot `duo_bot` inside it): `taskweave check docs/examples/cell`.
 
+### Start MoveIt for IK (a robot pack with `moveit/`)
+1. The MoveIt files go in `taskweave_robots/<robot>/moveit/` (a cell's `robots/<robot>/moveit/` wins over it):
+   `robot.urdf` (its presence turns move_group on; `meshes/` is referenced as `filename="meshes/..."` and made absolute
+   at launch), `robot.srdf` (the planning groups, one per arm, and the disabled collision pairs), `kinematics.yaml` (the
+   IK solver per group, `robot_description_kinematics`), `joint_limits.yaml` (optional: speeds and accelerations that
+   planned trajectories are timed with). `taskweave_robots/galbot_s1/moveit/` is a complete example.
+2. The profile's `ik:` section names the groups: `groups: {<tool>: <planning group>}`, `joints: '{tool}_joint[1-7]'` (the
+   joints IK may command). Optional: `service` (default `/compute_ik`), `timeout_s`, `seeds`, `avoid_collisions`,
+   `choose` (see `taskweave_skills/taskweave_skills/ik.py`).
+3. Start it: `ros2 launch taskweave_bringup taskweave_bringup.launch.py config_dir:=<cell> robot:=<robot> moveit:=true`,
+   or alone `ros2 launch taskweave_bringup taskweave_moveit.launch.py config_dir:=<cell> robot:=<robot>` (its
+   `use_sim_time` defaults to true; `use_sim_time:=false` on hardware). `taskweave_bringup/taskweave_bringup/moveit.py`
+   builds the parameters. move_group respawns on exit.
+4. move_group serves `/compute_ik` (the `ik` skills call it) and `/check_state_validity`. It has no MoveIt controllers
+   (`allow_trajectory_execution: False`): taskweave's joint skills execute the motion. Check with
+   `ros2 service list | grep -E "compute_ik|check_state_validity"`, on the robot's own ROS domain.
+
 ### Add a cell pack (an application's config)
 1. `pack.yaml` with `name`, `version`, `schema_version: 3`; `system.yaml` with `robot_packs: [..]` if packs live outside
    the install.
@@ -169,12 +227,31 @@ object points belong to the cell pack).
    is the 2 to 3 step alone).
    Check: `taskweave check <cell>`. Details: [docs/configuration.md](docs/configuration.md).
 
+### Add a skill to a live cell
+1. Copy the shipped template `docs/examples/skills/<skill>.yaml` (every shipped skill has one) to `<cell>/skills/<skill>.yaml`.
+   `implementations` is a list of `{name, type: script | vla | rl | other, class: "module:Class", requires: {capabilities,
+   embodiments, cameras, action_space}, params}`; the skill server serves the first one that fits the robot. Other
+   top-level keys (`speed`, `tolerances`, `motion`, ...) are shared by all implementations and read by the skill.
+2. It is served only when its name is in the skill server's `skills:=` launch argument (the list in README "Usage").
+3. What checks it: `taskweave check <cell>` validates the file against `SKILL_PARAMS` in
+   `taskweave_core/taskweave_core/config/schemas.py` (an implementation rejects unknown keys, a bad `type` or `class`) and
+   imports every class (`cli._importable`). `taskweave describe <cell> <robot>` lists the skill, or the reasons its
+   `requires` do not fit. It does not check the skill's arguments (see "Write a mission").
+4. Restart: the skill server reads `skills/<skill>.yaml` when it starts, so a new or changed file needs a restart of the
+   node that serves it (on the live rig, `frame-ros`, after the rules in CLAUDE.md). A build that predates a new key
+   rejects the file, so deploy the code first and the config after (rule 4). The launch log prints `ERROR ... not served`
+   for a skill whose file is missing or whose `requires` the robot cannot meet.
+
 ### Write a mission
 See [docs/missions.md](docs/missions.md). Put it in `<cell>/missions/<name>.yaml`. Validate in layers:
 - `taskweave check <cell>` (offline) checks file schemas, robot/embodiment consistency, skill yamls and that every mission
   expands. It does **not** check skill arguments, nor whether a point, contact, stance or pose a step names exists:
   those need the skills' argument schemas.
 - The HMI editor and the task handler check them against the live skill catalog before a start.
+- To catch a misspelt point, contact, stance or pose name before anything moves: start the skills and read the refusal
+  (`taskweave run <mission>` prints `rejected:` with the reason; the HMI editor shows it too). Offline, the test
+  `taskweave_skills/test/test_docs_examples.py` shows the Python check: `validate_plan(plan, catalog(store), store)` with
+  the catalog built from the skill classes.
 - A test does the same offline: `test_docs_examples.py` builds the catalog from the skill classes and runs
   `validate_plan` on every example. Add a mission that teaches something to `docs/examples/missions/` and to the list in
   that test (the docs must show it verbatim); it runs against `docs/examples/cell` (robot `duo_bot`, a copy of the
