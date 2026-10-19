@@ -1,5 +1,5 @@
 # What the Galbot S1 is and can do. No topics or joint names (see profile.yaml).
-# "~" = not measured yet (never guessed). Geometry from the galbot-usds asset (reference/galbot_s1_model.json, 9 Oct),
+# "~" = not measured yet (never guessed). Geometry from the galbot-usds asset (reference/galbot_s1_model.json, relative to the simulator workspace root, 9 Oct),
 # about +-1 cm; payload and gripper stroke need the datasheet or a measurement in the sim.
 name: galbot_s1
 summary: >-

@@ -21,6 +21,7 @@ from taskweave_core.validation import validate_plan
 ROBOTS = Path(__file__).resolve().parents[1]
 PACKS = sorted(p.parent.name for p in ROBOTS.glob('*/pack.yaml'))
 PACK_CONTENT = set(packs.ROBOT_PACK_FILES) | {packs.PACK_FILE}
+NOTE = 'LICENSE-NOTE.md'                  # the licence note every pack carries (vendor-derived data)
 
 
 def pack_folders(root: Path) -> list[str]:
@@ -118,8 +119,13 @@ def test_stray_folders_are_not_packs(tmp_path):
 
 
 @pytest.mark.parametrize('robot', PACKS)
+def test_every_pack_has_a_licence_note(robot):
+    assert (ROBOTS / robot / NOTE).is_file(), f'{robot}/{NOTE} missing (vendor-derived data: internal use only)'
+
+
+@pytest.mark.parametrize('robot', PACKS)
 def test_a_pack_holds_only_robot_files(robot):
-    extra = {p.name for p in (ROBOTS / robot).iterdir()} - PACK_CONTENT
+    extra = {p.name for p in (ROBOTS / robot).iterdir()} - PACK_CONTENT - {NOTE}
     assert not extra, f'{robot}: not robot pack files: {sorted(extra)} (cell-specific files belong to the cell pack)'
 
 

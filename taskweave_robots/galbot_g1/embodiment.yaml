@@ -1,5 +1,5 @@
 # What the Galbot G1 is and can do. No topics or joint names (see profile.yaml).
-# "~" = not measured yet (never guessed). Geometry from the Isaac 6.1 asset (reference/galbot_g1_model.json, 8 Oct),
+# "~" = not measured yet (never guessed). Geometry from the Isaac 6.1 asset (reference/galbot_g1_model.json, relative to the simulator workspace root, 8 Oct),
 # about +-1 cm; payload needs the datasheet.
 name: galbot_g1
 summary: >-

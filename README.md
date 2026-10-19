@@ -118,7 +118,8 @@ examples, common errors) and [docs/skills.md](docs/skills.md) (every skill and i
   `objects/`, `missions/`, `skills/`, and per robot `robots/<model>/` with its stances, held poses and object points.
 - A **robot pack** holds one robot model and nothing about a cell: `profile.yaml` (how the hardware is reached),
   `embodiment.yaml` (what it can do), poses, navigation, MoveIt files. `taskweave_robots` ships the bundled ones and
-  installs them to `share/taskweave_robots/`.
+  installs them to `share/taskweave_robots/`. The bundled `galbot_s1`, `galbot_g1` and `a2d` packs are vendor-derived and
+  internal use only: see each pack's `LICENSE-NOTE.md`.
 - A cell file overrides the robot pack's file key by key (`~override: keys`), so one robot model serves many cells.
   Layout, search order and migration: [docs/configuration.md](docs/configuration.md).
 

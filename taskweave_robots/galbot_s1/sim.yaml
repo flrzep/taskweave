@@ -2,7 +2,7 @@
 # copied to assets/galbot/Galbot_S1 (default variants: SteeringChassis, Arms with Ge103In grippers, PhysX).
 # Its sensor layer references FaSim sensor files that are not in the repo (mid360, d435), so those mounts are empty
 # and the cameras below are added instead.
-asset_file: assets/galbot/Galbot_S1/Galbot_S1.usda   # relative to the frame-sim workspace
+asset_file: assets/galbot/Galbot_S1/Galbot_S1.usda   # relative to the simulator workspace root (docs/configuration.md, Simulator data)
 prim: Galbot_S1                 # referenced at /World/Robot/<prim>
 root_joint: root_joint          # floating base: created, and the articulation root moved onto it
 create_root_joint: true
@@ -31,7 +31,7 @@ start_joints:                   # the robot starts in poses.yaml home on every P
   right_joint7: -0.8119
 joint_limits:                   # 15 Oct (user): arm joints opened to +-180 deg for now, to try motions the real S1
                                 # cannot do (e.g. joint 6 is +-45 deg). Same in moveit/robot.urdf; the real
-                                # limits are in the vendor asset (reference/galbot_s1_model.json). Remove both to undo.
+                                # limits are in the vendor asset (reference/galbot_s1_model.json, relative to the simulator workspace root). Remove both to undo.
   left_joint1: [-3.1416, 3.1416]
   left_joint2: [-3.1416, 3.1416]
   left_joint3: [-3.1416, 3.1416]
@@ -50,7 +50,7 @@ deactivate:                  # the asset's own ROS graphs (joint states, odometr
   - Graph                       # /cmd_vel) would duplicate ours: ros_graphs.py and base_controller.py
   - SteeringChassis/Graph
 cameras:                        # mount = pose of the camera body in the parent link frame (USD camera: -z forward).
-                                # Zero-pose frames (reference/galbot_s1_model.json): head_link2 x = world X,
+                                # Zero-pose frames (reference/galbot_s1_model.json, relative to the simulator workspace root): head_link2 x = world X,
                                 # y = world Z, z = -world Y; left/right_link7 -x = approach, +z = finger side.
   head_camera:                  # in front of the face plate (head meshes end 0.16 m ahead), forward and 20 deg down
     model: d435

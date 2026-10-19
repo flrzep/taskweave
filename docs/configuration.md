@@ -132,6 +132,19 @@ meets another: a hook plate on a frame, the hook it hangs on. Their z axis is th
 engage (down onto a hook). `move_object {to: <instance>/<contact>, contact: <held object's contact>, offset_m}` puts the
 held object's contact onto the placed one's, `offset_m` short of it against that direction.
 
+## Simulator data
+
+`sim.yaml` and `pose_targets.yaml` are inputs of the simulator integration and of the pose solver, not of taskweave:
+taskweave loads them as YAML and checks nothing else. Some of their values are paths into a simulation workspace:
+`asset_file` in `galbot_s1/sim.yaml` and `model` in each `pose_targets.yaml` (the comments also cite the `reference/*.json`
+geometry files). These are resolved relative to the **simulator workspace root**, which the simulator integration provides
+(for example through an environment variable such as `TASKWEAVE_SIM_ROOT`), never relative to the robot pack. A robot pack
+therefore does not change when the simulation workspace moves; only the simulator's root does. Other simulator keys follow
+the simulator's own conventions (for example `galbot_g1/sim.yaml` `asset`, relative to the scene's assets root).
+
+taskweave itself does not read `asset_file` or `model`: no code in this repository does, so the packs validate without any
+simulation workspace.
+
 ## Robot profile
 
 ```yaml

@@ -1,7 +1,7 @@
 # Input for tools/solve_poses.py galbot_g1 -> poses.yaml. TCP targets in base_link coordinates (x forward, z up);
 # approach = TCP z, closing = TCP y. "fixed" joints are set, not solved: the leg values keep the torso upright
 # (leg_joint2 = leg_joint1 + leg_joint3) with the shoulders at a given height above base_link.
-model: reference/galbot_g1_model.json
+model: reference/galbot_g1_model.json   # relative to the simulator workspace root
 base_link: base_link
 arm_joints: '{side}_arm_joint[1-7]'
 legs:                             # shoulder height above base_link -> leg joints (FK on the model, torso upright)

@@ -13,7 +13,7 @@ drives:                         # drive overrides by joint name (USD units: angu
   left_gripper_joint:  {stiffness: 100.0, damping: 10.0, max_force: 50.0}   # gripper drives (k 10, 5 Nm)
   right_gripper_joint: {stiffness: 100.0, damping: 10.0, max_force: 50.0}   # reach 0.87 of 1.7 rad in 4 s
 cameras:                        # mount = pose of the camera body in the parent link frame (USD camera: -z forward).
-                                # Zero-pose frames (reference/galbot_g1_model.json): head_link2 x = world X,
+                                # Zero-pose frames (reference/galbot_g1_model.json, relative to the simulator workspace root): head_link2 x = world X,
                                 # y = -world Z, z = world Y; left/right_arm_link7 -x = approach, y = closing.
   head_camera:                  # front face of the head, looking forward and 20 deg down
     model: d435

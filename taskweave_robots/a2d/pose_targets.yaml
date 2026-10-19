@@ -1,6 +1,6 @@
 # Input for tools/solve_poses.py a2d -> poses.yaml. TCP targets in base_link coordinates (x forward, z up);
 # approach = TCP z, closing = TCP y. "fixed" joints (lift, torso pitch) are set, not solved.
-model: reference/a2d_6.1_model.json
+model: reference/a2d_6.1_model.json   # relative to the simulator workspace root
 base_link: base_link
 arm_joints: '{side}_arm_joint[1-7]'
 targets:

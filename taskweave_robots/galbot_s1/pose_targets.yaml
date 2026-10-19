@@ -1,7 +1,7 @@
 # Input for tools/solve_poses.py galbot_s1 -> poses.yaml. TCP targets in base_link coordinates (x forward, z up;
 # base_link = column base, 0.583 m above the floor); approach = TCP z, closing = TCP y. "fixed" joints are set, not
 # solved: body_joint lifts the torso (shoulders 0.75 m above the floor + body_joint).
-model: reference/galbot_s1_model.json
+model: reference/galbot_s1_model.json   # relative to the simulator workspace root
 base_link: /base_link             # full model path: every component has its own base_link
 arm_joints: '{side}_joint[1-7]'
 targets:

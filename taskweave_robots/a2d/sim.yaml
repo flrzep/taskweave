@@ -5,7 +5,7 @@ prim: A2D                       # referenced at /World/Robot/<prim>
 root_joint: root_joint          # the asset's fixed world joint; it carries the articulation root
 base_link: base_link            # carried by the hidden planar base joints
 cameras:                        # mount = pose of the camera body in the parent link frame (USD camera: -z forward).
-                                # Link frames at zero pose (reference/a2d_6.1_model.json): link_pitch_head x = -world X,
+                                # Link frames at zero pose (reference/a2d_6.1_model.json, relative to the simulator workspace root): link_pitch_head x = -world X,
                                 # y = +world Z, z = +world Y (robot faces +X); Link7_l/_r z = approach, x = closing.
   head_camera:
     model: d435

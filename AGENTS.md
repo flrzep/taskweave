@@ -115,7 +115,9 @@ done
 ### Add a robot pack
 A pack is a folder `taskweave_robots/<robot>/`. The packs are data only: nothing about a cell (stances, held poses,
 object points belong to the cell pack).
-1. `pack.yaml`: `name` (= the folder), `version`, `schema_version: 1`, `description`. Required.
+1. `pack.yaml`: `name` (= the folder), `version`, `schema_version: 1`, `description`. Required. Add a `LICENSE-NOTE.md`
+   (copy one from `galbot_s1/`): the bundled galbot and a2d packs are vendor-derived, internal use only (licence line in
+   `taskweave_robots/package.xml`; the test `test_every_pack_has_a_licence_note` checks each pack has one).
 2. `profile.yaml` (how the hardware is reached) and `embodiment.yaml` (what the robot is), both required:
    - profile required: `name`, `base` with `type` (`holonomic | differential | fixed`), `cmd_vel`, `odom`, `frame`.
    - embodiment required: `name`, `summary`, `capabilities` (words of `embodiment.CAPABILITIES`, e.g. `base.differential`,
