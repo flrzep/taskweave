@@ -42,7 +42,17 @@ document.querySelectorAll('.tabs button').forEach((button) => button.addEventLis
   else if (teach.open) { teach.open = null; setTeachTarget(null); }  // the pad teaches only into an open position
   if (robotVisible) { loadRobot(); refreshPose(); }  // robot.js: live grippers and joints, settings
   if (button.dataset.view === 'record') loadRecordings();  // record.js
+  if (button.dataset.view === 'run') startRunViewer();
 }));
+
+// ---------- Run tab: the robot live in its cell (viewer3d.js, cell mode), for following a task ----------
+let runViewer = null;
+function startRunViewer() {
+  if (runViewer || !window.Viewer3D || $('view-run').hidden) return;
+  runViewer = new window.Viewer3D($('viewer3d-run'));
+  runViewer.load();
+}
+window.addEventListener('viewer3d-ready', startRunViewer);  // Run is the tab the page opens on
 
 // ---------- live state ----------
 function connect() {

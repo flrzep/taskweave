@@ -16,6 +16,10 @@
 // /api/robot/joints, /api/robot/base (503: no TF; the robot stays where it was, at the origin until a pose came, and
 // the toolbar shows a .viewer3d-note 'no robot pose'), /api/scene (placed objects' points are composed at top_z).
 // The world is ROS z-up: three.js keeps it as is and the camera's up is +z (set before OrbitControls reads it).
+//
+// Two modes: 'cell' (default; the robot where TF puts it, in the planning scene, with the taught points) for following
+// a task, and 'robot' (the robot alone at the origin of its base frame, live joints, on a floor grid with the
+// navigation areas around it: setAreas) for the Robot tab.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -75,8 +79,10 @@ function arrowGeometry() {
 const BOX_EDGES = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)).getAttribute('position').array;
 
 export class Viewer3D {
-  constructor(container, { fetchJSON = (path) => fetch(path).then((r) => (r.ok ? r.json() : Promise.reject(r))), pollMs = 200 } = {}) {
+  constructor(container, { fetchJSON = (path) => fetch(path).then((r) => (r.ok ? r.json() : Promise.reject(r))), pollMs = 200,
+    mode = 'cell' } = {}) {
     this.container = container;
+    this.mode = mode;
     this.fetchJSON = fetchJSON;
     this.pollMs = pollMs;
     this.model = null;        // /api/robot/model
@@ -158,9 +164,12 @@ export class Viewer3D {
     this.base.matrixAutoUpdate = false;
     this.cell = new THREE.Group();      // collision objects
     this.markers = new THREE.Group();   // locations, placed objects, points
-    this.scene.add(this.base, this.cell, this.markers);
+    this.areas = new THREE.Group();     // robot mode: navigation areas on the floor, in the base frame
+    this.areas.visible = mode === 'robot';
+    this.scene.add(this.base, this.cell, this.markers, this.areas);
+    this._floorZ = 0;                   // robot mode: the floor under the wheels (the base frame may sit above it)
     this.grid = null;
-    this._setGrid(4);
+    this._setGrid(mode === 'robot' ? 2 : 4);
 
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.target.set(0, 0, 0.5);
@@ -203,10 +212,10 @@ export class Viewer3D {
   async load() {
     const [model, scene] = await Promise.all([
       this.fetchJSON('/api/robot/model').catch((e) => ({ failed: e?.status === 404 ? 'missing' : 'error' })),
-      this.fetchJSON('/api/scene').catch(() => null),
+      this.mode === 'cell' ? this.fetchJSON('/api/scene').catch(() => null) : null,
     ]);
     if (this._disposed) return this;
-    this.status.scene = scene ? 'ok' : 'error';
+    this.status.scene = this.mode !== 'cell' ? 'none' : scene ? 'ok' : 'error';
     this._sceneAt = Date.now();
     if (scene) this._buildScene(scene);
     let meshes = Promise.resolve();
@@ -218,7 +227,8 @@ export class Viewer3D {
     this._poll();
     await meshes;
     if (this._disposed) return this;
-    if (this.robot) this.fitRobot(); else this.fit();  // the robot is what one looks for first; Fit shows the cell
+    if (this.mode === 'robot') { this._putFloor(); this.fitRobot(0.4); } else if (this.robot) this.fitRobot(); else this.fit();
+    this._updateTools();
     return this;
   }
 
@@ -315,8 +325,8 @@ export class Viewer3D {
       if (sceneDue) this._sceneAt = now;
       const [joints, base, scene] = await Promise.all([
         this.robot ? this.fetchJSON('/api/robot/joints').catch(() => null) : null,
-        this.fetchJSON('/api/robot/base').catch(() => ({ failed: true })),  // 503: no TF
-        sceneDue ? this.fetchJSON('/api/scene').catch(() => null) : null,
+        this.mode === 'cell' ? this.fetchJSON('/api/robot/base').catch(() => ({ failed: true })) : null,  // 503: no TF
+        sceneDue && this.mode === 'cell' ? this.fetchJSON('/api/scene').catch(() => null) : null,
       ]);
       this._busy = false;
       if (this._disposed) return;
@@ -325,7 +335,10 @@ export class Viewer3D {
         if (joints) changed = this._applyJoints(joints) || changed;
         if (base?.xyz && base?.quat) changed = this._applyBase(base, changed) || changed;
         // without TF the robot stays where it was (at the origin until a pose came) and the toolbar says so
-        this._poseNote.hidden = !base?.failed;
+        if (this.mode === 'cell' && this._poseNote.hidden !== !base?.failed) {
+          this._poseNote.hidden = !base?.failed;
+          this._updateTools();
+        }
         if (scene && scene.updated !== this.sceneData?.updated) { this._buildScene(scene); changed = true; }
         if (changed) this._requestRender();
       } catch (error) { console.error('Viewer3D: poll', error); }
@@ -371,6 +384,7 @@ export class Viewer3D {
       this.camera.position.add(delta);
       this.controls.update();
     }
+    if (!this._basePos) this._updateToolsSoon();
     this._basePos = position;
     return true;
   }
@@ -531,6 +545,7 @@ export class Viewer3D {
     node.addEventListener('click', () => this._emitPick(info));  // labels are easier to hit than markers on a phone
     this._labelLayer.append(node);
     this._labels.push({ node, object });
+    this._updateToolsSoon();
     return node;
   }
 
@@ -614,17 +629,39 @@ export class Viewer3D {
     this.scene.updateMatrixWorld();  // the base's matrix may not have been rendered yet
     const box = this._sceneBounds.clone();
     [this.robot, this.markers].forEach((object) => { if (object) box.expandByObject(object); });
-    this._frame(box);
+    this._frameBox(box);
   }
 
   // The robot with a metre around it: what is within its reach.
-  fitRobot() {
+  fitRobot(margin = 1.0) {
     if (!this.robot) { this.fit(); return; }
     this.scene.updateMatrixWorld();
-    this._frame(new THREE.Box3().setFromObject(this.robot).expandByScalar(1.0));
+    const box = new THREE.Box3().setFromObject(this.robot).expandByScalar(margin);
+    if (this.areas.visible) box.expandByObject(this.areas);
+    this._frameBox(box);
   }
 
-  _frame(box) {
+  // Straight down on the robot, its front (x) up the screen: for clearances and footprints.
+  viewTop() {
+    this.scene.updateMatrixWorld();
+    const box = new THREE.Box3();
+    if (this.robot) box.setFromObject(this.robot);
+    if (this.areas.visible) box.expandByObject(this.areas);
+    if (box.isEmpty()) box.set(new THREE.Vector3(-1, -1, 0), new THREE.Vector3(1, 1, 1));
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const half = Math.max(size.x, size.y) / 2 + 0.2;
+    const distance = half / Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 1.05 + size.z;
+    this.controls.target.copy(center);
+    this.camera.position.set(center.x - 1e-3, center.y, center.z + distance);  // a hair off vertical keeps x up
+    this.camera.near = distance / 200;
+    this.camera.far = distance * 20;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+    this._requestRender();
+  }
+
+  _frameBox(box) {
     if (box.isEmpty()) box.set(new THREE.Vector3(-1, -1, 0), new THREE.Vector3(1, 1, 1));
     const center = box.getCenter(new THREE.Vector3());
     const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.5);
@@ -652,6 +689,11 @@ export class Viewer3D {
     this._requestRender();
   }
 
+  _updateToolsSoon() {  // labels come in bursts while a scene is built: once after it
+    if (this._toolsTimer) return;
+    this._toolsTimer = setTimeout(() => { this._toolsTimer = 0; this._updateTools(); }, 0);
+  }
+
   setLabels(on) {
     this.labelsOn = !!on;
     this._labelsButton?.setAttribute('aria-pressed', String(this.labelsOn));
@@ -669,17 +711,108 @@ export class Viewer3D {
       tools.append(node);
       return node;
     };
-    button('Robot', 'Frame the robot and what is within its reach', () => this.fitRobot());
-    button('Cell', 'Frame the robot and the whole cell', () => this.fit());
-    this._followButton = button('Follow', 'Keep the robot in the middle as it drives', () => this.setFollow(!this.followRobot));
-    this._followButton.setAttribute('aria-pressed', 'false');
-    this._labelsButton = button('Labels', 'Show or hide the names', () => this.setLabels(!this.labelsOn));
-    this._labelsButton.setAttribute('aria-pressed', 'true');
+    if (this.mode === 'robot') {
+      button('Fit', 'Frame the robot', () => this.fitRobot(0.4));
+      button('Top', 'Look straight down: the navigation areas around the robot', () => this.viewTop());
+      this._areasButton = button('Areas', 'Show or hide the navigation areas', () => this.setAreasShown(!this.areas.visible));
+      this._areasButton.setAttribute('aria-pressed', 'true');
+    } else {
+      button('Robot', 'Frame the robot and what is within its reach', () => this.fitRobot());
+      button('Cell', 'Frame the robot and the whole cell', () => this.fit());
+      this._followButton = button('Follow', 'Keep the robot in the middle as it drives', () => this.setFollow(!this.followRobot));
+      this._followButton.setAttribute('aria-pressed', 'false');
+      this._labelsButton = button('Labels', 'Show or hide the names', () => this.setLabels(!this.labelsOn));
+      this._labelsButton.setAttribute('aria-pressed', 'true');
+    }
     this._poseNote = el('span', 'viewer3d-note', 'no robot pose');
     this._poseNote.title = 'No base pose from TF (/api/robot/base): the robot is drawn where it was last, or at the origin';
     this._poseNote.hidden = true;
     tools.append(this._poseNote);
     return tools;
+  }
+
+  // A button with nothing to do is greyed out (it looked broken otherwise): Labels without labels, Follow without a pose.
+  _updateTools() {
+    if (this._labelsButton) {
+      this._labelsButton.disabled = this._labels.length === 0;
+      this._labelsButton.title = this._labels.length ? 'Show or hide the names' : 'No names to show: nothing taught or placed yet';
+    }
+    if (this._followButton) {
+      this._followButton.disabled = !this._basePos;
+      this._followButton.title = this._basePos ? 'Keep the robot in the middle as it drives' : 'No robot pose (TF) to follow';
+    }
+  }
+
+  // ---------- robot mode: the navigation areas ----------
+  // The floor under the robot's lowest point (the wheels): the base frame (e.g. the column base) may sit above it.
+  _putFloor() {
+    if (!this.robot) return;
+    this.scene.updateMatrixWorld();
+    const box = new THREE.Box3().setFromObject(this.robot);
+    if (box.isEmpty()) return;
+    this._floorZ = box.min.z;
+    this.grid.position.z = this._floorZ;
+    this.areas.position.z = this._floorZ + 0.002;  // just above the grid
+    this._requestRender();
+  }
+
+  // The navigation clearances around the robot, as the Robot tab's Navigation settings give them (metres, base frame:
+  // x forward, y left): chassis footprint [length, width] centred on the base, envelope {front, back, left, right},
+  // padding around it, the inflation radius beyond that (rounded). Call again with new numbers while they are edited.
+  setAreas({ footprint = null, envelope = null, padding = 0, inflation = 0 } = {}) {
+    this.areas.children.slice().forEach((child) => { child.removeFromParent(); child.geometry?.dispose(); });
+    const rect = (back, right, front, left, radius = 0) => {
+      const shape = new THREE.Shape();
+      const [x0, x1, y0, y1] = [-back, front, -right, left];
+      const r = Math.min(radius, (x1 - x0) / 2, (y1 - y0) / 2);
+      shape.moveTo(x0 + r, y0);
+      shape.lineTo(x1 - r, y0); if (r) shape.quadraticCurveTo(x1, y0, x1, y0 + r);
+      shape.lineTo(x1, y1 - r); if (r) shape.quadraticCurveTo(x1, y1, x1 - r, y1);
+      shape.lineTo(x0 + r, y1); if (r) shape.quadraticCurveTo(x0, y1, x0, y1 - r);
+      shape.lineTo(x0, y0 + r); if (r) shape.quadraticCurveTo(x0, y0, x0 + r, y0);
+      return shape;
+    };
+    const add = (shape, fill, line, z) => {
+      if (fill) {
+        const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape, 12), fill);
+        mesh.position.z = z;
+        this.areas.add(mesh);
+      }
+      const outline = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(shape.getPoints(12)), line);
+      outline.position.z = z + 0.001;
+      this.areas.add(outline);
+    };
+    const m = this._areaMats ||= {
+      inflation: new THREE.MeshBasicMaterial({ color: this._accent(), transparent: true, opacity: 0.10, depthWrite: false }),
+      inflationLine: new THREE.LineBasicMaterial({ color: this._accent(), transparent: true, opacity: 0.45 }),
+      padding: new THREE.LineDashedMaterial({ color: 0xf2a64f, dashSize: 0.05, gapSize: 0.035 }),
+      envelope: new THREE.LineBasicMaterial({ color: this._accent() }),
+      chassis: new THREE.MeshBasicMaterial({ color: 0x8a96a3, transparent: true, opacity: 0.25, depthWrite: false }),
+      chassisLine: new THREE.LineBasicMaterial({ color: 0x8a96a3 }),
+    };
+    if (envelope) {
+      const e = envelope;
+      const outer = padding + inflation;
+      add(rect(e.back + outer, e.right + outer, e.front + outer, e.left + outer, outer), m.inflation, m.inflationLine, 0);
+      const pad = rect(e.back + padding, e.right + padding, e.front + padding, e.left + padding);
+      const padLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pad.getPoints(12).concat([pad.getPoints(12)[0]])), m.padding);
+      padLine.computeLineDistances();  // dashes need them
+      padLine.position.z = 0.002;
+      this.areas.add(padLine);
+      add(rect(e.back, e.right, e.front, e.left), null, m.envelope, 0.003);
+    }
+    if (footprint) add(rect(footprint[0] / 2, footprint[1] / 2, footprint[0] / 2, footprint[1] / 2), m.chassis, m.chassisLine, 0.004);
+    // forward arrow: which way the robot faces
+    const arrow = new THREE.Mesh(this._geoms.arrow, m.envelope);
+    arrow.position.set((envelope?.front ?? 0.4) + 0.12, 0, 0.005);
+    this.areas.add(arrow);
+    this._requestRender();
+  }
+
+  setAreasShown(on) {
+    this.areas.visible = !!on;
+    this._areasButton?.setAttribute('aria-pressed', String(this.areas.visible));
+    this._requestRender();
   }
 
   // ---------- rendering: only when something changed ----------

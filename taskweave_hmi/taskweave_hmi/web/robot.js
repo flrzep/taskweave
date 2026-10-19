@@ -7,17 +7,19 @@
 const NAV_FIELDS = ['front', 'back', 'left', 'right'];
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-// The 3D view (viewer3d.js, an ES module: it runs after these classic scripts) is made the first time the tab opens.
-let viewer3d = null;
-function startViewer() {
-  if (viewer3d || !window.Viewer3D) return;
-  viewer3d = new window.Viewer3D($('viewer3d'));
-  viewer3d.load();
+// The robot alone in 3D (viewer3d.js robot mode: an ES module, it runs after these classic scripts), its navigation
+// areas from the Navigation settings below, redrawn while they are edited (drawSketch). Made when the tab first opens.
+let robotViewer = null;
+function startRobotViewer() {
+  if (robotViewer || !window.Viewer3D) return;
+  robotViewer = new window.Viewer3D($('viewer3d-robot'), { mode: 'robot' });
+  robotViewer.load();
+  if (state.robotData) drawSketch();
 }
-window.addEventListener('viewer3d-ready', () => { if (robotVisible) startViewer(); });
+window.addEventListener('viewer3d-ready', () => { if (robotVisible) startRobotViewer(); });
 
 async function loadRobot() {
-  startViewer();
+  startRobotViewer();
   const { ok, data } = await api('GET', '/api/robot');
   if (!ok) { message($('nav-msg'), data.error || (data.problems || []).join('\n'), true); return; }
   state.robotData = data;
@@ -100,6 +102,7 @@ function drawSketch() {
   const svg = $('nav-sketch');
   const { envelope: e, padding = 0, inflation_radius: inflation = 0 } = navSettings();
   const [length, width] = state.robotData?.footprint || [0.6, 0.6];
+  robotViewer?.setAreas({ footprint: [length, width], envelope: e, padding, inflation });
   const rect = (back, right, front, left, cls, round = 0) => {
     const node = document.createElementNS(SVG_NS, 'rect');
     const attrs = { x: -left, y: -front, width: left + right, height: front + back, rx: round, class: cls };
