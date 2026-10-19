@@ -143,10 +143,9 @@ base:
   frame: base_link
   footprint: [0.60, 0.45]     # length, width in metres
   limits: {linear: 1.0, angular: 1.5}
-arms:
-  left:  {group: left_arm,  tool_frame: left_tool, elbow: {shoulder: left_link2, elbow: left_link4, wrist: left_link6}}
-  right: {group: right_arm, tool_frame: right_tool, elbow: {shoulder: right_link2, elbow: right_link4, wrist: right_link6}}
-  both:  {group: both_arms_lift}
+arms:                         # per IK tool, the keys elbow and swivel (nothing else is read, see below)
+  left:  {elbow: {shoulder: left_link2, elbow: left_link4, wrist: left_link6}, swivel: left_joint3}
+  right: {elbow: {shoulder: right_link2, elbow: right_link4, wrist: right_link6}, swivel: right_joint3}
 grippers:
   left:  {action: /left_gripper/command,  open: 0.0, closed: 1.0}
   right: {action: /right_gripper/command, open: 0.0, closed: 1.0}
@@ -158,11 +157,13 @@ motion_tuning:                # optional, every key defaults (schemas.MOTION_TUN
   elbow: {rate_rad: 0.03}
 ```
 
-Skills ask for roles (`base`, `arms.both`, `grippers.left`, `cameras.head`); only this file knows the hardware names.
+Skills ask for roles (`base`, `joints`, `grippers.left`, `tool_frames.left`, `ik`); only this file knows the hardware names.
 
 `arms.<tool>.elbow` names the links at an IK arm's shoulder, elbow and wrist centres: the elbow side (`ik.choose.elbow`,
 a point's `elbow`), straight lines and elbow swings use it. An arm without it has no elbow control (an elbow side is
-ignored with a warning, an elbow swing fails with a message). `arms.<tool>.swivel` names the joint the pad's elbow
+ignored with a warning, an elbow swing fails with a message). Only `elbow` and `swivel` are read under `arms.<tool>`;
+the schema does not reject other keys (an old profile may carry `group` or `tool_frame`), they are ignored, and
+`taskweave check` warns about each so that a typo does not stay silent. `arms.<tool>.swivel` names the joint the pad's elbow
 jog turns (e.g. the upper-arm roll): without a URDF the jog turns it and IK puts the TCP back (an arm without it has no
 elbow jog then); with a URDF it only sets which way is positive. `motion_tuning` holds the step sizes and thresholds of
 the arm motion code, grouped as `chain` (damped least-squares step), `line` (straight-line steps), `elbow` (elbow side
@@ -320,8 +321,16 @@ tolerances: {position: 0.02, settle_s: 0.3, stall_timeout_s: 3.0, state_timeout_
 ```yaml
 # robots/<robot>/profile.yaml
 joints: {command: /joint_command, state: /joint_states, linear: [body_joint],
-         groups: {torso: [body_joint], head: [head_joint1, head_joint2], left_arm: [left_joint1, ...]}}
+         groups: {torso: [body_joint], head: [head_joint1, head_joint2], left_arm: [left_joint1, ...]},
+         limits: {body_joint: [0.0, 0.75]}}
 ```
+
+`joints.limits` is optional: joint -> `[lower, upper]` (rad, m for a prismatic joint). It is laid over the limits of the
+robot's URDF (`moveit/robot.urdf` of the pack), so it is the only source for a robot without a URDF and the place to narrow
+a joint. `move_joints` checks values against it before anything moves, IK and the straight-line code keep clear of it
+(`ik.choose.limit_margin_deg`), and plan validation checks named poses against it. A robot with limits from neither
+source is not checked. `joints.groups` names the
+groups for `move_joints only`; `<tool>_arm` groups it does not list come from the `ik.joints` regex and the URDF.
 
 ```yaml
 # mission steps

@@ -111,6 +111,11 @@ Skill arguments name things in the config. A wrong name is reported before the m
 - A **contact** is a frame where one object meets another (a part's `base` on a bin's `seat`). `move_object` puts the held
   object's `contact` onto the placed one's, `offset_m` short of it against its engage direction (z). Use the offset
   step first, then the same step without offset.
+- **Placing without a contact.** `to.onto` needs a contact on the placed object (`contacts:` in its `objects/<type>.yaml`).
+  If it has none, either put the object where you can name the spot: `move_object {to: {at: [x, y, z]}}` (robot frame: where the
+  object origin goes, orientation kept) or `{to: {pose: <held pose>}}` (a named held pose of the robot for this type of
+  object), or add a contact to the object type (a `{xyz, rpy}` frame, z = the direction the object moves to engage) and
+  use `to.onto` as in [Example 4](#example-4-pick-up-a-bin-and-put-it-on-the-fixture).
 - Where an object is put down, `grip open` with `place_as: <name>` records it as a placed object of that name, whose
   points exist from then on (validation knows a point of a `place_as` object only after that step).
 
@@ -152,10 +157,31 @@ A one-hand step on a two-hand point uses the point's `alone:` poses. Closing han
 also one hand of a two-hand point; opening takes them out of the hold, and an object with no hands left is released.
 `move_object` keeps every holding hand locked to the object; `set_posture` defaults to the holding hands, else all.
 
+## The example cell
+
+The examples run against `docs/examples/cell`, a cell pack of its own: `taskweave check docs/examples/cell` works on it as it
+stands, and `taskweave_skills/test/test_docs_examples.py` validates every example mission against it.
+
+| File | Holds |
+|---|---|
+| `pack.yaml` | name, version, `schema_version: 3` |
+| `cell/locations.yaml`, `cell/objects.yaml` | `home`, `staging`; placed objects: `part_stack_1`, `part_stack_2` (stacks of `part`), `bin_1`, `fixture_1` |
+| `objects/part.yaml` | point `grasp` (both hands, and `alone` for one), contact `base` |
+| `objects/bin.yaml` | point `grasp` (left hand), contacts `seat` (where a part sits) and `base` |
+| `objects/fixture.yaml` | point `handle` (a lever), contact `slot` (where something put on the fixture sits) |
+| `robots/duo_bot/` | the robot: `profile.yaml`, `embodiment.yaml`, `poses.yaml` (`home`, `present_both`), `stances.yaml`, `held_poses.yaml` (`carry` for `part` and `bin`), `object_points.yaml` |
+
+The robot is `duo_bot`, a neutral test robot (fixed base, a lift, two 2-joint arms, two parallel grippers, IK by a fake
+MoveIt). Its files here are a copy of `taskweave_skills/test/fixtures/config/robots/duo_bot` (the test fixture the
+skill tests run on), with joint groups added for `move_joints only`. It is not a shipped robot pack on purpose: the
+tool poses, stances and carry poses are made up to fit the example objects and mean nothing for a real robot, and a pack in
+`taskweave_robots` would suggest they do. To try the missions on a shipped pack (`galbot_s1`, ...), keep the cell files
+and give the cell that robot's stances and held poses (`robots/<robot>/stances.yaml`, `held_poses.yaml`, taught on the
+robot) as in [configuration.md](configuration.md).
+
 ## Example 1: drive, pick and place with two hands
 
-Runs against the example cell in `docs/examples/cell` (a `part` stack, a `bin`, a robot with two grippers). Each step has
-a short instruction; the grasp is a pre-grasp offset, then the point itself, then `grip close`.
+Each step has a short instruction; the grasp is a pre-grasp offset, then the point itself, then `grip close`.
 
 ```yaml
 goal: Pick a part from its stack with both hands and put it into the bin
@@ -308,11 +334,73 @@ steps:
 The planner works out `next_stack` at the start of each cycle, the include step becomes the six steps of `pick_part`
 (ids `pick_s1` ... `pick_s6`) with `{part}` filled, and the mission ends when no `part_stack_*` has parts left.
 
+## Example 4: pick up a bin and put it on the fixture
+
+One hand, from a point on the bin to a contact on the fixture: the left hand takes the bin by its `grasp` point, carries
+it, and puts its `base` contact onto the fixture's `slot`.
+
+```yaml
+goal: Take the bin with the left hand, put it onto the fixture, arm back to the driving pose
+loop: once
+defaults: {timeout_s: 120, retries: 1, on_failure: abort}
+steps:
+  - id: to_bin
+    instruction: Drive to the pick stance at the bin
+    skill: navigate_to
+    args: {target: "stance:bin_1/pick"}
+  - instruction: Open the left gripper
+    skill: grip
+    args: {hands: [left], action: open}
+  - id: pregrasp
+    instruction: Left hand 10 cm short of the bin's grasp point
+    skill: move_gripper
+    args: {to: {point: bin_1/grasp, offset_m: 0.1}, hands: [left]}
+    retries: 2
+    on_failure: replan
+    replan_from: to_bin
+  - instruction: Left hand straight onto the grasp point, at half speed
+    skill: move_gripper
+    args: {to: {point: bin_1/grasp}, hands: [left], motion: {mode: linear, speed: 0.5}}
+  - instruction: Close the left gripper on the bin
+    skill: grip
+    args: {hands: [left], action: close}
+  - instruction: Lift the bin 20 cm
+    skill: move_object
+    args: {to: {by: [0, 0, 0.2]}, hands: [left]}
+  - instruction: Bin into the carry pose
+    skill: move_object
+    args: {to: {pose: carry}, hands: [left]}
+  - id: to_fixture
+    instruction: Drive to the work stance at the fixture
+    skill: navigate_to
+    args: {target: "stance:fixture_1/work"}
+  - instruction: Bin onto the fixture slot, 5 cm short of it
+    skill: move_object
+    args: {to: {onto: fixture_1/slot, contact: base, offset_m: 0.05}, hands: [left]}
+  - instruction: Bin down onto the fixture slot
+    skill: move_object
+    args: {to: {onto: fixture_1/slot, contact: base}, hands: [left]}
+  - instruction: Let go of the bin with the left hand
+    skill: grip
+    args: {hands: [left], action: open}
+  - id: tuck
+    instruction: Arms back in the driving pose
+    skill: move_joints
+    args: {pose: home}
+```
+
+Notes: no `to.onto` without the `slot` contact on `objects/fixture.yaml`; `contact: base` is the bin's own contact, the
+one that goes onto the slot. `hands: [left]` on `move_object` makes it explicit that only the left hand holds.
+
 ## Validate a mission
 
-1. `taskweave check <cell>` (offline, no ROS graph): loads every file of the cell pack against its schema, expands the
-   includes of every mission and reports the robot/embodiment contradictions. It does not check skill arguments, since
-   the catalog comes from the skill servers.
+1. `taskweave check <cell>` (offline, no ROS graph) checks what needs no skill catalog: every file of the cell pack and of
+   its robots (`robots/<robot>`, cell first, then the robot packs) loads against its schema, the profile and the
+   embodiment agree (base type, tools; warnings for an IK arm without elbow description and for keys under `arms` that
+   nothing reads), each `skills/<name>.yaml` loads and its classes import, and every mission expands (includes,
+   parameters) into a plan. It does **not** check skill arguments or any name a step uses: a misspelt point, contact,
+   stance, held pose or joint pose, a wrong `hands` value or a missing argument passes. Those need the skills'
+   argument schemas, so they are checked by 2 (live catalog) or 3 (the same offline, in a test).
 2. The HMI mission editor checks the arguments against the live skill catalog, as the task handler does before a start:
    skill exists and has an implementation for the robot, arguments fit the schema, points, stances, contacts and poses
    exist (a problem names the step and the argument). Starting an invalid mission is refused with the reasons.

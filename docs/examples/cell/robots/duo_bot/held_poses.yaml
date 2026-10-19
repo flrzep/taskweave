@@ -4,3 +4,8 @@ part:
     joints: {lift: 0.1}
     path:
       - {xyz: [0.7, 0.0, 0.1], rpy: [0.0, 0.0, 0.0]}
+bin:
+  carry:
+    joints: {lift: 0.1}
+    path:
+      - {xyz: [0.7, 0.0, 0.1], rpy: [0.0, 0.0, 0.0]}

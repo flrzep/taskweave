@@ -16,18 +16,13 @@ from taskweave_core.config import ConfigStore, packs  # noqa: E402
 from taskweave_core.config.schemas import HAND_RULES, hands_schema  # noqa: E402
 from taskweave_core.plan import Plan  # noqa: E402
 from taskweave_core.validation import validate_plan  # noqa: E402
-from taskweave_skills.basic import Wait  # noqa: E402
-from taskweave_skills.drive import DriveStraight  # noqa: E402
-from taskweave_skills.gripper_motion import Grip, MoveGripper  # noqa: E402
-from taskweave_skills.joint_motion import MoveJoints  # noqa: E402
-from taskweave_skills.navigate import NavigateTo  # noqa: E402
-from taskweave_skills.object_motion import MoveObject, SetPosture  # noqa: E402
+from taskweave_skills import shipped_skills  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO / 'docs' / 'examples'
 FIXTURE = Path(__file__).parent / 'fixtures' / 'config'
 ROBOT = 'duo_bot'
-SKILLS = (MoveGripper, Grip, MoveJoints, MoveObject, SetPosture, NavigateTo, DriveStraight, Wait)
+SKILLS = shipped_skills()    # every skill of the package: a new skill is in here without being registered
 
 pytestmark = pytest.mark.skipif(not EXAMPLES.is_dir(), reason='docs/examples is not shipped with the package')
 
@@ -39,7 +34,7 @@ def catalog(store):
     for skill in SKILLS:
         schema = copy.deepcopy(skill.args_schema)
         if 'hands' in schema.get('properties', {}):
-            rules = ('auto', 'all') if skill is Grip else getattr(skill, 'hand_rules', HAND_RULES)
+            rules = ('auto', 'all') if skill.name == 'grip' else getattr(skill, 'hand_rules', HAND_RULES)
             schema['properties']['hands'] = hands_schema(hands, rules)
         out[skill.name] = schema
     return out
@@ -52,11 +47,6 @@ def cell(tmp_path, monkeypatch):
     shutil.copytree(FIXTURE, root)
     shutil.copytree(EXAMPLES / 'cell', root, dirs_exist_ok=True)
     shutil.copytree(EXAMPLES / 'missions', root / 'missions')
-    profile = root / 'robots' / ROBOT / 'profile.yaml'   # joint groups for move_joints `only`
-    text = profile.read_text()
-    assert 'linear: [lift]}' in text
-    profile.write_text(text.replace('linear: [lift]}', 'linear: [lift], groups: {torso: [lift], '
-                                    'left_arm: [left_joint1, left_joint2]}}'))
     return root
 
 
@@ -64,7 +54,7 @@ MISSIONS = sorted(path.stem for path in (EXAMPLES / 'missions').glob('*.yaml'))
 
 
 def test_the_example_missions_exist():
-    assert {'pick_and_place', 'one_hand', 'pick_part', 'restock'} <= set(MISSIONS)
+    assert {'pick_and_place', 'one_hand', 'pick_part', 'restock', 'bin_to_fixture'} <= set(MISSIONS)
 
 
 @pytest.mark.parametrize('name', MISSIONS)
@@ -73,6 +63,18 @@ def test_example_mission_validates(cell, name):
     plan = Plan.from_mission(store.expanded_mission(name), name, robot=ROBOT)
     assert plan.steps
     assert validate_plan(plan, catalog(store), store) == []
+
+
+def test_the_example_cell_is_a_cell_pack_of_its_own(tmp_path, monkeypatch, capsys):
+    """`taskweave check docs/examples/cell` works as it stands (pack.yaml, its own robot), and so with the missions."""
+    from taskweave_core import cli
+
+    monkeypatch.setattr(packs, 'installed_location', lambda: None)
+    assert cli.check(str(EXAMPLES / 'cell')) == 0, capsys.readouterr().out
+    root = tmp_path / 'cell'
+    shutil.copytree(EXAMPLES / 'cell', root)
+    shutil.copytree(EXAMPLES / 'missions', root / 'missions')
+    assert cli.check(str(root)) == 0, capsys.readouterr().out
 
 
 def test_the_included_block_is_expanded_into_the_mission(cell):
@@ -101,7 +103,7 @@ def test_every_example_step_of_the_skill_reference_validates(cell, name, step):
 def test_the_missions_in_the_docs_are_the_validated_files():
     """README.md and docs/missions.md show the example files verbatim, so what they print is what was validated."""
     shown = {'README.md': ['readme_example'], 'docs/missions.md': ['pick_and_place', 'one_hand', 'pick_part',
-                                                                    'restock']}
+                                                                    'restock', 'bin_to_fixture']}
     for doc, names in shown.items():
         text = (REPO / doc).read_text(encoding='utf-8')
         for name in names:

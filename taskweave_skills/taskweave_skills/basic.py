@@ -7,7 +7,8 @@ WAIT_POLL_S = 0.1  # how often wait checks for a stop
 
 class Wait(Skill):
     name = 'wait'
-    description = 'Wait for the given number of seconds (simulation time when use_sim_time is set).'
+    description = ('Wait for the given number of seconds (simulation time when use_sim_time is set). Not scaled by '
+                   'the speed override: ten seconds stay ten seconds at 10 %.')
     args_schema = {
         'type': 'object',
         'required': ['seconds'],

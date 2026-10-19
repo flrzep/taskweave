@@ -37,6 +37,26 @@ def test_every_skill_is_documented_with_an_example(generator):
         assert f'## `{skill.name}`' in text
 
 
+def test_every_shipped_skill_has_a_template_and_an_example_yaml(generator):
+    """AGENTS.md "add a skill": config/skill_templates.py (what taskweave config migrate-skills starts from) and
+    docs/examples/skills/<name>.yaml, kept equal by test_migrate_skills."""
+    from taskweave_core.config.skill_templates import TEMPLATES
+
+    names = {skill.name for skill in generator.load_skills()}
+    assert names == set(TEMPLATES), 'skill_templates.TEMPLATES needs one entry per skill'
+    for name in names:
+        assert (REPO / 'docs' / 'examples' / 'skills' / f'{name}.yaml').is_file(), f'docs/examples/skills/{name}.yaml'
+
+
+def test_the_launch_example_names_every_shipped_skill(generator):
+    """The README's launch command lists the skills to serve: a new skill must be in it."""
+    import re
+
+    text = (REPO / 'README.md').read_text(encoding='utf-8')
+    listed = set(re.search(r'skills:=([\w,]+)', text).group(1).split(','))
+    assert listed == {skill.name for skill in generator.load_skills()}
+
+
 def test_the_generation_needs_no_ros_graph(generator):
     # classes are read, never constructed: every skill class has the attributes the reference prints
     for skill in generator.load_skills():

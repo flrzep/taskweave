@@ -1,3 +1,10 @@
 name: bin
+points:
+  grasp:                          # a small bin the left hand lifts out by its rim
+    tool_type: parallel_gripper
+    grip_width_m: 0.03
+    approach_m: 0.1
+    left_tool: {xyz: [0.0, 0.2, 0.25], rpy: [0.0, 3.14159265, 0.0]}
 contacts:
   seat: {xyz: [0.0, 0.0, 0.2], rpy: [0.0, 0.0, 0.0]}    # where a part sits in the bin
+  base: {xyz: [0.0, 0.0, 0.0], rpy: [0.0, 0.0, 0.0]}    # the bin's own underside: where it stands on something

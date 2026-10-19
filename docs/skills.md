@@ -527,11 +527,11 @@ controller 10 %. The step result reports it as data.speed.nav2_override.
 
 ### Implementation and requires
 
-No `requires` in the minimal `skills/<name>.yaml` below: the skill is served on every robot (a run that does not fit the robot is rejected by the skill itself):
+Implementation entry of the shipped skill yaml (`implementations:` in `skills/<name>.yaml`):
 
 ```yaml
 implementations:
-- {name: navigate_to, type: script, class: 'taskweave_skills.navigate:NavigateTo'}
+- {name: navigate_direct, type: script, class: 'taskweave_skills.navigate:NavigateTo'}
 ```
 
 ### Arguments
@@ -567,7 +567,7 @@ move sideways.
 
 ### Implementation and requires
 
-No `requires` in the minimal `skills/<name>.yaml` below: the skill is served on every robot (a run that does not fit the robot is rejected by the skill itself):
+Implementation entry of the shipped skill yaml (`implementations:` in `skills/<name>.yaml`):
 
 ```yaml
 implementations:
@@ -600,7 +600,8 @@ Give exactly one of: `distance_m` or `to`.
 
 ## `wait`
 
-Wait for the given number of seconds (simulation time when use_sim_time is set).
+Wait for the given number of seconds (simulation time when use_sim_time is set). Not scaled by the speed override: ten
+seconds stay ten seconds at 10 %.
 
 - Class: `taskweave_skills.basic:Wait`
 - Default timeout: 60 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
@@ -608,7 +609,7 @@ Wait for the given number of seconds (simulation time when use_sim_time is set).
 
 ### Implementation and requires
 
-No `requires` in the minimal `skills/<name>.yaml` below: the skill is served on every robot (a run that does not fit the robot is rejected by the skill itself):
+Implementation entry of the shipped skill yaml (`implementations:` in `skills/<name>.yaml`):
 
 ```yaml
 implementations:

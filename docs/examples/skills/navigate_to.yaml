@@ -1,0 +1,14 @@
+# skills/navigate_to.yaml. The direct controller (no obstacle avoidance), served on every robot with a base.
+# With Nav2 running, list a second implementation before it: class taskweave_skills.nav2:Nav2NavigateTo (it uses this
+# controller for the final approach and takes the same keys, plus the Nav2 ones of the nav2 module doc).
+# Every key below is optional; the values are the defaults, each capped by the robot's base limits (profile base.limits).
+implementations:
+  - name: navigate_direct
+    type: script
+    class: taskweave_skills.navigate:NavigateTo
+max_linear: 0.5                 # m/s
+max_angular: 1.0                # rad/s
+position_tolerance: 0.03        # m
+yaw_tolerance: 0.03             # rad
+settle_s: 0.3                   # inside tolerance this long -> success
+stuck_timeout_s: 5.0            # no progress this long -> fail

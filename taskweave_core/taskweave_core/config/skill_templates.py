@@ -127,5 +127,45 @@ tolerances:
   state_timeout_s: 5.0          # no joint states this long (wall time) -> fail; rides out sim stalls (UI asset loads)
 """
 
+WAIT = """\
+# skills/wait.yaml. Needs no hardware, so it has no requires and no parameters. wait counts node time (sim time when
+# use_sim_time is set), not work time: the speed override does not stretch it (see AGENTS.md, rule 6).
+implementations:
+  - name: wait
+    type: script
+    class: taskweave_skills.basic:Wait
+"""
+
+NAVIGATE_TO = """\
+# skills/navigate_to.yaml. The direct controller (no obstacle avoidance), served on every robot with a base.
+# With Nav2 running, list a second implementation before it: class taskweave_skills.nav2:Nav2NavigateTo (it uses this
+# controller for the final approach and takes the same keys, plus the Nav2 ones of the nav2 module doc).
+# Every key below is optional; the values are the defaults, each capped by the robot's base limits (profile base.limits).
+implementations:
+  - name: navigate_direct
+    type: script
+    class: taskweave_skills.navigate:NavigateTo
+max_linear: 0.5                 # m/s
+max_angular: 1.0                # rad/s
+position_tolerance: 0.03        # m
+yaw_tolerance: 0.03             # rad
+settle_s: 0.3                   # inside tolerance this long -> success
+stuck_timeout_s: 5.0            # no progress this long -> fail
+"""
+
+DRIVE_STRAIGHT = """\
+# skills/drive_straight.yaml. A short straight drive without obstacle avoidance; a fixed base rejects it. It takes the
+# keys of navigate_to (the controller) plus its own below, all optional; the values are the defaults.
+implementations:
+  - name: drive_straight
+    type: script
+    class: taskweave_skills.drive:DriveStraight
+speed: 0.15                     # m/s, capped by the base limit
+max_distance_m: 1.0             # a longer drive is rejected
+to_offset_m: 0.05               # `to`: a target this much off the straight line is still accepted
+to_turn_deg: 5.0                # `to`: and this much of heading difference
+stuck_timeout_s: 5.0
+"""
+
 TEMPLATES = {'move_gripper': MOVE_GRIPPER, 'grip': GRIP, 'move_object': MOVE_OBJECT, 'set_posture': SET_POSTURE,
-             'move_joints': MOVE_JOINTS}
+             'move_joints': MOVE_JOINTS, 'wait': WAIT, 'navigate_to': NAVIGATE_TO, 'drive_straight': DRIVE_STRAIGHT}
