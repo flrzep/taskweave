@@ -192,6 +192,15 @@ def test_teach_object_point_stores_tcps_relative_to_the_top_item(config_dir):
         store.save_object_point('nowhere/top_grasp', {'left': ((0, 0, 0), down)})
 
 
+def test_object_type_may_carry_simulator_keys(config_dir):
+    path = config_dir / 'objects' / 'crate.yaml'
+    path.write_text('name: crate\nsim: {box: [0.06, 0.06, 0.1], on_hold: glue}\n')
+    assert ConfigStore(config_dir).object('crate')['sim']['box'] == [0.06, 0.06, 0.1]
+    path.write_text('name: crate\nsim: 3\n')
+    with pytest.raises(ConfigError, match='sim'):
+        ConfigStore(config_dir).object('crate')
+
+
 def turned_shelf(config_dir):
     """shelf_c lies turned 180 deg; shelves are declared 180 deg symmetric (e.g. a frame in a front row)."""
     (config_dir / 'objects' / 'shelf.yaml').write_text(

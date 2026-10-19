@@ -410,6 +410,9 @@ OBJECT = {
         # a placed object of this type is a place the next one comes to (e.g. a carrier waiting on a conveyor): taking
         # it, or gripping it to work it, leaves the placed object where it is
         'replenished': {'type': 'boolean'},
+        # how the simulator integration shows and handles this object (e.g. a box size, what a hold does): taskweave
+        # skills never read it; the keys are the simulator's own
+        'sim': {'type': 'object'},
         'points': {
             'type': 'object',
             'propertyNames': NAME,

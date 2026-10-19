@@ -297,6 +297,9 @@ contacts:                     # frames where this object meets another (move_obj
   base: {xyz: [0, 0, 0], rpy: [0, 0, 0]}
 ```
 
+An object type may carry a `sim:` object (free-form, e.g. `sim: {box: [0.06, 0.06, 0.1], on_hold: pull_release}`): it is for the
+simulator integration (what to draw, what a hold does), taskweave skills never read it.
+
 Tool poses are canonical-TCP poses relative to the object, so they hold for any robot that can reach them.
 `<role>_tool` names the robot tool (`left_tool` is `tools.left`). Validation checks tool type and grip width against
 the robot's tools.
