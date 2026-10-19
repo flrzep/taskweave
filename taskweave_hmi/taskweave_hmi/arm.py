@@ -17,7 +17,7 @@ from collections.abc import Mapping
 import numpy as np
 
 from taskweave_core.config import ConfigError, ConfigStore, schemas
-from taskweave_core.config.limits import joint_limits, pose_problems
+from taskweave_core.config.limits import joint_limits, mimic_joints, pose_problems
 from taskweave_skills.ik import rpy_matrix, tcp_matrix
 
 from . import held, points, robot
@@ -68,6 +68,7 @@ def overview(store: ConfigStore, robot_name: str, pose_args: set) -> dict:
                 'approach_m': point['approach_m'], 'grip_m': point['grip_m'], 'hands': point['tools'],
                 'used_by': point['used_by'], 'problems': []})
     instances = store.object_instances()
+    mimics = mimic_joints(store, robot_name)
     return {
         'robot': robot_name,
         'positions': positions,
@@ -77,8 +78,8 @@ def overview(store: ConfigStore, robot_name: str, pose_args: set) -> dict:
         'placed': {t: sorted(n for n, i in instances.items() if i.object == t) for t in types},
         'tools': list(profile.data.get('ik', {}).get('groups', {})),   # hands with IK
         'linear_joints': list(profile.data.get('joints', {}).get('linear', [])),
-        'joint_limits': {joint: [None if math.isinf(v) else v for v in bounds]
-                         for joint, bounds in joint_limits(store, robot_name).items()},
+        'joint_limits': {joint: [None if math.isinf(v) else v for v in bounds]   # mimic joints left out: not settable
+                         for joint, bounds in joint_limits(store, robot_name).items() if joint not in mimics},
         'elbow_sides': schemas.ELBOW_SIDES,
         'approach_default': float((store.skill_params('move_gripper').get('motion') or {})
                                   .get('approach_m', 0.0)),

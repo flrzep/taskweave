@@ -3,7 +3,7 @@ import math
 import pytest
 
 from taskweave_core.config import ConfigStore
-from taskweave_core.config.limits import joint_limits, joint_problems, pose_problems
+from taskweave_core.config.limits import joint_limits, joint_problems, mimic_joints, pose_problems
 from taskweave_core.validation import check_point
 
 URDF = """<?xml version="1.0"?>
@@ -44,6 +44,18 @@ def test_limits_come_from_the_urdf_and_the_profile_overrides(store):
     profile = store.root / 'robots' / 'demo_bot' / 'profile.yaml'
     profile.write_text(profile.read_text().replace('linear: [lift]}', 'linear: [lift], limits: {lift: [0.0, 0.4]}}'))
     assert joint_limits(ConfigStore(store.root), 'demo_bot')['lift'] == (0.0, 0.4)
+
+
+def test_mimic_joints_name_the_joint_they_follow(store, config_dir):
+    urdf = config_dir / 'robots' / 'demo_bot' / 'moveit' / 'robot.urdf'
+    assert mimic_joints(store, 'demo_bot') == {}
+    urdf.write_text(URDF.replace('</robot>', '''  <link name="finger"/>
+  <joint name="finger_joint" type="revolute"><parent link="arm"/><child link="finger"/>
+    <limit lower="0" upper="1" effort="1" velocity="1"/><mimic joint="j1" multiplier="-1"/></joint>
+</robot>'''))
+    assert mimic_joints(store, 'demo_bot') == {'finger_joint': 'j1'}
+    urdf.unlink()
+    assert mimic_joints(ConfigStore(config_dir), 'demo_bot') == {}
 
 
 def test_poses_outside_the_limits_or_with_foreign_joints_are_problems(store):

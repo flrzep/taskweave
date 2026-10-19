@@ -488,7 +488,7 @@ class Bridge(Node):
 
     def send_joints(self, values: dict) -> dict:
         """Joint targets straight to the robot (the HMI's joint panel): within the limits, no mission running."""
-        from taskweave_core.config.limits import joint_limits, joint_problems
+        from taskweave_core.config.limits import joint_limits, joint_problems, mimic_joints
 
         self.check_idle()
         if self.joint_command is None:
@@ -501,6 +501,10 @@ class Bridge(Node):
         unknown = [joint for joint in values if joint not in current]
         if unknown:
             raise arm.ArmError(f'not in the joint states: {", ".join(unknown)}')
+        mimics = mimic_joints(self.config, self.robot)
+        followers = [f'{joint} follows {mimics[joint]}' for joint in values if joint in mimics]
+        if followers:
+            raise arm.ArmError('set the joint they follow: ' + '; '.join(followers))
         linear = set(self.config.robot(self.robot).data.get('joints', {}).get('linear', []))
         problems = joint_problems(values, joint_limits(self.config, self.robot), linear)
         if problems:

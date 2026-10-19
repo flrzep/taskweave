@@ -52,6 +52,16 @@ def joint_limits(store: ConfigStore, robot: str) -> dict[str, tuple[float, float
     return limits
 
 
+def mimic_joints(store: ConfigStore, robot: str) -> dict[str, str]:
+    """Joint -> the joint it follows, for the URDF's mimic joints (e.g. a gripper's knuckles and fingers): they move
+    with that joint, a target of their own is ignored by the robot. {} without a URDF."""
+    path = urdf_path(store, robot)
+    if not path.is_file():
+        return {}
+    return {joint.get('name'): mimic.get('joint') for joint in ElementTree.parse(path).getroot().iter('joint')
+            if (mimic := joint.find('mimic')) is not None}
+
+
 def _urdf_velocities(path: Path) -> dict[str, float]:
     return {joint.get('name'): float(limit.get('velocity'))
             for joint in ElementTree.parse(path).getroot().iter('joint')
