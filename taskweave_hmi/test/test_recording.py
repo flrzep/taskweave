@@ -215,6 +215,18 @@ def test_a_light_recording_deletes_only_old_light_ones(tmp_path, monkeypatch):
     assert names == [started['id'], '20251016_130000_l3', '20251016_110000_l1', '20251016_100000_heavy']
 
 
+def test_the_status_says_stopping_once_stop_is_asked_or_the_recording_is_finishing(tmp_path, monkeypatch):
+    monkeypatch.setattr(Recorder, '_run', lambda self, rec, folder: None)
+    recorder = Recorder(FakeBridge(), str(tmp_path))
+    recorder.start({'reset': False, 'bag': False, 'video': False}, [])
+    assert recorder.status()['stopping'] is False      # recording
+    recorder.stop()
+    assert recorder.status()['stopping'] is True       # Stop pressed, the run has not seen it yet
+    recorder.active['stop'] = False
+    recorder._phase(recorder.active, 'post-processing')
+    assert recorder.status()['stopping'] is True       # the end reached by itself (cycles done): finishing too
+
+
 def test_step_events_and_plan_ids_go_into_the_status_and_meta(tmp_path, monkeypatch):
     monkeypatch.setattr(Recorder, '_run', lambda self, rec, folder: None)
     recorder = Recorder(FakeBridge(), str(tmp_path))
