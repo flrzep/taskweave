@@ -30,6 +30,7 @@ const ONE = new THREE.Vector3(1, 1, 1);
 const NEUTRAL = 0x5a6878;      // markers and arrows when not highlighted
 const BOX_COLOUR = 0x8a96a3;   // collision objects
 const SCENE_POLL_MS = 2000;    // the scene changes rarely: re-read it now and then, rebuild only when 'updated' moves
+const DEFAULT_VIEW = new THREE.Vector3(1, -1.2, 0.9);  // camera direction from the target: front right, from above
 
 // ---------- ROS pose helpers ----------
 const quatWXYZ = ([w, x, y, z]) => new THREE.Quaternion(x, y, z, w);
@@ -633,12 +634,12 @@ export class Viewer3D {
   }
 
   // The robot with a metre around it: what is within its reach.
-  fitRobot(margin = 1.0) {
+  fitRobot(margin = 1.0, angled = false) {
     if (!this.robot) { this.fit(); return; }
     this.scene.updateMatrixWorld();
     const box = new THREE.Box3().setFromObject(this.robot).expandByScalar(margin);
     if (this.areas.visible) box.expandByObject(this.areas);
-    this._frameBox(box);
+    this._frameBox(box, angled ? DEFAULT_VIEW : null);
   }
 
   // Straight down on the robot, its front (x) up the screen: for clearances and footprints.
@@ -661,13 +662,14 @@ export class Viewer3D {
     this._requestRender();
   }
 
-  _frameBox(box) {
+  // From the current viewing direction, or ``direction`` (e.g. back to the angled view after Top).
+  _frameBox(box, direction = null) {
     if (box.isEmpty()) box.set(new THREE.Vector3(-1, -1, 0), new THREE.Vector3(1, 1, 1));
     const center = box.getCenter(new THREE.Vector3());
     const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.5);
     const distance = radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 1.05;
-    const direction = this.camera.position.clone().sub(this.controls.target);
-    if (direction.lengthSq() < 1e-6) direction.set(1, -1.2, 0.9);
+    direction = direction ? direction.clone() : this.camera.position.clone().sub(this.controls.target);
+    if (direction.lengthSq() < 1e-6) direction.copy(DEFAULT_VIEW);
     this.camera.position.copy(center).add(direction.setLength(distance));
     this.camera.near = distance / 200;
     this.camera.far = distance * 20;
@@ -712,7 +714,7 @@ export class Viewer3D {
       return node;
     };
     if (this.mode === 'robot') {
-      button('Fit', 'Frame the robot', () => this.fitRobot(0.4));
+      button('Fit', 'Frame the robot, seen from the front left', () => this.fitRobot(0.4, true));
       button('Top', 'Look straight down: the navigation areas around the robot', () => this.viewTop());
       this._areasButton = button('Areas', 'Show or hide the navigation areas', () => this.setAreasShown(!this.areas.visible));
       this._areasButton.setAttribute('aria-pressed', 'true');
