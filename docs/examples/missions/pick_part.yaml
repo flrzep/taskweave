@@ -1,0 +1,25 @@
+# Block (included by other missions, with: {part: <placed part>}): pick the part and hold it in the carry pose.
+goal: Pick a part and hold it in the carry pose
+params:
+  part: {point: instance, description: "the placed part (cell/objects.yaml), e.g. part_stack_1"}
+loop: once
+defaults: {timeout_s: 120, retries: 0, on_failure: abort}
+steps:
+  - instruction: Drive to the pick stance at {part}
+    skill: navigate_to
+    args: {target: "stance:{part}"}
+  - instruction: Open both grippers
+    skill: grip
+    args: {hands: all, action: open}
+  - instruction: Pre-grasp above {part}
+    skill: move_gripper
+    args: {to: {point: "{part}/grasp", offset_m: 0.1}}
+  - instruction: Onto the part
+    skill: move_gripper
+    args: {to: {point: "{part}/grasp"}}
+  - instruction: Close both grippers
+    skill: grip
+    args: {hands: all, action: close}
+  - instruction: Into the carry pose
+    skill: move_object
+    args: {to: {pose: carry}}

@@ -1,0 +1,8 @@
+# Where this robot stands relative to an object (base pose in the object's frame).
+objects:
+  part:
+    pick: {x: -0.85, y: 0.0, yaw: 0.0}
+  bin:
+    place: {x: -0.70, y: 0.0, yaw: 0.0}
+  fixture:
+    work: {x: -0.60, y: 0.0, yaw: 0.0}

@@ -1,0 +1,6 @@
+# Where this robot holds an object of a type (move_object to.pose).
+part:
+  carry:
+    joints: {lift: 0.1}
+    path:
+      - {xyz: [0.7, 0.0, 0.1], rpy: [0.0, 0.0, 0.0]}

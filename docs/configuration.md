@@ -38,6 +38,7 @@ installed to `share/taskweave_robots/<model>/`):
   navigation.yaml        room kept around the robot while driving
   moveit/                URDF, SRDF, kinematics, joint limits, collision meshes
   sim.yaml, pose_targets.yaml   simulator and pose-solver inputs of the application
+  skill_overrides.yaml   optional: this robot's own motion options and standard speeds per skill (over skills/<skill>.yaml)
 ```
 
 `robots/<model>/<file>` is read from the cell pack if it has the file, else from the first robot pack that has it:
@@ -68,11 +69,11 @@ poses. `frame` is `cell` or a named object or fixture frame.
 ## Mission
 
 ```yaml
-goal: Move frames from the bays to the Karakuri rack
-robot: a2d                    # optional: only for robot-specific missions; omitted = any robot
+goal: Move parts from their stacks into the bin
+# robot: <model>              # optional: only for robot-specific missions; omitted = any robot
 loop: forever                 # once | forever
 max_cycles: 72                # optional, with loop: forever
-stop_when: bays_empty         # optional world-state flag that ends the mission
+stop_when: bin_full           # optional, with loop: forever: world-state key that ends the mission when truthy
 defaults:
   timeout_s: 120
   retries: 1                  # extra attempts after a failure
@@ -83,9 +84,9 @@ steps:
     instruction: Drive to the fullest stack
     skill: navigate_to
     args: {target: "stance:{fullest_stack}"}
-  - instruction: Pick the top frame with both hands
-    skill: pick_frame
-    args: {object: frame_type2, at: "{fullest_stack}", grasp: side_rails}
+  - instruction: Both hands onto the part
+    skill: move_gripper
+    args: {to: {point: "{fullest_stack}/grasp"}}
     retries: 2
     on_failure: replan
     replan_from: drive_to_stack   # on replan, continue from this step with fresh retries
@@ -102,7 +103,8 @@ Decision rules per step (falling back to `defaults`):
 | `max_replans` | Replans one step may trigger per cycle; after that the mission aborts |
 
 `{name}` placeholders are resolved from the world state when the step starts; arguments that contain placeholders
-are validated at that point instead of before the mission starts.
+are validated at that point instead of before the mission starts. [missions.md](missions.md) is the guide to writing
+missions, [skills.md](skills.md) the reference of the skills and their arguments.
 
 A step can include another mission instead of calling a skill: `{instruction, include: <mission>, with: {param:
 value}}`. The included mission declares its parameters (`params: {frame: {point: instance, description: ...}}`; the
@@ -119,9 +121,11 @@ complete, which ends a `loop: forever` mission once every matching stack is empt
 Point references: `stance:<instance>[/<variant>]` (where this robot stands at a placed object), `location:<name>`
 or a bare name (cell location),
 `<object>.<point>` (a point of an object type) or `<instance>/<point>` (that point on one placed object). A skill
-declares which arguments are points in its argument schema with `"x-taskweave-point": "base_target"`, `"object_point"`
-(either form), `"instance_point"` (only `<instance>/<point>`, e.g. move_gripper) or `"instance_contact"`
-(`<instance>/<contact>`, e.g. move_object `to`), so missing points are reported before anything moves.
+declares which arguments are points in its argument schema with `"x-taskweave-point"`: `base_target`, `object_point`
+(either form), `instance_point` (only `<instance>/<point>`, e.g. move_gripper `to.point`), `instance_contact`
+(`<instance>/<contact>`, e.g. move_object `to.onto`), `joint_pose` / `joint_pose_only` / `tool_pose` (poses of
+`poses.yaml`), `joint_group`, `held_pose`, `held_object` and `via_target`, so missing points are reported before
+anything moves (`taskweave_core.validation.check_point`).
 
 Contacts (`contacts:` in `objects/<object>.yaml`, `{xyz, rpy}` relative to the object) are frames where one object
 meets another: a hook plate on a frame, the hook it hangs on. Their z axis is the direction the held object moves to
@@ -207,7 +211,7 @@ differential base, or a tool without a gripper mapping) and implementation class
 ## Skill implementations
 
 ```yaml
-# skills/pick_frame.yaml
+# skills/pick_frame.yaml: a skill of the application (not one of taskweave_skills)
 implementations:                    # the skill server serves the first one that fits the robot
   - name: pick_frame_vla_v1
     type: vla                       # script | vla | rl | other
@@ -274,7 +278,9 @@ points:
     grip_width_m: 0.03        # checked against the tool's stroke
     left_tool:  {frame: frame_type2, xyz: [-0.18,  0.235, 0.065], rpy: [0, 1.5708, 0]}
     right_tool: {frame: frame_type2, xyz: [-0.18, -0.235, 0.065], rpy: [0, 1.5708, 0]}
-    approach: {axis: z, distance: 0.10}
+    approach_m: 0.10          # the last 10 cm of the way in are a straight line (else the skill's motion.approach_m)
+contacts:                     # frames where this object meets another (move_object to.onto)
+  base: {xyz: [0, 0, 0], rpy: [0, 0, 0]}
 ```
 
 Tool poses are canonical-TCP poses relative to the object, so they hold for any robot that can reach them.
@@ -297,9 +303,10 @@ yaw_tolerance: 0.05
 stuck_timeout_s: 5.0
 ```
 
-`move_joints` (torso, head, arm joints to a named joint pose or to given values) uses the new layout, which the other
-arm skills will follow: standard speeds in `speed`, option defaults in `motion`, accuracy and timeouts in `tolerances`.
-Joint groups for its `only` option come from the profile's `joints.groups`.
+The arm skills (`move_joints`, `move_gripper`, `move_object`, `set_posture`, `grip`) use one layout: standard speeds in
+`speed`, option defaults in `motion`, accuracy and timeouts in `tolerances` (shipped files: `docs/examples/skills/`;
+older flat keys are renamed by `taskweave config migrate-skills`). `move_joints` moves the torso, head and arm
+joints to a named joint pose or to given values. Joint groups for its `only` option come from the profile's `joints.groups`.
 
 ```yaml
 # skills/move_joints.yaml

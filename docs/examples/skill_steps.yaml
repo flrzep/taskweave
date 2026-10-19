@@ -1,0 +1,68 @@
+# Example steps of docs/skills.md (one or more per skill, in the order the reference lists the skills). Written against
+# the example cell docs/examples/cell; taskweave_skills/test/test_docs_examples.py validates every step. After a change
+# run: python3 tools/gen_skills_doc.py
+move_gripper:
+  - instruction: Both hands 10 cm above the grasp point of the part
+    skill: move_gripper
+    args: {to: {point: part_stack_1/grasp, offset_m: 0.1}}
+  - instruction: Left hand only, straight onto the point, at half speed
+    skill: move_gripper
+    args: {to: {point: part_stack_1/grasp}, hands: [left], motion: {mode: linear, speed: 0.5}}
+  - instruction: Both hands to the presentation pose
+    skill: move_gripper
+    args: {to: {pose: present_both}}
+  - instruction: Hands 5 cm up from where they are
+    skill: move_gripper
+    args: {to: {by: [0, 0, 0.05]}}
+grip:
+  - instruction: Close both grippers on the part
+    skill: grip
+    args: {hands: all, action: close}
+  - instruction: Open the left gripper 40 mm wide
+    skill: grip
+    args: {hands: [left], action: opening, opening_mm: 40}
+  - instruction: Let go and record where the part now is
+    skill: grip
+    args: {hands: all, action: open, place_as: part_stack_2}
+move_joints:
+  - instruction: Arms in the driving pose
+    skill: move_joints
+    args: {pose: home}
+  - instruction: Only the left arm to the pose, half speed
+    skill: move_joints
+    args: {pose: home, only: [left_arm], motion: {speed: 0.5}}
+  - instruction: The lift to a given height
+    skill: move_joints
+    args: {joints: {lift: 0.2}}
+move_object:
+  - instruction: Lift the held part 20 cm
+    skill: move_object
+    args: {to: {by: [0, 0, 0.2]}}
+  - instruction: Into the carry pose
+    skill: move_object
+    args: {to: {pose: carry}}
+  - instruction: Part onto the seat of the bin, 5 cm short of it
+    skill: move_object
+    args: {to: {onto: bin_1/seat, contact: base, offset_m: 0.05}}
+set_posture:
+  - instruction: Swing the elbows out, the part staying where it is
+    skill: set_posture
+    args: {elbow: out}
+navigate_to:
+  - instruction: Drive to the pick stance at the part stack
+    skill: navigate_to
+    args: {target: "stance:part_stack_1"}
+  - instruction: Drive to a named location
+    skill: navigate_to
+    args: {target: staging}
+drive_straight:
+  - instruction: Back out 40 cm
+    skill: drive_straight
+    args: {distance_m: -0.4}
+  - instruction: Move up to the work stance straight ahead
+    skill: drive_straight
+    args: {to: "stance:fixture_1/work"}
+wait:
+  - instruction: Wait 3 seconds
+    skill: wait
+    args: {seconds: 3}

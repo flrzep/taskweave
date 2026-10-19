@@ -1,0 +1,13 @@
+# A part carried with both hands. Tool poses are canonical TCP poses relative to the object.
+name: part
+points:
+  grasp:                          # taught with `taskweave teach point <instance>/grasp`
+    tool_type: parallel_gripper
+    grip_width_m: 0.03
+    approach_m: 0.1               # the last 10 cm in a straight line
+    left_tool: {xyz: [0.0, 0.2, 0.05], rpy: [0.0, 3.14159265, 0.0]}
+    right_tool: {xyz: [0.0, -0.2, 0.05], rpy: [0.0, 3.14159265, 0.0]}
+    alone:                        # the same point for one hand (move_gripper hands: [left])
+      left_tool: {xyz: [0.0, 0.1, 0.05], rpy: [0.0, 3.14159265, 0.0]}
+contacts:                         # frames where the part meets another object (move_object to.onto)
+  base: {xyz: [0.0, 0.0, 0.0], rpy: [0.0, 0.0, 0.0]}

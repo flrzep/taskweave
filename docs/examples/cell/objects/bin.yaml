@@ -1,0 +1,3 @@
+name: bin
+contacts:
+  seat: {xyz: [0.0, 0.0, 0.2], rpy: [0.0, 0.0, 0.0]}    # where a part sits in the bin

@@ -15,9 +15,10 @@ Turns a goal into a `Plan`: an ordered list of `PlanStep`s. Each step has
 Planner interface (Python, in `taskweave_core`):
 
 ```python
-class Planner:
-    def make_plan(self, goal: str, world_state: dict, skills: list[SkillInfo]) -> Plan: ...
-    def replan(self, plan: Plan, failed_step: int, reason: str, world_state: dict) -> Plan | None: ...
+class Planner(ABC):
+    def make_plan(self, world: Mapping[str, Any], cycle: int) -> Plan | None: ...      # None: mission complete
+    def replan(self, plan: Plan, failed_index: int, reason: str,
+               world: Mapping[str, Any]) -> tuple[Plan, int] | None: ...               # (new plan, step to resume at)
 ```
 
 | Implementation | Status |
@@ -34,7 +35,7 @@ A ROS 2 node that
 3. sends the step to the skill through `RunSkill` and forwards feedback to `TaskStatus`;
 4. applies the decision rules on failure or timeout: `retry` → `replan` / `skip` / `abort`;
 5. loops the mission according to `loop`;
-6. handles operator commands (`~/pause`, `~/resume`, `~/abort`) at any time by canceling the active skill;
+6. handles operator commands (`/taskweave/pause`, `/taskweave/resume`, `/taskweave/abort`) at any time by canceling the active skill;
 7. publishes episode markers (step start / end with instruction and outcome) so runs can be recorded as training data.
 
 It knows nothing about how a skill works.
@@ -70,13 +71,15 @@ embodiment, skill implementations and parameters, missions. See [configuration.m
 | Interface | Type | Used by |
 |---|---|---|
 | `RunSkill` | action | task handler → skill |
-| `Plan`, `PlanStep` | msg | planner → task handler; published on `~/plan` |
-| `TaskStatus` | msg | task handler → operator UIs, recorders; `~/status` |
+| `Plan`, `PlanStep` | msg | planner → task handler; published on `/taskweave/plan` |
+| `TaskStatus` | msg | task handler → operator UIs, recorders; `/taskweave/status` |
 | `SkillInfo`, `ListSkills` | msg, srv | skill catalog → task handler, planners |
 | `StartMission` | srv | operator / MES → task handler |
 | `DescribeRobot` | srv | planners → task handler (robot card + filtered catalog) |
-| `TeachPoint` | srv | operator → teach node (save the current base pose by name) |
-| `~/pause`, `~/resume`, `~/abort` | `std_srvs/Trigger` | operator → task handler |
+| `TeachPoint` | srv | operator → teach node (save the current base pose or tool poses by name) |
+| `SpeedOverride` | msg | task handler → skills: the global speed override and test mode (latched, `/taskweave/speed_override`) |
+| `SetSpeedOverride` | srv | operator → task handler: the single write path of the override (`/taskweave/task_handler/set_speed_override`) |
+| `/taskweave/pause`, `/taskweave/resume`, `/taskweave/abort` | `std_srvs/Trigger` | operator → task handler |
 
 `RunSkill` outcomes: `SUCCEEDED`, `FAILED` (ran but missed the goal), `TIMEOUT`, `CANCELED` (by the task handler),
 `REJECTED` (invalid arguments or unmet preconditions; nothing moved).

@@ -62,69 +62,155 @@ Every decision reads its rule from the mission file (`timeout_s`, `retries`, `on
 
 ## A mission
 
+A mission is a YAML file in the cell pack (`missions/<name>.yaml`). This one picks the top part of the fullest stack
+with both hands and puts it into a bin; it uses only generic skills and names from the cell pack:
+
 ```yaml
-goal: Move frames from the bays to the Karakuri rack
-robot: a2d                    # selects config/robots/a2d/
-loop: forever                 # once | forever
-stop_when: bays_empty         # world-state flag that ends the mission
+goal: Move parts from the fullest stack into the bin
+loop: forever                       # once | forever
+facts:
+  next_stack: {fullest: part, among: "part_stack_*"}   # fixed for each cycle; none left = mission complete
 defaults: {timeout_s: 120, retries: 1, on_failure: abort}
 steps:
-  - instruction: Drive to the fullest stack
+  - id: to_stack
+    instruction: Drive to the stance at {next_stack}
     skill: navigate_to
-    args: {target: "stance:{fullest_stack}"}
-  - instruction: Pick the top frame with both hands
-    skill: pick_frame
-    args: {object: frame_type2, at: "{fullest_stack}", grasp: side_rails}
+    args: {target: "stance:{next_stack}"}      # where this robot stands at that stack (robots/<robot>/stances.yaml)
+  - instruction: Open both grippers
+    skill: grip
+    args: {hands: all, action: open}
+  - instruction: Pre-grasp 10 cm above the part
+    skill: move_gripper
+    args: {to: {point: "{next_stack}/grasp", offset_m: 0.1}}
     retries: 2
-    on_failure: replan
+    on_failure: replan              # ask the planner again ...
+    replan_from: to_stack           # ... starting at the drive
+  - instruction: Onto the part
+    skill: move_gripper
+    args: {to: {point: "{next_stack}/grasp"}}
+  - instruction: Close both grippers on the part
+    skill: grip
+    args: {hands: all, action: close}
+  - instruction: Lift it 20 cm
+    skill: move_object
+    args: {to: {by: [0, 0, 0.2]}}
+  - instruction: Drive to the bin
+    skill: navigate_to
+    args: {target: "stance:bin_1/place"}
+  - instruction: Part onto the seat of the bin
+    skill: move_object
+    args: {to: {onto: bin_1/seat, contact: base}}
+  - instruction: Let go
+    skill: grip
+    args: {hands: all, action: open}
 ```
 
-Placeholders such as `{fullest_stack}` are resolved from the world state when the step starts.
+`{next_stack}` is a **fact**, worked out when each cycle is planned (here the stack with most parts left); other
+`{placeholders}` come from the world state or from the parameters of an included mission. `stance:...` is where this
+robot stands at an object, `<instance>/<point>` a grasp point taught on a placed object, `contact` the frame where the
+held part meets the bin. Nothing in the file names a robot: the same mission runs on any robot that has stances for the
+parts and a bin. More in [docs/missions.md](docs/missions.md) (all keys, targets, hands, motion options, three complete
+examples, common errors) and [docs/skills.md](docs/skills.md) (every skill and its arguments).
+
+## Packs
+
+- A **cell pack** is the config directory of one work cell: `pack.yaml`, `cell/` (layout, locations, placed objects),
+  `objects/`, `missions/`, `skills/`, and per robot `robots/<model>/` with its stances, held poses and object points.
+- A **robot pack** holds one robot model and nothing about a cell: `profile.yaml` (how the hardware is reached),
+  `embodiment.yaml` (what it can do), poses, navigation, MoveIt files. `taskweave_robots` ships the bundled ones and
+  installs them to `share/taskweave_robots/`.
+- A cell file overrides the robot pack's file key by key (`~override: keys`), so one robot model serves many cells.
+  Layout, search order and migration: [docs/configuration.md](docs/configuration.md).
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| [`taskweave_interfaces/`](taskweave_interfaces) | ROS 2 interfaces: `RunSkill` action, `Plan`, `PlanStep`, `TaskStatus`, `SkillInfo`, `ListSkills`, `StartMission` |
-| [`taskweave_core/`](taskweave_core) | Config loader and schemas, planners, task handler, skill server base class, CLI |
+| [`taskweave_interfaces/`](taskweave_interfaces) | ROS 2 interfaces: `RunSkill` action, `Plan`, `PlanStep`, `TaskStatus`, `SkillInfo`, `SpeedOverride`, `ListSkills`, `StartMission`, `SetSpeedOverride`, `DescribeRobot`, `TeachPoint` |
+| [`taskweave_core/`](taskweave_core) | Config loader, schemas and migrations, planners, task handler, skill server base class, speed override, smoke test, CLI |
 | [`taskweave_skills/`](taskweave_skills) | Generic, robot-agnostic skills: `wait`, `navigate_to`, `drive_straight`, `move_joints`, `move_gripper`, `move_object`, `set_posture`, `grip` |
-| [`taskweave_hmi/`](taskweave_hmi) | Web HMI: live mission status and control, validated mission editor |
-| [`docs/architecture.md`](docs/architecture.md) | Layers, interfaces, decision rules, design rules |
+| [`taskweave_hmi/`](taskweave_hmi) | Web HMI: live mission status and control, validated mission editor, teaching, recording |
+| [`taskweave_robots/`](taskweave_robots) | Robot packs (profile, embodiment, poses, MoveIt files), one folder per model |
+| [`docs/missions.md`](docs/missions.md) | Writing missions: file anatomy, targets, hands, motion options, examples, common errors |
+| [`docs/skills.md`](docs/skills.md) | Skill reference (generated from the skill classes: `python3 tools/gen_skills_doc.py`) |
 | [`docs/configuration.md`](docs/configuration.md) | Config tree and file formats |
+| [`docs/architecture.md`](docs/architecture.md) | Layers, interfaces, decision rules, design rules |
+| [`docs/pack_switchover.md`](docs/pack_switchover.md) | Moving a deployment from one config directory to cell pack + robot packs |
+| [`AGENTS.md`](AGENTS.md) | Guide for developers and AI agents: build, tests, rules, how to add a skill, robot pack or cell pack |
 
-Application-specific parts (a cell's layout, its objects and missions, a robot profile, cell-specific skills) live in
-the application repository and are passed to taskweave as a config directory.
+Application-specific parts (a cell's layout, its objects and missions, cell-specific skills) live in the application's
+cell pack and are passed to taskweave as a config directory.
 
 ## Status
 
-Early development. The interfaces are defined; the core packages are being built step by step:
+taskweave runs a full pick-and-place cell in simulation. Working today:
 
-- [x] Interfaces (`taskweave_interfaces`)
-- [x] Config loader and schemas, robot profile and embodiment, capability vocabulary
-- [x] Mission-file planner, executive (decision rules) and task handler
-- [x] Skill server with implementation selection, `wait`, `navigate_to`
-- [x] Teaching named base poses; `describe_robot` for planners
-- [x] Joint skills `move_joints` (named poses) and `grip` (open/close, holding detection)
-- [x] Joystick buttons for pause/abort and manual skill calls (`operator.yaml`)
-- [x] Web HMI: live status, start/pause/resume/abort, mission editor with validation
-- [x] Teaching tool poses (pad or CLI), `move_gripper`, Nav2 and MoveIt adapters
-- [ ] VLM planner
+- Config: cell packs and robot packs with per-key overrides, schema validation, capability vocabulary, `config
+  migrate` / `migrate-skills` / `slim` / `files`, `taskweave check`.
+- Mission-file planner, executive (retry / replan / skip / abort), include blocks with parameters and facts, task
+  handler with plan validation before anything moves, pause / resume / abort.
+- Skills: `wait`, `navigate_to` (direct and Nav2), `drive_straight`, `move_joints`, `move_gripper`, `grip`,
+  `move_object`, `set_posture`, with IK, MoveIt planning, elbow control and hold tracking.
+- Global speed override with test mode; the smoke test against a reference run.
+- Teaching (locations, stances, object points, from the CLI, the pad or the HMI); web HMI with live status, mission
+  editor with validation, record tab; `describe_robot` for planners.
+
+Planned: automatic arm selection (the planner or IK picks the arm and the torso height instead of the mission naming
+them), an HMI config editor, a VLM planner and learned skills (VLA, RL) behind the same `RunSkill` interface. The
+interfaces and config schemas may still change between minor versions; schema changes come with a migration.
 
 ## Usage
 
 ```bash
-ros2 launch taskweave_core taskweave.launch.py config_dir:=/path/to/config robot:=a2d skills:=wait,navigate_to
-ros2 run taskweave_core taskweave check /path/to/config     # validate all config files offline
-ros2 run taskweave_core taskweave describe                  # robot card + skills of the running system
-ros2 run taskweave_core taskweave run frame_cycle           # start a mission
-ros2 run taskweave_core taskweave status --follow
-ros2 run taskweave_core taskweave pause | resume | abort
-ros2 run taskweave_core taskweave teach location bay_2      # save the current base pose
-ros2 run taskweave_core taskweave teach point bay_2_stack_1/rails_top   # save the tools' TCPs on an object
-ros2 run taskweave_hmi hmi_server --ros-args -p config_dir:=/path/to/config -p robot:=a2d -p host:=<address>
+ros2 launch taskweave_core taskweave.launch.py config_dir:=/path/to/cell robot:=<robot> \
+    skills:=wait,navigate_to,drive_straight,move_joints,grip,move_gripper,move_object,set_posture
+ros2 run taskweave_hmi hmi_server --ros-args -p config_dir:=/path/to/cell -p robot:=<robot> -p host:=<address>
 ```
 
 The HMI (default port 8090) has no login: bind it to a trusted network only (for example a Tailscale address).
+`taskweave` below is `ros2 run taskweave_core taskweave`.
+
+```bash
+taskweave check /path/to/cell            # validate all config files offline (no ROS graph needed)
+taskweave describe                       # robot card + skills of the running system
+taskweave describe /path/to/cell <robot> # the same offline
+taskweave skills                         # the skill catalog of the running system
+taskweave run restock                    # start a mission
+taskweave status --follow
+taskweave pause | resume | abort
+taskweave teach location staging         # save the current base pose
+taskweave teach stance part_stack_1      # save it as the stance at an object (add --instance for one instance)
+taskweave teach point part_stack_1/grasp # save the tools' TCPs on an object
+```
+
+### Speed override and test mode
+
+One global override (1 to 100 %) scales the speed of every skill and, by 1/override, the step timeouts. The task handler
+owns it; skills follow the latched topic `/taskweave/speed_override`. Test mode lowers the override to a safe value
+when a run starts, caps it while on and restores it when the run ends (only if it lowered it). Nothing is persisted: a
+handler restart starts at 100 %.
+
+```bash
+ros2 service call /taskweave/task_handler/set_speed_override taskweave_interfaces/srv/SetSpeedOverride "{percent: 50}"
+ros2 service call /taskweave/task_handler/set_speed_override taskweave_interfaces/srv/SetSpeedOverride \
+    "{set_test_mode: true, test_mode: true, test_percent: 10}"   # test mode on; runs start at 10 %
+ros2 param set /task_handler speed_override_percent 50.0              # same path as the service
+```
+
+`percent: 0` leaves the value unchanged. Handler parameters `speed_test_percent` (default 10) and `speed_cap_percent`
+(default 50) set the test mode values. A base driven by Nav2 needs the `speed_gate` node between the planner and the
+base (`ros2 run taskweave_core speed_gate`).
+
+### Cell pack maintenance
+
+```bash
+taskweave config migrate /path/to/cell [--robot-packs DIR] [--dry-run]  # any older layout -> the current schema (1 -> 2 -> 3)
+taskweave config migrate-skills /path/to/cell [--dry-run]               # only 2 -> 3: move_to_pose, go_to_point, gripper
+                                                                        # become move_joints, move_gripper, grip, ...
+taskweave config slim /path/to/cell [--dry-run]                         # whole-file robot overrides -> per-key overrides
+taskweave config files /path/to/cell [<robot>]                          # where each robot file comes from
+taskweave check /path/to/cell                                           # validate the result
+```
 
 ### Mission smoke test
 
@@ -134,9 +220,9 @@ starts the mission and stops it after `--cycles`; the step events of `/api/state
 (sim time) and the `max error` a skill reports. Bag and video are off unless `--bag` / `--video` is given.
 
 ```bash
-taskweave smoke run frame_cycle --hmi http://<hmi>:8090 --save-reference config/tests/frame_cycle.reference.yaml
-taskweave smoke run frame_cycle --hmi http://<hmi>:8090 --reference config/tests/frame_cycle.reference.yaml
-taskweave smoke compare config/tests/frame_cycle.reference.yaml run.yaml   # offline, a saved run (--save-run)
+taskweave smoke run restock --hmi http://<hmi>:8090 --save-reference config/tests/restock.reference.yaml
+taskweave smoke run restock --hmi http://<hmi>:8090 --reference config/tests/restock.reference.yaml
+taskweave smoke compare config/tests/restock.reference.yaml run.yaml   # offline, a saved run (--save-run)
 ```
 
 A step passes when it runs in the reference's order with outcome `SUCCEEDED`, its duration is within `--tolerance`

@@ -1,0 +1,5 @@
+name: fixture
+points:
+  handle:                         # a lever the left hand pulls
+    tool_type: parallel_gripper
+    left_tool: {xyz: [0.0, 0.0, 0.9], rpy: [0.0, 3.14159265, 0.0]}

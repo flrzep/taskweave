@@ -1,0 +1,49 @@
+goal: Pick a part from its stack with both hands and put it into the bin
+loop: once
+defaults: {timeout_s: 120, retries: 1, on_failure: abort}
+steps:
+  - id: tuck
+    instruction: Arms in the driving pose
+    skill: move_joints
+    args: {pose: home}
+  - id: to_part
+    instruction: Drive to the pick stance at the part stack
+    skill: navigate_to
+    args: {target: "stance:part_stack_1"}
+  - instruction: Open both grippers
+    skill: grip
+    args: {hands: all, action: open}
+  - instruction: Pre-grasp 10 cm above the part
+    skill: move_gripper
+    args: {to: {point: part_stack_1/grasp, offset_m: 0.1}}
+    retries: 2
+    on_failure: replan
+    replan_from: to_part
+  - instruction: Onto the part
+    skill: move_gripper
+    args: {to: {point: part_stack_1/grasp}, motion: {mode: linear, speed: 0.5}}
+  - instruction: Close both grippers on the part
+    skill: grip
+    args: {hands: all, action: close}
+  - instruction: Lift the part 20 cm
+    skill: move_object
+    args: {to: {by: [0, 0, 0.2]}}
+  - instruction: Into the carry pose
+    skill: move_object
+    args: {to: {pose: carry}}
+  - id: to_bin
+    instruction: Drive to the bin
+    skill: navigate_to
+    args: {target: "stance:bin_1/place"}
+  - instruction: Part onto the seat, 5 cm short of it
+    skill: move_object
+    args: {to: {onto: bin_1/seat, contact: base, offset_m: 0.05}}
+  - instruction: Down onto the seat
+    skill: move_object
+    args: {to: {onto: bin_1/seat, contact: base}}
+  - instruction: Let go
+    skill: grip
+    args: {hands: all, action: open}
+  - instruction: Arms in the driving pose
+    skill: move_joints
+    args: {pose: home}
