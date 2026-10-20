@@ -4,7 +4,7 @@ Config-driven task planning and execution for ROS 2 robots.
 
 A **planner** turns a goal into steps, a **task handler** runs them and decides what happens when one fails, and
 **skills** do the work behind a single ROS 2 action. Every location, grasp point, speed and decision rule comes from
-YAML. Robot hardware is described in one profile, so the same mission runs on a different robot. Install and first run: [docs/install.md](docs/install.md). Release notes: `CHANGELOG.md`.
+YAML. Robot hardware is described in one profile, so the same mission runs on a different robot. Install and first run: [docs/install.md](docs/install.md). Running missions: [docs/operator.md](docs/operator.md). Release notes: `CHANGELOG.md`.
 
 Skills can be scripts today and learned policies (VLA, RL) tomorrow; the planner can be a mission file today and a
 VLM tomorrow. Neither change touches the rest of the system.
@@ -134,6 +134,7 @@ examples, common errors) and [docs/skills.md](docs/skills.md) (every skill and i
 | [`taskweave_bringup/`](taskweave_bringup) | Launch files: taskweave + HMI + Nav2 + MoveIt of any robot pack (`taskweave_bringup.launch.py`, `taskweave_nav2.launch.py`, `taskweave_moveit.launch.py`) |
 | [`taskweave_robots/`](taskweave_robots) | Robot packs (profile, embodiment, poses, MoveIt files), one folder per model |
 | [`docs/install.md`](docs/install.md) | Install from a clean Ubuntu 24.04 + ROS 2 Jazzy machine, run the example cell, use your own packs, upgrade a cell pack |
+| [`docs/operator.md`](docs/operator.md) | Operator guide: running missions, speed and test mode, hands, reload vs restart, checks, troubleshooting |
 | [`docs/missions.md`](docs/missions.md) | Writing missions: file anatomy, targets, hands, motion options, examples, common errors |
 | [`docs/skills.md`](docs/skills.md) | Skill reference (generated from the skill classes: `python3 tools/gen_skills_doc.py`) |
 | [`docs/configuration.md`](docs/configuration.md) | Config tree and file formats |
