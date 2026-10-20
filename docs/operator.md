@@ -46,18 +46,53 @@ Four more terms you will meet in missions, messages and the teach tools:
   creates a new placed object whose points exist from then on). This state is what lets a looping mission finish when
   every stack is empty. It is not in the cell pack (section 7).
 
-<!-- HMI: opening the HMI. Address and port (default 8090), who may open it (no login: trusted network only), the
-layout of the page and which tabs exist. Written by the HMI session. -->
-(HMI section to come: opening the HMI.)
+### The HMI
+
+The task stack serves a web page, the HMI: `http://<host>:8090` in a browser on a laptop or a phone (port 8090 by
+default; a second stack on the same host uses another port, for example 8091). There is **no login**: anyone who can
+reach the address can start missions and move the robot. Keep it on a trusted network (the frame cell: the Tailscale
+address of the robot host only), never on a public one.
+
+The bar at the top shows the robot the stack drives, the pad's mode (`pad: drive`, or the arm it jogs) and a dot: green
+while the page has a live connection to the stack, red when it lost it (the page reconnects by itself). A pad action
+that changed something, such as a taught point, shows there for a moment.
+
+| Tab | What it is for |
+|---|---|
+| **Run** | Start, pause, resume and abort a mission; its status, its plan step by step, and the robot live in the cell (3D). |
+| **Missions** | Read and edit the mission files, checked before they are saved (writing missions: [missions.md](missions.md)). |
+| **Robot** | The robot now: its position, grippers and joints, in 3D with the room the planner keeps around it; below, the navigation and arm settings. |
+| **Teach** | Locations, stances, poses, points and carry poses: where the robot drives to, stands and puts its hands. |
+| **Record** | Record a run (bag, the simulator's videos) and download the recordings. Only there when the stack has a recordings folder. |
+| **Log** | The step events of the last runs, newest last. |
+
+While a mission runs, everything that changes points or settings is locked (the buttons are greyed out and a note says
+why): teach and edit between runs.
 
 ## 2. Running a mission
 
 Check first that the stack is up: `taskweave skills` lists the skills of the running system (an error or an empty list
 means the task handler or skill servers are not running), and `taskweave status` shows `[idle]`.
 
-<!-- HMI: the Run tab, start / pause / resume / abort buttons, test mode and the speed control. Written by the HMI
-session. -->
-(HMI section to come: the Run tab.)
+### From the HMI: the Run tab
+
+1. Pick the mission under **Start a mission** and press **Start**. The answer appears under it: `Started <plan id>`, or
+   why it was refused (the same reasons as `rejected: ...` below).
+2. **Pause** stops the robot where it is; the same button then reads **Resume**. **Abort** ends the mission. Both work
+   like the commands below. A pad can do the same if the cell's `operator.yaml` maps buttons to it (the frame cell: options
+   = pause / resume, share = abort).
+3. **Start at a step:** before starting, open the plan (**List**) and tap a step: the mission's first cycle then begins
+   there, with the robot and the objects as they are now. Tap it again to clear it. Use it to repeat the end of a
+   mission after a fix, not as a shortcut through a mission whose first steps set things up.
+
+The plan shows as a **Graph** (the steps and where a failure leads: retry, replan, skip, abort) or a **List**, each step
+with its outcome once it ran. The 3D view below the status shows the robot where the stack believes it is, in the cell
+with its fixtures, and the taught locations, objects and points. **Robot** frames the robot, **Cell** the whole cell,
+**Follow** keeps the camera on the robot as it drives, **Labels** shows the names (greyed out while nothing is taught).
+A note `no robot pose` means the stack has no position of the robot: the 3D view and every drive are off until it
+has one again.
+
+The HMI has no speed control or test-mode switch yet: set them from a terminal (section 3).
 
 ### From the command line
 
@@ -118,9 +153,74 @@ mean the plan did not validate before it started, nothing moved.
 A `loop: forever` mission starts the next cycle after the last step; it ends as `succeeded` with `mission complete`
 when the planner finds nothing left to do (`stop_when`, `max_cycles`, or no stack with items left).
 
-<!-- HMI: on-screen status and errors. What the status bar, step list and error banner show, and how to read them
-next to the CLI status lines above. Written by the HMI session. -->
-(HMI section to come: on-screen status and errors.)
+### On screen
+
+The status card at the top of the Run tab is the same information as `taskweave status`, made to be read from a few
+metres away:
+
+| On screen | Same as in the status line |
+|---|---|
+| The badge and the coloured rail: `IDLE` grey, `RUNNING` blue, `PAUSED` amber with stripes, `SUCCEEDED` green, `FAILED` and `ABORTED` red | The state in brackets. |
+| The big line: the mission's goal, or `No mission running` | The goal. |
+| `cycle n` at the top right | `cycle n`. |
+| Under the goal: the step (`step 4/9 · move_gripper`), its instruction, a progress bar and the attempt and elapsed time | `step 4/9: s4 move_gripper "..." attempt 1 running 45% 12.3s`. |
+| A red box under it | `last error`, as `<step id> (<skill>) <result>: <message>`. Like the status line, it stays until the next failure: after a retry that worked it is still there while the mission runs on. |
+
+In the plan, each step that ran is marked with its result: `SUCCEEDED`, `FAILED` (the attempt that failed, then the
+retry), `REJECTED`, `TIMEOUT`, `CANCELED`. A step marked `REJECTED` at once, before anything moved, means the mission or
+the cell config is wrong (the message names the argument), not the robot. The Log tab lists the same step events with
+their times, for reading back what happened after the run.
+
+### The Robot tab
+
+What the robot is doing now. At the top a 3D view of the robot alone, its joints live, with the room the path planner
+keeps around it drawn on the floor: the chassis, the envelope (the robot in its driving pose, arms included), the
+padding and the inflation zone, and an arrow to the front. **Fit** shows it from the front, **Top** straight down,
+**Areas** hides the floor drawing. Below:
+
+- **Robot pose:** where the base is in the cell (x, y, heading) and the placed object nearest to it.
+- **Grippers:** each gripper's finger opening in mm, with **Open** and **Close**. They move at once.
+- **Joints:** every joint against its limits (red within 10° of one), grouped by torso, head and arms. A value set here
+  is sent at once and **without a collision check**: for getting an arm out of a place the pad cannot reach, not for
+  normal work.
+- **Settings** (closed by default): **Navigation** (the clearances and driving speeds of the path planner, applied to
+  it at once; the floor drawing above follows your numbers while you type) and **Arm solutions** (which elbow side the
+  robot prefers when several arm shapes reach a target).
+
+### Teaching in the HMI
+
+The Teach tab shows the robot's position at the top and one list at a time:
+
+| List | What it stores | How to teach it |
+|---|---|---|
+| **Locations** | Base poses of the cell (`cell/locations.yaml`) | Drive the robot there (pad, or a mission step), **+ Location**, a name, **Set from robot**, **Save**. **Drive here** drives to a saved one. |
+| **Stances** | Where the robot stands at a type of object, relative to it, per robot | In the card of the object type: drive the robot to where it should stand at one of the placed objects, choose that object, **Set from robot**, **Save**. Every placed object of the type follows. A per-object override is for the one object that needs another stance. The card's **Placed** view lists the placed objects (read-only: they come from `cell/objects.yaml`). |
+| **Poses** | Arm shapes relative to the robot (`poses.yaml`), such as `home` | Put the arms there with the pad, **+ Pose**, a name, then **Capture from robot** (or the pad's L1 + L3). **Move here** moves the robot into it. |
+| **Points** | Where a gripper goes on an object (a grasp, a place), relative to the object type | Choose at which placed object to teach (**at**: the nearest one by default), put the gripper there with the pad, **+ Point**, **Capture from robot** or L1 + L3. **Go here** drives the gripper there. |
+| **Carry poses** | How the robot carries an object it holds (`move_object` `pose:`) | Typed in as joint values and waypoints; **Test** needs the robot holding such an object. |
+
+An entry that is open is the one the pad's teach press (L1 + L3) goes to: open the one you mean before you press.
+Every entry shows which missions use it; one that a mission uses cannot be renamed or deleted. **Numbers** shows and
+edits the stored values, **Advanced** a point's elbow side, straight approach and finger opening. **Delete** needs a
+second tap. Saved values are used from the next move or mission start.
+
+### Recording a run
+
+The Record tab records what happens, with or without a mission:
+
+1. Choose a mission (or none: then it records what you do), and if you like a name and **Stop after cycles**.
+2. Choose what to record: **ROS bag** (with **Camera images in the bag**, by far the largest part), **Videos** (the
+   simulator's fixed and following views) and **From the start (reset the sim)**: the simulator is reset and the mission
+   starts from the clean world, as the smoke test does.
+3. **Start recording**. **Stop recording** ends it; the recording then shows **finishing** while the simulator encodes its
+   videos and the camera videos are made from the bag. That takes minutes for a long run, Stop is greyed out
+   meanwhile, and the recording is not complete until it says it has ended.
+
+Each finished recording opens to its videos (to play in the page) and its files. **Download all (.tar, size)** saves the
+whole recording, bag included, as one file into the browser's downloads; single videos and data files download one by
+one from their links. **Keep** protects a recording from being replaced: by default a new recording replaces the older
+ones, and the tab says how many are kept and how much disk is free. A recording that runs out of disk space is refused
+before it starts.
 
 ## 3. Speed
 
@@ -146,9 +246,8 @@ ros2 service call /taskweave/task_handler/set_speed_override taskweave_interface
 `percent: 0` means "leave unchanged". A value outside 1-100 is refused with a message. Use test mode for a first run of
 any new or changed mission, with the people and the cell in the state you want when it goes wrong.
 
-<!-- HMI: speed control and test mode in the Run tab (presets 10 / 50 / 100 %, the test mode switch). Written by
-the HMI session. -->
-(HMI section to come: speed control in the Run tab.)
+The HMI does not set the override or test mode yet; it uses the override the handler has, so what you set from the
+terminal applies to runs started from the HMI too.
 
 **Timeouts scale with the speed.** A step's `timeout_s` is counted in *work time*, not wall time: time passes at the
 effective override. At 10 % a step gets ten times as long; at 100 % it is exactly the stated time. Retries and
@@ -238,9 +337,9 @@ needs a restart is listed on every call until the restart.
 restart anything while a mission or a recording is running**: check `taskweave status` is `idle`, `succeeded`, `failed` or
 `aborted` first, and ask whoever shares the robot. A restart of the simulator also resets the world (section 7).
 
-<!-- HMI: the config editor. Editing and saving a file with validation, history and restore, and the reload button.
-Written by the HMI session. -->
-(HMI section to come: the config editor.)
+The HMI has no general config editor yet. It edits missions (Missions tab), the taught points (Teach tab) and the
+navigation and arm settings (Robot tab), each checked before it is saved; every other file is edited as text and
+reloaded as above.
 
 ## 6. Checks
 
