@@ -95,3 +95,10 @@ def test_the_version_is_the_running_source_trees(monkeypatch):
     expected = re.search(r'<version>([^<]+)</version>', xml.read_text(encoding='utf-8')).group(1).strip()
     monkeypatch.setattr('importlib.metadata.version', lambda name: '0.0.1')
     assert real() == expected
+
+
+def test_a_folder_that_is_no_cell_says_so(tmp_path):
+    """No pack.yaml and none of an old cell's folders: 'no cell pack here', not 'migrate schema 1'."""
+    (tmp_path / 'scripts').mkdir()
+    with pytest.raises(ConfigError, match='no cell pack here'):
+        ConfigStore(tmp_path)

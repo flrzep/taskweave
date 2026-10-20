@@ -127,6 +127,9 @@ def check_cell_schema(folder: Path) -> None:
     pack = read_pack(folder)
     if pack:
         check_requires(pack, Path(folder) / PACK_FILE, f'cell pack {pack["name"]}')
+    elif not any((Path(folder) / part).exists() for part in ('cell', 'objects', 'missions', 'robots')):
+        # no pack.yaml and none of an old cell's folders: not a cell at all (not one to migrate)
+        raise _error(Path(folder), 'no cell pack here: pass the cell pack folder (the one with pack.yaml, e.g. config)')
     version = cell_schema(folder)
     if version < CELL_SCHEMA:
         command = 'migrate-skills' if version == 2 else 'migrate'   # 2 -> 3 is the skill migration (migrate_skills.py)
