@@ -239,8 +239,12 @@ def _write(target: Path, data: bytes) -> None:
 
 
 # ---- git -------------------------------------------------------------------------------------------------------------
-def _git(cwd: Path, *args: str, config: tuple = ()) -> subprocess.CompletedProcess:
+def _git(cwd: Path, *args: str, config: tuple = (), shared: bool = False) -> subprocess.CompletedProcess:
+    """``shared``: run under umask 002, so new object folders stay group-writable (a shell, not preexec_fn: the HMI
+    is multi-threaded)."""
     cmd = ['git', *(a for c in config for a in ('-c', c)), *args]
+    if shared and os.name == 'posix':
+        cmd = ['sh', '-c', 'umask 002; exec "$@"', 'sh', *cmd]
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding='utf-8', errors='replace')
 
 
@@ -280,6 +284,20 @@ def _ignore_lock(lock: Path) -> None:
         pass
 
 
+def _shared_hint(repo: Path) -> list:
+    """The objects folder has setgid (set up for a group) but core.sharedRepository is unset: new object folders of
+    other users' commits may come out 755."""
+    try:
+        objects = Path(_git(repo, 'rev-parse', '--git-path', 'objects').stdout.strip())
+        objects = objects if objects.is_absolute() else repo / objects
+        unset = _git(repo, 'config', '--get', 'core.sharedRepository').returncode != 0
+        if objects.stat().st_mode & stat.S_ISGID and unset:
+            return ['git repository shared by several users: set git config core.sharedRepository group']
+    except OSError:
+        pass
+    return []
+
+
 def _commit(target: Path, message: str, author: str | None, removed: bool = False) -> tuple[str | None, list]:
     """Commit exactly ``target`` if it is in a git work tree: (rev, warnings). A git failure is a warning."""
     repo = _repo(target.parent if target.parent.exists() else target.parent.parent)
@@ -288,17 +306,17 @@ def _commit(target: Path, message: str, author: str | None, removed: bool = Fals
     name, email = _author(author)
     config = (f'user.name={name}', f'user.email={email}')
     try:
-        stage = (_git(repo, 'rm', '-q', '--cached', '--ignore-unmatch', '--', str(target)) if removed
-                 else _git(repo, 'add', '--', str(target)))
+        stage = (_git(repo, 'rm', '-q', '--cached', '--ignore-unmatch', '--', str(target), shared=True) if removed
+                 else _git(repo, 'add', '--', str(target), shared=True))
         if stage.returncode:
             return None, [f'not committed: git {stage.args[1]}: {stage.stderr.strip()}']
         if _git(repo, 'diff', '--cached', '--quiet', '--', str(target)).returncode == 0:
             return _last_rev(repo, target), []     # nothing changed
         run = _git(repo, 'commit', '-q', '--only', '-m', message, f'--author={name} <{email}>', '--', str(target),
-                   config=config)
+                   config=config, shared=True)
         if run.returncode:
             return None, [f'not committed: {(run.stderr or run.stdout).strip()}']
-        return _git(repo, 'rev-parse', 'HEAD').stdout.strip() or None, []
+        return _git(repo, 'rev-parse', 'HEAD').stdout.strip() or None, _shared_hint(repo)
     except OSError as error:
         return None, [f'not committed: {error}']
 

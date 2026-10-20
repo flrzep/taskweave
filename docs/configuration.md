@@ -157,6 +157,12 @@ An editor changes files only through core (`config/save.py`, on `ConfigStore`); 
   (`git commit --only`); other dirty or staged files stay alone. Message: the caller's or `HMI: edit <path>`; author:
   the caller's (`Name <mail>`) or `taskweave HMI <hmi@HOSTNAME>`. A git failure after the write is a warning in
   `warnings`, not a failure; no repo: `rev` is None.
+- **Deployment note, shared git repository:** if several users commit into the pack's repo (the HMI server's user and
+  people committing by SSH), git creates new `.git/objects/xx` folders with the committing user's umask, and a 755 folder
+  breaks the next user's commit. Set it up once, per repo: `git config core.sharedRepository group` (and a group-owned,
+  setgid `.git`). `save` and `delete` run git under umask 002; when the objects folder has setgid but
+  `core.sharedRepository` is unset, the result's `warnings` say "set git config core.sharedRepository group". taskweave
+  never changes the repo's config itself.
 - `delete(path, pack, base, message)`: same lock, conflict and git handling; problems the pack has afterwards are warnings.
 - `create(kind, name, robot=None, content=None)`: `catalogue.new_file` plus `save` without base (the template may need
   filling in: pass `content`). `save_mission(name, content, base)`: `missions/<name>.yaml` with the mission checks

@@ -569,3 +569,31 @@ def test_an_invalid_system_yaml_is_a_problem_and_can_be_fixed_by_a_save(store, b
     assert text(store, 'system.yaml') == 'robot: demo_bot\n' and not any(
         p['path'] == 'system.yaml' for p in store.check_pack())
     store.delete('missions/ok.yaml', base=store.file_hash('missions/ok.yaml'))
+
+
+# ---- P4 review: shared git repository ------------------------------------------------------------------------------
+def _object_dirs(repo) -> set:
+    return {p for p in (repo / '.git' / 'objects').iterdir() if p.is_dir() and len(p.name) == 2}
+
+
+@posix_only
+def test_the_shared_repo_commit_runs_with_umask_002(store, repo):
+    old = os.umask(0o022)
+    try:
+        before = _object_dirs(repo)
+        store.save(LOCATIONS, text(store) + '# note\n', base=store.file_hash(LOCATIONS))
+    finally:
+        os.umask(old)
+    made = _object_dirs(repo) - before
+    assert made and all(d.stat().st_mode & 0o020 for d in made)
+
+
+@posix_only
+def test_a_shared_repo_without_shared_repository_warns(store, repo):
+    objects = repo / '.git' / 'objects'
+    save = lambda: store.save(LOCATIONS, text(store) + '# note\n', base=store.file_hash(LOCATIONS))   # noqa: E731
+    assert not any('sharedRepository' in str(w) for w in save()['warnings'])    # no setgid: nothing to say
+    objects.chmod(objects.stat().st_mode | 0o2000)
+    assert any('core.sharedRepository group' in str(w) for w in save()['warnings'])
+    git(repo, 'config', 'core.sharedRepository', 'group')
+    assert not any('sharedRepository' in str(w) for w in save()['warnings'])
