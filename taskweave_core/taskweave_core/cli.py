@@ -26,6 +26,13 @@
     taskweave config slim CELL_DIR [--dry-run]
                                           rewrite whole-file overrides of robot pack files as per-key overrides
                                           (only the keys that differ; config/slim.py)
+    taskweave config init CELL_DIR --robot PACK [--name NAME]
+                                          a new, empty, valid cell pack (config/packfile.py)
+    taskweave config export CELL_DIR FILE.tar.gz
+                                          the pack's files plus manifest.yaml (sha256 per file, git rev) in one file
+    taskweave config import FILE.tar.gz CELL_DIR [--force]
+                                          check the archive (paths, links, hashes, schema, taskweave check), then
+                                          replace the folder (old one kept as .bak-<time>) or commit into a git repo
     taskweave config files CELL_DIR [ROBOT]
                                           where each robot file comes from (cell pack, override, robot pack)
 """
@@ -109,6 +116,30 @@ def check(config_dir: str) -> int:
         attempt(f'missions/{name}.yaml', lambda n=name: Plan.from_mission(store.expanded_mission(n), 'check'))
     print(f'{problems} problem(s)' if problems else 'config ok (skill arguments are checked against a running catalog)')
     return 1 if problems else 0
+
+
+def packfile_command(options) -> int:
+    from .config import packfile
+
+    try:
+        if options.action == 'init':
+            print(f'created {packfile.init_cell(options.cell_dir, options.robot, options.name)}')
+            return check(options.cell_dir)
+        if options.action == 'export':
+            manifest = packfile.export_cell(options.cell_dir, options.file)
+            print(f'wrote {options.file}: {manifest["name"]}, {len(manifest["files"])} files, '
+                  f'git rev {manifest["git_rev"] or "none"}')
+            return 0
+        report = packfile.import_cell(options.file, options.cell_dir, options.force)
+    except packfile.PackfileError as error:
+        print(f'error: {error}', file=sys.stderr)
+        return 1
+    where = {'swap': f'old pack kept as {report["backup"]}', 'git': f'commit {report["commit"] or "(no change)"}',
+             'new': 'new folder'}[report['mode']]
+    print(f'imported {report["name"]} ({report["files"]} files) into {options.cell_dir}: {where}')
+    for warning in report['warnings']:
+        print(f'warning: {warning}')
+    return 0
 
 
 def robot_files(config_dir: str, robot: str | None) -> int:
@@ -287,6 +318,17 @@ def main(argv=None) -> int:
     slim_parser = config_sub.add_parser('slim', help='whole-file overrides of robot pack files to per-key overrides')
     slim_parser.add_argument('cell_dir')
     slim_parser.add_argument('--dry-run', action='store_true', help='only print what would be done')
+    init_parser = config_sub.add_parser('init', help='create an empty, valid cell pack')
+    init_parser.add_argument('cell_dir')
+    init_parser.add_argument('--robot', required=True, help='robot pack the cell uses')
+    init_parser.add_argument('--name', help='cell pack name (default: the folder name)')
+    export_parser = config_sub.add_parser('export', help='write a cell pack to one .tar.gz file')
+    export_parser.add_argument('cell_dir')
+    export_parser.add_argument('file')
+    import_parser = config_sub.add_parser('import', help='take a cell pack .tar.gz into a folder (checked first)')
+    import_parser.add_argument('file')
+    import_parser.add_argument('cell_dir')
+    import_parser.add_argument('--force', action='store_true', help='replace a non-empty folder (old pack kept)')
     files_parser = config_sub.add_parser('files', help='where each robot file comes from')
     files_parser.add_argument('cell_dir')
     files_parser.add_argument('robot', nargs='?')
@@ -294,6 +336,8 @@ def main(argv=None) -> int:
     if options.command == 'smoke':
         return smoke.main(options)
     if options.command == 'config':
+        if options.action in ('init', 'export', 'import'):
+            return packfile_command(options)
         if options.action == 'files':
             return robot_files(options.cell_dir, options.robot)
         if options.action == 'slim':

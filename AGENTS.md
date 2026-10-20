@@ -14,7 +14,7 @@ taskweave runs robot tasks on ROS 2 Jazzy, driven entirely by YAML.
 | Path | Contents |
 |---|---|
 | `taskweave_interfaces/` | msgs, srvs, `RunSkill` action (CMake package) |
-| `taskweave_core/taskweave_core/` | `config/` (store, schemas, packs, overlay, migrate*, slim), `planner.py`, `executive.py`, `task_handler.py`, `skill.py` (base class), `skill_server.py`, `validation.py`, `motion.py` (motion option resolution), `speed.py`, `speed_gate.py`, `smoke.py`, `teach.py`, `operator_joy.py`, `cli.py` |
+| `taskweave_core/taskweave_core/` | `config/` (store, schemas, packs, overlay, migrate*, slim, packfile), `planner.py`, `executive.py`, `task_handler.py`, `skill.py` (base class), `skill_server.py`, `validation.py`, `motion.py` (motion option resolution), `speed.py`, `speed_gate.py`, `smoke.py`, `teach.py`, `operator_joy.py`, `cli.py` |
 | `taskweave_skills/taskweave_skills/` | the generic skills: `basic` (wait), `navigate`, `drive`, `joint_motion`, `gripper_motion`, `object_motion`; helpers `joints`, `ik`, `chain`, `cartesian`, `motion_plan`, `hold`, `points`, `tcp_jog`, `nav2` |
 | `taskweave_hmi/taskweave_hmi/` | web HMI (`server.py`, `web/*.js`): status, control, mission editor, teach, record |
 | `taskweave_bringup/` | launch files `taskweave_bringup.launch.py` (taskweave, HMI, optional Nav2/MoveIt), `taskweave_nav2.launch.py`, `taskweave_moveit.launch.py`; `taskweave_bringup/` (`nav2.py`, `moveit.py`, `hmi.py`, `robot_files.py`: the logic, testable without launching), `config/nav2_params.yaml` (default Nav2 tuning) |
@@ -222,7 +222,11 @@ object points belong to the cell pack).
 4. `robots/<robot>/stances.yaml`, `held_poses.yaml`, `object_points.yaml`: what this robot does at this cell.
 5. `skills/<skill>.yaml` for each skill the missions use (start from `docs/examples/skills/`),
    `missions/<name>.yaml`.
-6. From an older layout: `taskweave config migrate <cell>` (runs every migration up to schema 3; `migrate-skills`
+6. New cell from nothing: `taskweave config init <dir> --robot <pack> [--name N]` (empty, passes `check`); one file
+   between hosts: `taskweave config export <cell> f.tar.gz`, `taskweave config import f.tar.gz <cell> [--force]`
+   (checked before anything changes; folder swap with `.bak-<time>`, or a commit when the target is a git work tree;
+   `taskweave_core/taskweave_core/config/packfile.py`, which the HMI can call too).
+7. From an older layout: `taskweave config migrate <cell>` (runs every migration up to schema 3; `migrate-skills`
    is the 2 to 3 step alone).
    Check: `taskweave check <cell>`. Details: [docs/configuration.md](docs/configuration.md).
 
