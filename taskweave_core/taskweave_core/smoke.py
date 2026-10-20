@@ -155,7 +155,8 @@ def _judge(ref: dict, now: dict, tolerance: float, slack_s: float, error_slack: 
         if abs(now_s - ref_s) > duration_tolerance * ref_s + slack_s:
             paths = [(d or {}).get('path') for d in (now.get('data'), ref.get('data'))]
             why = f' (path {paths[0]}, ref {paths[1]})' if all(paths) else ''
-            problems.append(f'{"slower" if now_s > ref_s else "faster"} than {ref_s:g} s ±{duration_tolerance:.0%}{why}')
+            way = 'slower' if now_s > ref_s else 'faster'
+            problems.append(f'{way} than {ref_s:g} s ±{duration_tolerance:.0%}{why}')
     elif ref_s is not None:
         problems.append('no duration')
     ref_e, now_e = ref.get('max_error'), now.get('max_error')
