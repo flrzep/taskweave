@@ -25,6 +25,10 @@
   <exec_depend>nav2_navfn_planner</exec_depend>
   <exec_depend>nav2_costmap_2d</exec_depend>
   <!-- the node taskweave_moveit.launch.py starts, and its OMPL planning pipeline -->
+  <exec_depend>nav2_msgs</exec_depend>
+  <exec_depend>lifecycle_msgs</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>rosgraph_msgs</exec_depend>
   <exec_depend>moveit_ros_move_group</exec_depend>
   <exec_depend>moveit_planners_ompl</exec_depend>
   <test_depend>python3-pytest</test_depend>

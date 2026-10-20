@@ -13,6 +13,7 @@ setup(
                                           'launch/taskweave_moveit.launch.py']),
         ('share/' + PACKAGE + '/config', ['config/nav2_params.yaml']),
     ],
+    entry_points={'console_scripts': ['clock_guard = taskweave_bringup.clock_guard:main']},
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='Florian Rzepczyk',

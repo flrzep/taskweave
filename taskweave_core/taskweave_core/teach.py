@@ -29,11 +29,9 @@ from rclpy.node import Node
 
 from taskweave_interfaces.srv import TeachPoint
 
-from . import names, tf_util
+from . import clock_jump, names, tf_util
 from .config import ConfigError, ConfigStore, Pose2D
 from .config.poses import quaternion_from_rpy, quaternion_multiply, rotate
-
-MAX_POSE_AGE_S = 1.0
 
 
 def yaw_from_quaternion(q) -> float:
@@ -51,7 +49,13 @@ class Teach(Node):
         self.cell_frame = self.get_parameter('cell_frame').value or self._skill_cell_frame()
         self.pose: Pose2D | None = None
         self.stamp = 0.0
+        self.declare_parameter('max_tf_age_s', 1.0)   # refuse to save from TF or a base pose older than this
+        self.declare_parameter('after_jump_s', 2.0)   # ... and for this long after a clock jump
+        self.max_age_s = self.get_parameter('max_tf_age_s').value
+        self.after_jump_s = self.get_parameter('after_jump_s').value
         self.tf, self.tf_listener = tf_util.buffer(self)  # cleared when sim time jumps back
+        self.clock_jump = clock_jump.watch(self)
+        self.clock_jump.callbacks.append(self._forget_pose)
         self.create_subscription(Odometry, self.robot.base['odom'], self._odom, 10)
         self.create_service(TeachPoint, names.TEACH_POINT, self._teach)
         self.get_logger().info(f'teach: base pose from {self.robot.base["odom"]}, tool TCPs in {self.cell_frame}')
@@ -62,6 +66,22 @@ class Teach(Node):
         except (ConfigError, KeyError):
             return 'world'
 
+    def _forget_pose(self) -> None:
+        self.pose = None  # the base pose of the old run
+
+    def _stale(self, tf_stamp: float | None = None) -> str:
+        """Why what teach would save cannot be trusted, or '' when it can. ``tf_stamp``: the oldest TF stamp used."""
+        if self.clock_jump.recent(self.after_jump_s):
+            return f'the sim clock jumped less than {self.after_jump_s:g} s ago (clock jump); wait and try again'
+        now = self._now()
+        if self.pose is not None and abs(now - self.stamp) > self.max_age_s:
+            return f'the base pose on {self.robot.base["odom"]} is stale ({now - self.stamp:.1f} s old)'
+        if tf_stamp:
+            age = now - tf_stamp
+            if abs(age) > self.max_age_s:
+                return f'TF is stale ({age:.1f} s old, limit {self.max_age_s:g} s); is the robot publishing TF?'
+        return ''
+
     def _now(self) -> float:
         return self.get_clock().now().nanoseconds * 1e-9
 
@@ -70,12 +90,16 @@ class Teach(Node):
         self.pose = Pose2D(p.position.x, p.position.y, yaw_from_quaternion(p.orientation))
         self.stamp = self._now()
 
-    def tcp_pose(self, tool: str):
-        """The tool's canonical TCP in the cell frame: (position, quaternion xyzw); raises if TF lacks it."""
+    def tcp_pose(self, tool: str, stamps: list | None = None):
+        """The tool's canonical TCP in the cell frame: (position, quaternion xyzw); raises if TF lacks it.
+        The TF stamp (seconds) is appended to ``stamps``."""
         frame = self.robot.data.get('tool_frames', {}).get(tool)
         if frame is None:
             raise ValueError(f'no tool_frames.{tool} in the robot profile')
-        t = self.tf.lookup_transform(self.cell_frame, frame['link'], rclpy.time.Time()).transform
+        found = self.tf.lookup_transform(self.cell_frame, frame['link'], rclpy.time.Time())
+        t, stamp = found.transform, found.header.stamp
+        if stamps is not None:
+            stamps.append(stamp.sec + stamp.nanosec * 1e-9)
         flange_q = (t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w)
         offset = rotate(flange_q, frame.get('xyz', [0.0, 0.0, 0.0]))
         position = (t.translation.x + offset[0], t.translation.y + offset[1], t.translation.z + offset[2])
@@ -84,7 +108,10 @@ class Teach(Node):
     def _teach_object_point(self, request, response):
         tools = list(request.tools) or list(self.robot.data.get('tool_frames', {}))
         try:
-            poses = {tool: self.tcp_pose(tool) for tool in tools}
+            stamps: list = []
+            poses = {tool: self.tcp_pose(tool, stamps) for tool in tools}
+            if reason := self._stale(min((x for x in stamps if x), default=None)):  # 0: a static transform
+                raise ValueError(reason)
             note = f'taught {datetime.date.today().isoformat()}'
             path, stored = self.config.save_object_point(request.name, poses, note, self.robot.name, self.pose)
         except Exception as error:  # noqa: BLE001 - tf2 raises several types; the caller gets the message
@@ -100,7 +127,10 @@ class Teach(Node):
     def _teach(self, request, response):
         if request.kind == 'object_point':
             return self._teach_object_point(request, response)
-        if self.pose is None or self._now() - self.stamp > MAX_POSE_AGE_S:
+        if reason := self._stale():
+            response.success, response.message = False, f'{request.kind or "location"} {request.name!r}: {reason}'
+            return response
+        if self.pose is None:
             response.success, response.message = False, f'no current pose on {self.robot.base["odom"]}'
             return response
         kind = request.kind or 'location'

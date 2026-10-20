@@ -47,7 +47,7 @@ class HoldState:
         from rclpy.qos import DurabilityPolicy, QoSProfile
         from std_msgs.msg import String
 
-        from taskweave_core import tf_util
+        from taskweave_core import clock_jump, tf_util
 
         self.node, self.String = node, String
         self.base = robot.base['frame']
@@ -61,12 +61,9 @@ class HoldState:
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.publisher = node.create_publisher(String, TOPIC, latched)
         self._publish()
-        from rclpy.clock import JumpThreshold
-        from rclpy.duration import Duration
-        threshold = JumpThreshold(min_forward=None, min_backward=Duration(seconds=-reset_jump_s), on_clock_change=True)
-        self.jump_handle = node.get_clock().create_jump_callback(threshold, post_callback=self._on_reset)
+        clock_jump.watch(node, reset_jump_s).callbacks.append(self._on_reset)
 
-    def _on_reset(self, _jump) -> None:
+    def _on_reset(self, _jump=None) -> None:
         with self.lock:
             holds = list(self.holds)
             self.holds, self.reached = {}, {}

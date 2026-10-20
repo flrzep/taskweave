@@ -83,3 +83,67 @@ def test_the_teach_button_stores_the_jogged_tool_relative_to_the_object(system):
     # TCP in the cell: flange (1.2, 2.0, 0.6) + 0.1 along cell -x = (1.1, 2.0, 0.6); top item at z 0.2
     assert point['left_tool'].xyz == pytest.approx((0.1, 0.0, 0.4), abs=1e-4)
     assert 'taught' in (store.root / 'objects' / 'box.yaml').read_text()
+
+
+# ---- stale TF / clock jump: teach refuses to store what it cannot trust ----------------------------------------
+@pytest.fixture
+def teach_node(config_dir):
+    from taskweave_core.teach import Teach
+
+    (config_dir / 'cell' / 'objects.yaml').write_text(
+        'pile: {object: box, frame: cell, x: 1.0, y: 2.0, z: 0.1, yaw: 0.0, stack: {count: 3, pitch: 0.05}}\n')
+    profile = config_dir / 'robots' / 'demo_bot' / 'profile.yaml'
+    profile.write_text(profile.read_text() + TOOL_FRAMES)
+    parameters = [Parameter('config_dir', value=str(config_dir)), Parameter('robot', value='demo_bot'),
+                  Parameter('max_tf_age_s', value=1.0), Parameter('after_jump_s', value=30.0)]
+    with RosRig() as ros:
+        yield ros.add(Teach(parameter_overrides=parameters))
+
+
+def flange_at(node, age_s: float) -> None:
+    t = TransformStamped(child_frame_id='left_link7')
+    t.header.frame_id = 'world'
+    t.header.stamp = (node.get_clock().now() - rclpy.duration.Duration(seconds=age_s)).to_msg()
+    t.transform.translation.x, t.transform.rotation.y, t.transform.rotation.w = 1.2, 1.0, 0.0
+    node.tf.set_transform(t, 'test')
+
+
+def teach_point(node):
+    from taskweave_interfaces.srv import TeachPoint
+
+    return node._teach(TeachPoint.Request(name='pile/top_grasp', kind='object_point'), TeachPoint.Response())
+
+
+def test_teach_saves_a_point_with_fresh_tf(teach_node):
+    flange_at(teach_node, 0.0)
+    assert teach_point(teach_node).success
+
+
+def test_teach_refuses_a_point_with_stale_tf(teach_node):
+    flange_at(teach_node, 5.0)
+    answer = teach_point(teach_node)
+    assert not answer.success
+    assert 'stale' in answer.message and '5.0' in answer.message
+
+
+def test_teach_refuses_for_a_while_after_a_clock_jump_then_accepts(teach_node):
+    flange_at(teach_node, 0.0)
+    teach_node.clock_jump.handle(-100.0)
+    flange_at(teach_node, 0.0)  # the buffer was cleared: fresh data arrives again
+    answer = teach_point(teach_node)
+    assert not answer.success and 'clock jump' in answer.message
+    teach_node.clock_jump.settle_until = 0.0
+    teach_node.clock_jump.last_jump = time.monotonic() - 31.0
+    assert teach_point(teach_node).success
+
+
+def test_teach_refuses_a_stance_or_location_with_a_pose_from_before_a_jump(teach_node):
+    from nav_msgs.msg import Odometry
+
+    from taskweave_interfaces.srv import TeachPoint
+
+    teach_node._odom(Odometry())
+    teach_node.clock_jump.handle(-100.0)
+    answer = teach_node._teach(TeachPoint.Request(name='bin_2', kind='location'), TeachPoint.Response())
+    assert not answer.success and 'clock jump' in answer.message
+    assert teach_node.pose is None  # the pre-jump base pose is gone
