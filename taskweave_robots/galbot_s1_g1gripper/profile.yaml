@@ -1,0 +1,73 @@
+# How the Galbot S1 with Galbot G1 grippers is reached in this setup (Isaac Sim 6.1, frame-sim-2). Topics and names
+# only; capabilities live in embodiment.yaml. From galbot_s1 (same chassis, torso, arms, head and cameras); grippers,
+# tool frames and IK seeds are the G1 gripper's (19 Oct).
+name: galbot_s1_g1gripper
+base:
+  type: differential        # four-wheel steering chassis: forward/backward and turning on the spot, no sideways
+  cmd_vel: /cmd_vel         # motion (real S1). Planar virtual joints in the sim; the sim drops sideways commands
+  odom: /odom               # ground truth, in the cell frame
+  frame: base_link          # column base, 0.583 m above the floor
+  footprint: [0.88, 0.74]   # chassis meshes: x -0.29..+0.44, y +-0.37 around base_link (symmetric box around it)
+  limits: {linear: 2.0, angular: 1.5}   # 15 Oct, was 1.0 m/s: the sim drives faster than the S1 datasheet is known to
+joints:                     # joint position targets in, joint states out (Isaac articulation controller)
+  command: /joint_command
+  state: /joint_states
+  linear: [body_joint]      # prismatic: torso lift 0-0.75 m
+  groups:                   # move_joints `only`
+    torso: [body_joint]
+    head: [head_joint1, head_joint2]
+    left_arm: [left_joint1, left_joint2, left_joint3, left_joint4, left_joint5, left_joint6, left_joint7]
+    right_arm: [right_joint1, right_joint2, right_joint3, right_joint4, right_joint5, right_joint6, right_joint7]
+grippers:                   # Galbot G1 gripper: one driven joint per hand, the knuckle/finger joints are mimic joints
+  left: {joint: left_gripper_joint, open: 0.0, closed: 1.70, closed_from: 0.1, opening_m: &opening [[0.0, 0.123], [0.2, 0.115], [0.4, 0.105], [0.6, 0.092], [0.8, 0.076], [1.0, 0.059], [1.2, 0.042], [1.4, 0.024], [1.6, 0.006], [1.68, 0.0]]}
+  right: {joint: right_gripper_joint, open: 0.0, closed: 1.70, closed_from: 0.1, opening_m: *opening}
+                            # limit 0-1.703 rad (as galbot_g1: 0 = open, 1.70 = closed). opening_m: [joint, gap between
+                            # the finger pads in m], from the collision hulls on the URDF chain (19 Oct, +-3 mm); a
+                            # point's grip_m turns into the joint through it. closed_from: a capture (HMI) further than
+                            # this from open takes the gripper as closed on the part
+tool_frames:                # flange -> canonical TCP (grasp centre, z approach, y closing)
+  left: {link: left_link7, xyz: [-0.27, 0.0, 0.0], rpy: [1.5708, 0.0, -1.5708]}    # along -x of link7, y = +z of link7
+  right: {link: right_link7, xyz: [-0.27, 0.0, 0.0], rpy: [1.5708, 0.0, -1.5708]}
+                            # G1 gripper_flange 0.14 m along -x of link7, on the wrist axis; fingers close along link7 z.
+                            # Pads (0.075 m) 0.23-0.31 m out when open, tips move out to 0.336 m while closing: TCP =
+                            # pad middle when open, as on galbot_g1 (URDF chain, 19 Oct)
+arms:                       # elbow: the links at the shoulder, elbow and wrist centres (frames of joints 2, 4, 6): the
+                            # elbow side (ik.choose.elbow, points), straight lines and elbow swings. swivel: the joint
+                            # the pad's elbow jog turns (upper-arm roll; its positive way on the URDF chain)
+  left: {elbow: {shoulder: left_link2, elbow: left_link4, wrist: left_link6}, swivel: left_joint3}
+  right: {elbow: {shoulder: right_link2, elbow: right_link4, wrist: right_link6}, swivel: right_joint3}
+ik:                         # tool targets in poses.yaml: solved by MoveIt (ros/moveit.launch.py, moveit/ config)
+  groups: {left: left_arm, right: right_arm}
+  joints: '{tool}_joint[1-7]'   # the arm joints IK may move
+  timeout_s: 0.3              # per attempt (each seed, then the current state, then the fallback)
+  fallback_groups: {left: left_arm_global, right: right_arm_global}   # global search if no descent converges
+  fallback_timeout_s: 2.0
+  avoid_collisions: true      # collision hulls: moveit/meshes (tools/export_collision.py), pairs: tools/collision_matrix.py
+  mirror: {right: left}       # the S1's right arm mirrors the left with the same joint values (URDF FK, 13 Oct)
+  choose:                     # best of several solutions (taskweave_skills/ik.py), not the first
+    elbow: down               # 13 Oct: top-down grasps keep the most joint-limit room elbow out/up, not down
+    limit_margin_deg: 25.0
+    weights: {limits: 2.0, elbow: 1.0, motion: 0.2, symmetry: 0.5}
+  seeds:                      # known-good arm postures: IK descends from each in order, so a named pose always gets the
+                              # same arm configuration. home (poses.yaml), inside the vendor limits (galbot_s1's
+                              # seeds have left joint 4 at -2.6, below its -1.92 limit; joint 4 <= -0.05 on both arms)
+  - {left_joint1: 0.745, left_joint2: -1.865, left_joint3: -0.451, left_joint4: -1.752, left_joint5: -0.001, left_joint6: -0.473, left_joint7: -0.156, right_joint1: 0.725, right_joint2: -1.7253, right_joint3: -0.3178, right_joint4: -1.752, right_joint5: -0.1957, right_joint6: -0.4572, right_joint7: -0.3347} # home
+planning:                   # collision-free arm, lift and head motion (MoveIt OMPL, moveit/joint_limits.yaml speeds)
+  group: whole_body
+  joints: '(left|right)_joint[1-7]|body_joint|head_joint[12]'   # whole_body's joints: those a move does not set stay put
+  timeout_s: 5.0
+  attempts: 3
+motion_tuning:              # how the arm motion code steps (taskweave schemas.MOTION_TUNING_DEFAULTS; tuned on the S1)
+  chain: {max_step_rad: 0.08, damping: 0.05, singular: 0.04, limit_margin: 0.001}   # one damped least-squares step
+  line: {limit_push_rad: 0.02, on_line_m: 0.0005, on_line_rad: 0.005, step_iterations: 8, push_iterations: 3,
+         min_step_s: 0.001}   # a straight-line step on the URDF chain
+  elbow: {rate_rad: 0.03, settled_rad: 0.1, swing_max_steps: 200, via_out_deg: 150.0, via_out_until_deg: 120.0,
+          probe_rad: 0.01, progress_rad: 0.0001, limit_edge_parts: 5}
+  continuation: {max_m: 0.25, max_deg: 45.0, elbow_deg: 90.0, jump_deg: 120.0}   # short moves: no wrist flips
+  plan: {tries: 3, deeper_m: 0.005, unknown_depth_m: 0.3}
+cameras:
+  head: {color: /head_camera/color/image_raw, depth: /head_camera/aligned_depth_to_color/image_raw, info: /head_camera/color/camera_info, frame: head_camera_optical_frame}
+  left_wrist: {color: /left_wrist_camera/color/image_raw, depth: /left_wrist_camera/aligned_depth_to_color/image_raw, info: /left_wrist_camera/color/camera_info, frame: left_wrist_camera_optical_frame}
+  right_wrist: {color: /right_wrist_camera/color/image_raw, depth: /right_wrist_camera/aligned_depth_to_color/image_raw, info: /right_wrist_camera/color/camera_info, frame: right_wrist_camera_optical_frame}
+teleop:
+  joy: /joy

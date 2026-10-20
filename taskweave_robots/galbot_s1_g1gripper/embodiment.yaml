@@ -1,0 +1,25 @@
+# What the Galbot S1 with Galbot G1 grippers is and can do. No topics or joint names (see profile.yaml).
+# "~" = not measured yet (never guessed). Geometry from the galbot-usds asset (reference/galbot_s1_model.json, 9 Oct),
+# about +-1 cm; payload and gripper stroke need the datasheet or a measurement in the sim.
+name: galbot_s1_g1gripper
+summary: >-
+  Wheeled bimanual robot: four-wheel steering chassis (drives forward and backward, turns on the spot, no sideways
+  motion), a vertical column that lifts the
+  torso 0.75 m, two 7-DoF arms with Galbot G1 two-finger parallel grippers, pan-tilt head with an RGB-D camera, one RGB-D camera per
+  wrist, and Livox Mid-360 lidars on chassis, column and head (not simulated yet).
+capabilities: [base.differential, torso.lift, head.pan_tilt, arms.bimanual, gripper.parallel,
+               camera.head.rgbd, camera.wrist.rgbd]
+base:  {footprint: [0.88, 0.74], max_speed: {linear: 2.0, angular: 1.5}}
+torso: {lift_range_m: [0.0, 0.75]}   # shoulders 0.75-1.50 m above the floor
+arms:
+  left:  {dof: 7, reach_m: 1.20, payload_kg: ~, tool: left}     # shoulder to TCP, straight arm (0.92 m to the flange)
+  right: {dof: 7, reach_m: 1.20, payload_kg: ~, tool: right}
+tools:
+  left:  {type: parallel_gripper, stroke_m: 0.12, finger_length_m: 0.075}   # G1 gripper: pads 0.123 m apart open
+  right: {type: parallel_gripper, stroke_m: 0.12, finger_length_m: 0.075}   # (URDF chain, 19 Oct; galbot_g1: 0.12)
+cameras:
+  head:        {type: rgbd, hfov_deg: 69, range_m: [0.1, 10.0]}
+  left_wrist:  {type: rgbd, hfov_deg: 87, range_m: [0.07, 1.0], mounted_on: tools.left}
+  right_wrist: {type: rgbd, hfov_deg: 87, range_m: [0.07, 1.0], mounted_on: tools.right}
+action_spaces:
+  joint_pos_bimanual: {dims: 17, rate_hz: 30, description: "2x7 arm joints, 2 grippers, torso lift"}

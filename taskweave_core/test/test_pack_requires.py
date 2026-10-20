@@ -78,7 +78,7 @@ def test_shipped_packs_admit_this_taskweave(monkeypatch):
     root = Path(__file__).resolve().parents[2]
     version = re.search(r'<version>([^<]+)</version>', (root / 'taskweave_core' / 'package.xml').read_text()).group(1)
     found = sorted([*root.glob('taskweave_robots/*/pack.yaml'), root / 'docs' / 'examples' / 'cell' / 'pack.yaml'])
-    assert len(found) == 4
+    assert len(found) >= 4  # the bundled robot packs (one more with each new robot) and the example cell
     for path in found:
         spec = yaml.safe_load(path.read_text())['requires']['taskweave']
         assert SpecifierSet(spec).contains(version), path
