@@ -59,9 +59,11 @@ def test_robot_pack_is_checked_too(tmp_path):
     with pytest.raises(ConfigError, match=r'robot pack demo_bot 0\.1\.0 requires taskweave >=1\.0, this is '
                                           r'taskweave 0\.2\.3'):
         packs.robot_pack(location, ROBOT)
-    (pack / 'pack.yaml').write_text(f'name: {ROBOT}\nversion: 0.1.0\nschema_version: {packs.ROBOT_SCHEMA}\n'
-                                    'requires:\n  taskweave: ">=0.2,<0.3"\n')
-    assert packs.robot_pack(location, ROBOT) is not None
+    ok = tmp_path / 'ok' / ROBOT    # (a pack.yaml is read again only when its mtime changes: a folder of its own)
+    ok.mkdir(parents=True)
+    (ok / 'pack.yaml').write_text(f'name: {ROBOT}\nversion: 0.1.0\nschema_version: {packs.ROBOT_SCHEMA}\n'
+                                  'requires:\n  taskweave: ">=0.2,<0.3"\n')
+    assert packs.robot_pack(packs.Location(tmp_path / 'ok', 'env', True), ROBOT) is not None
     assert store
 
 
