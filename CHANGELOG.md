@@ -18,6 +18,19 @@
 - **Limitations of 0.1.0 resolved:** arm selection exists (`hands: any_one` in `move_gripper` and `grip`), so the
   "no arm auto-selection" limitation is gone; the other limitations of 0.1.0 still apply.
 
+### HMI (PRs #1–#4, #6)
+- New layout: tabs Run · Missions · Robot · Teach · Record · Log; Teach in sub-tabs (locations, stances, poses,
+  points, carry poses); a new visual design with light and dark themes.
+- Read-only 3D view of the robot model, the planning-scene collision objects, placed objects and points (Robot tab,
+  and the cell view in Run).
+- Speed strip in the top bar: global speed override and test mode.
+- Mimic joints shown correctly in the robot model.
+- Operator guide `docs/operator.md`: running missions, speed, hands, reload vs restart, checks, troubleshooting, and
+  the HMI tabs.
+
+### Robot packs
+- New pack `galbot_s1_g1gripper` (Galbot S1 with the G1 gripper, PR #5).
+
 ### Arm selection and one-hand work (P3)
 - `hands: any_one` for `move_gripper` and `grip`: a free, IK-feasible hand with the least motion; the profile order
   breaks ties; a repeatable hand ranks before one that needed the global IK search; a FAILED target (TF) is passed on.
