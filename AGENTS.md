@@ -1,6 +1,6 @@
 # AGENTS.md: working on taskweave
 
-For AI agents and new developers. Users of taskweave start with [README.md](README.md).
+For AI agents and new developers. Users of taskweave start with [README.md](README.md); operators with [docs/operator.md](docs/operator.md).
 
 ## What this is
 taskweave runs robot tasks on ROS 2 Jazzy, driven entirely by YAML.
@@ -19,7 +19,7 @@ taskweave runs robot tasks on ROS 2 Jazzy, driven entirely by YAML.
 | `taskweave_hmi/taskweave_hmi/` | web HMI (`server.py`, `web/*.js`): status, control, mission editor, teach, record |
 | `taskweave_bringup/` | launch files `taskweave_bringup.launch.py` (taskweave, HMI, optional Nav2/MoveIt), `taskweave_nav2.launch.py`, `taskweave_moveit.launch.py`; `taskweave_bringup/` (`nav2.py`, `moveit.py`, `hmi.py`, `robot_files.py`: the logic, testable without launching), `config/nav2_params.yaml` (default Nav2 tuning) |
 | `taskweave_robots/<robot>/` | robot packs (`pack.yaml`, `profile.yaml`, `embodiment.yaml`, `poses.yaml`, `moveit/` ...), installed to `share/taskweave_robots/` |
-| `docs/` | `install.md`, `architecture.md`, `configuration.md`, `missions.md`, `skills.md` (generated), `pack_switchover.md`, `examples/` |
+| `docs/` | `install.md`, `operator.md` (for the people who run missions; keep it true when the CLI, speed or reload rules change), `architecture.md`, `configuration.md`, `missions.md`, `skills.md` (generated), `pack_switchover.md`, `examples/` |
 | `tools/gen_skills_doc.py` | generates `docs/skills.md` (needs ROS sourced, see "Add a skill" step 6) |
 | `*/test/` | pytest suites per package; config fixtures in `*/test/fixtures/config` |
 

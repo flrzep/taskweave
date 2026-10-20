@@ -115,7 +115,7 @@ def test_relative_links_and_documented_paths_exist():
     import re
 
     for doc in ['README.md', 'AGENTS.md', 'docs/install.md', 'docs/missions.md', 'docs/skills.md',
-                'docs/configuration.md', 'docs/architecture.md']:
+                'docs/configuration.md', 'docs/architecture.md', 'docs/operator.md']:
         path = REPO / doc
         text = path.read_text(encoding='utf-8')
         for target in re.findall(r'\]\(([^)#\s]+)(?:#[^)]*)?\)', text):
