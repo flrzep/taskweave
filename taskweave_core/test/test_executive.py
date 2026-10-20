@@ -66,6 +66,15 @@ def test_runs_all_steps_in_order():
     assert [e['event'] for e in episodes] == ['step_started', 'step_finished'] * 2
 
 
+def test_step_finished_carries_a_small_summary_of_the_skill_data():
+    ex, d, _, episodes = make([step('a'), step('b')])
+    ex.start()
+    finish(ex, d, data={'path': 'planned', 'plan_s': 1.25, 'hands': ['left'], 'motion': {'speed': 1}, 'max_error': 1})
+    finish(ex, d, data={'hands': ['left']})
+    done = [e for e in episodes if e['event'] == 'step_finished']
+    assert done[0]['data'] == {'path': 'planned', 'plan_s': 1.25} and 'data' not in done[1]
+
+
 def test_invalid_plan_fails_before_dispatch():
     ex, d, _, _ = make([step('a')], validate=lambda plan: ['unknown skill'])
     assert ex.start().state == State.FAILED

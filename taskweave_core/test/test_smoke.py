@@ -59,6 +59,25 @@ def test_step_results_skip_later_cycles_and_unfinished_starts():
     assert running[-1]['outcome'] == 'RUNNING' and running[-1]['duration_s'] is None
 
 
+def test_step_results_keep_a_small_data_summary():
+    events = [episode('step_started', 's2', 1.0),
+              done('s2', 3.0, data={'path': 'planned', 'plan_s': 1.2, 'plan_points': 14, 'junk': 1},
+                   speed={'override_avg': 100.0, 'override_min': 100.0, 'scale': 0.5}),
+              episode('step_started', 's3', 3.0), done('s3', 4.0)]
+    steps = smoke.step_results(events)
+    assert steps[0]['data'] == {'path': 'planned', 'plan_s': 1.2, 'plan_points': 14, 'scale': 0.5}
+    assert 'data' not in steps[1]
+
+
+def test_slower_step_names_both_path_kinds():
+    ref = ref_run(s2={'duration_s': 1.8, 'data': {'path': 'direct'}})
+    now = ref_run(s2={'duration_s': 3.1, 'data': {'path': 'planned'}})
+    note = smoke.compare(ref, now)['rows'][1]['note']
+    assert note == 'slower than 1.8 s ±10% (path planned, ref direct)'
+    assert smoke.compare(ref, ref_run(s2={'duration_s': 3.1}))['rows'][1]['note'] == 'slower than 1.8 s ±10%'
+    assert smoke.compare(ref_run(s2={'duration_s': 1.8}), now)['rows'][1]['note'] == 'slower than 1.8 s ±10%'
+
+
 def ref_run(**changes):
     steps = [{'cycle': 1, 'step_id': 's1', 'skill': 'navigate_to', 'instruction': 'drive', 'outcome': 'SUCCEEDED',
               'duration_s': 12.5, 'max_error': None, 'attempts': 1, 'message': ''},

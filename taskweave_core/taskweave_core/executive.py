@@ -28,6 +28,8 @@ from .planner import Planner
 from .speed import WorkClock
 from .world_state import WorldState
 
+EPISODE_DATA = ('path', 'mode', 'choice', 'plan_s', 'plan_points')  # skill data kept in step_finished (smoke test)
+
 
 class Outcome(Enum):
     SUCCEEDED = 0
@@ -164,8 +166,9 @@ class Executive:
             if interrupt == 'timeout' and outcome == Outcome.CANCELED:
                 outcome, message = Outcome.TIMEOUT, f'no result within {self.status.step.timeout_s:g} s'
             speed = (data or {}).get('speed') or (self._work.stats() if self._work else None)
+            summary = {k: data[k] for k in EPISODE_DATA if k in data} if data else {}
             self._episode('step_finished', outcome=outcome.name, message=message,
-                          **({'speed': speed} if speed else {}))
+                          **({'speed': speed} if speed else {}), **({'data': summary} if summary else {}))
             if interrupt == 'abort':
                 self._finish(State.ABORTED, self.status.last_error or 'aborted')
             elif interrupt == 'pause':

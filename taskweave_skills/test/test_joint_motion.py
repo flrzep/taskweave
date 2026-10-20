@@ -235,6 +235,22 @@ def test_a_planned_path_is_timed_at_the_step_speed(monkeypatch, tmp_path):
     assert rig.reached_at('j1', 1.0) == pytest.approx(2.0, rel=0.03)
 
 
+def test_a_planned_move_reports_the_planner_time_and_points(monkeypatch, tmp_path):
+    rig = Rig(monkeypatch, tmp_path)
+    path = Trajectory(['j1'], [0.0, 1.0], [[0.0], [1.0]])
+
+    class Planner(SimpleNamespace):
+        def plan(self, start, goal, stop):
+            self.spent_s, self.points = self.spent_s + 0.75, self.points + 2
+            return path
+
+    rig.skill.planner = Planner(spent_s=5.0, points=7, free=lambda *a: True)   # earlier plans do not count
+    data = rig.run({'joints': {'j1': 1.0}}).data
+    assert data['path'] == 'planned' and data['plan_s'] == 0.75 and data['plan_points'] == 2
+    rig.skill.planner = None
+    assert 'plan_s' not in rig.run({'joints': {'j1': 0.0}}).data
+
+
 def test_planner_direct_is_the_straight_move_and_fails_when_blocked(monkeypatch, tmp_path):
     rig = Rig(monkeypatch, tmp_path)
     planned = []

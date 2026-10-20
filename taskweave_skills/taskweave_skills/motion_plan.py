@@ -140,6 +140,7 @@ class MotionPlanner:
                                            callback_group=ReentrantCallbackGroup())
         self.escape_max = float(spec['escape_max_rad'])
         self.escape_speed = float(spec['escape_speed'])
+        self.spent_s, self.points = 0.0, 0   # planning time and trajectory points so far
 
     def violation(self, path: Trajectory, keep: dict[str, float]) -> str | None:
         """Why ``path`` moves a joint of ``keep`` ({joint: value it must stay at}) further than hold_tolerance_rad
@@ -160,7 +161,12 @@ class MotionPlanner:
         moves one of them anyway is refused (see the module doc). Only the goal joints' start values are sent, on top
         of the planner's own current state: the state topic can carry joints the planner's model lacks (e.g. a
         simulator's base joints), and MoveIt rejects unknown names."""
-        path = self._plan(start, goal, should_stop, keep or {})
+        began = time.monotonic()
+        try:
+            path = self._plan(start, goal, should_stop, keep or {})
+        finally:
+            self.spent_s += time.monotonic() - began   # for the step data (move_joints reports the delta)
+        self.points += len(path.points) if path is not None else 0
         problem = self.violation(path, keep) if path is not None and keep else None
         if problem:
             raise PlanError(problem)
