@@ -17,6 +17,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
 from taskweave_bringup.args import flag
+from taskweave_bringup.clock_guard import clock_guard_nodes
 from taskweave_bringup.hmi import hmi_nodes
 from taskweave_bringup.moveit import moveit_nodes
 from taskweave_bringup.nav2 import nav2_nodes
@@ -43,6 +44,8 @@ def nodes(context):
     if flag(value('nav2')):
         actions += nav2_nodes(config_dir, robot, value('map'), value('nav2_output_dir'), sim_time,
                               value('nav2_params'), value('map_topic'))
+    if flag(value('clock_guard')):
+        actions += clock_guard_nodes(flag(value('nav2')), flag(value('moveit')), value('clock_guard_params'))
     return actions
 
 
@@ -69,6 +72,11 @@ def arguments():
         DeclareLaunchArgument('nav2_output_dir', default_value='',
                               description='where the generated nav2_params.yaml is written (default: a temp folder)'),
         DeclareLaunchArgument('moveit', default_value='false', description='start MoveIt move_group'),
+        DeclareLaunchArgument('clock_guard', default_value='false',
+                              description='start the clock guard: resets Nav2 and restarts move_group after a '
+                                          'sim clock jump back (Stop/Play)'),
+        DeclareLaunchArgument('clock_guard_params', default_value='',
+                              description='ROS parameter YAML for the clock guard (node names, timing)'),
     ]
 
 

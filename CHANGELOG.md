@@ -14,6 +14,9 @@
   `taskweave state clear`", instead of the list of instances.
 
 ### New
+- **Sim clock jump (Stop/Play):** one helper, `taskweave_core.clock_jump`, clears every node's TF buffer and calls
+  reset hooks; `teach` refuses to save from stale TF or a pre-jump base pose (`max_tf_age_s`, `after_jump_s`); the
+  optional `clock_guard:=true` bringup node resets Nav2 and restarts move_group after a jump.
 - `taskweave state show|clear` for the run-time object state.
 - The smoke report records how each step moved (`path` direct/planned, planner time, trajectory points) and names the
   path kinds when a step is out of tolerance.

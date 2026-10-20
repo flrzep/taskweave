@@ -14,10 +14,10 @@ taskweave runs robot tasks on ROS 2 Jazzy, driven entirely by YAML.
 | Path | Contents |
 |---|---|
 | `taskweave_interfaces/` | msgs, srvs, `RunSkill` action (CMake package) |
-| `taskweave_core/taskweave_core/` | `config/` (store, schemas, packs, overlay, catalogue, check, save, migrate*, slim, packfile), `planner.py`, `executive.py`, `task_handler.py`, `skill.py` (base class), `skill_server.py`, `validation.py`, `motion.py` (motion option resolution), `speed.py`, `speed_gate.py`, `smoke.py`, `teach.py`, `operator_joy.py`, `cli.py` |
+| `taskweave_core/taskweave_core/` | `config/` (store, schemas, packs, overlay, catalogue, check, save, migrate*, slim, packfile), `planner.py`, `executive.py`, `task_handler.py`, `skill.py` (base class), `skill_server.py`, `clock_jump.py`, `validation.py`, `motion.py` (motion option resolution), `speed.py`, `speed_gate.py`, `smoke.py`, `teach.py`, `operator_joy.py`, `cli.py` |
 | `taskweave_skills/taskweave_skills/` | the generic skills: `basic` (wait), `navigate`, `drive`, `joint_motion`, `gripper_motion`, `object_motion`; helpers `joints`, `ik`, `chain`, `cartesian`, `motion_plan`, `hold`, `points`, `tcp_jog`, `nav2` |
 | `taskweave_hmi/taskweave_hmi/` | web HMI (`server.py`, `web/*.js`): status, control, mission editor, teach, record |
-| `taskweave_bringup/` | launch files `taskweave_bringup.launch.py` (taskweave, HMI, optional Nav2/MoveIt), `taskweave_nav2.launch.py`, `taskweave_moveit.launch.py`; `taskweave_bringup/` (`nav2.py`, `moveit.py`, `hmi.py`, `robot_files.py`: the logic, testable without launching), `config/nav2_params.yaml` (default Nav2 tuning) |
+| `taskweave_bringup/` | launch files `taskweave_bringup.launch.py` (taskweave, HMI, optional Nav2/MoveIt), `taskweave_nav2.launch.py`, `taskweave_moveit.launch.py`; `taskweave_bringup/` (`nav2.py`, `moveit.py`, `hmi.py`, `clock_guard.py`, `robot_files.py`: the logic, testable without launching), `config/nav2_params.yaml` (default Nav2 tuning) |
 | `taskweave_robots/<robot>/` | robot packs (`pack.yaml`, `profile.yaml`, `embodiment.yaml`, `poses.yaml`, `moveit/` ...), installed to `share/taskweave_robots/` |
 | `docs/` | `install.md`, `operator.md` (for the people who run missions; keep it true when the CLI, speed or reload rules change), `architecture.md`, `configuration.md`, `missions.md`, `skills.md` (generated), `pack_switchover.md`, `examples/` |
 | `tools/gen_skills_doc.py` | generates `docs/skills.md` (needs ROS sourced, see "Add a skill" step 6) |
@@ -92,6 +92,16 @@ change. Launch files go to `share/<name>/launch` through `data_files` in `setup.
 7. Python 3.12, type hints where they help, docstrings that say why, line length 120.
 
 ## How-tos
+
+### Sim clock jumps (Stop/Play)
+A node that holds a TF buffer gets it from `tf_util.buffer(node)`, never `tf2_ros.Buffer()` directly:
+`taskweave_core/taskweave_core/clock_jump.py` (`watch(node)`, one per node) clears every registered buffer when ROS time goes back
+(and again while the clock settles) and calls `watcher.callbacks` (`hold.py` ends holds, `teach` drops its base pose).
+New state that must forget the old run goes into `watch(node).callbacks`. `teach` refuses to save while TF or the base
+pose is older than `max_tf_age_s` (1 s) or within `after_jump_s` (2 s) of a jump. Nav2 and MoveIt cannot be fixed from
+inside: the optional `clock_guard` node (`taskweave_bringup/taskweave_bringup/clock_guard.py`, launch arg `clock_guard:=true`, default
+off) resets the Nav2 lifecycle nodes and restarts move_group; its decisions are pure functions (`nav2_reset_due`,
+`move_group_restart_due`, `inactive_update`), node names and timing are ROS parameters (`clock_guard_params:=<yaml>`).
 
 ### Add a skill
 1. Class in `taskweave_skills/taskweave_skills/<module>.py`, subclass of `taskweave_core.skill.Skill`: `name`,
