@@ -95,6 +95,41 @@ is what is validated), so later pack updates to other keys still reach the cell:
 Frames: poses are `{frame, xyz: [x, y, z], rpy: [r, p, y]}` (metres, radians) or `{frame, x, y, yaw}` for planar base
 poses. `frame` is `cell` or a named object or fixture frame.
 
+## Catalogue, schemas and checks (for editors)
+
+Core describes its own files, so an editor needs no knowledge of the layout (`config/catalogue.py`, `config/check.py`;
+all on `ConfigStore`, offline, nothing here writes):
+
+- `files()` lists every file of the cell pack and its robots' packs: `path` (relative to its pack), `pack` (`cell` or
+  `robot:<name>`), `kind`, `source` (`cell`, `override` = a cell copy of a robot pack file, `robot_pack`, `installed` =
+  a read-only pack), `editable` and `editable_reason`, `schema_id` or `no_schema_reason`, `reload`, `hash` (sha256 of the
+  bytes; `file_hash(path, pack)` gives the same). `reload` says what a change needs: `live`, `mission_start`,
+  `skill_server`, `launch` (restart the task stack), `sim` (the simulator reads it); a list when parts differ.
+- `file_kinds()` lists the kinds of file a pack can hold, also those not present (`objects/*.yaml`, `missions/*.yaml`):
+  `pattern`, `creatable`, `template`. `catalogue.new_file(kind, name, robot)` gives a new file's path and starting content.
+- `json_schema(kind_or_path)`: one self-contained JSON Schema (draft 2020-12) with title and the `x-taskweave-*` hints.
+  Names that depend on the pack (skills, robots, objects, joints, ...) are not baked in: `x-taskweave-enum: <name>` on a
+  value, `x-taskweave-enum-keys: <name>` on an object whose keys they are; `enum_values(name, robot=None)` returns them.
+- `validate_file(path, data_or_text=None, pack='cell')` returns problems `{path, pack, where, line, col, message,
+  severity}`: `where` is a JSON pointer (`/points/top_grasp/grip_width_m`), `line`/`col` are set when text is given,
+  `severity` is `error` or `warning`. It checks the schema, then the cross-file checks of the kind against the rest of the
+  pack on disk: profile vs embodiment, `joints.limits`, navigation vs the base, pose and held pose joints vs limits,
+  grip width vs tool stroke, point, stance, object type and skill names, mission ids, `replan_from` and includes.
+  A cell copy of a robot pack file that is a keyed override is checked as laid over the pack's file.
+- `check_pack()` is that for every file (what `taskweave check` prints); `dry_run_pack(path, data_or_text, pack)` is the
+  same with the new content in place on a throwaway copy, so "check before save" shows what else breaks.
+- `robot_packs()` (no argument) lists the packs: `{name, version, description, location, writable}`.
+
+Files with no schema, and why: `cell/layout.yaml`, `sim/scene.yaml`, `sim.yaml`, `pose_targets.yaml` (application
+content), `moveit/*` (MoveIt formats), `nav2_params.yaml` (Nav2's own), `tests/*.reference.yaml` (smoke record).
+A skill yaml is validated only for `implementations`; its other keys belong to the skill class.
+
+```
+taskweave config files CELL_DIR --json      the catalogue
+taskweave config schema object_type         JSON Schema of a kind, or of a path (--pack robot:<name>)
+taskweave config validate PATH [--cell CELL_DIR] [--json]    one file as it is on disk
+```
+
 ## Mission
 
 ```yaml

@@ -181,6 +181,9 @@ ROBOT_PROFILE = {
             'required': ['command', 'state'],
             'properties': {'command': {'type': 'string'}, 'state': {'type': 'string'},
                            'linear': {'type': 'array', 'items': {'type': 'string'}},  # prismatic joints (m)
+                           # joint -> [lower, upper] in rad or m, laid over the URDF's limits (limits.py)
+                           'limits': {'type': 'object', 'additionalProperties': {
+                               'type': 'array', 'items': FINITE, 'minItems': 2, 'maxItems': 2}},
                            # joint groups for move_joints `only` (torso, head, left_arm, ...): group -> its joints;
                            # <tool>_arm groups the profile does not list come from the ik joints regex and the URDF
                            'groups': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {
