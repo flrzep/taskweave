@@ -9,7 +9,8 @@ home:                           # 15 Oct: joint angles, not tool targets: IK cho
                                 # to the side) and broke the cycle. Same TCPs as before ([0.8767, +-0.1993, 0.2924],
                                 # approach +x, closing -z; within 0.5 mm), the elbow-lowest solution: elbows 0.47 m
                                 # below the shoulders, wrists nearly straight. Arms mirror: same values both sides.
-  body_joint: 0.494
+                                # 20 Oct (F13): no torso: the torso search picks it per move, and navigate_to /
+                                # drive_straight bring it to profile torso.drive_m (0.494) before driving.
   head_joint1: 0.0
   head_joint2: 0.0
   left_joint1: 0.745
