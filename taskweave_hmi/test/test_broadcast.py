@@ -33,6 +33,7 @@ def test_step_events_are_numbered_and_read_since_a_number():
     bridge = bridge_with()
     bridge.events, bridge.event_seq, bridge.outcomes = deque(maxlen=3), 0, {}
     bridge.robot, bridge.status, bridge.plan, bridge.pad_mode, bridge.recorder = 'r', {}, None, '', None
+    bridge.speed_state = {}
     for n in range(5):
         bridge._episode(type('Msg', (), {'data': json.dumps({'event': 'step_started', 'step_id': f's{n}'})}))
     state = bridge.snapshot()

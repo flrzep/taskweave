@@ -69,6 +69,33 @@ button, input, select, textarea { font-family: inherit; }
         box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); }
 .conn.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
 
+/* speed override: a strip between header and tabs, the value big; amber while test mode caps it, greyed out without
+   the task handler. On a phone: value and presets, then the slider and test mode */
+.speed { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); padding: var(--sp-2) var(--sp-4);
+         border-bottom: 1px solid var(--border); }
+.speed-read { display: flex; align-items: baseline; gap: var(--sp-2); }
+.speed-read .sub { margin: 0; }
+.speed-value { min-width: 4ch; font: 700 var(--fs-2xl)/1 var(--cond); color: var(--text); white-space: nowrap; }
+.speed-set { display: flex; align-items: center; gap: var(--sp-2); flex: 1 1 180px; min-width: 0; max-width: 360px; }
+.speed-set input[type="range"] { flex: 1; min-width: 0; min-height: var(--tap-s); padding: 0; border: 0; background: none;
+                                 accent-color: var(--brand); cursor: pointer; }
+.speed-set .icon { font: 600 var(--fs-lg) var(--sans); }
+.speed .segmented button { min-width: var(--tap-s); padding: 0 var(--sp-2); }
+.speed .segmented button:disabled, .speed-set input:disabled { cursor: default; }
+.speed-test[aria-pressed="true"] { color: var(--warn); border-color: var(--warn); background: color-mix(in srgb, var(--warn) 11%, var(--surface-card)); }
+.speed.test .speed-value { color: var(--warn); }
+.speed.off .speed-value { color: var(--text-muted); }
+.speed.off .segmented { opacity: .45; }
+.speed-msg { flex: 1 1 100%; font-size: var(--fs-sm); color: var(--warn); overflow-wrap: anywhere; }
+.speed-msg.bad { color: var(--bad); }
+.speed.off .speed-msg:not(.bad) { color: var(--text-muted); }
+@media (max-width: 600px) {
+  .speed { gap: var(--sp-2) var(--sp-3); padding: var(--sp-2) var(--sp-3); }
+  .speed-set { order: 1; flex: 1 1 150px; max-width: none; }
+  .speed-test { order: 1; }
+  .speed-msg { order: 2; }
+}
+
 /* tabs: equal width while they fit, scrolling inside the bar (not the page) on a narrow phone */
 .tabs { display: flex; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--border); }
 .tabs::-webkit-scrollbar { display: none; }

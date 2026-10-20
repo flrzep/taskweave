@@ -58,13 +58,14 @@ window.addEventListener('viewer3d-ready', startRunViewer);  // Run is the tab th
 function connect() {
   const source = new EventSource('/api/events');
   source.onopen = () => $('conn').classList.add('on');
-  source.onerror = () => { $('conn').classList.remove('on'); };
+  source.onerror = () => { $('conn').classList.remove('on'); renderSpeed(); };
   source.onmessage = (event) => {
     const { type, data } = JSON.parse(event.data);
-    if (type === 'state') { state.snapshot = data; }
+    if (type === 'state') { state.snapshot = data; renderSpeed(); }
     else if (!state.snapshot) return;
     else if (type === 'status') state.snapshot.status = data;
     else if (type === 'pad_mode') state.snapshot.pad_mode = data;
+    else if (type === 'speed') { state.snapshot.speed = data; renderSpeed(); return; }
     else if (type === 'notice') { padNotice(data); if (data.taught) teachTaught(); return; }
     else if (type === 'plan') { if (state.snapshot.plan?.plan_id !== data.plan_id) state.snapshot.outcomes = {}; state.snapshot.plan = data; }
     else if (type === 'episode') {
@@ -179,6 +180,82 @@ $('btn-start').addEventListener('click', async () => {
     : (data.message || data.error || 'not started'), !ok);
 });
 $('mission-select').addEventListener('change', () => { state.startStep = null; renderRun(); });
+
+// ---------- speed override ----------
+// The task handler's global override (1-100 %), shown and set from the top bar on every tab. It is meant for a
+// running mission: the skills follow a change at once. Requests go one at a time; clicks while one is on its way
+// are merged into the next. While the slider is dragged, live updates do not move it.
+const SPEED_STEP = 5;  // the − / + buttons, in percent (the slider sets single percents)
+const speedUi = { pending: null, aim: null, busy: false, dragging: false, note: null, noteTimer: null };
+function speedNow() { return state.snapshot?.speed || null; }
+function speedUsable() { const s = speedNow(); return !!s?.available && s.percent !== null && $('conn').classList.contains('on'); }
+function renderSpeed() {
+  const s = speedNow();
+  const usable = speedUsable();
+  const box = $('speed');
+  box.classList.toggle('off', !usable);
+  box.classList.toggle('test', !!s?.test_mode);
+  $('speed-value').textContent = s?.percent != null ? `${s.percent} %` : '–';
+  if (!speedUi.dragging && s?.percent != null) $('speed-range').value = s.percent;
+  if (s && !$('speed-presets').children.length) {  // made once: the presets come with the override
+    $('speed-presets').append(...s.presets.map((p) => {
+      const button = el('button', { text: `${p} %`, 'data-percent': String(p), 'aria-pressed': 'false' });
+      button.addEventListener('click', () => setSpeed({ percent: p }));
+      return button;
+    }));
+  }
+  $('speed-presets').querySelectorAll('button').forEach((b) => {
+    b.setAttribute('aria-pressed', String(Number(b.dataset.percent) === s?.percent));
+    b.disabled = !usable;
+  });
+  ['speed-down', 'speed-up', 'speed-range', 'speed-test'].forEach((id) => { $(id).disabled = !usable; });
+  if (s) {
+    $('speed-down').disabled ||= s.percent <= s.min;
+    $('speed-up').disabled ||= s.percent >= s.max;
+  }
+  const test = $('speed-test');
+  test.setAttribute('aria-pressed', String(!!s?.test_mode));
+  test.textContent = s?.test_mode ? `Test · max ${s.cap_percent} %` : 'Test mode';
+  test.title = s ? `Test mode: a run starts at ${s.test_percent} %, the speed stays at ${s.cap_percent} % or below` : '';
+  // why the control is grey, else the handler's word on a clamped or refused request (for a while)
+  const note = s && !usable ? { text: 'Task handler not reachable: the speed cannot be set now', bad: false } : speedUi.note;
+  message($('speed-msg'), note?.text || '', !!note?.bad);
+}
+function speedMessage(text, bad = false) {
+  speedUi.note = { text, bad };
+  clearTimeout(speedUi.noteTimer);
+  speedUi.noteTimer = setTimeout(() => { speedUi.note = null; renderSpeed(); }, 8000);
+  renderSpeed();
+}
+async function setSpeed(body) {
+  speedUi.pending = { ...speedUi.pending, ...body };
+  if (body.percent) speedUi.aim = body.percent;  // − / + count on from what was asked, not from the last answer
+  if (speedUi.busy) return;
+  speedUi.busy = true;
+  while (speedUi.pending) {
+    const sent = speedUi.pending;
+    speedUi.pending = null;
+    const { ok, data } = await api('POST', '/api/speed', sent);
+    if (ok && state.snapshot?.speed) { state.snapshot.speed.percent = data.percent; renderSpeed(); }  // the event follows
+    if (!ok) speedMessage(data.message || data.error || 'not set', true);
+    else if (/clamp/.test(data.message)) speedMessage(data.message);
+  }
+  speedUi.busy = false;
+  speedUi.aim = null;
+}
+function stepSpeed(direction) {  // to the next multiple of SPEED_STEP; the bottom step goes to the minimum
+  const s = speedNow();
+  if (!s) return;
+  const base = speedUi.aim ?? s.percent;
+  const next = direction > 0 ? Math.floor(base / SPEED_STEP) * SPEED_STEP + SPEED_STEP
+    : Math.ceil(base / SPEED_STEP) * SPEED_STEP - SPEED_STEP;
+  setSpeed({ percent: Math.max(s.min, Math.min(s.max, next)) });
+}
+$('speed-down').addEventListener('click', () => stepSpeed(-1));
+$('speed-up').addEventListener('click', () => stepSpeed(1));
+$('speed-range').addEventListener('input', () => { speedUi.dragging = true; $('speed-value').textContent = `${$('speed-range').value} %`; });
+$('speed-range').addEventListener('change', () => { speedUi.dragging = false; setSpeed({ percent: Number($('speed-range').value) }); });
+$('speed-test').addEventListener('click', () => setSpeed({ test_mode: !speedNow()?.test_mode }));
 
 // ---------- start at a step ----------
 // With no mission active, the Run tab shows the selected mission's last run (with its outcomes) or, if it has not

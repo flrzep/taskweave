@@ -23,6 +23,10 @@ HTTP API (JSON):
   POST /api/missions/<name>/validate
   GET  /api/missions/<name>/plan   the plan a start would run now (includes expanded, facts filled): step ids to
                                    start at
+  GET  /api/speed                  the global speed override {percent, test_mode, test_percent, cap_percent, presets,
+                                   min, max, available}; also in /api/state (speed) and as the live event speed
+  POST /api/speed {percent, test_mode, test_percent}  set it through the task handler (each key optional; also while
+                                   a mission runs): {ok, message, percent}, 422 when refused (e.g. out of range)
   POST /api/start {mission[, start_step]}  start a mission (at a step id: the first cycle begins there, robot and
                                    objects as they are); POST /api/pause | /api/resume | /api/abort
   GET  /api/skills                 skill catalog;  GET /api/points  named points for argument pickers (the store's
@@ -100,12 +104,13 @@ from std_srvs.srv import Trigger
 from taskweave_core import names, tf_util
 from taskweave_core.config import ConfigError, ConfigStore, Pose2D
 from taskweave_core.planner import MissionFilePlanner
-from taskweave_core.speed import SpeedOverride
+from taskweave_core.speed import MAX_PERCENT, MIN_PERCENT, PRESETS, SpeedOverride
 from taskweave_core.teach import MAX_POSE_AGE_S, yaw_from_quaternion
 from taskweave_interfaces.action import RunSkill
 from taskweave_interfaces.msg import Plan as PlanMsg
+from taskweave_interfaces.msg import SpeedOverride as SpeedOverrideMsg
 from taskweave_interfaces.msg import TaskStatus
-from taskweave_interfaces.srv import ListSkills, StartMission, TeachPoint
+from taskweave_interfaces.srv import ListSkills, SetSpeedOverride, StartMission, TeachPoint
 from taskweave_skills.ik import pose_matrix, tool_target
 from taskweave_skills.nav2 import nav2_parameters
 
@@ -125,6 +130,7 @@ FK_SERVICE = '/compute_fk'  # MoveIt move_group
 SCENE_SERVICE = '/get_planning_scene'  # MoveIt move_group
 SCENE_PERIOD_S = 10.0  # how often the 3D view's collision objects are fetched
 SCENE_GIVE_UP_S = 30.0  # a fetch with no answer by then is dropped (move_group gone mid-call)
+SPEED_CHECK_S = 2.0  # how often the HMI checks that the task handler serves set_speed_override (greys the control out)
 OUTCOMES = ['succeeded', 'failed', 'timeout', 'canceled', 'rejected']
 CONTENT_TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
                  '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.mp4': 'video/mp4',
@@ -159,6 +165,34 @@ def status_dict(msg: TaskStatus) -> dict:
             'step': step_dict(msg.step) if msg.step_index >= 0 else None, 'attempt': msg.attempt,
             'step_status': msg.step_status, 'step_progress': msg.step_progress,
             'step_elapsed_s': msg.step_elapsed_s, 'last_error': msg.last_error}
+
+
+def speed_dict(msg: SpeedOverrideMsg | None, available: bool) -> dict:
+    """The speed override as the web UI shows it; percent None until the task handler's first (latched) message.
+    float32 fields are rounded, so 33.3 does not read 33.29999923."""
+    values = {key: None if msg is None else round(float(getattr(msg, key)), 1)
+              for key in ('percent', 'test_percent', 'cap_percent')}
+    return {**values, 'test_mode': msg is not None and bool(msg.test_mode), 'presets': list(PRESETS),
+            'min': MIN_PERCENT, 'max': MAX_PERCENT, 'available': available}
+
+
+def speed_request(body: dict) -> SetSpeedOverride.Request:
+    """The SetSpeedOverride request for a POST /api/speed body: percent, test_percent (numbers) and test_mode (true or
+    false), each optional (left out: unchanged). The range is the task handler's to check (its message says why);
+    ValueError for values of the wrong type or not above 0 (0 means 'unchanged' to the service)."""
+    request = SetSpeedOverride.Request()
+    for key in ('percent', 'test_percent'):
+        value = body.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int | float) or not value > 0:
+            raise ValueError(f'{key}: a number, {MIN_PERCENT:g}-{MAX_PERCENT:g} (percent)')
+        setattr(request, key, float(value))
+    if body.get('test_mode') is not None:
+        if not isinstance(body['test_mode'], bool):
+            raise ValueError('test_mode: true or false')
+        request.set_test_mode, request.test_mode = True, body['test_mode']
+    return request
 
 
 def await_skill(done, work, limit_s: float, served, sleep=time.sleep) -> str:
@@ -234,6 +268,13 @@ class Bridge(Node):
             for node in [*self.get_parameter('nav_costmaps').value, self.get_parameter('nav_controller').value]}
         self.skill_lock = threading.Lock()  # one manual skill at a time
         self.speed = SpeedOverride.for_node(self)  # manual skills wait on work time, like the skills
+        # the speed override control: the full message (with test mode and cap) and whether the handler serves it
+        self.speed_client = self.create_client(SetSpeedOverride, names.SET_SPEED_OVERRIDE, callback_group=self.group)
+        self.speed_msg: SpeedOverrideMsg | None = None
+        self.speed_state = speed_dict(None, False)
+        self.create_subscription(SpeedOverrideMsg, names.SPEED_OVERRIDE, self._speed_update, latched,
+                                 callback_group=self.group)
+        self.create_timer(SPEED_CHECK_S, self._speed_update, callback_group=self.group)
         self.skill_clients: dict[str, ActionClient] = {}
         self.fk_client = None  # created on first use (MoveIt)
         self.ik = None  # IkClient, created on first reach check
@@ -292,6 +333,25 @@ class Bridge(Node):
                 self.outcomes = {}
             self.plan = plan
         self._broadcast('plan', plan)
+
+    def _speed_update(self, msg: SpeedOverrideMsg | None = None) -> None:
+        """A new override from the task handler, or (timer, no message) a check that it still serves the service;
+        broadcast when what the control shows changed."""
+        available = self.speed_client.service_is_ready()
+        with self.lock:
+            if msg is not None:
+                self.speed_msg = msg
+            state = speed_dict(self.speed_msg, available)
+            changed, self.speed_state = state != self.speed_state, state
+        if changed:
+            self._broadcast('speed', state)
+
+    def set_speed(self, request: SetSpeedOverride.Request) -> dict:
+        """Set the override through the task handler, its single write path. Not refused while a mission runs: that
+        is when it matters, the skills follow the latched topic at once."""
+        response = self.call(self.speed_client, request)
+        self.get_logger().info(f'HMI speed override: {response.message}')
+        return {'ok': response.ok, 'message': response.message, 'percent': round(float(response.percent), 1)}
 
     def _odom(self, msg: Odometry) -> None:
         p = msg.pose.pose
@@ -635,7 +695,7 @@ class Bridge(Node):
             return {'robot': self.robot, 'status': self.status, 'plan': self.plan, 'outcomes': dict(self.outcomes),
                     'events': events[-50:] if since is None else [e for e in events if e['seq'] > since],
                     'event_seq': self.event_seq, 'events_from': events[0]['seq'] if events else self.event_seq + 1,
-                    'pad_mode': self.pad_mode}
+                    'pad_mode': self.pad_mode, 'speed': self.speed_state}
 
     # ---- service calls -------------------------------------------------------------
     def call(self, client, request):
@@ -810,6 +870,15 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'POST' and len(route) == 3 and route[0] == 'missions' and route[2] == 'validate':
                 problems = missions.validate(self._body(), bridge.config, bridge.schemas(), bridge.robot)
                 return self._json({'problems': problems})
+            if method == 'GET' and route == ['speed']:
+                return self._json(bridge.speed_state)  # replaced on change, never changed in place
+            if method == 'POST' and route == ['speed']:
+                try:
+                    request = speed_request(self._body())
+                except ValueError as error:  # a body that is not JSON, too
+                    return self._json({'error': str(error)}, HTTPStatus.BAD_REQUEST)
+                result = bridge.set_speed(request)
+                return self._json(result, HTTPStatus.OK if result['ok'] else HTTPStatus.UNPROCESSABLE_ENTITY)
             if method == 'POST' and route == ['start']:
                 body = self._body()
                 response = bridge.call(bridge.start_client, StartMission.Request(
