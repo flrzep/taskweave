@@ -2,6 +2,10 @@
 Changelog for package taskweave_skills
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.1 (2026-10-20)
+------------------
+* Patch release; see CHANGELOG.md at the repository root.
+
 0.2.0 (2026-10-20)
 ------------------
 * Arm selection: hands any_one for move_gripper and grip; free arm moves while the other hand holds.

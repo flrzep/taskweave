@@ -2,6 +2,10 @@
 Changelog for package taskweave_hmi
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.1 (2026-10-20)
+------------------
+* Patch release; see CHANGELOG.md at the repository root.
+
 0.2.0 (2026-10-20)
 ------------------
 * Record tab: Download all (one tar) and the finishing state of a stopped recording.

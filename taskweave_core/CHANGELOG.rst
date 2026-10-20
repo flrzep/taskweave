@@ -2,6 +2,10 @@
 Changelog for package taskweave_core
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.1 (2026-10-20)
+------------------
+* Patch release; see CHANGELOG.md at the repository root.
+
 0.2.0 (2026-10-20)
 ------------------
 * Config API: catalogue, structured validation, save / history / restore, init / export / import, reload_config.

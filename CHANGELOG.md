@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.1 — 2026-10-20
+
+### Fixes
+- **HMI: planning stalls from the 3D view (PR #7).** The HMI asked MoveIt for the full planning scene every 10 s, which
+  slowed arm moves that planned at that moment by up to 1.4 s. The scene is now fetched only while a 3D view asks, and
+  the geometry only when the object names change.
+- **Held objects with collision shapes on the Galbot S1:** `galbot_s1` lists its gripper links (`grippers.<hand>.links`)
+  as touch links, so a held object's shape no longer collides with the fingers (pack version 0.2.1).
+- **Version check:** `taskweave_version()` reads the running source tree's `package.xml` first, then the installed copy
+  this file belongs to; an older installed taskweave no longer decides it.
+- **A taken object** gets its own message: "'x' was taken in an earlier step or run (object state); reset the sim or run
+  `taskweave state clear`", instead of the list of instances.
+
+### New
+- `taskweave state show|clear` for the run-time object state.
+- The smoke report records how each step moved (`path` direct/planned, planner time, trajectory points) and names the
+  path kinds when a step is out of tolerance.
+- Install guide: the gaps a clean-host install of 0.2.0 found.
+
 ## 0.2.0 — 2026-10-20
 
 ### Breaking changes
