@@ -292,6 +292,54 @@ class ConfigStore:
         from . import check
         return check.dry_run_pack(self, path, data_or_text, pack)
 
+    # ---- writing and history (save.py) -------------------------------------------
+    def save(self, path: str, content, pack: str = 'cell', base: str | None = None, message: str | None = None,
+             author: str | None = None) -> dict:
+        """Validate and write a file (text as given, or data merged keeping comments), commit it if the pack is in a
+        git work tree. ``base``: the hash read; SaveConflict if the file changed, SaveError on errors (save.py)."""
+        from . import save
+        return save.save(self, path, content, pack, base, message, author)
+
+    def delete(self, path: str, pack: str = 'cell', base: str | None = None, message: str | None = None,
+               author: str | None = None) -> dict:
+        """Remove a file (a robot file: its cell override); same lock, conflict and git handling as save."""
+        from . import save
+        return save.delete(self, path, pack, base, message, author)
+
+    def create(self, kind: str, name: str = '', robot: str | None = None, content=None, message: str | None = None,
+               author: str | None = None) -> dict:
+        """A new file of a kind (catalogue.new_file), saved without a base."""
+        from . import save
+        return save.create(self, kind, name, robot, content, message, author)
+
+    def save_mission(self, name: str, content, base: str | None = None, message: str | None = None,
+                     author: str | None = None) -> dict:
+        """Save missions/<name>.yaml, validated as a mission."""
+        from . import save
+        return save.save_mission(self, name, content, base, message, author)
+
+    def set_robot(self, robot: str, base: str | None = None, message: str | None = None,
+                  author: str | None = None) -> dict:
+        """The robot in system.yaml, through save (reload: launch)."""
+        from . import save
+        return save.set_robot(self, robot, base, message, author)
+
+    def history(self, path: str, pack: str = 'cell', limit: int = 50) -> list[dict]:
+        """Commits of a file, newest first: ``{rev, time, author, message}``; [] without a repo."""
+        from . import save
+        return save.history(self, path, pack, limit)
+
+    def show(self, path: str, rev: str, pack: str = 'cell') -> str:
+        """A file's text at a revision."""
+        from . import save
+        return save.show(self, path, rev, pack)
+
+    def restore(self, path: str, rev: str, pack: str = 'cell', base: str | None = None,
+                author: str | None = None) -> dict:
+        """A save of a file's text at a revision (conflicts like save)."""
+        from . import save
+        return save.restore(self, path, rev, pack, base, author)
+
     # ---- missions, robots, skills, operator ------------------------------
     def mission_names(self) -> list[str]:
         return sorted(p.stem for p in (self.root / 'missions').glob('*.yaml'))

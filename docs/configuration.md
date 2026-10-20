@@ -98,7 +98,7 @@ poses. `frame` is `cell` or a named object or fixture frame.
 ## Catalogue, schemas and checks (for editors)
 
 Core describes its own files, so an editor needs no knowledge of the layout (`config/catalogue.py`, `config/check.py`;
-all on `ConfigStore`, offline, nothing here writes):
+all on `ConfigStore`, offline; nothing in this list writes, the next section does):
 
 - `files()` lists every file of the cell pack and its robots' packs: `path` (relative to its pack), `pack` (`cell` or
   `robot:<name>`), `kind`, `source` (`cell`, `override` = a cell copy of a robot pack file, `robot_pack`, `installed` =
@@ -128,6 +128,52 @@ A skill yaml is validated only for `implementations`; its other keys belong to t
 taskweave config files CELL_DIR --json      the catalogue
 taskweave config schema object_type         JSON Schema of a kind, or of a path (--pack robot:<name>)
 taskweave config validate PATH [--cell CELL_DIR] [--json]    one file as it is on disk
+```
+
+## Save, delete, history and restore (for editors)
+
+An editor changes files only through core (`config/save.py`, on `ConfigStore`); it never writes YAML itself.
+
+- `save(path, content, pack='cell', base=None, message=None, author=None)` returns `{path, pack, hash (new), rev
+  (commit sha or None), reload, warnings, override}`. `content` is YAML **text** (written as given, comments kept) or
+  **data** (a dict, the whole new content: merged into the loaded file with ruamel, so comments and key order of what
+  stays are kept, keys the dict lacks are removed). Before writing it validates the file (`validate_file`) and the pack
+  with the file in place (`dry_run_pack`; only problems the pack did not already have count). An error raises
+  `SaveError` (`.problems`) and nothing is written or committed; warnings pass and are returned.
+- `base` is the `hash` the editor read (`files()` / `file_hash`). If the file changed since, `SaveConflict` carries
+  `current_hash` and `current_text` (the editor shows the diff). **`base=None` is for a new file only**: if the file
+  exists, a save without base is refused as a conflict (it would silently overwrite someone's edit); the same for
+  `delete`. Compare, validate and write happen under one per-pack lock (flock on `<cell>/.taskweave.lock`, or next to
+  the cell if it is read-only), so two processes never interleave; the lock file is added to the repo's local exclude.
+- The write is atomic (temp file in the same folder, fsync, rename). An existing file keeps owner, group and mode; a new
+  file takes the folder's group and mode 664 (the umask's, plus g+w); a new folder takes its parent's group and mode
+  (setgid stays). A symbolic link is not written through.
+- **Robot pack files** (`pack='robot:<name>'`, `content` = the whole file): the robot pack stays untouched; the cell pack
+  gets `robots/<robot>/<file>` as a keyed override (`~override: keys`, only the keys that differ from the pack's file;
+  `overlay.py`) for the files that can be overridden per key, else a whole-file copy. `override` in the result names it.
+  The hash of a robot pack file with an override covers both files, so `files()` hashes stay valid base values.
+  `delete(path, 'robot:<name>', base)` removes the override (the pack's file is in effect again).
+- **Git:** if the file is inside a work tree (the repo root may be above the pack), exactly that path is committed
+  (`git commit --only`); other dirty or staged files stay alone. Message: the caller's or `HMI: edit <path>`; author:
+  the caller's (`Name <mail>`) or `taskweave HMI <hmi@HOSTNAME>`. A git failure after the write is a warning in
+  `warnings`, not a failure; no repo: `rev` is None.
+- `delete(path, pack, base, message)`: same lock, conflict and git handling; problems the pack has afterwards are warnings.
+- `create(kind, name, robot=None, content=None)`: `catalogue.new_file` plus `save` without base (the template may need
+  filling in: pass `content`). `save_mission(name, content, base)`: `missions/<name>.yaml` with the mission checks
+  (schema, step ids, `replan_from`, includes, the plan builds). `set_robot(robot, base=None)`: `robot` in system.yaml
+  through `save` (`reload` has `launch`); `base=None` there means the file as it is now.
+- `history(path, pack='cell', limit=50)` is `[{rev, time (ISO), author, message}]`, newest first (`git log --follow`);
+  [] without a repo. `show(path, rev, pack)` is the text then (ValueError if there is none).
+  `restore(path, rev, pack='cell', base=None, author=None)` is a `save` of that text with `base` (it conflicts like any
+  save), message `restore <path> to <rev[:8]>`. For a robot pack file, history and show are those of the pack file; to
+  step back an override use its cell path (`robots/<robot>/<file>`, `pack='cell'`).
+- Caches: a save drops the store's file cache and the pack.yaml cache (keyed by mtime and size), so the same store
+  reads the new content at once; other processes see it by the file's stamp.
+
+```
+taskweave config save PATH --from FILE [--base HASH] [--message M] [--cell CELL_DIR] [--pack P]   (exit 3: conflict)
+taskweave config history PATH [--limit N]
+taskweave config restore PATH REV [--base HASH]
 ```
 
 ## Mission

@@ -47,14 +47,15 @@ def _error(path, message: str, key: str = ''):
     return ConfigError(path, message, key)
 
 
-_packs: dict[Path, tuple[int, dict]] = {}   # pack.yaml -> (mtime, data): robot files are resolved on every load
+_packs: dict[Path, tuple[tuple, dict]] = {}   # pack.yaml -> ((mtime, size), data)
 
 
 def read_pack(folder: Path) -> dict | None:
     """<folder>/pack.yaml, validated; None if the folder has none."""
     path = Path(folder) / PACK_FILE
     try:
-        stamp = path.stat().st_mtime_ns
+        info = path.stat()
+        stamp = (info.st_mtime_ns, info.st_size)    # not mtime alone: a coarse clock misses a quick rewrite
     except OSError:
         return None
     if path in _packs and _packs[path][0] == stamp:
