@@ -53,6 +53,8 @@
       </div>
     </div>
 
+    <div id="viewer3d-run" class="viewer3d" role="region" aria-label="3D view: the robot live in its cell"></div>
+
     <div class="card">
       <label for="mission-select" class="label">Start a mission</label>
       <div class="row gap">
@@ -178,6 +180,7 @@
   <!-- ROBOT -->
   <section id="view-robot" class="view" hidden>
     <div id="robot-busy" class="error" hidden></div>
+    <div id="viewer3d-robot" class="viewer3d" role="region" aria-label="3D view: the robot, its joints live, and the room it keeps while driving"></div>
     <div class="card">
       <div class="label">Robot pose</div>
       <div id="robot-pose" class="mono">–</div>
@@ -322,11 +325,18 @@
   </li>
 </template>
 
+<!-- the 3D view (viewer3d.js): three.js and urdf-loader, vendored (no internet on the cell network) -->
+<script type="importmap">
+{"imports": {"three": "./vendor/three/three.module.min.js",
+             "three/addons/": "./vendor/three/addons/",
+             "three/examples/jsm/": "./vendor/three/addons/"}}
+</script>
 <script src="app.js"></script>
 <script src="robot.js"></script>
 <script src="teach.js"></script>
 <script src="held.js"></script>
 <script src="graph.js"></script>
 <script src="record.js"></script>
+<script type="module" src="viewer3d.js"></script>
 </body>
 </html>

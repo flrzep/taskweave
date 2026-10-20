@@ -73,7 +73,8 @@ def sources(suffixes=('.py',)) -> list[Path]:
     for package in PACKAGES:
         for path in sorted((ROOT / package).rglob('*')):
             parts = path.relative_to(ROOT / package).parts
-            if path.suffix in suffixes and 'test' not in parts and '__pycache__' not in parts and path.is_file():
+            # vendor/: third-party libraries (the HMI's three.js, urdf-loader), not taskweave's code to judge
+            if path.suffix in suffixes and not {'test', '__pycache__', 'vendor'} & set(parts) and path.is_file():
                 out.append(path)
     return out
 
