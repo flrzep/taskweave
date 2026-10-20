@@ -232,11 +232,11 @@ class MoveObject(_HeldMotion):
         waypoints one after the other, each like any other move of the object."""
         from .ik import rpy_matrix
 
-        instance = self.config.object_instances().get(hold['object'])
-        if instance is None:
+        kind = self.hold.type_of(hold, self.config.object_instances())
+        if kind is None:
             return SkillResult.rejected(f'the held {hold["object"]} is not a placed object: its type is unknown')
         try:
-            pose = self.config.held_pose(self.robot.name, instance.object, name)
+            pose = self.config.held_pose(self.robot.name, kind, name)
         except KeyError as error:
             return SkillResult.rejected(str(error.args[0]))
         arm = self._arm_joints(pose['joints'])

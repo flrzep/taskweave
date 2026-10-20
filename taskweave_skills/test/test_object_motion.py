@@ -341,3 +341,12 @@ def test_a_lift_segment_of_a_held_pose_updates_the_other_hold_too(system):      
     move(system, {'pose': 'carry'}, object='box_1', motion={'mode': 'linear'})
     assert system.sim.position['lift'] == pytest.approx(0.1, abs=0.03)
     assert object_x(system, 'pile_1') == pytest.approx(0.0, abs=1e-6), 'the other hold was not followed'
+
+
+def test_move_object_of_a_held_single_object_after_take_object(system):
+    system.server.skills['move_object']._tcp_fk = fake_fk()
+    assert run(system, 'move_gripper', {'to': {'point': 'box_1/rim'}, 'motion': {'approach_m': 0}}).outcome == OK
+    assert run(system, 'grip', {'action': 'close'}).outcome == OK
+    assert 'box_1' not in system.server.config.object_instances()      # taken: its type lives in the hold
+    move(system, {'pose': 'carry'}, motion={'mode': 'linear'})
+    move(system, {'onto': 'pile_1/top', 'contact': 'base'}, motion={'mode': 'linear'})
