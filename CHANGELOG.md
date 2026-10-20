@@ -7,7 +7,7 @@
   slowed arm moves that planned at that moment by up to 1.4 s. The scene is now fetched only while a 3D view asks, and
   the geometry only when the object names change.
 - **Held objects with collision shapes on the Galbot S1:** `galbot_s1` lists its gripper links (`grippers.<hand>.links`)
-  as touch links, so a held object's shape no longer collides with the fingers (pack version 0.2.1).
+  as touch links, so a held object's shape no longer collides with the fingers (robot packs version 0.2.1).
 - **Version check:** `taskweave_version()` reads the running source tree's `package.xml` first, then the installed copy
   this file belongs to; an older installed taskweave no longer decides it.
 - **A taken object** gets its own message: "'x' was taken in an earlier step or run (object state); reset the sim or run
