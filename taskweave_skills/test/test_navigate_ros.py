@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 
 import pytest
+import yaml
 from conftest import TIME_SCALE, RosRig, connect, copy_config, wait_until
 
 rclpy = pytest.importorskip('rclpy')
@@ -125,7 +126,12 @@ def test_teach_then_drive_back(system):
     assert run_skill(client, 'navigate_to', {'target': 'home'}).outcome == RunSkill.Result.SUCCEEDED
     result = run_skill(client, 'navigate_to', {'target': 'taught_dock'})
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
-    assert math.hypot(sim.x - 1.0, sim.y - 0.5) < 0.05
+    # Back at the taught point, within the skill's own tolerance (0.03 m, plus a margin). The point itself was taught
+    # where the first drive stopped, which is within that tolerance of the dock: the two errors add up against the
+    # dock (up to 0.06 m), so the dock is no reference for the second drive.
+    taught = yaml.safe_load((config / 'cell' / 'locations.yaml').read_text())['taught_dock']
+    assert math.hypot(taught['x'] - 1.0, taught['y'] - 0.5) < 0.04
+    assert math.hypot(sim.x - taught['x'], sim.y - taught['y']) < 0.04
 
 
 def test_drive_straight_forward_and_back_keeps_the_heading(system):
