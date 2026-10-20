@@ -252,6 +252,8 @@ ROBOT_PROFILE = {
                         # the current height wins at once when feasible and its arm cost is at most this (default: any)
                         'accept_cost': {'type': 'number', 'minimum': 0},
                         'line_sample_m': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.3},
+                        # no height solves with local IK: the nearest this many are tried with the global search
+                        'global_heights': {'type': 'integer', 'minimum': 0, 'default': 3},
                     },
                     'additionalProperties': False,
                 },

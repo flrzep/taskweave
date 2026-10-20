@@ -420,7 +420,7 @@ def test_ik_torso_with_no_feasible_height_fails_with_every_height_and_its_reason
     system.ik.blocked = {'left'}
     result, data = go(system, {'to': {'pose': 'present_left'}}, FAILED)
     assert 'no torso height works' in result.message
-    assert sorted(r['height'] for r in data['torso'][0]['rejected']) == [0.0, 0.1, 0.2, 0.3]
+    assert {r['height'] for r in data['torso'][0]['rejected']} == {0.0, 0.1, 0.2, 0.3}
     assert system.sim.position['lift'] == 0.0
 
 

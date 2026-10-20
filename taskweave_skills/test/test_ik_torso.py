@@ -99,6 +99,7 @@ def test_a_height_where_the_idle_arm_collides_is_rejected():
 
 def test_no_height_works_names_every_height_and_its_reason():
     ik = FakeIk(reach=lambda tool, target, h: None)
+    ik.torso['global_heights'] = 0
     with pytest.raises(TorsoError, match='no torso height works') as raised:
         ik.solve_with_torso([TOOLS], {}, now(0.3))
     assert sorted(r['height'] for r in raised.value.rejected) == [*GRID]
@@ -280,3 +281,54 @@ def test_the_profile_schema_takes_the_wrist_keys():
                                                           'weights': {'torso': 1.0, 'wrist': 0.5}}}}) == without
     assert errors({**base, 'ik': {**base['ik'], 'torso': {**torso, 'weights': {'wrist': -1}}}})
     assert schemas.default(schemas.ROBOT_PROFILE, 'ik', 'torso', 'weights', 'wrist') == 0.0
+
+
+# ---- robustness: the old way as a fallback, and the real line path ------------------------------------------------
+
+class GlobalOnly(FakeIk):
+    """Local descents fail (timing dependent in life); only the global search solves, at the heights in ``works``."""
+
+    def __init__(self, works=(0.45,), **kw):
+        super().__init__(**kw)
+        self.works, self.global_calls = works, []
+
+    def solve(self, tools, fixed, should_stop=lambda: False, current=None, allow_flip=True, elbow=None,
+              global_search=True):
+        if not global_search or fixed['lift'] not in self.works:
+            raise IkError('no IK solution for left: local descent failed')
+        self.global_calls.append(fixed['lift'])
+        return super().solve(tools, fixed, should_stop, current, allow_flip, elbow, global_search)
+
+
+def test_when_local_ik_fails_everywhere_the_global_search_at_the_current_height_is_the_fallback():
+    ik = GlobalOnly(works=(0.45,))
+    choice = ik.solve_with_torso([TOOLS], {}, now(0.45))
+    assert choice.height == pytest.approx(0.45) and 'global search' in choice.skipped
+    assert ik.global_calls == [0.45]
+    assert all('no IK solution' in r['reason'] for r in choice.rejected)          # every local try is on record
+
+
+def test_the_global_fallback_tries_the_nearest_heights_only_and_can_still_fail():
+    ik = GlobalOnly(works=(0.7,))                       # not among the 3 nearest to 0.45: 0.45, 0.4/0.5, ...
+    with pytest.raises(TorsoError, match='global search'):
+        ik.solve_with_torso([TOOLS], {}, now(0.45))
+    ik = GlobalOnly(works=(0.5,))
+    assert ik.solve_with_torso([TOOLS], {}, now(0.45)).height == pytest.approx(0.5)
+    ik = GlobalOnly(works=(0.45,))
+    ik.torso['global_heights'] = 0                      # off: the old failure
+    with pytest.raises(TorsoError):
+        ik.solve_with_torso([TOOLS], {}, now(0.45))
+
+
+def test_a_line_whose_real_path_runs_out_of_reach_rejects_the_height_even_when_every_sample_solves():
+    def line(height):
+        return [TOOLS, TOOLS]
+    line.verify = lambda height: 'no straight-line path for left: step 23 of 24: out of reach' if height > 0.3 else None
+    ik = FakeIk(accept=-1)
+    choice = ik.solve_with_torso(line, {}, now(0.6))
+    assert choice.height == pytest.approx(0.3)           # the nearest height with a real line
+    reasons = {r['height']: r['reason'] for r in choice.rejected}
+    assert reasons[0.6].startswith('line: no straight-line path') and reasons[0.4].startswith('line:')
+    line.verify = lambda height: 'out of reach'
+    with pytest.raises(TorsoError, match='line: out of reach'):
+        FakeIk(accept=-1).solve_with_torso(line, {}, now(0.6))

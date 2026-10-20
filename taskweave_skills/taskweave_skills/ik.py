@@ -241,6 +241,7 @@ WEIGHTS = IK_WEIGHTS                                                       # ik.
 LIMIT_MARGIN_DEG = default(ROBOT_PROFILE, 'ik', 'choose', 'limit_margin_deg')   # ik.choose.limit_margin_deg default
 START_TIMEOUT_S = default(ROBOT_PROFILE, 'ik', 'choose', 'start_timeout_s')     # ik.choose.start_timeout_s default
 TORSO_WEIGHT = default(ROBOT_PROFILE, 'ik', 'torso', 'weights', 'torso')           # ik.torso.weights.torso default
+GLOBAL_HEIGHTS = default(ROBOT_PROFILE, 'ik', 'torso', 'global_heights')           # ik.torso.global_heights default
 WRIST_WEIGHT = default(ROBOT_PROFILE, 'ik', 'torso', 'weights', 'wrist')           # ik.torso.weights.wrist default
 LINE_SAMPLE_M = default(ROBOT_PROFILE, 'ik', 'torso', 'line_sample_m')             # ik.torso.line_sample_m default
 
@@ -439,7 +440,10 @@ class IkClient:
         to the smaller change, then the lower height, so the same input gives the same height. The current height
         comes first and wins at once when it is feasible and its cost is at most ``accept_cost`` (default: always), so
         the common case is one solve per sample; otherwise heights are tried outward from it and the search stops
-        when the torso cost alone passes the best total. Raises TorsoError."""
+        when the torso cost alone passes the best total. If no height solves with local IK, the nearest
+        ``global_heights`` heights are tried with the global search (what the move itself would do). A ``samples``
+        function with a ``verify(height)`` attribute returns why the real path fails at that height, or None.
+        Raises TorsoError."""
         spec = self.torso
         joint = spec['joint']
         if joint not in current:
@@ -469,6 +473,16 @@ class IkClient:
             if best is None or (round(choice.cost, 9), round(abs(choice.height - now), 9), choice.height) < (
                     round(best.cost, 9), round(abs(best.height - now), 9), best.height):
                 best = choice
+        if best is None:     # local descents are timing dependent: the old way (global search) at the nearest heights
+            for height in heights[:int(spec.get('global_heights', GLOBAL_HEIGHTS))]:
+                try:
+                    best = self._torso_height(samples, height, fixed, current, joint, now, weight, should_stop, elbow,
+                                              allow_flip, global_search=True)
+                except TorsoError as error:
+                    rejected.append({'height': round(height, 4), 'reason': f'global search: {error}'})
+                    continue
+                best.skipped = 'no height solved with local IK: global search'
+                break
         rejected.sort(key=lambda item: item['height'])
         if best is None:
             raise TorsoError('no torso height works: ' + '; '.join(f'{r["height"]:g}: {r["reason"]}' for r in rejected),
@@ -477,8 +491,9 @@ class IkClient:
         return best
 
     def _torso_height(self, samples, height, fixed, current, joint, now, weight, should_stop, elbow,
-                      allow_flip) -> TorsoChoice:
-        """One candidate of solve_with_torso, or TorsoError saying why it is out."""
+                      allow_flip, global_search=False) -> TorsoChoice:
+        """One candidate of solve_with_torso, or TorsoError saying why it is out. ``global_search``: the IK may fall
+        back to the global solver (slow, not repeatable); else a height only that solves is no candidate."""
         with_h = {**fixed, joint: height}
         goals = samples(height) if callable(samples) else samples
         main = None
@@ -486,7 +501,7 @@ class IkClient:
             where = f'sample {k}: ' if k else ''
             try:
                 arm = self.solve(tools, with_h, should_stop, current=current, allow_flip=allow_flip, elbow=elbow,
-                                 global_search=False)    # a height only the global search solves is no candidate
+                                 global_search=global_search)
                 self._remember(tools, with_h, current, allow_flip, elbow, arm)
             except TorsoError:
                 raise
@@ -500,6 +515,10 @@ class IkClient:
             if not stay and not self._state_valid({joint: height, **self.idle_joints(tools, current), **arm},
                                                   next(iter(tools))):
                 raise TorsoError(f'{where}collision (idle arm included)')
+        verify = getattr(samples, 'verify', None)    # a straight line: the path itself must exist at this height
+        problem = verify(height) if verify is not None else None
+        if problem:
+            raise TorsoError(f'line: {problem}')
         arm, flips, cost = main
         bend = self._wrist_bend(arm, goals[0] if goals else {})
         if bend is not None:

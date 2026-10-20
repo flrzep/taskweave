@@ -280,6 +280,25 @@ class MoveGripper(_PointMotion):
             return [{t: target_of(goals[t]) for t in goals},
                     *({t: target_of(interpolate(begin[t], goals[t], i / parts)) for t in goals}
                       for i in range(parts))]
+
+        def verify(height: float) -> str | None:
+            """Why the straight line itself (walked on the URDF chains from the arms' joints, the torso set to
+            ``height``) fails, or None: per-sample IK can pass where the continuous path runs out of reach."""
+            import re
+
+            from .cartesian import PathError, linear_path
+
+            moved = self.ik.tcps_at(goals, {**current, joint: height})
+            if len(moved) < len(goals):
+                return None
+            arm = {n: v for n, v in current.items() if any(re.fullmatch(self.ik.joint_pattern.format(tool=t), n)
+                                                           for t in goals)}
+            try:
+                linear_path(self.ik, moved, goals, arm, self.tcp_speed, self.tcp_turn, state={**current, joint: height})
+            except PathError as error:
+                return str(error)
+            return None
+        at.verify = verify
         return at
 
     def _set_torso(self, ctx, chosen, label: str, planner: str):
