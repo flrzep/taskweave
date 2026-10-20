@@ -18,8 +18,10 @@ joints:                     # joint position targets in, joint states out (Isaac
     left_arm: [left_joint1, left_joint2, left_joint3, left_joint4, left_joint5, left_joint6, left_joint7]
     right_arm: [right_joint1, right_joint2, right_joint3, right_joint4, right_joint5, right_joint6, right_joint7]
 grippers:                   # Ge103In: one driven joint per hand, a finger linkage closing toward the +z side of link7
-  left: {joint: left_gripper_joint, open: 0.0, closed: 1.63, closed_from: 0.1, opening_m: &opening [[0.0, 0.077], [0.2, 0.068], [0.4, 0.058], [0.6, 0.048], [0.8, 0.037], [1.0, 0.026], [1.2, 0.016], [1.4, 0.006], [1.55, 0.0]]}
-  right: {joint: right_gripper_joint, open: 0.0, closed: 1.63, closed_from: 0.1, opening_m: *opening}
+  left: {joint: left_gripper_joint, open: 0.0, closed: 1.63, closed_from: 0.1, opening_m: &opening [[0.0, 0.077], [0.2, 0.068], [0.4, 0.058], [0.6, 0.048], [0.8, 0.037], [1.0, 0.026], [1.2, 0.016], [1.4, 0.006], [1.55, 0.0]],
+         links: [left_link7, Arms_Gripper_Ge103In_base_link, Arms_Gripper_Ge103In_left_active_link1, Arms_Gripper_Ge103In_left_active_link2, Arms_Gripper_Ge103In_left_passive_link]}
+  right: {joint: right_gripper_joint, open: 0.0, closed: 1.63, closed_from: 0.1, opening_m: *opening,
+          links: [right_link7, Arms_Gripper_Ge103In_Right_base_link, Arms_Gripper_Ge103In_Right_left_active_link1, Arms_Gripper_Ge103In_Right_left_active_link2, Arms_Gripper_Ge103In_Right_left_passive_link]}
                             # limit 0-1.636 rad; 15 Oct (user + gripper meshes): 1.63 = finger on the fixed jaw, 0 = swung
                             # 8 cm away. opening_m: [joint, gap finger-jaw at the tips in m], from the left gripper's
                             # collision hulls (+-3 mm); a point's grip_m turns into the joint through it. closed_from:
