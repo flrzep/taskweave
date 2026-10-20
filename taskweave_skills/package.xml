@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypelocation="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>taskweave_skills</name>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <description>Generic, robot-agnostic taskweave skills (wait, navigate_to, go_to_point).</description>
   <maintainer email="f.rzepczyk@gmail.com">Florian Rzepczyk</maintainer>
   <license>TBD</license>

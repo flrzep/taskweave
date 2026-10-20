@@ -97,7 +97,7 @@ def check_requires(pack: dict, path: Path, label: str) -> None:
     try:
         specifier = SpecifierSet(spec)
     except InvalidSpecifier as error:
-        raise _error(path, f'{label}: requires.taskweave {spec!r} is not a version specifier like ">=0.1,<0.2" '
+        raise _error(path, f'{label}: requires.taskweave {spec!r} is not a version specifier like ">=0.2,<0.3" '
                            f'({error})', key) from error
     have = taskweave_version()
     try:

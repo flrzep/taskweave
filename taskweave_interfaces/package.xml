@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypelocation="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>taskweave_interfaces</name>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <description>ROS 2 interfaces of taskweave: the RunSkill action, plans, task status and the skill catalog.</description>
   <maintainer email="f.rzepczyk@gmail.com">Florian Rzepczyk</maintainer>
   <license>TBD</license>

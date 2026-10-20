@@ -4,7 +4,7 @@ PACKAGE = 'taskweave_skills'
 
 setup(
     name=PACKAGE,
-    version='0.1.0',
+    version='0.2.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + PACKAGE]),

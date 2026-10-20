@@ -32,7 +32,7 @@ import yaml
 
 from . import packs
 
-ROBOT_PACK_VERSION = '0.1.0'
+ROBOT_PACK_VERSION = '0.2.0'
 
 
 def _relation(a: Path, b: Path) -> str:
