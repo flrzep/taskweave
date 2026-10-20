@@ -100,6 +100,7 @@ class MoveJoints(_PoseMotion):
             return refusal
         self.hold.leave(list(self.hold.reached_hands()))   # the hands are no longer at an object point
         self._path_used, self._time_scale = 'direct', 1.0
+        spent = self._planned()
         self.p = self._step_params(values)
         try:
             worst = 0.0
@@ -118,9 +119,16 @@ class MoveJoints(_PoseMotion):
         stats = ctx.work.stats()
         data = {'hands': self._hands(legs), 'mode': 'free', 'path': self._path_used, 'max_error': round(worst, 4),
                 'speed': {**stats, 'scale': round(self._time_scale * stats['override_avg'] / 100.0, 4)}}
+        if self._path_used == 'planned':
+            now = self._planned()
+            data['plan_s'], data['plan_points'] = round(now[0] - spent[0], 3), now[1] - spent[1]
         if 'pose' in args:
             data['world_state'] = {'arm_pose': args['pose']}
         return SkillResult.succeeded(f'at {label} (max error {worst:.3f})', **data)
+
+    def _planned(self) -> tuple[float, int]:
+        """The planner's (time, trajectory points) so far; a step reports the difference."""
+        return getattr(self.planner, 'spent_s', 0.0), getattr(self.planner, 'points', 0)
 
     def _leg(self, ctx, goal: dict, label: str, planner: str):
         """One move to ``goal``. ``direct``: the straight joint move only, refused if the planner finds it blocked.
