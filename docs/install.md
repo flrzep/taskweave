@@ -142,3 +142,38 @@ taskweave check /path/to/cell
 Keep the pack in git so that you can review the diff. `taskweave config slim` turns whole-file overrides of robot
 pack files into per-key overrides. See [pack_switchover.md](pack_switchover.md) for moving from a plain config
 directory to cell pack + robot packs.
+
+## 9. Container
+
+The repository has a `Dockerfile` (nothing is published; build it yourself). It starts from `ros:jazzy-ros-base`,
+installs the dependencies with rosdep, builds all six packages with colcon from your checkout and sets up an
+entrypoint that sources `/opt/ros/jazzy` and the install, so `taskweave` and `ros2` work for any command. The image is
+several GB (Nav2 and MoveIt come with `taskweave_bringup`).
+
+```bash
+docker build -t taskweave .
+docker run --rm taskweave                                   # taskweave --help
+docker run --rm taskweave ros2 pkg list | grep taskweave
+docker run --rm -v "$PWD/docs/examples/cell:/cell:ro" taskweave taskweave check /cell
+```
+
+To run taskweave itself, mount a cell pack at `/cell` and use the host network so that ROS 2 discovery and the HMI
+(port 8090) work; set the `ROS_DOMAIN_ID` of the robot you talk to. `docker/compose.example.yaml` does this for the
+example cell (`docker compose -f docker/compose.example.yaml up`). Robot packs of your own: mount the folder and set
+`TASKWEAVE_ROBOT_PACKS` (section 7).
+
+## 10. Pack versions
+
+A cell pack's or robot pack's `pack.yaml` may carry its own `version` (any string, e.g. `1.4.0`) and the taskweave
+versions it works with, a [PEP 440](https://peps.python.org/pep-0440/#version-specifiers) specifier:
+
+```yaml
+version: 1.4.0
+requires:
+  taskweave: ">=0.1,<0.2"
+```
+
+`taskweave check` and every load refuse a pack that does not admit the installed taskweave, with a message naming the
+pack, its version, the requirement and the taskweave version. Without `requires` the pack loads with any taskweave. A
+malformed specifier is an error as well. The bundled robot packs and the example cell require the minor range of the
+release they ship with.

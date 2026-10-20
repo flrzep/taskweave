@@ -31,7 +31,7 @@ installed to `share/taskweave_robots/<model>/`):
 
 ```
 <model>/
-  pack.yaml              name (= the model), version, schema_version (1), description
+  pack.yaml              name (= the model), version, schema_version (1), description, optional requires: {taskweave: ">=0.1,<0.2"} (install.md, "Pack versions")
   profile.yaml           how the hardware is reached: roles -> topics, joints, frames, controllers
   embodiment.yaml        what the robot is and can do: capabilities, tools, reach, cameras, action spaces
   poses.yaml             named poses (home, carry); robot-specific by nature

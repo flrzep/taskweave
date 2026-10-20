@@ -3,7 +3,8 @@
 A cell pack is one cell's config (the ConfigStore root): cell/, objects/, missions/, skills/, sim/, tests/,
 system.yaml, operator.yaml and robots/<robot>/ with the robot's cell-specific files (stances, held poses, object
 points). A robot pack is one robot model, nothing about a cell: profile, embodiment, moveit/, navigation, sim, poses,
-pose targets. Both have a pack.yaml {name, version, schema_version[, description]}; a robot pack's name is the robot.
+pose targets. Both have a pack.yaml {name, version, schema_version[, description][, requires: {taskweave: <spec>}]};
+a robot pack's name is the robot.
 
 A robot file is looked up in the cell pack's robots/<robot>/ first (cell-specific files, and overrides of robot pack
 files: keyed, only the keys the cell changes laid over the pack's file, or a whole file; overlay.py), then in the
@@ -23,6 +24,8 @@ from pathlib import Path
 
 import yaml
 from jsonschema import Draft202012Validator
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 from . import schemas
 
@@ -67,6 +70,45 @@ def read_pack(folder: Path) -> dict | None:
     return data
 
 
+def taskweave_version() -> str:
+    """The version of this taskweave: the installed taskweave_core, else the package.xml of the source tree."""
+    try:
+        from importlib.metadata import version
+
+        return version('taskweave_core')
+    except Exception:  # not installed (run from a source tree)
+        pass
+    import re
+
+    xml = Path(__file__).resolve().parents[2] / 'package.xml'
+    try:
+        return re.search(r'<version>([^<]+)</version>', xml.read_text(encoding='utf-8')).group(1).strip()
+    except (OSError, AttributeError):
+        return 'unknown'
+
+
+def check_requires(pack: dict, path: Path, label: str) -> None:
+    """Refuse a pack whose ``requires.taskweave`` does not admit this taskweave. No ``requires``: always fine."""
+    spec = (pack.get('requires') or {}).get('taskweave')
+    if spec is None:
+        return
+    key = 'requires.taskweave'
+    try:
+        specifier = SpecifierSet(spec)
+    except InvalidSpecifier as error:
+        raise _error(path, f'{label}: requires.taskweave {spec!r} is not a version specifier like ">=0.1,<0.2" '
+                           f'({error})', key) from error
+    have = taskweave_version()
+    try:
+        ok = specifier.contains(Version(have), prereleases=True)
+    except InvalidVersion:
+        return      # no usable own version (unknown): nothing to compare
+    if not ok:
+        mine = f' {pack["version"]}' if 'version' in pack else ''
+        raise _error(path, f'{label}{mine} requires taskweave {spec}, this is taskweave {have}: use a matching '
+                           f'taskweave release or a matching pack version', key)
+
+
 def cell_schema(folder: Path) -> int:
     """The cell pack's schema_version; 1 without a pack.yaml (a config directory from before packs)."""
     pack = read_pack(folder)
@@ -74,6 +116,9 @@ def cell_schema(folder: Path) -> int:
 
 
 def check_cell_schema(folder: Path) -> None:
+    pack = read_pack(folder)
+    if pack:
+        check_requires(pack, Path(folder) / PACK_FILE, f'cell pack {pack["name"]}')
     version = cell_schema(folder)
     if version < CELL_SCHEMA:
         command = 'migrate-skills' if version == 2 else 'migrate'   # 2 -> 3 is the skill migration (migrate_skills.py)
@@ -167,6 +212,7 @@ def robot_pack(location: Location, robot: str) -> RobotPack | None:
         return None
     if pack['name'] != robot:
         raise _error(folder / PACK_FILE, f'name is {pack["name"]!r}, expected {robot!r}', 'name')
+    check_requires(pack, folder / PACK_FILE, f'robot pack {robot}')
     version = int(pack['schema_version'])
     if version != ROBOT_SCHEMA:
         hint = f'run taskweave config migrate {folder}' if version < ROBOT_SCHEMA else 'update taskweave'

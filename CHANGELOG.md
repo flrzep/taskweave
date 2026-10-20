@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Container image.** A `Dockerfile` (ROS 2 Jazzy, all packages built from the checkout, entrypoint sourcing ROS and
+  the install, `taskweave` on the PATH), `docker/compose.example.yaml` and a CI job that builds the image without
+  pushing it. Nothing is published. See `docs/install.md`, "Container".
+- **Pack versions.** A cell or robot `pack.yaml` may carry `requires: {taskweave: ">=0.1,<0.2"}` (a PEP 440
+  specifier). Loading and `taskweave check` refuse a pack that does not admit the installed taskweave and name both
+  versions; a missing `requires` is allowed. The example cell and the bundled robot packs require `>=0.1,<0.2`. New
+  run-time dependency: `python3-packaging`.
+
 ## 0.1.0 (2026-10-19)
 
 First release. taskweave runs robot tasks on ROS 2 Jazzy, driven entirely by YAML. All six packages

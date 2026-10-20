@@ -50,3 +50,13 @@ jobs:
           # one package at a time: the ROS tests of several packages must not share a domain concurrently
           colcon test --executor sequential --event-handlers console_direct+
           colcon test-result --verbose
+
+  docker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image (not pushed)
+        run: docker build -t taskweave .
+      - name: The cell example validates in the image
+        run: docker run --rm -v "$PWD/docs/examples/cell:/cell:ro" taskweave taskweave check /cell
+

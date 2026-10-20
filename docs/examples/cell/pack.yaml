@@ -4,3 +4,5 @@
 name: example_cell
 version: 1
 schema_version: 3
+requires:
+  taskweave: ">=0.1,<0.2"
