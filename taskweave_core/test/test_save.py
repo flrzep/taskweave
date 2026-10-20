@@ -504,3 +504,14 @@ def test_symlinks_stays_inside_the_pack(store, tmp_path):
     with pytest.raises(SaveError):
         store.save('profile.yaml', 'a: 1\n', pack='robot:link_bot')
     assert not list(outside.iterdir())
+
+
+# ---- P4 review: old errors are not new ones ------------------------------------------------------------------------
+def test_a_cross_file_error_the_pack_had_does_not_block_a_valid_save(store):
+    (store.root / 'missions' / 'outer.yaml').write_text(
+        'goal: g\nsteps:\n  - instruction: x\n    include: gone_mission\n')
+    errors = [p for p in store.check_pack() if p['path'] == 'missions/outer.yaml' and p['severity'] == 'error']
+    assert errors and str(store.root) in errors[0]['message']    # a message with the real path
+    store.reload()
+    store.save(LOCATIONS, text(store) + '# note\n', base=store.file_hash(LOCATIONS))
+    store.save('missions/ok.yaml', 'goal: g\nsteps:\n  - instruction: w\n    skill: wait\n')
