@@ -143,13 +143,16 @@ class NavigateTo(Skill):
     achieves = ['robot base at the target pose']
     default_timeout_s = 120.0
 
-    def setup(self, node, config, robot, params):
-        super().setup(node, config, robot, params)
-        self.base = robot.base
-        limits = base_limits(config, robot.name)
+    def configure(self, params):
+        super().configure(params)
+        self.base = self.robot.base
+        limits = base_limits(self.config, self.robot.name)
         self.p = Params.from_config(params, limits)
         wanted = Params.from_config(params, {})
         self.capped = capped_by({'linear': wanted.max_linear, 'angular': wanted.max_angular}, limits)  # motion.capped
+
+    def setup(self, node, config, robot, params):
+        super().setup(node, config, robot, params)
         self.pose: Pose2D | None = None
         self.pose_time = -math.inf
         self.lock = threading.Lock()

@@ -142,12 +142,15 @@ class MoveGripper(_PointMotion):
     # skill yaml ``any_one_tolerance_rad``: hands any_one treats joint motions this close as equal (profile order)
     param_defaults = {**_PointMotion.param_defaults, 'any_one_tolerance_rad': 0.05}
 
-    def setup(self, node, config, robot, params):
+    def configure(self, params):
         params, extra = translate_params(params)
         self.any_one_tolerance_rad = float(params.pop('any_one_tolerance_rad',
                                                       self.param_defaults['any_one_tolerance_rad']))
         self.accel, self.torso_fallback = extra['accel'], extra['torso_fallback']
         self.path_kind, self.plan_scale = None, 1.0
+        super().configure(params)
+
+    def setup(self, node, config, robot, params):
         super().setup(node, config, robot, params)
         self.hands = list(robot.data.get('grippers', {}))
         self.args_schema = copy.deepcopy(self.args_schema)
@@ -466,11 +469,14 @@ class Grip(_FingerMotion):
     achieves = ['gripper open, or closed (holding an object if one was between the fingers)']
     default_timeout_s = 20.0
 
-    def setup(self, node, config, robot, params):
+    def configure(self, params):
         params, _ = translate_params(params)
         for key in ('lift_joint', 'lift_values', 'tcp_speed', 'tcp_turn'):   # arm motion settings of a shared yaml
             params.pop(key, None)
         self.cell_frame = params.pop('cell_frame', 'world')  # TF frame of the cell (place_as)
+        _JointSkill.configure(self, params)
+
+    def setup(self, node, config, robot, params):
         _JointSkill.setup(self, node, config, robot, params)
         self.hold.on_reset.append(config.clear_object_state)  # a sim reset puts every object back
         self.collision = None   # HoldCollision, made when a held object has collision shapes

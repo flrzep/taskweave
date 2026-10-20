@@ -49,7 +49,7 @@ def test_files_lists_the_cell_pack_with_kind_schema_reload_and_hash(example):
     assert (entry['kind'], entry['source'], entry['schema_id'], entry['reload'], entry['editable']) == (
         'object_type', 'cell', 'object_type', ['live'], True)
     assert entry['hash'] == store.file_hash('objects/part.yaml') and len(entry['hash']) == 64
-    assert files['skills/wait.yaml']['reload'] == ['skill_server']
+    assert files['skills/wait.yaml']['reload'] == ['reload_service']
     pack = files['pack.yaml']
     assert not pack['editable'] and 'migrate' in pack['editable_reason'] and pack['hash'] is None
     # a cell copy of a robot pack file is an override, a cell-specific file is cell

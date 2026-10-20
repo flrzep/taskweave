@@ -9,14 +9,22 @@ For every skill name the server reads skills/<name>.yaml and serves the first im
 fits the robot's embodiment; it logs why the others do not fit. A skill without a fitting implementation is not
 served (missions using it are then rejected by validation with the same reasons).
 
+Service <node>/reload_config (ReloadConfig): re-reads the config and applies, between goals, what the skills read per
+goal: the parameters of skills/<name>.yaml and base.limits of the profile. A changed implementation, a profile or
+embodiment part bound at start (topics, joint interface, IK, planning, hands) or a skill's ``startup_params`` is
+reported as needs_restart. While a goal is active the answer is ``busy``.
+
 Run: ros2 run taskweave_core skill_server --ros-args -p config_dir:=... -p robot:=... -p skills:="['...']"
 """
 
 from __future__ import annotations
 
+import copy
 import importlib
 import json
+import threading
 import traceback
+from pathlib import Path
 
 import rclpy
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
@@ -25,11 +33,12 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
 from taskweave_interfaces.action import RunSkill
-from taskweave_interfaces.msg import SkillInfo
-from taskweave_interfaces.srv import ListSkills
+from taskweave_interfaces.msg import RestartItem, SkillInfo
+from taskweave_interfaces.srv import ListSkills, ReloadConfig
 
 from . import names
-from .config import ConfigError, ConfigStore
+from .config import ConfigError, ConfigStore, RobotProfile
+from .config.reload import Reloader
 from .executive import Outcome
 from .skill import Skill, SkillContext, SkillResult
 from .speed import SpeedOverride
@@ -79,6 +88,12 @@ class SkillServer(Node):
                 skill.implementation = f'{implementation["type"]}:{implementation["name"]}'
                 implementations[skill_name] = implementation
                 skills.append(skill)
+        self._impl, self._params = implementations, {}
+        self._active, self._lock = 0, threading.Lock()    # goals running; held while a reload applies
+        try:
+            self._embodiment = self.config.embodiment(robot_name)
+        except ConfigError:
+            self._embodiment = None
         self.group = ReentrantCallbackGroup()
         self.speed = SpeedOverride.for_node(self)  # the handler's global override (latched topic)
         self.skills: dict[str, Skill] = {}
@@ -86,8 +101,8 @@ class SkillServer(Node):
         for skill in skills:
             if not skill.name or skill.name in self.skills:
                 raise ValueError(f'skill name {skill.name!r} is empty or duplicated')
-            skill.setup(self, self.config, self.robot,
-                        self.config.skill_params(skill.name, implementations.get(skill.name)))
+            self._params[skill.name] = self.config.skill_params(skill.name, implementations.get(skill.name))
+            skill.setup(self, self.config, self.robot, self._params[skill.name])
             self.skills[skill.name] = skill
             self._servers.append(ActionServer(
                 self, RunSkill, names.skill_action(skill.name),
@@ -97,6 +112,10 @@ class SkillServer(Node):
                 callback_group=self.group))
         self.create_service(ListSkills, f'{self.get_name()}{names.SKILL_SERVER_CATALOG_SUFFIX}', self._list,
                             callback_group=self.group)
+        self.create_service(ReloadConfig, f'{self.get_name()}{names.RELOAD_CONFIG_SUFFIX}', self._reload,
+                            callback_group=self.group)
+        self.reloader = Reloader(self.config, robot_name, {'live', 'reload_service', 'launch'}, {}, self._concerns,
+                                 self._apply)
         served = ', '.join(f'{name} ({skill.implementation})' for name, skill in self.skills.items())
         self.get_logger().info(f'skills for robot {robot_name!r}: {served or "none"}')
 
@@ -113,7 +132,90 @@ class SkillServer(Node):
         response.skills = [self.info(skill) for skill in self.skills.values()]
         return response
 
+    # ---- reload_config ---------------------------------------------------------
+    def _concerns(self, entry: dict) -> bool:
+        """Skill yamls of the skills served here, the profile and embodiment, and the live files (the store reads
+        those per use)."""
+        if entry['kind'] == 'skill':
+            return Path(entry['path']).stem in self.skills
+        return entry['kind'] in ('profile', 'embodiment') or 'live' in entry['reload']
+
+    def _apply(self, entries: list[dict]) -> list[tuple[str, str]]:
+        """Take the changed profile, embodiment and skill yamls into effect. Everything is built and tried on copies
+        first, so a value that does not load changes nothing (raises). Returns what only a restart applies."""
+        refused, name = [], self.robot.name
+        robot, old = self.robot, self.robot.data
+        profile = next((e for e in entries if e['kind'] == 'profile'), None)
+        if profile:     # base.limits is read per goal; the rest of the profile is bound when the server starts
+            new = self.config.robot(name).data
+            robot = RobotProfile(name, {**old, 'base': {**_bound(old, 'base'), **_limits_of(new['base'])}})
+            rest = sorted(k for k in {*old, *new} if _bound(old, k) != _bound(new, k))
+            if rest:
+                refused.append((profile['path'], f'{", ".join(rest)}: topics, joint interface, IK, planning and hands '
+                                                 'are bound when the skill servers start'))
+        embodiment = next((e for e in entries if e['kind'] == 'embodiment'), None)
+        if embodiment and self.config.embodiment(name) != self._embodiment:
+            refused.append((embodiment['path'], 'the skill implementations were chosen from it when the skill '
+                                                'servers started'))
+        changed = {Path(e['path']).stem: e['path'] for e in entries if e['kind'] == 'skill'}
+        plan = {}
+        for skill in self.skills.values():
+            if skill.name not in changed and robot is self.robot:
+                continue
+            params = self._params[skill.name]
+            if skill.name in changed:
+                path, impl = changed[skill.name], self._impl.get(skill.name)
+                new_impl = self.config.select_implementation(skill.name, name)[0] if impl else None
+                if impl and (new_impl is None or
+                             (new_impl['name'], new_impl['class']) != (impl['name'], impl['class'])):
+                    refused.append((path, 'the implementation (name, class) was chosen when the skill servers '
+                                          'started'))
+                    continue
+                params = dict(self.config.skill_params(skill.name, new_impl))
+                for key in skill.startup_params:    # a connection made at start keeps its value
+                    if params.get(key) != self._params[skill.name].get(key):
+                        refused.append((path, f'{key}: a connection made when the skill server started'))
+                        params.pop(key, None)
+                        if key in self._params[skill.name]:
+                            params[key] = self._params[skill.name][key]
+            trial = copy.copy(skill)
+            trial.robot = robot
+            trial.configure(dict(params))
+            plan[skill.name] = params
+        self.robot = robot
+        for skill_name, params in plan.items():
+            self.skills[skill_name].robot = robot
+            self.skills[skill_name].configure(dict(params))
+            self._params[skill_name] = params
+        return refused
+
+    def _reload(self, request, response):
+        response.node = self.get_name()
+        with self._lock:
+            if self._active:
+                response.status, response.message = 'busy', f'{self._active} skill goal(s) active'
+                return response
+            try:
+                response.reloaded, restart = self.reloader.reload(list(request.paths))
+            except Exception as error:  # a file that does not load: nothing was applied
+                response.status, response.message = 'failed', f'{type(error).__name__}: {error}'
+                self.get_logger().warning(f'reload_config failed: {response.message}')
+                return response
+        response.needs_restart = [RestartItem(path=path, what=what) for path, what in restart]
+        response.status = 'reloaded'
+        self.get_logger().info(f'reload_config: {len(response.reloaded)} reloaded, {len(restart)} need a restart')
+        return response
+
     def _execute(self, skill: Skill, handle) -> RunSkill.Result:
+        with self._lock:
+            self._active += 1
+        try:
+            return self._execute_goal(skill, handle)
+        finally:
+            with self._lock:
+                self._active -= 1
+
+    def _execute_goal(self, skill: Skill, handle) -> RunSkill.Result:
         goal = handle.request
         result = self._run(skill, goal, handle)
         if result.outcome != Outcome.SUCCEEDED:
@@ -166,6 +268,16 @@ class SkillServer(Node):
         for key, value in ctx.work.stats().items():   # a skill may add keys of its own (nav2_override)
             speed.setdefault(key, value)
         return result
+
+
+def _limits_of(base: dict) -> dict:
+    return {'limits': base['limits']} if 'limits' in base else {}
+
+
+def _bound(profile: dict, key: str):
+    """A profile part as the skills bind it at start: all of it, but base.limits (read per goal)."""
+    value = profile.get(key)
+    return {k: v for k, v in value.items() if k != 'limits'} if key == 'base' else value
 
 
 def spin(node: Node) -> None:

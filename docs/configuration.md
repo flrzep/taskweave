@@ -104,7 +104,8 @@ all on `ConfigStore`, offline; nothing in this list writes, the next section doe
   `robot:<name>`), `kind`, `source` (`cell`, `override` = a cell copy of a robot pack file, `robot_pack`, `installed` =
   a read-only pack), `editable` and `editable_reason`, `schema_id` or `no_schema_reason`, `reload`, `hash` (sha256 of the
   bytes; `file_hash(path, pack)` gives the same). `reload` says what a change needs: `live`, `mission_start`,
-  `skill_server`, `launch` (restart the task stack), `sim` (the simulator reads it); a list when parts differ.
+  `reload_service` (`taskweave config reload`, see "Reload without a restart"), `launch` (restart the task stack),
+  `sim` (the simulator reads it); a list when parts differ.
 - `file_kinds()` lists the kinds of file a pack can hold, also those not present (`objects/*.yaml`, `missions/*.yaml`):
   `pattern`, `creatable`, `template`. `catalogue.new_file(kind, name, robot)` gives a new file's path and starting content.
 - `json_schema(kind_or_path)`: one self-contained JSON Schema (draft 2020-12) with title and the `x-taskweave-*` hints.
@@ -175,6 +176,37 @@ taskweave config save PATH --from FILE [--base HASH] [--message M] [--cell CELL_
 taskweave config history PATH [--limit N]
 taskweave config restore PATH REV [--base HASH]
 ```
+
+## Reload without a restart
+
+A running task stack re-reads edited files through one service per process, `<node>/reload_config` (`ReloadConfig`):
+the task handler (`/taskweave/task_handler/reload_config`) and every skill server (`<node>/reload_config`).
+Request: `paths` (files relative to their pack; empty = every file that changed since the process last loaded).
+Answer: `node`, `status` (`reloaded`, `busy`, `failed`), `message`, `reloaded` (paths now in effect),
+`needs_restart` (`[{path, what}]`: changed, but taken only at a restart, and what binds it). A process answers `busy`
+while a mission runs (task handler) or a skill goal is active (skill server), and `failed` (nothing applied) if a
+changed file does not load. A file that needs a restart is reported on every call until the process restarts.
+
+```
+taskweave config reload [PATH ...] [--ros | --hmi URL]    (exit 1: a process was busy, failed or none answered)
+```
+
+`--ros` (default) calls every `ReloadConfig` service in the graph and prints per process what was reloaded and what
+needs a restart; `--hmi URL` posts `{"paths": [...]}` to `<URL>/api/config/reload`, which answers `{"nodes": [...]}`
+with the same entries (`node, status, message, reloaded, needs_restart`).
+
+| What changed | Effect |
+|---|---|
+| `skills/<name>.yaml`: parameter defaults, speeds, tolerances, implementation `params` | reloaded by the skill server that serves it: the next goal uses them |
+| `skills/<name>.yaml`: implementation `name` or `class`; a parameter a skill made a connection from (`startup_params`, e.g. the topics and action of the Nav2 skill) | needs restart of the skill servers |
+| profile `base.limits` | reloaded by the skill servers |
+| the rest of the profile (topics, joint interface, IK, planning, hands); the embodiment | needs restart: bound when the skill servers start, the implementations are chosen from it |
+| missions, locations, objects, stances, poses, skill overrides and the other `live` / `mission_start` files | reloaded (the store reads them per use or at mission start) |
+| `operator.yaml`, `system.yaml`, pack files, navigation, `moveit/`, `nav2_params.yaml` | needs restart: reported by the task handler (read at launch) |
+| speed defaults (`speed_test_percent`, `speed_cap_percent`) | node parameters: restart; the override itself is live through `set_speed_override` |
+
+A skill reads its yaml in `Skill.configure(params)` (re-run on a reload, on a copy first: a value that does not load
+changes nothing); publishers, clients and subscriptions are made in `setup`.
 
 ## Mission
 

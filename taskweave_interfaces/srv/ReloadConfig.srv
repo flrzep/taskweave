@@ -1,0 +1,10 @@
+# Re-read the config files this process uses and apply what can change between missions: <node>/reload_config on the
+# task handler and on every skill server. Refused (status busy) while a mission runs or a skill goal is active.
+
+string[] paths          # only these files, relative to their pack (empty: every file that changed since the last load)
+---
+string node             # the answering node
+string status           # reloaded | busy | failed
+string message          # why, for busy and failed
+string[] reloaded       # files now in effect (this process's share)
+taskweave_interfaces/RestartItem[] needs_restart    # changed files that take effect only after a restart

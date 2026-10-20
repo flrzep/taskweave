@@ -14,7 +14,9 @@ Parameters:
   speed_test_percent, speed_cap_percent (double)  test mode: a run starts at test (default 10), cap (default 50)
                              is the highest override while it is on
 
-Interfaces: see taskweave_core.names (start_mission, pause, resume, abort, list_skills, status, plan, episodes).
+Interfaces: see taskweave_core.names (start_mission, pause, resume, abort, list_skills, status, plan, episodes,
+reload_config: re-reads the config between missions, "busy" while one runs; the launch-time files it reports as
+needs_restart are listed in RESTARTS).
 """
 
 from __future__ import annotations
@@ -34,12 +36,13 @@ from std_srvs.srv import Trigger
 
 from taskweave_interfaces.action import RunSkill
 from taskweave_interfaces.msg import Plan as PlanMsg
+from taskweave_interfaces.msg import RestartItem, TaskStatus
 from taskweave_interfaces.msg import SpeedOverride as SpeedOverrideMsg
-from taskweave_interfaces.msg import TaskStatus
-from taskweave_interfaces.srv import DescribeRobot, ListSkills, SetSpeedOverride, StartMission
+from taskweave_interfaces.srv import DescribeRobot, ListSkills, ReloadConfig, SetSpeedOverride, StartMission
 
 from . import names
 from .config import ConfigError, ConfigStore
+from .config.reload import Reloader
 from .conversions import plan_to_msg, skill_info_to_dict, status_to_msg
 from .embodiment import robot_card
 from .executive import ACTIVE, Executive, Outcome, Status
@@ -51,6 +54,16 @@ from .validation import validate_plan
 from .world_state import WorldState
 
 CATALOG_TIMEOUT_S = 2.0
+# config kinds the handler reports as needs_restart when they change (profile and embodiment are the skill servers' to
+# report: the handler reads them per call): what binds them at launch
+RESTARTS = {
+    'system': 'read at launch: the robot packs and the application keys',
+    'operator': 'read by the operator input at launch',
+    'cell_pack': 'read at launch', 'robot_pack': 'read at launch',
+    'navigation': 'the driving envelope is also laid into the Nav2 launch',
+    'moveit': 'MoveIt is configured from these files at launch',
+    'nav2_params': 'Nav2 reads its parameters at launch',
+}
 
 
 class RosDispatcher:
@@ -189,6 +202,10 @@ class TaskHandler(Node):
         self.create_service(Trigger, names.ABORT, self._trigger('abort'), callback_group=self.group)
         self.create_service(ListSkills, names.LIST_SKILLS, self._list_skills, callback_group=self.group)
         self.create_service(DescribeRobot, names.DESCRIBE_ROBOT, self._describe, callback_group=self.group)
+        self.create_service(ReloadConfig, names.RELOAD_CONFIG, self._reload, callback_group=self.group)
+        self.reloader = Reloader(self.config, self.robot, {'live', 'mission_start'}, RESTARTS,
+                                 lambda entry: entry['kind'] in RESTARTS or bool({'live', 'mission_start'}
+                                                                                 & set(entry['reload'])))
         self._setup_speed(latched)
         self.create_timer(0.1, self._tick, callback_group=self.group)
         self.create_timer(1.0 / self.get_parameter('status_rate_hz').value, self._publish_status,
@@ -354,6 +371,24 @@ class TaskHandler(Node):
         response.plan_id = status.plan_id
         at = f' from step {request.start_step}' if request.start_step else ''
         self.get_logger().info(f'mission {request.mission!r}{at}: {response.message}')
+        return response
+
+    def _reload(self, request, response):
+        """Missions, points and the other files the store reads per use are in effect after the store is re-read; a
+        mission is read when it starts. Refused while a mission is active."""
+        response.node = self.get_name()
+        if self.executive and self.executive.status.state in ACTIVE:
+            response.status, response.message = 'busy', 'a mission is active'
+            return response
+        try:
+            response.reloaded, restart = self.reloader.reload(list(request.paths))
+        except Exception as error:  # a file that does not load
+            response.status, response.message = 'failed', f'{type(error).__name__}: {error}'
+            self.get_logger().warning(f'reload_config failed: {response.message}')
+            return response
+        response.needs_restart = [RestartItem(path=path, what=what) for path, what in restart]
+        response.status = 'reloaded'
+        self.get_logger().info(f'reload_config: {len(response.reloaded)} reloaded, {len(restart)} need a restart')
         return response
 
     def _trigger(self, command: str):

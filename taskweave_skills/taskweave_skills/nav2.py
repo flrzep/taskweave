@@ -130,9 +130,16 @@ class Nav2NavigateTo(NavigateTo):
     param_defaults = {**NAV2_DEFAULTS, 'depart_slack_s': 5.0}  # see the module doc
     NAV2_SHARE = 0.9  # of the step's progress feedback reported while Nav2 drives (the direct controller the rest)
 
-    def setup(self, node, config, robot, params):
+    # the resources of setup are made from these (topics, action, controller, costmaps, the map subscription)
+    startup_params = ('speed_limit_topic', 'action', 'controller_node', 'costmaps', 'map_topic', 'nominal_accel',
+                      'nominal_time', 'depart_max_m')
+
+    def configure(self, params):
         params = dict(params)
         self.nav = {key: type(default)(params.pop(key, default)) for key, default in self.param_defaults.items()}
+        super().configure(params)
+
+    def setup(self, node, config, robot, params):
         super().setup(node, config, robot, params)
         from nav2_msgs.action import NavigateToPose  # only needed by this implementation
         from rclpy.action import ActionClient

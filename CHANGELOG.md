@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Reload without a restart.** `<node>/reload_config` (`ReloadConfig`) on the task handler and every skill server
+  re-reads the config between missions and goals; `taskweave config reload [--ros | --hmi URL]` calls them all and
+  prints what was reloaded and what needs a restart. Skill yaml parameters and `base.limits` apply live; the catalogue
+  value of `skills/*.yaml` is now `reload_service` (was `skill_server`). Skills read their parameters in
+  `Skill.configure`, split off `setup`. See `docs/configuration.md`, "Reload without a restart".
 - **Container image.** A `Dockerfile` (ROS 2 Jazzy, all packages built from the checkout, entrypoint sourcing ROS and
   the install, `taskweave` on the PATH), `docker/compose.example.yaml` and a CI job that builds the image without
   pushing it. Nothing is published. See `docs/install.md`, "Container".

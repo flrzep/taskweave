@@ -48,12 +48,12 @@ class DriveStraight(NavigateTo):
     default_timeout_s = 60.0
     param_defaults = {'speed': 0.15, 'max_distance_m': 1.0, 'to_offset_m': 0.05, 'to_turn_deg': 5.0}  # module doc
 
-    def setup(self, node, config, robot, params):
+    def configure(self, params):
         params = dict(params)
         own = {key: float(params.pop(key, default)) for key, default in self.param_defaults.items()}
         self.speed, self.max_distance, self.to_offset = own['speed'], own['max_distance_m'], own['to_offset_m']
         self.to_turn = math.radians(own['to_turn_deg'])
-        super().setup(node, config, robot, params)
+        super().configure(params)
         if self.speed > self.p.max_linear + 1e-12:   # its own speed above the base limit
             self.capped = {**self.capped, 'linear': self.p.max_linear}
 

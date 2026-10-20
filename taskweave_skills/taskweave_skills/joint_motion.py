@@ -70,8 +70,8 @@ class MoveJoints(_PoseMotion):
     needs = ['the motion path is free of obstacles']
     achieves = ['joints at the target']
 
-    def setup(self, node, config, robot, params):
-        super().setup(node, config, robot, self._joint_params(params))
+    def configure(self, params):
+        super().configure(self._joint_params(params))
         self.base_p = self.p
 
     @staticmethod

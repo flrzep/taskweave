@@ -307,6 +307,68 @@ def _call(node, srv_type, name, request, timeout=10.0):
     return future.result()
 
 
+RELOAD_TYPE = 'taskweave_interfaces/srv/ReloadConfig'
+
+
+def reload_services(node, wait_s: float = 3.0) -> list[str]:
+    """The reload_config services in the graph (the task handler, every skill server); waits for discovery."""
+    import time
+
+    deadline = time.monotonic() + wait_s
+    while True:
+        found = sorted(name for name, types in node.get_service_names_and_types() if RELOAD_TYPE in types)
+        if found or time.monotonic() >= deadline:
+            return found
+        time.sleep(0.1)
+
+
+def reload_all(node, paths=(), timeout: float = 10.0) -> list[dict]:
+    """Call every reload_config service: ``[{node, service, status (reloaded | busy | failed | unreachable), message,
+    reloaded, needs_restart: [{path, what}]}]``."""
+    from taskweave_interfaces.srv import ReloadConfig
+
+    results = []
+    for service in reload_services(node):
+        try:
+            answer = _call(node, ReloadConfig, service, ReloadConfig.Request(paths=list(paths)), timeout)
+        except SystemExit as error:
+            results.append({'node': service.rsplit('/', 1)[0], 'service': service, 'status': 'unreachable',
+                            'message': str(error), 'reloaded': [], 'needs_restart': []})
+            continue
+        results.append({'node': answer.node, 'service': service, 'status': answer.status, 'message': answer.message,
+                        'reloaded': list(answer.reloaded),
+                        'needs_restart': [{'path': r.path, 'what': r.what} for r in answer.needs_restart]})
+    return results
+
+
+def print_reload(results: list[dict]) -> int:
+    """What each process reloaded and what needs a restart; 0 if every process answered reloaded, 1 if one was busy,
+    failed or unreachable (or none was found)."""
+    for each in results:
+        print(f'{each["node"]}: {each["status"]}' + (f' ({each["message"]})' if each['message'] else ''))
+        for path in each['reloaded']:
+            print(f'  reloaded      {path}')
+        for item in each['needs_restart']:
+            print(f'  needs restart {item["path"]}: {item["what"]}')
+    if not results:
+        print('no reload_config service found - is the task stack running?')
+    return 0 if results and all(each['status'] == 'reloaded' for each in results) else 1
+
+
+def config_reload(hmi: str | None, paths) -> int:
+    """``taskweave config reload``: ask every process over ROS, or the HMI (POST <url>/api/config/reload with
+    ``{"paths": [...]}``, answering ``{"nodes": [...]}`` as ``reload_all`` returns them)."""
+    if hmi is None:
+        return print_reload(_ros(lambda node: reload_all(node, paths)))
+    import urllib.request
+
+    body = json.dumps({'paths': list(paths)}).encode()
+    request = urllib.request.Request(hmi.rstrip('/') + '/api/config/reload', body,
+                                     {'Content-Type': 'application/json'})
+    with urllib.request.urlopen(request, timeout=60) as reply:
+        return print_reload(json.load(reply)['nodes'])
+
+
 def skills(node) -> int:
     from taskweave_interfaces.srv import ListSkills
 
@@ -427,6 +489,11 @@ def main(argv=None) -> int:
     import_parser.add_argument('file')
     import_parser.add_argument('cell_dir')
     import_parser.add_argument('--force', action='store_true', help='replace a non-empty folder (old pack kept)')
+    reload_parser = config_sub.add_parser('reload', help='make a running task stack re-read its config (no restart)')
+    reload_parser.add_argument('paths', nargs='*', help='only these files (relative to their pack)')
+    where = reload_parser.add_mutually_exclusive_group()
+    where.add_argument('--ros', action='store_true', help='call the reload_config service of every process (default)')
+    where.add_argument('--hmi', metavar='URL', help='ask the HMI to do it (http://host:8090)')
     files_parser = config_sub.add_parser('files', help='where each robot file comes from')
     files_parser.add_argument('cell_dir')
     files_parser.add_argument('robot', nargs='?')
@@ -461,6 +528,8 @@ def main(argv=None) -> int:
     if options.command == 'config':
         if options.action in ('init', 'export', 'import'):
             return packfile_command(options)
+        if options.action == 'reload':
+            return config_reload(options.hmi, options.paths)
         if options.action == 'schema':
             return config_schema(options.target, options.pack)
         if options.action in ('save', 'history', 'restore'):

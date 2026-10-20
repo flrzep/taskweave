@@ -97,8 +97,10 @@ change. Launch files go to `share/<name>/launch` through `data_files` in `setup.
 1. Class in `taskweave_skills/taskweave_skills/<module>.py`, subclass of `taskweave_core.skill.Skill`: `name`,
    `description` (written for a planner), `args_schema` (JSON schema; `additionalProperties: false`; mark points with
    `x-taskweave-point`, units with `x-taskweave-unit`; reuse `hands_schema`, `motion_schema(keys)`, `VEC3` from
-   `config/schemas.py`), `needs`, `achieves`, `default_timeout_s`, `setup(node, config, robot, params)`,
-   `execute(ctx, args)` returning `SkillResult.succeeded/failed/rejected`. Check `ctx.should_stop` in loops and return
+   `config/schemas.py`), `needs`, `achieves`, `default_timeout_s`, `setup(node, config, robot, params)` (ROS resources:
+   publishers, clients, subscriptions) and `configure(params)` (everything derived from the yaml parameters and
+   `self.robot`: re-run by `reload_config`, so no ROS resources and no state of a running goal; a key a resource was
+   made from goes in `startup_params`), `execute(ctx, args)` returning `SkillResult.succeeded/failed/rejected`. Check `ctx.should_stop` in loops and return
    `ctx.interrupted()`. Implement `stop()` so cancel leaves the hardware safe. Clocks: rule 6.
    **Discovery:** `taskweave_skills.shipped_skills()` finds every `Skill` subclass with a `name` in any module of the
    package, so the class needs no registration. The docs generator and the doc tests use that one list.
@@ -286,6 +288,16 @@ See [docs/missions.md](docs/missions.md). Put it in `<cell>/missions/<name>.yaml
   run start, clamp to `cap_percent` while on, restore at run end only if it lowered it).
 - Skills follow it through `SpeedOverride.for_node` and `ctx.work_clock()`; base drives that Nav2 plans use `speed_gate`.
 - Test: `test_speed*.py` in `taskweave_core/test` and `taskweave_skills/test`.
+
+### Reload without a restart
+- Service `<node>/reload_config` (`ReloadConfig`: `paths` -> `node`, `status` reloaded|busy|failed, `message`,
+  `reloaded`, `needs_restart[{path, what}]`) on the task handler (`names.RELOAD_CONFIG`) and every skill server.
+  `config/reload.py` `Reloader` hashes the files, finds what changed and sorts it by the catalogue's `reload` values;
+  the skill server's `_apply` builds the new skill parameters on copies first. `busy` while a mission or goal runs.
+- `taskweave config reload [--ros | --hmi URL]` calls every process. Which file kinds apply live and which need a
+  restart: docs/configuration.md "Reload without a restart". A new kind goes in the handler's `RESTARTS` or gets a
+  `live`/`reload_service` value in `catalogue.py`.
+- Test: `test_reload_ros.py` in `taskweave_core/test` and `taskweave_skills/test`.
 
 ### Smoke test
 `taskweave smoke run <mission> --hmi http://<hmi>:8090 [--reference <file>]` talks to the HMI's HTTP API only (no ROS

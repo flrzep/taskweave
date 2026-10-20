@@ -19,7 +19,8 @@ from . import schemas
 RELOAD = {
     'live': 'read on every use: effective at once',
     'mission_start': 'read when the next mission starts',
-    'skill_server': 'read when the skill servers start: restart them (the task stack)',
+    'reload_service': 'applied on request, between goals: taskweave config reload (a changed implementation class or '
+                      'a parameter a connection was made from needs a restart of the skill servers)',
     'launch': 'read at launch (task handler, HMI bridge, operator input, Nav2, MoveIt): restart the task stack',
     'sim': 'read by the simulator application: restart it (not read by taskweave)',
 }
@@ -67,7 +68,7 @@ KINDS = (
     _K('scene', 'cell', 'sim/scene.yaml', 'Simulator scene', ('sim',),
        no_schema_reason='read by the simulator application, not by taskweave'),
     _K('object_type', 'cell', 'objects/*.yaml', 'Object type', ('live',), schemas.OBJECT, template={'name': '{name}'}),
-    _K('skill', 'cell', 'skills/*.yaml', 'Skill implementations and parameters', ('skill_server',),
+    _K('skill', 'cell', 'skills/*.yaml', 'Skill implementations and parameters', ('reload_service',),
        schemas.SKILL_PARAMS, template={'implementations': []}),
     _K('mission', 'cell', 'missions/*.yaml', 'Mission', ('mission_start',), schemas.MISSION,
        template={'goal': '', 'steps': []}),

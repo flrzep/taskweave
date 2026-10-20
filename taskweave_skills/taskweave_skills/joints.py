@@ -193,11 +193,14 @@ class _JointSkill(Skill):
         if 'execute' in cls.__dict__:
             cls.execute = _report_caps(cls.__dict__['execute'])
 
+    def configure(self, params):
+        super().configure(params)
+        self.p = Params.from_config(params)
+        self.p.linear_joints = tuple(self.robot.role('joints').get('linear', ()))
+        self.p.velocity_limits = velocity_limits(self.config, self.robot.name)
+
     def setup(self, node, config, robot, params):
         super().setup(node, config, robot, params)
-        self.p = Params.from_config(params)
-        self.p.linear_joints = tuple(robot.role('joints').get('linear', ()))
-        self.p.velocity_limits = velocity_limits(config, robot.name)
         self._capped: dict[str, float] = {}
         self.joints = JointInterface.for_node(node, robot)
         self._held: dict = {}
@@ -554,7 +557,7 @@ class _PointMotion(_PoseMotion):
     # skills/<skill>.yaml defaults: tcp_speed (m/s) and tcp_turn (rad/s) of straight-line TCP motions
     param_defaults = {'tcp_speed': 0.05, 'tcp_turn': 0.3}
 
-    def setup(self, node, config, robot, params):
+    def configure(self, params):
         params = dict(params)
         self.cell_frame = params.pop('cell_frame', 'world')  # TF frame of the cell (object and location poses)
         # if the point is out of reach at the current lift: these heights of this joint are tried, in order
@@ -562,7 +565,7 @@ class _PointMotion(_PoseMotion):
         self.tcp_speed = float(params.pop('tcp_speed', self.param_defaults['tcp_speed']))
         self.tcp_turn = float(params.pop('tcp_turn', self.param_defaults['tcp_turn']))
         self.approach_m = float(params.pop('approach_m', 0.0))  # straight final approach (m) unless args say other
-        super().setup(node, config, robot, params)
+        super().configure(params)
 
     def _approach_in(self, ctx, tools: dict, before: dict, lifts: list, label: str, elbow=None, approach=0.0,
                      planner='auto'):

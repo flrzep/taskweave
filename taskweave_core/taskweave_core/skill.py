@@ -116,9 +116,20 @@ class Skill:
     implementation: str = 'script'
     default_timeout_s: float = 60.0
 
+    startup_params: tuple = ()   # skill yaml keys bound to a publisher, client or subscription made in setup
+
     def setup(self, node, config: ConfigStore, robot: RobotProfile, params: dict) -> None:
-        """Create publishers/subscribers and read parameters. Called once when the skill server starts."""
-        self.node, self.config, self.robot, self.params = node, config, robot, params
+        """Create publishers/subscribers and read parameters (``configure``). Called once when the skill server
+        starts."""
+        self.node, self.config, self.robot = node, config, robot
+        self.configure(params)
+
+    def configure(self, params: dict) -> None:
+        """Everything derived from the yaml parameters and the profile (``self.robot``), nothing that holds a ROS
+        resource. Called by ``setup``, and again by the skill server's reload_config between goals with the new
+        values: so keep it free of side effects on ROS and re-runnable. A key that a resource of ``setup`` was made
+        from belongs in ``startup_params``."""
+        self.params = params
 
     def execute(self, ctx: SkillContext, args: dict) -> SkillResult:
         raise NotImplementedError

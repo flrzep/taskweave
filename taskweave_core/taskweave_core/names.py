@@ -19,6 +19,8 @@ SPEED_OVERRIDE = f'{NAMESPACE}/speed_override'  # global speed override (SpeedOv
 SET_SPEED_OVERRIDE = f'{NAMESPACE}/task_handler/set_speed_override'  # its single write path (SetSpeedOverride)
 SKILL_ACTION_PREFIX = f'{NAMESPACE}/skills/'
 SKILL_SERVER_CATALOG_SUFFIX = '/list_skills'  # each skill server serves <node>/list_skills
+RELOAD_CONFIG = f'{NAMESPACE}/task_handler/reload_config'  # ReloadConfig; the skill servers serve <node>/reload_config
+RELOAD_CONFIG_SUFFIX = '/reload_config'
 
 
 def skill_action(skill: str) -> str:
