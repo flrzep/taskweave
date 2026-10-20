@@ -125,6 +125,11 @@ navigation) a map and a clock of the robot or its simulator. Add them to `skills
 
   A cell pack may also carry the robot inside itself, as `docs/examples/cell/robots/duo_bot` does. A cell file with
   `~override: keys` overrides a robot pack's file key by key.
+- **A new cell from nothing:** `taskweave config init /path/to/cell --robot my_robot [--name my_cell]` writes an
+  empty cell pack that passes `taskweave check` (the robot pack must be found, see above); the folder must not exist or
+  be empty. Fill it with the HMI or by hand. Move a cell between hosts as one file:
+  `taskweave config export /path/to/cell cell.tar.gz` and, on the other host,
+  `taskweave config import cell.tar.gz /path/to/cell [--force]` (details in [configuration.md](configuration.md)).
 - `taskweave config files CELL_DIR` shows where each robot file comes from (cell or pack).
 
 ## 8. Upgrade an older cell pack

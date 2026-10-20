@@ -26,6 +26,35 @@ config/                  cell pack: everything about one cell
     <mission>.yaml       goal, robot, loop mode, defaults, steps
 ```
 
+## Create, export and import a cell pack
+
+```bash
+taskweave config init CELL_DIR --robot PACK [--name NAME]   # new empty pack; CELL_DIR absent or empty; then taskweave check passes
+taskweave config export CELL_DIR cell.tar.gz                # one file
+taskweave config import cell.tar.gz CELL_DIR [--force]      # check, then replace
+```
+
+`init` writes `pack.yaml` (current schema), `system.yaml` (`robot`), empty `cell/locations.yaml` and
+`cell/objects.yaml`, the robot's empty `stances.yaml`, `held_poses.yaml`, `object_points.yaml`, and the folders
+`objects/`, `missions/`, `skills/`. The robot must be a robot pack taskweave finds (`TASKWEAVE_ROBOT_PACKS`, installed).
+
+`export` packs the pack's files (no caches, `.git`, `state/`; if the folder is in a git repo, only files git does not
+ignore; symlinks are skipped and listed) with a `manifest.yaml`: `name`, `schema_version`, `git_rev` (null without a
+repo), `taskweave_version`, `date`, `files` (`path`, `sha256`, `size`).
+
+`import` extracts into a temp folder next to the target, refuses unsafe paths (`..`, absolute), links and special
+files, checks every sha256 and the file list against the manifest, refuses another schema version with a message, and
+runs the same checks as `taskweave check`. Only then does it replace the target; a bad archive changes nothing.
+- A plain folder is swapped: the old one is renamed `<dir>.bak-<yyyymmdd-hhmmss>`, the new one takes its place with the
+  old folder's group and mode (setgid dirs, group-write files). A non-empty target needs `--force`.
+- A folder inside a git work tree (the live host: `/data/frame-sim`) is not swapped, as that would break the repo:
+  the files are copied in place (owners kept), files the archive lacks are removed, and exactly those paths are
+  committed as `import <name> <rev>`; git history is the backup. Uncommitted changes in the pack stop the import,
+  or with `--force` are committed first as `taskweave: snapshot before import`. Nothing is pushed.
+
+The same functions are in `taskweave_core.config.packfile` (`init_cell`, `export_cell`, `import_cell`; errors are
+`PackfileError`).
+
 A robot pack holds one robot model, nothing about a cell (taskweave ships `taskweave_robots`, one folder per robot,
 installed to `share/taskweave_robots/<model>/`):
 
