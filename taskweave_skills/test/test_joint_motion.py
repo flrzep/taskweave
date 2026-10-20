@@ -309,7 +309,7 @@ def test_a_speed_within_the_limits_reports_no_cap(rig):
 
 rclpy = pytest.importorskip('rclpy')
 
-from conftest import RosRig  # noqa: E402
+from conftest import RosRig, copy_config  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from test_joints_ros import JointSim, run  # noqa: E402
 
@@ -321,7 +321,7 @@ from taskweave_interfaces.action import RunSkill  # noqa: E402
 def system(tmp_path):
     with RosRig() as ros:
         config = tmp_path / 'config'
-        shutil.copytree(FIXTURE, config)
+        copy_config(FIXTURE, config)
         sim = ros.add(JointSim())
         server = SkillServer(parameter_overrides=[
             Parameter('config_dir', value=str(config)), Parameter('robot', value=ROBOT),

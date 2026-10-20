@@ -25,6 +25,9 @@ jobs:
       ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
       # the agnostic-code check fails on any finding (the baseline is zero); unset it only warns
       TASKWEAVE_STRICT_AGNOSTIC: zero
+      # the ROS tests multiply their wall-clock tolerances (stall, settle, odometry timeouts, waits) by this: the shared
+      # runners starve the fake simulators for seconds
+      TASKWEAVE_TEST_TIME_SCALE: '4'
     steps:
       - uses: actions/checkout@v4
         with:

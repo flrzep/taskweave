@@ -45,8 +45,10 @@ def commanded_speed(client, pose, joint='j1', timeout_s=20.0):
         del joints.command
     values = [v for _, v in samples]
     low, high = min(values), max(values)
-    middle = [(t, (v - low) / (high - low)) for t, v in samples if 0.1 < (v - low) / (high - low) < 0.9]
-    assert len(middle) >= 5, f'only {len(middle)} commands in the middle of the move'
+    # the commands that are strictly inside the path: before the start and after the end they sit on the ends. The
+    # slope needs only a few of them (a slow runner publishes few); more samples just make the fit steadier.
+    middle = [(t, (v - low) / (high - low)) for t, v in samples if 0.02 < (v - low) / (high - low) < 0.98]
+    assert len(middle) >= 3, f'only {len(middle)} commands inside the move'
     times, fractions = zip(*middle, strict=True)
     return result, float(np.polyfit(times, fractions, 1)[0])
 
@@ -56,19 +58,20 @@ def test_override_slows_moves_and_their_timeouts(system):  # noqa: F811
     publisher = client.create_publisher(SpeedOverride, names.SPEED_OVERRIDE,
                                         QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
     run(client, 'move_joints', {'pose': 'home'})       # warm up: action discovery is not motion time
-    result, full = commanded_speed(client, 'ready')
+    result, full = commanded_speed(client, 'far')
     assert result.outcome == 0, result.message
     run(client, 'move_joints', {'pose': 'home'})
     publisher.publish(SpeedOverride(percent=50.0, cap_percent=50.0, test_percent=10.0))
     wait_until(lambda: client.taskweave_server.speed.fraction() == 0.5, what='the server to take the 50 % override')
-    result, half = commanded_speed(client, 'ready')
+    result, half = commanded_speed(client, 'far')
     assert result.outcome == 0, result.message
     assert 1.7 < full / half < 2.4, (full, half)  # the commanded move runs about twice as long at 50 %
     speed = json.loads(result.data_json)['speed']     # move_joints adds the effective time scale of the move
     assert (speed['override_min'], speed['override_avg']) == (50.0, 50.0) and speed['scale'] == pytest.approx(0.5)
     run(client, 'move_joints', {'pose': 'home'})
-    publisher.publish(SpeedOverride(percent=25.0, cap_percent=50.0, test_percent=10.0))
-    wait_until(lambda: client.taskweave_server.speed.fraction() == 0.25, what='the server to take the 25 % override')
-    result, slow = timed(client, 'ready', timeout_s=1.5)   # about 3.2 s of node time: 0.8 work s, no timeout
+    publisher.publish(SpeedOverride(percent=10.0, cap_percent=50.0, test_percent=10.0))
+    wait_until(lambda: client.taskweave_server.speed.fraction() == 0.1, what='the server to take the 10 % override')
+    result, slow = timed(client, 'ready', timeout_s=3.0)   # about 8 s of wall time, 0.8 work s: no timeout, though the
+    # budget is 3 work s (3 s of wall time without the override); the margin is wide so that a loaded runner is fine
     assert result.outcome == 0, result.message
-    assert slow > 2.5
+    assert slow > 3.0   # it ran past what the timeout allows without the override

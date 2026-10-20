@@ -2,12 +2,11 @@
 
 import json
 import math
-import shutil
 import time
 from pathlib import Path
 
 import pytest
-from conftest import RosRig, connect, wait_ready, wait_until
+from conftest import TIME_SCALE, RosRig, connect, copy_config, wait_ready, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 
@@ -58,7 +57,7 @@ class JointSim(Node):
 def system(tmp_path):
     with RosRig() as ros:
         config = tmp_path / 'config'
-        shutil.copytree(FIXTURE, config)
+        copy_config(FIXTURE, config)
         sim = ros.add(JointSim())
         server = SkillServer(parameter_overrides=[
             Parameter('config_dir', value=str(config)), Parameter('robot', value='arm_bot'),
@@ -71,7 +70,8 @@ def system(tmp_path):
         yield sim, client
 
 
-def run(client, skill, args, timeout_s=20.0):
+def run(client, skill, args, timeout_s=None):
+    timeout_s = 20.0 * TIME_SCALE if timeout_s is None else timeout_s
     action = connect(client, RunSkill, names.skill_action(skill))
     future = action.send_goal_async(RunSkill.Goal(step_id='t', skill=skill, args_json=json.dumps(args),
                                                   timeout_s=timeout_s))

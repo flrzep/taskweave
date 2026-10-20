@@ -1,12 +1,56 @@
+import os
+import shutil
 import time
 
 import pytest
+
+# One knob for slow machines: every wall-clock tolerance the skills use in the ROS tests (stall, settle, state and
+# odometry timeouts of the fixture configs), every action timeout and every wait in the tests is multiplied by it. CI
+# sets it (the runners starve the fake simulators for seconds); locally it is 1.
+TIME_SCALE = max(1.0, float(os.environ.get('TASKWEAVE_TEST_TIME_SCALE', '1') or 1))
+SCALED_KEYS = ('stall_timeout_s', 'settle_s', 'state_timeout_s', 'stuck_timeout_s', 'odom_timeout_s',
+               'server_timeout_s')
+
+
+def scale_times(config):
+    """Multiply the wall-clock tolerances in a yaml file, or all yaml files under a folder, by TIME_SCALE. Call it
+    once per file: copy_config does it for the copied fixture, a test that then writes a yaml file itself calls it
+    for that file."""
+    if TIME_SCALE == 1.0:
+        return
+    import yaml
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in SCALED_KEYS and isinstance(value, int | float):
+                    node[key] = value * TIME_SCALE
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    for path in sorted([config] if config.is_file() else config.rglob('*.yaml')):
+        data = yaml.safe_load(path.read_text())
+        before = repr(data)
+        walk(data)
+        if repr(data) != before:
+            path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+
+def copy_config(source, config):
+    """``shutil.copytree`` of the fixture config, with its tolerances scaled by TIME_SCALE."""
+    shutil.copytree(source, config)
+    scale_times(config)
+
 
 
 def wait_until(condition, timeout=30.0, interval=0.02, what='condition'):
     """Poll ``condition()`` (while a background executor spins the nodes) until it is truthy, and return its value.
     The deadline is generous on purpose: it only matters when something is really wrong, a loaded machine (several
     suites in parallel) just takes longer. Raises AssertionError naming ``what`` on timeout."""
+    timeout *= TIME_SCALE
     deadline = time.monotonic() + timeout
     while True:
         value = condition()
@@ -39,6 +83,7 @@ def connect(node, action_type, name, timeout=90.0, attempt_s=5.0):
     is generous."""
     from rclpy.action import ActionClient
 
+    timeout *= TIME_SCALE
     deadline = time.monotonic() + timeout
     while True:
         client = ActionClient(node, action_type, name)
