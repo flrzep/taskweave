@@ -216,3 +216,10 @@ def test_the_answers_of_the_search_are_reused_by_the_move_that_follows(monkeypat
     assert len(ik.memo) == 1
     key = ik._memo_key(TOOLS, {'lift': 0.45}, now(0.45), True, None)
     assert key in ik.memo
+
+
+def test_staying_at_the_current_height_skips_the_state_check_when_ik_avoids_collisions():
+    ik = FakeIk(collides=lambda joints: True)
+    ik.avoid_collisions = True
+    choice = ik.solve_with_torso([TOOLS, TOOLS], {}, now(0.45))
+    assert choice.height == pytest.approx(0.45) and ik.checked == [] and len(ik.solved) == 4

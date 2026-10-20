@@ -87,10 +87,14 @@ def main() -> None:
         ik.memo = {}
         started = time.monotonic()
         try:
-            report = ik.solve_with_torso(samples, {}, current, elbow=args.elbow).report()
+            choice = ik.solve_with_torso(samples, {}, current, elbow=args.elbow)
+            mid = time.monotonic()
+            ik.solve(samples[0], choice.fixed, current=current, elbow=args.elbow)   # the move's own solve: a memo hit
+            again = time.monotonic() - mid
+            report = choice.report()
             rejected = ', '.join(f'{r["height"]:g}: {r["reason"][:40]}' for r in report['rejected'])
-            print(f'run {run}: {time.monotonic() - started:.2f} s  height {report["height"]}  cost {report["cost"]}  '
-                  f'{report.get("skipped", "")}  rejected [{rejected}]')
+            print(f'run {run}: {mid - started:.2f} s  height {report["height"]}  cost {report["cost"]}  '
+                  f'(the move\'s solve after it {again:.2f} s)  {report.get("skipped", "")}  rejected [{rejected}]')
         except IkError as error:
             print(f'run {run}: {time.monotonic() - started:.2f} s  FAILED {str(error)[:300]}')
     rclpy.shutdown()

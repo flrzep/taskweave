@@ -487,7 +487,11 @@ class IkClient:
                 raise TorsoError(f'{where}{str(error).split(":")[0]}') from error
             if k == 0:
                 main = (arm, {t for t, info in self.last.items() if info.get('flipped')}, self._arm_cost(arm, current))
-            if not self._state_valid({joint: height, **self.idle_joints(tools, current), **arm}, next(iter(tools))):
+            # staying at the current height moves no torso and no idle arm, and IK already rejects a solution in
+            # collision (avoid_collisions): no second check
+            stay = height == now and getattr(self, 'avoid_collisions', False)
+            if not stay and not self._state_valid({joint: height, **self.idle_joints(tools, current), **arm},
+                                                  next(iter(tools))):
                 raise TorsoError(f'{where}collision (idle arm included)')
         arm, flips, cost = main
         return TorsoChoice(height, with_h, arm, flips, cost + weight * abs(height - now))
@@ -496,7 +500,9 @@ class IkClient:
         """Identifies a solve() call: the answer is a function of exactly these (and the scene, which stays within a
         run: set_choice clears the memo)."""
         side = elbow or (self.choose or {}).get('elbow')
-        return json.dumps([tools, fixed, current or {}, bool(allow_flip), side], sort_keys=True, default=float)
+        digits = 4      # live joint states jitter in the last digits: the same pose must give the same key
+        near = {name: round(float(value), digits) for name, value in {**(current or {}), **fixed}.items()}
+        return json.dumps([tools, sorted(fixed), near, bool(allow_flip), side], sort_keys=True, default=float)
 
     def _remember(self, tools, fixed, current, allow_flip, elbow, arm) -> None:
         """Keep the solve() answer so the move that follows the torso search does not solve it again."""
