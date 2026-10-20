@@ -1,10 +1,9 @@
 """move_joints with a motion planner: follows the planned trajectory, fails when there is no path."""
 
-import shutil
 from types import SimpleNamespace
 
 import pytest
-from conftest import RosRig, wait_ready
+from conftest import RosRig, copy_config, wait_ready
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('moveit_msgs')
@@ -77,7 +76,7 @@ class FakePlanner(Node):
 def system(tmp_path):
     with RosRig() as ros:
         config = tmp_path / 'config'
-        shutil.copytree(FIXTURE, config)
+        copy_config(FIXTURE, config)
         profile = config / 'robots' / 'arm_bot' / 'profile.yaml'
         profile.write_text(profile.read_text() + PLANNING)
         sim, planner = ros.add(JointSim()), ros.add(FakePlanner())

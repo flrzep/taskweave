@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 
 import pytest
-from conftest import RosRig, connect, wait_until
+from conftest import TIME_SCALE, RosRig, connect, copy_config, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 
@@ -53,11 +53,10 @@ class BaseSim(Node):
 @pytest.fixture(params=[('omni', True, 'omni_bot'), ('diff', False, 'diff_bot')], ids=['holonomic', 'differential'])
 def system(request, tmp_path):
     with RosRig() as ros:
-        import shutil
 
         prefix, holonomic, robot = request.param
         config = tmp_path / 'config'
-        shutil.copytree(FIXTURE, config)
+        copy_config(FIXTURE, config)
         params = [Parameter('config_dir', value=str(config)), Parameter('robot', value=robot)]
         sim = ros.add(BaseSim(prefix, holonomic))
         # production path: skill names resolved through config/skills/<name>.yaml implementations
@@ -74,7 +73,8 @@ def system(request, tmp_path):
         yield sim, client, config
 
 
-def run_skill(client, skill, args, timeout_s=20.0):
+def run_skill(client, skill, args, timeout_s=None):
+    timeout_s = 20.0 * TIME_SCALE if timeout_s is None else timeout_s
     action = connect(client, RunSkill, names.skill_action(skill))
     goal = RunSkill.Goal(step_id='t', skill=skill, args_json=json.dumps(args), timeout_s=timeout_s)
     handle_future = action.send_goal_async(goal)
@@ -173,10 +173,9 @@ def test_drive_straight_to_a_target_in_line(system):
 def fast_system(tmp_path):
     """diff_bot (base limits 0.8 m/s, 1.5 rad/s) with drive_straight and navigate_to configured above them."""
     with RosRig() as ros:
-        import shutil
 
         config = tmp_path / 'config'
-        shutil.copytree(FIXTURE, config)
+        copy_config(FIXTURE, config)
         with open(config / 'skills' / 'drive_straight.yaml', 'a') as f:
             f.write('speed: 1.2\nmax_linear: 1.5\nmax_angular: 2.5\n')
         params = [Parameter('config_dir', value=str(config)), Parameter('robot', value='diff_bot')]

@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import RosRig, connect, wait_ready, wait_until
+from conftest import TIME_SCALE, RosRig, connect, copy_config, scale_times, wait_ready, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('nav2_msgs')
@@ -69,11 +69,11 @@ class FakeCostmap(Node):
 @pytest.fixture
 def system(tmp_path):
     with RosRig() as ros:
-        import shutil
 
         config = tmp_path / 'config'
-        shutil.copytree(FIXTURE, config)
+        copy_config(FIXTURE, config)
         (config / 'skills' / 'navigate_to.yaml').write_text(NAV2_CONFIG)
+        scale_times(config / 'skills' / 'navigate_to.yaml')
         (config / 'robots' / 'omni_bot' / 'navigation.yaml').write_text(
             'envelope: {front: 0.4, back: 0.3, left: 0.3, right: 0.3}\n'
             'carry_envelope: {front: 1.2, back: 0.3, left: 0.4, right: 0.4}\n')
@@ -97,7 +97,8 @@ def system(tmp_path):
         yield sim, nav2, client
 
 
-def run(client, target, timeout_s=20.0):
+def run(client, target, timeout_s=None):
+    timeout_s = 20.0 * TIME_SCALE if timeout_s is None else timeout_s
     action = connect(client, RunSkill, names.skill_action('navigate_to'))
     future = action.send_goal_async(RunSkill.Goal(step_id='t', skill='navigate_to',
                                                   args_json=json.dumps({'target': target}), timeout_s=timeout_s))
