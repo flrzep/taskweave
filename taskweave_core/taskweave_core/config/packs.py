@@ -104,11 +104,13 @@ class Location:
     writable: bool
 
 
-def locations(cell: Path, configured: list[str] | None, planned: tuple[str, ...] = ()) -> list[Location]:
+def locations(cell: Path, configured: list[str] | None, planned: tuple[str, ...] = (),
+              first: tuple[Path, ...] = ()) -> list[Location]:
     """Robot pack locations in search order: env, system.yaml robot_packs (``configured``), installed share. A
     configured location that does not exist is an error (a typo would silently hide a robot pack, and the files
-    would come from an older one further down); ``planned`` system.yaml entries may not exist yet (migrate)."""
-    found = []
+    would come from an older one further down); ``planned`` system.yaml entries may not exist yet (migrate);
+    ``first``: folders searched before all others (a dry run of an edit, ConfigStore.dry_run_pack)."""
+    found = [Location(Path(path), 'dry run', True) for path in first]
     for entry in os.environ.get(ROBOT_PACKS_ENV, '').split(os.pathsep):
         if entry.strip():
             found.append(_location(Path(entry).expanduser().resolve(), 'env', f'env {ROBOT_PACKS_ENV}', cell))
@@ -175,6 +177,25 @@ def robot_pack(location: Location, robot: str) -> RobotPack | None:
     return RobotPack(folder, robot, location)
 
 
-def robot_packs(cell: Path, configured: list[str] | None, robot: str) -> list[RobotPack]:
+def robot_packs(cell: Path, configured: list[str] | None, robot: str, first: tuple[Path, ...] = ()) -> list[RobotPack]:
     """Every pack of the robot, in search order."""
-    return [p for p in (robot_pack(loc, robot) for loc in locations(cell, configured)) if p is not None]
+    return [p for p in (robot_pack(loc, robot) for loc in locations(cell, configured, first=first)) if p is not None]
+
+
+def list_packs(cell: Path, configured: list[str] | None, first: tuple[Path, ...] = ()) -> list[dict]:
+    """Every robot pack at every location: ``{name, version, description, location, writable}`` (``location``: the
+    pack's folder; a pack whose pack.yaml is invalid has ``error`` instead of version and description)."""
+    found = []
+    for location in locations(cell, configured, first=first):
+        folders = [location.path] if (location.path / PACK_FILE).is_file() else sorted(
+            p for p in location.path.glob('*') if (p / PACK_FILE).is_file()) if location.path.is_dir() else []
+        for folder in folders:
+            entry = {'name': folder.name, 'location': str(folder), 'writable': location.writable}
+            try:
+                pack = read_pack(folder) or {}
+                entry.update(name=pack.get('name', folder.name), version=pack.get('version'),
+                             description=pack.get('description', ''))
+            except Exception as error:  # noqa: BLE001 - a broken pack is listed, not hidden
+                entry['error'] = str(error)
+            found.append(entry)
+    return found

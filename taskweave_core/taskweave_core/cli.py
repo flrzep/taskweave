@@ -26,8 +26,13 @@
     taskweave config slim CELL_DIR [--dry-run]
                                           rewrite whole-file overrides of robot pack files as per-key overrides
                                           (only the keys that differ; config/slim.py)
-    taskweave config files CELL_DIR [ROBOT]
-                                          where each robot file comes from (cell pack, override, robot pack)
+    taskweave config files CELL_DIR [ROBOT] [--json]
+                                          where each robot file comes from (cell pack, override, robot pack); --json:
+                                          the catalogue of every file (kind, schema, reload, hash; config/catalogue.py)
+    taskweave config schema KIND_OR_PATH [--pack robot:NAME]
+                                          the JSON Schema of a file kind (object_type, mission, profile ...)
+    taskweave config validate PATH [--cell CELL_DIR] [--pack P] [--json]
+                                          check one file as it is on disk (schema and cross-file checks)
 """
 
 from __future__ import annotations
@@ -74,41 +79,82 @@ def describe(node) -> int:
 
 
 def check(config_dir: str) -> int:
-    from .config import ConfigError, ConfigStore
-    from .embodiment import profile_warnings
-    from .plan import Plan
+    """Check every file of the cell pack and its robot packs (config/check.py); the exit code is 1 on an error."""
+    from .config import ConfigStore
+    from .config.check import checked_files
 
-    store = ConfigStore(config_dir)
-    problems = 0
+    errors = 0
+    for entry, problems in checked_files(ConfigStore(config_dir)):
+        label = entry['path'] if entry['pack'] == 'cell' else f'{entry["pack"]}: {entry["path"]}'
+        failed = [p for p in problems if p['severity'] == 'error']
+        errors += bool(failed)
+        print(f'  {"FAIL" if failed else "ok  "}  {label}' + (f': {_say(failed[0])}' if failed else ''))
+        for problem in failed[1:] + [p for p in problems if p['severity'] != 'error']:
+            print(f'  {"FAIL" if problem["severity"] == "error" else "warn"}  {label}: {_say(problem)}')
+    print(f'{errors} file(s) with problems' if errors else 'config ok (skill arguments are checked against a running '
+                                                          'catalog)')
+    return 1 if errors else 0
 
-    def attempt(label, function):
-        nonlocal problems
-        try:
-            function()
-            print(f'  ok    {label}')
-        except (ConfigError, KeyError, ValueError) as error:
-            problems += 1
-            print(f'  FAIL  {label}: {error}')
 
-    for robot in store.robot_names():
-        attempt(f'robots/{robot}', lambda r=robot: (store.robot(r), store.stances(r)))
-        attempt(f'robots/{robot}/embodiment.yaml', lambda r=robot: _consistent(store, r))
-        try:
-            for warning in profile_warnings(store.robot(robot).data):
-                print(f'  warn  robots/{robot}/profile.yaml: {warning}')
-        except (ConfigError, KeyError, ValueError):
-            pass    # the attempt above reported it
-    attempt('cell/locations.yaml', store.locations)
-    attempt('cell/objects.yaml', store.object_instances)
-    attempt('operator.yaml', store.operator)
-    for path in sorted((store.root / 'objects').glob('*.yaml')):
-        attempt(f'objects/{path.name}', lambda n=path.stem: store.object(n))
-    for path in sorted((store.root / 'skills').glob('*.yaml')):
-        attempt(f'skills/{path.name}', lambda n=path.stem: _importable(store.skill_config(n)))
-    for name in store.mission_names():
-        attempt(f'missions/{name}.yaml', lambda n=name: Plan.from_mission(store.expanded_mission(n), 'check'))
-    print(f'{problems} problem(s)' if problems else 'config ok (skill arguments are checked against a running catalog)')
-    return 1 if problems else 0
+def _say(problem: dict) -> str:
+    place = f'{problem["where"]}: ' if problem['where'] else ''
+    return place + problem['message']
+
+
+def config_files_json(config_dir: str) -> int:
+    from .config import ConfigStore
+
+    print(json.dumps(ConfigStore(config_dir).files(), indent=2))
+    return 0
+
+
+def config_schema(target: str, pack: str) -> int:
+    from .config.catalogue import json_schema
+
+    try:
+        print(json.dumps(json_schema(target, pack), indent=2))
+    except KeyError as error:
+        print(error.args[0], file=sys.stderr)
+        return 2
+    return 0
+
+
+def config_validate(path: str, cell: str | None, pack: str, as_json: bool) -> int:
+    """Validate one file as it is on disk. ``path`` is a file (inside a cell pack, or with ``cell`` inside a robot
+    pack) or, with ``cell``, a path relative to ``pack``."""
+    from pathlib import Path
+
+    from .config import ConfigStore
+    from .config.packs import CELL_SCHEMA, cell_schema
+
+    target = Path(path).expanduser().resolve()
+    if target.is_file():
+        folder = next((p for p in target.parents if (p / 'pack.yaml').is_file()), None)
+        if folder is None:
+            print(f'{path} is in no pack (no pack.yaml above it)', file=sys.stderr)
+            return 2
+        if cell_schema(folder) == CELL_SCHEMA:
+            cell, relative, pack = str(folder), target.relative_to(folder).as_posix(), 'cell'
+        elif cell:
+            relative, pack = target.relative_to(folder).as_posix(), f'robot:{folder.name}'
+        else:
+            print(f'{path} is in a robot pack: give the cell pack with --cell', file=sys.stderr)
+            return 2
+    elif cell:
+        relative = path
+    else:
+        print(f'{path} is not a file; for a path inside a pack give --cell', file=sys.stderr)
+        return 2
+    store = ConfigStore(cell or folder)
+    problems = store.validate_file(relative, None, pack)
+    if as_json:
+        print(json.dumps(problems, indent=2))
+    else:
+        for problem in problems:
+            line = f':{problem["line"]}' if problem['line'] else ''
+            print(f'{problem["severity"]:<7} {relative}{line} {_say(problem)}')
+        print(f'{relative}: ' + ('ok' if not problems else f'{len(problems)} problem(s)'))
+    return 1 if any(p['severity'] == 'error' for p in problems) else 0
 
 
 def robot_files(config_dir: str, robot: str | None) -> int:
@@ -290,11 +336,27 @@ def main(argv=None) -> int:
     files_parser = config_sub.add_parser('files', help='where each robot file comes from')
     files_parser.add_argument('cell_dir')
     files_parser.add_argument('robot', nargs='?')
+    files_parser.add_argument('--json', action='store_true',
+                              help='the catalogue of every file of the cell pack and its robot packs instead')
+    schema_parser = config_sub.add_parser('schema', help='JSON Schema of a file kind or path')
+    schema_parser.add_argument('target', help='a kind (object_type, mission, profile ...) or a path in a pack')
+    schema_parser.add_argument('--pack', default='cell', help="for a path: 'cell' (default) or robot:<name>")
+    validate_parser = config_sub.add_parser('validate', help='check one file as it is on disk')
+    validate_parser.add_argument('path')
+    validate_parser.add_argument('--cell', help='the cell pack (for a robot pack file, or a path relative to it)')
+    validate_parser.add_argument('--pack', default='cell', help="for a relative path: 'cell' or robot:<name>")
+    validate_parser.add_argument('--json', action='store_true')
     options = parser.parse_args(argv)
     if options.command == 'smoke':
         return smoke.main(options)
     if options.command == 'config':
+        if options.action == 'schema':
+            return config_schema(options.target, options.pack)
+        if options.action == 'validate':
+            return config_validate(options.path, options.cell, options.pack, options.json)
         if options.action == 'files':
+            if options.json:
+                return config_files_json(options.cell_dir)
             return robot_files(options.cell_dir, options.robot)
         if options.action == 'slim':
             from .config.slim import slim

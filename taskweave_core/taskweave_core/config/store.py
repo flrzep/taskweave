@@ -88,7 +88,8 @@ class ConfigStore:
     Placed objects (cell/objects.yaml) are the start state; what happens to them at run time (items taken off a stack,
     objects put down) is kept in <state dir>/objects.yaml and laid over them by object_instances()."""
 
-    def __init__(self, root: str | Path, check_schema: bool = True):
+    def __init__(self, root: str | Path, check_schema: bool = True, first_packs: tuple[Path, ...] = ()):
+        self.first_packs = tuple(Path(p) for p in first_packs)    # robot pack folders searched first (dry runs)
         self.root = Path(root).expanduser().resolve()
         if not self.root.is_dir():
             raise ConfigError(self.root, 'config directory does not exist')
@@ -155,9 +156,12 @@ class ConfigStore:
         """system.yaml: the installation (robot_packs; other keys are the application's); {} if absent."""
         return self._load('system.yaml', schemas.SYSTEM, required=False, default={})
 
-    def robot_packs(self, robot: str) -> list[packs.RobotPack]:
-        """The robot's packs in search order: env TASKWEAVE_ROBOT_PACKS, system.yaml robot_packs, installed."""
-        return packs.robot_packs(self.root, self.system().get('robot_packs'), robot)
+    def robot_packs(self, robot: str | None = None) -> list:
+        """The robot's packs in search order: env TASKWEAVE_ROBOT_PACKS, system.yaml robot_packs, installed.
+        Without ``robot``: every pack at every location as ``{name, version, description, location, writable}``."""
+        if robot is None:
+            return packs.list_packs(self.root, self.system().get('robot_packs'), self.first_packs)
+        return packs.robot_packs(self.root, self.system().get('robot_packs'), robot, self.first_packs)
 
     def robot_names(self) -> list[str]:
         """Robots this cell has files for (robots/<robot>/), plus system.yaml robot."""
@@ -246,6 +250,47 @@ class ConfigStore:
                 if path.is_relative_to(pack.path):
                     return f'{pack.name} robot pack: {path.relative_to(pack.path)}'
         return str(path)
+
+    # ---- catalogue, schema export, validation (catalogue.py, check.py) ---------
+    def files(self, hashes: bool = True) -> list[dict]:
+        """Every config file of the cell pack and its robot packs (catalogue.files)."""
+        from . import catalogue
+        return catalogue.files(self, hashes)
+
+    def file_kinds(self) -> list[dict]:
+        """The kinds of file a pack can hold, also those not present (catalogue.file_kinds)."""
+        from . import catalogue
+        return catalogue.file_kinds()
+
+    def json_schema(self, kind_or_path: str, pack: str = 'cell') -> dict:
+        """JSON Schema (2020-12) of a kind or of a file path, for a form editor (catalogue.json_schema)."""
+        from . import catalogue
+        return catalogue.json_schema(kind_or_path, pack)
+
+    def enum_values(self, name: str, robot: str | None = None) -> list[str]:
+        """The values of a dynamic enum (``x-taskweave-enum`` in an exported schema) in this pack."""
+        from . import catalogue
+        return catalogue.enum_values(self, name, robot)
+
+    def file_hash(self, path: str, pack: str = 'cell') -> str | None:
+        """sha256 of a file's bytes (None if absent), for an edit that must not overwrite a newer one."""
+        from . import catalogue
+        return catalogue.file_hash(self, path, pack)
+
+    def validate_file(self, path: str, data_or_text=None, pack: str = 'cell') -> list[dict]:
+        """Problems of one file (check.validate_file); the file on disk when no data or text is given."""
+        from . import check
+        return check.validate_file(self, path, data_or_text, pack)
+
+    def check_pack(self) -> list[dict]:
+        """Problems of every file of the pack (check.check_pack)."""
+        from . import check
+        return check.check_pack(self)
+
+    def dry_run_pack(self, path: str, data_or_text, pack: str = 'cell') -> list[dict]:
+        """check_pack with ``data_or_text`` in place of the file, nothing written (check.dry_run_pack)."""
+        from . import check
+        return check.dry_run_pack(self, path, data_or_text, pack)
 
     # ---- missions, robots, skills, operator ------------------------------
     def mission_names(self) -> list[str]:

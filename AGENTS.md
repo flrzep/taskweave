@@ -14,7 +14,7 @@ taskweave runs robot tasks on ROS 2 Jazzy, driven entirely by YAML.
 | Path | Contents |
 |---|---|
 | `taskweave_interfaces/` | msgs, srvs, `RunSkill` action (CMake package) |
-| `taskweave_core/taskweave_core/` | `config/` (store, schemas, packs, overlay, migrate*, slim), `planner.py`, `executive.py`, `task_handler.py`, `skill.py` (base class), `skill_server.py`, `validation.py`, `motion.py` (motion option resolution), `speed.py`, `speed_gate.py`, `smoke.py`, `teach.py`, `operator_joy.py`, `cli.py` |
+| `taskweave_core/taskweave_core/` | `config/` (store, schemas, packs, overlay, catalogue, check, migrate*, slim), `planner.py`, `executive.py`, `task_handler.py`, `skill.py` (base class), `skill_server.py`, `validation.py`, `motion.py` (motion option resolution), `speed.py`, `speed_gate.py`, `smoke.py`, `teach.py`, `operator_joy.py`, `cli.py` |
 | `taskweave_skills/taskweave_skills/` | the generic skills: `basic` (wait), `navigate`, `drive`, `joint_motion`, `gripper_motion`, `object_motion`; helpers `joints`, `ik`, `chain`, `cartesian`, `motion_plan`, `hold`, `points`, `tcp_jog`, `nav2` |
 | `taskweave_hmi/taskweave_hmi/` | web HMI (`server.py`, `web/*.js`): status, control, mission editor, teach, record |
 | `taskweave_bringup/` | launch files `taskweave_bringup.launch.py` (taskweave, HMI, optional Nav2/MoveIt), `taskweave_nav2.launch.py`, `taskweave_moveit.launch.py`; `taskweave_bringup/` (`nav2.py`, `moveit.py`, `hmi.py`, `robot_files.py`: the logic, testable without launching), `config/nav2_params.yaml` (default Nav2 tuning) |
@@ -241,10 +241,20 @@ object points belong to the cell pack).
    rejects the file, so deploy the code first and the config after (rule 4). The launch log prints `ERROR ... not served`
    for a skill whose file is missing or whose `requires` the robot cannot meet.
 
+### The config API (catalogue, schemas, checks)
+`config/catalogue.py` holds **one table** (`KINDS`): per kind of file its pattern, schema, `reload` (what a change needs)
+and editability; a kind's id is its schema id. `ConfigStore.files()`, `file_kinds()`, `json_schema()`, `enum_values()`,
+`file_hash()` read it. `config/check.py` has `validate_file` (schema, then `CROSS[kind]`, one function per kind),
+`check_pack`, `dry_run_pack`; problems are dicts `{path, pack, where (JSON pointer), line, col, message, severity}`.
+A new config file: add a `Kind` (with a schema or a `no_schema_reason`), a `CROSS` entry if it refers to other files,
+`ENUM_HINTS` for names that depend on the pack; `test_catalogue.py` checks the table. A new schema key: optional only, and
+`json_schema` exports it with no further work.
+
 ### Write a mission
 See [docs/missions.md](docs/missions.md). Put it in `<cell>/missions/<name>.yaml`. Validate in layers:
-- `taskweave check <cell>` (offline) checks file schemas, robot/embodiment consistency, skill yamls and that every mission
-  expands. It does **not** check skill arguments, nor whether a point, contact, stance or pose a step names exists:
+- `taskweave check <cell>` (offline; `ConfigStore.check_pack()` returns the same as problem dicts) checks the schema and the
+  cross-file rules of every file of the pack and its robot packs (config API below), and that every mission expands.
+  It does **not** check skill arguments, nor whether a point, contact, stance or pose a step names exists:
   those need the skills' argument schemas.
 - The HMI editor and the task handler check them against the live skill catalog before a start.
 - To catch a misspelt point, contact, stance or pose name before anything moves: start the skills and read the refusal
