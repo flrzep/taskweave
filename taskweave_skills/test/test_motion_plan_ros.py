@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from conftest import RosRig, copy_config, wait_ready
+from conftest import TIME_SCALE, RosRig, copy_config, wait_ready
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('moveit_msgs')
@@ -13,7 +13,6 @@ from moveit_msgs.msg import ContactInformation  # noqa: E402
 from moveit_msgs.srv import GetMotionPlan, GetStateValidity  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
-from sensor_msgs.msg import JointState  # noqa: E402
 from test_joints_ros import FIXTURE, JointSim, run  # noqa: E402
 from trajectory_msgs.msg import JointTrajectoryPoint  # noqa: E402
 
@@ -63,13 +62,25 @@ class FakePlanner(Node):
         goal = {c.joint_name: c.position for c in r.goal_constraints[0].joint_constraints}
         names = list(goal)
         detour = [-0.5 if n == 'j1' else 0.7 if n == self.wander else start[n] for n in names]
-        points = [([start[n] for n in names], 0.0), (detour, 0.6), ([goal[n] for n in names], 1.5)]
+        # a slow runner commands few points: the detour lasts long enough that it cannot be skipped between two commands
+        points = [([start[n] for n in names], 0.0), (detour, 0.6 * TIME_SCALE),
+                  ([goal[n] for n in names], 1.5 * TIME_SCALE)]
         trajectory = response.motion_plan_response.trajectory.joint_trajectory
         trajectory.joint_names = names
         trajectory.points = [JointTrajectoryPoint(positions=p, time_from_start=Duration(sec=int(t), nanosec=int(
             (t % 1) * 1e9))) for p, t in points]
         response.motion_plan_response.error_code.val = 1
         return response
+
+
+class TrackedSim(JointSim):
+    def __init__(self):
+        super().__init__()
+        self.seen = {'j1_min': 0.0}
+
+    def step(self):
+        super().step()
+        self.seen['j1_min'] = min(self.seen['j1_min'], self.position['j1'])
 
 
 @pytest.fixture
@@ -79,15 +90,13 @@ def system(tmp_path):
         copy_config(FIXTURE, config)
         profile = config / 'robots' / 'arm_bot' / 'profile.yaml'
         profile.write_text(profile.read_text() + PLANNING)
-        sim, planner = ros.add(JointSim()), ros.add(FakePlanner())
+        sim, planner = ros.add(TrackedSim()), ros.add(FakePlanner())
         server = SkillServer(parameter_overrides=[
             Parameter('config_dir', value=str(config)), Parameter('robot', value='arm_bot'),
             Parameter('skills', value=['move_joints'])])
         ros.add(server)
         client = ros.add(rclpy.create_node('test_client'))
-        seen = {'j1_min': 0.0}
-        client.create_subscription(JointState, '/arm/joint_states', lambda m: seen.update(
-            j1_min=min(seen['j1_min'], dict(zip(m.name, m.position, strict=False)).get('j1', 0.0))), 10)
+        seen = sim.seen   # the simulator's own lowest j1: a subscriber drops messages when it is starved
         ros.spin(8)
         planning = planner.motion_planner = server.skills['move_joints'].planner
         wait_ready(server, planning.client, planning.validity)
