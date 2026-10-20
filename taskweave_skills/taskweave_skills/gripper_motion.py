@@ -576,7 +576,10 @@ class Grip(_FingerMotion):
     def _close(self, hands: list, state: dict) -> tuple[str, bool]:
         """The registry after a close: hands at an object point hold that object. (message, hold not registered)."""
         try:
-            grasped = self.hold.close_hands(hands)
+            instances = self.config.object_instances()
+            types = {at['instance']: instances[at['instance']].object
+                     for at in self.hold.reached_hands(hands).values() if at['instance'] in instances}
+            grasped = self.hold.close_hands(hands, types)
         except LookupError as error:
             return f'; hold not registered: where is the gripper? {error}', True
         message = ''

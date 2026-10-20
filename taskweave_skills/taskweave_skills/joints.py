@@ -651,13 +651,13 @@ class _ObjectMotion(_PointMotion):
         from .points import onto_pose
 
         instances = self.config.object_instances()
-        held = instances.get(hold['object'])
-        if held is None:
+        kind = self.hold.type_of(hold, instances)
+        if kind is None:
             return SkillResult.rejected(f'the held {hold["object"]} is not in cell/objects.yaml: '
                                         'its contacts are unknown')
         try:
             target, contact = self.config.instance_contact(args['to'])
-            mine = self.config.object_contact(held.object, args['contact'])
+            mine = self.config.object_contact(kind, args['contact'])
             base_in_cell = self.hold.transform(self.cell_frame, self.robot.base['frame'])
         except KeyError as error:
             return SkillResult.rejected(str(error.args[0]))
@@ -674,8 +674,8 @@ class _FingerMotion(_JointSkill):
         """Save ``hold``'s object pose as the placed object ``name`` (see _placed)."""
         import math
 
-        instance = self.config.object_instances().get(hold['object'])
-        if instance is None:
+        kind = self.hold.type_of(hold, self.config.object_instances())
+        if kind is None:
             return f'{hold["object"]} is not a placed object, {name} not placed'
         try:
             pose = self.hold.transform(self.cell_frame, self.robot.base['frame']) @ hold['object_in_base']
@@ -683,6 +683,6 @@ class _FingerMotion(_JointSkill):
             return f'where is the robot? {error}; {name} not placed'
         yaw = math.atan2(pose[1, 0], pose[0, 0])
         tilt = math.degrees(math.acos(max(-1.0, min(1.0, pose[2, 2]))))
-        self.config.put_object(name, instance.object, float(pose[0, 3]), float(pose[1, 3]), float(pose[2, 3]), yaw)
+        self.config.put_object(name, kind, float(pose[0, 3]), float(pose[1, 3]), float(pose[2, 3]), yaw)
         return (f'placed {name} at ({pose[0, 3]:.3f}, {pose[1, 3]:.3f}, {pose[2, 3]:.3f}), yaw '
                 f'{math.degrees(yaw):.1f} deg' + (f' (tilted {tilt:.0f} deg: stored level)' if tilt > 2 else ''))

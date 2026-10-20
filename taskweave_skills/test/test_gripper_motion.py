@@ -484,8 +484,8 @@ def test_close_at_a_point_holds_with_the_hands_that_closed(system):
     assert system.hold.hand_holds == {'left': 'box_1'} and system.sim.position['right_grip'] == 1.0
     payload = settled(system, '"hands": ["left"]')               # legacy keys of the first hold, plus all holds
     assert payload == {'object': 'box_1', 'point': 'box_1/rim', 'tools': ['left'], 'links': ['left_link7'],
-                       'holds': [{'object': 'box_1', 'point': 'box_1/rim', 'hands': ['left'],
-                                  'links': ['left_link7']}]}
+                       'holds': [{'object': 'box_1', 'type': 'box', 'point': 'box_1/rim',
+                                  'hands': ['left'], 'links': ['left_link7']}]}
     assert data['world_state']['held_object'] == 'box_1' and data['world_state']['left_gripper'] == 'holding'
     run(system, 'grip', {'action': 'close', 'hands': ['right']})          # the other hand joins the hold
     assert system.hold.held()['hands'] == ['left', 'right'] and len(system.hold.held_all()) == 1
@@ -899,3 +899,28 @@ def test_move_object_keeps_the_arm_of_another_hold_but_moves_its_own_hands(syste
                                          'motion': {'mode': 'free', 'planner': 'planned'}})
     assert result.outcome == OK, result.message
     assert set(stub.keeps[-1]) == {'right_joint1', 'right_joint2', 'right_grip'}, stub.keeps
+
+
+def grip_single(system):
+    """Both hands close on box_1 (a single placed object): the run-time state drops it."""
+    go(system, {'to': {'point': 'box_1/rim'}, 'motion': {'approach_m': 0}})
+    assert run(system, 'grip', {'action': 'close'}).outcome == OK
+    assert 'box_1' not in system.server.config.object_instances()
+
+
+@pytest.mark.parametrize('name', ['box_1', 'box_7'])
+def test_a_released_single_object_is_placed_again_by_its_recorded_type(system, name):
+    grip_single(system)
+    assert system.hold.held()['type'] == 'box' and settled(system, '"hands"')['holds'][0]['type'] == 'box'
+    result = run(system, 'grip', {'action': 'open', 'place_as': name})
+    assert result.outcome == OK and f'placed {name}' in result.message, result.message
+    placed = system.server.config.object_instances()[name]
+    assert placed.object == 'box'
+    point = system.server.config.object_point('box', 'rim', 'duo_bot')            # a point on it resolves
+    assert point is not None
+
+
+def test_a_stack_item_keeps_its_type_in_the_hold(system):
+    go(system, {'to': {'point': 'pile_1/rim'}, 'motion': {'approach_m': 0}})
+    run(system, 'grip', {'action': 'close'})
+    assert system.hold.held()['type'] == system.server.config.object_instances()['pile_1'].object
