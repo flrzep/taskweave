@@ -141,7 +141,7 @@ class HoldState:
     # ---- holds ------------------------------------------------------------------
     def close_hands(self, hands, types: dict | None = None) -> dict[str, dict]:
         """Grippers of ``hands`` closed: every one of them that is at an object point (and holds nothing yet) holds that
-        object now, joining its hold or starting it (``types``: {object: its type}, kept in the hold). Returns {object: {hands: [new hands], new: bool (a new hold)}}."""
+        object now, joining its hold or starting it (``types``: {object: type}, kept). Returns {object: {hands: [new hands], new: bool (a new hold)}}."""
         with self.lock:
             todo = {hand: dict(self.reached[hand]) for hand in hands
                     if hand in self.reached and not any(hand in h['hands'] for h in self.holds.values())}
@@ -268,7 +268,8 @@ class HoldState:
             first = holds[0]
             data = {'object': first['object'], 'point': first['point'], 'tools': first['hands'],
                     'links': [self.tool_frames[t]['link'] for t in first['hands']],
-                    'holds': [{'object': h['object'], 'type': h.get('type'), 'point': h['point'], 'hands': h['hands'],
+                    'holds': [{'object': h['object'], **({'type': h['type']} if h.get('type') else {}),
+                               'point': h['point'], 'hands': h['hands'],
                                'links': [self.tool_frames[t]['link'] for t in h['hands']]} for h in holds]}
         first_link = data['links'][0] if data and data['links'] else None
         if self._first_link is not None and first_link is not None and first_link != self._first_link:
