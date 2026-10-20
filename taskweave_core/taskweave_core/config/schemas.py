@@ -651,10 +651,10 @@ PACK = {
     'required': ['name', 'version', 'schema_version'],
     'properties': {
         'name': NAME,
-        'version': {'type': ['string', 'integer']},             # the pack's own version, e.g. 0.1.0
+        'version': {'type': ['string', 'integer']},             # the pack's own version, e.g. 0.2.0
         'schema_version': {'type': 'integer', 'minimum': 1},    # its layout, checked against packs.py
         'description': {'type': 'string'},
-        # what the pack needs: requires.taskweave is a PEP 440 specifier of the taskweave version, e.g. ">=0.1,<0.2"
+        # what the pack needs: requires.taskweave is a PEP 440 specifier of the taskweave version, e.g. ">=0.2,<0.3"
         'requires': {'type': 'object',
                      'properties': {'taskweave': {'type': 'string', 'minLength': 1}},
                      'additionalProperties': False},

@@ -1,6 +1,6 @@
 # Installing taskweave
 
-taskweave 0.1.0 targets **ROS 2 Jazzy** on Ubuntu 24.04. This guide goes from a clean machine to a running example
+taskweave 0.2.0 targets **ROS 2 Jazzy** on Ubuntu 24.04. This guide goes from a clean machine to a running example
 cell, without a robot or a simulator. Everything below also works in a container:
 
 ```bash
@@ -23,7 +23,7 @@ rosdep update --rosdistro jazzy
 
 ```bash
 mkdir -p ~/tw_ws/src && cd ~/tw_ws/src
-git clone --branch v0.1.0 --depth 1 https://github.com/flrzep/taskweave.git
+git clone --branch v0.2.0 --depth 1 https://github.com/flrzep/taskweave.git
 cd ~/tw_ws
 ```
 
@@ -175,7 +175,7 @@ versions it works with, a [PEP 440](https://peps.python.org/pep-0440/#version-sp
 ```yaml
 version: 1.4.0
 requires:
-  taskweave: ">=0.1,<0.2"
+  taskweave: ">=0.2,<0.3"
 ```
 
 `taskweave check` and every load refuse a pack that does not admit the installed taskweave, with a message naming the
