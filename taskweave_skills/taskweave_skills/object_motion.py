@@ -117,7 +117,7 @@ class MoveObject(_HeldMotion):
             'object': {'type': 'string', 'x-taskweave-point': 'held_object',
                        'description': 'Only needed when several objects are held: which one (placed-object name).'},
             'hands': hands_schema((), HOLD_RULES),
-            'motion': motion_schema(['mode', 'speed', 'speed_abs', 'accel', 'planner', 'tolerance']),
+            'motion': motion_schema(['mode', 'speed', 'speed_abs', 'accel', 'planner', 'tolerance', 'torso']),
         },
     }
     needs = ['an object held with the grippers']
@@ -141,6 +141,7 @@ class MoveObject(_HeldMotion):
             if isinstance(goal, SkillResult):
                 return goal
         self._refresh_ik()
+        self.torso_reports = []            # per move: the torso height chosen and the rejected ones (ik.torso)
         saved = self.p, self.tcp_speed, self.tcp_turn, self.plan_scale
         self._speeds(m)
         try:
@@ -153,9 +154,11 @@ class MoveObject(_HeldMotion):
         if isinstance(result, SkillResult):
             return result
         label, worst, kind = result
+        torso = {'torso': self.torso_reports} if self.torso_reports else {}
         return SkillResult.succeeded(f'moved {label} (max error {worst:.3f})',
                                      world_state={'held_object': hold['object']}, held_object=hold['object'],
-                                     hands=hold['hands'], mode=mode, path=kind, max_error=float(worst), motion=m)
+                                     hands=hold['hands'], mode=mode, path=kind, max_error=float(worst), motion=m,
+                                     **torso)
 
     def _hold(self, args: dict):
         """The hold to move: the one ``args.object`` names, or the only one (or the one the named hands are in). A
@@ -208,14 +211,27 @@ class MoveObject(_HeldMotion):
         """Move the held object to ``moved`` (4x4, base frame) with every hand of the hold: (label, worst joint error,
         path kind) or a failure result. Updates the hold afterwards."""
         goals = {hand: moved @ pose for hand, pose in hold['tcp_in_object'].items()}
+        tools = {hand: _target_of(goal) for hand, goal in goals.items()}
+        chosen, leg = None, Target(label, list(goals), tools)
+        if m.get('torso', 'keep') == 'auto' and self._searches(leg):
+            # one height for every hand of the hold (the torso carries them all), the held object goes with it
+            chosen = self._torso_choice(ctx, leg, m, mode, 0.0, label, flip=False)
+            if isinstance(chosen, SkillResult):
+                return chosen
+            self.torso_reports.append({'leg': label, **chosen.report()})
         if mode == 'linear':
+            if chosen is not None:     # set the height first, the line keeps it; the object moved with the lift
+                result = self._set_torso(ctx, chosen, label, planner)
+                failed = self._follow_holds([hold], label)
+                if result is not None or failed is not None:
+                    return result or failed
             result, worst = self._linear(ctx, {}, label, goals=goals)
             kind = 'linear'
         else:
-            tools = {hand: _target_of(goal) for hand, goal in goals.items()}
             self.drift_hands = tuple(goals) if len(goals) > 1 else ()
             try:      # the hands' IK goals keep the grasp as it is (no flipped fingers on a held object)
-                result, worst = self._reach(ctx, {}, tools, label, flip=False, planner=planner)
+                result, worst = self._reach(ctx, chosen.fixed if chosen is not None else {}, tools, label, flip=False,
+                                            planner=planner)
             finally:
                 self.drift_hands = ()
             kind = self.path_kind
@@ -245,6 +261,8 @@ class MoveObject(_HeldMotion):
                                         'with (e.g. a lift) can be set')
         label, worst, kind = f'{hold["object"]} to {name}', 0.0, 'direct'
         hand = hold['hands'][0]
+        if self.ik is not None and self.ik.torso and self.ik.torso['joint'] in pose['joints']:
+            m = {**m, 'torso': 'keep'}       # the pose sets the torso: the waypoints keep it
         if pose['joints']:
             others = [h for h in self.hold.held_all() if h['object'] != hold['object']]
             result, worst = self._go(ctx, pose['joints'], f'{label} (joints)', planner=planner)

@@ -239,10 +239,10 @@ class MoveGripper(_PointMotion):
         (a named pose) already set it."""
         return bool(self.ik is not None and self.ik.torso and leg.tools and self.ik.torso['joint'] not in leg.joints)
 
-    def _torso_choice(self, ctx, leg: Target, m: dict, mode: str, approach: float, label: str):
+    def _torso_choice(self, ctx, leg: Target, m: dict, mode: str, approach: float, label: str, flip=None):
         """ik.solve_with_torso for the leg: the target and, with an approach, the pre-grasp; for a straight line the
-        points along it (spaced ik.torso.line_sample_m), so the height holds for the whole line. A TorsoChoice or a
-        FAILED result naming every rejected height."""
+        points along it (spaced ik.torso.line_sample_m), so the height holds for the whole line. ``flip``: may a grasp
+        be flipped (default: not on a line). A TorsoChoice or a FAILED result naming every rejected height."""
         from .ik import IkError
 
         current = self._start()
@@ -253,7 +253,8 @@ class MoveGripper(_PointMotion):
             samples = self._line_samples(leg.tools, current) if mode == 'linear' else [
                 leg.tools, *([leg.before(approach)] if approach > 0 else [])]
             return self.ik.solve_with_torso(samples, leg.joints, current, lambda: ctx.should_stop,
-                                            elbow=m.get('elbow'), allow_flip=mode != 'linear')
+                                            elbow=m.get('elbow'),
+                                            allow_flip=mode != 'linear' if flip is None else flip)
         except LookupError as error:
             return SkillResult.failed(f'{label}: where is the gripper? {error}')
         except IkError as error:

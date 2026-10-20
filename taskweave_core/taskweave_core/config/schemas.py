@@ -243,8 +243,12 @@ ROBOT_PROFILE = {
                     'properties': {
                         'joint': {'type': 'string', 'minLength': 1},
                         'candidates': {'type': 'array', 'items': FINITE, 'minItems': 1},   # heights tried (joint units)
+                        # wrist: cost per rad of wrist bend (mean distance of wrist_joints from mid-range); 0 = off
                         'weights': {'type': 'object', 'additionalProperties': False,
-                                    'properties': {'torso': {'type': 'number', 'minimum': 0, 'default': 1.0}}},
+                                    'properties': {'torso': {'type': 'number', 'minimum': 0, 'default': 1.0},
+                                                   'wrist': {'type': 'number', 'minimum': 0, 'default': 0.0}}},
+                        # joints whose bend weights.wrist counts, per hand ({tool} = tool name)
+                        'wrist_joints': {'type': 'array', 'items': {'type': 'string', 'minLength': 1}},
                         # the current height wins at once when feasible and its arm cost is at most this (default: any)
                         'accept_cost': {'type': 'number', 'minimum': 0},
                         'line_sample_m': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.3},

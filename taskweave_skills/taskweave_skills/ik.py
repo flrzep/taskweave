@@ -54,8 +54,8 @@ of the move from the current joints. With ``mirror``, an arm is solved after the
 image of that arm's solution and prefers it (``symmetry``): symmetric targets give mirrored arms. Industrial
 controllers store such a configuration with every taught point; here the profile gives the default.
 
-With the profile's ``ik.torso`` ({joint, candidates, weights: {torso}, line_sample_m}) ``solve_with_torso`` also
-chooses the torso height: see there.
+With the profile's ``ik.torso`` ({joint, candidates, weights: {torso, wrist}, wrist_joints, line_sample_m})
+``solve_with_torso`` also chooses the torso height: see there.
 """
 
 from __future__ import annotations
@@ -100,9 +100,11 @@ class TorsoChoice:
     cost: float
     rejected: list = field(default_factory=list)
     skipped: str = ''     # why the other heights were not tried
+    wrist: float | None = None    # mean wrist bend (rad) of the first sample, when ik.torso.wrist_joints is set
 
     def report(self) -> dict:
         more = {'skipped': self.skipped} if self.skipped else {}
+        more |= {'wrist_bend': round(self.wrist, 4)} if self.wrist is not None else {}
         return {'height': round(self.height, 4), 'cost': round(self.cost, 4), 'rejected': self.rejected, **more}
 
 
@@ -239,6 +241,7 @@ WEIGHTS = IK_WEIGHTS                                                       # ik.
 LIMIT_MARGIN_DEG = default(ROBOT_PROFILE, 'ik', 'choose', 'limit_margin_deg')   # ik.choose.limit_margin_deg default
 START_TIMEOUT_S = default(ROBOT_PROFILE, 'ik', 'choose', 'start_timeout_s')     # ik.choose.start_timeout_s default
 TORSO_WEIGHT = default(ROBOT_PROFILE, 'ik', 'torso', 'weights', 'torso')           # ik.torso.weights.torso default
+WRIST_WEIGHT = default(ROBOT_PROFILE, 'ik', 'torso', 'weights', 'wrist')           # ik.torso.weights.wrist default
 LINE_SAMPLE_M = default(ROBOT_PROFILE, 'ik', 'torso', 'line_sample_m')             # ik.torso.line_sample_m default
 
 
@@ -431,7 +434,8 @@ class IkClient:
         line) must be solvable and collision free too. For each candidate height (the profile's grid and the current
         one, nearest first) every sample is solved (``solve``) and its full state checked (/check_state_validity: the
         torso, the solved arms and the idle arms as they are now). Cost: the arm cost of the main
-        sample (ik.choose weights: joint limits, elbow, arm motion) + ik.torso.weights.torso * |height change|; ties go
+        sample (ik.choose weights: joint limits, elbow, arm motion) + ik.torso.weights.torso * |height change| +
+        ik.torso.weights.wrist * the mean wrist bend (rad, ik.torso.wrist_joints) of the main sample; ties go
         to the smaller change, then the lower height, so the same input gives the same height. The current height
         comes first and wins at once when it is feasible and its cost is at most ``accept_cost`` (default: always), so
         the common case is one solve per sample; otherwise heights are tried outward from it and the search stops
@@ -440,7 +444,10 @@ class IkClient:
         joint = spec['joint']
         if joint not in current:
             raise IkError(f'torso joint {joint} has no state yet')
-        now, weight = float(current[joint]), float((spec.get('weights') or {}).get('torso', TORSO_WEIGHT))
+        weights = spec.get('weights') or {}
+        now, weight = float(current[joint]), float(weights.get('torso', TORSO_WEIGHT))
+        if float(weights.get('wrist', WRIST_WEIGHT)) > 0 and not spec.get('wrist_joints'):
+            raise IkError('ik.torso.weights.wrist needs ik.torso.wrist_joints (the joints whose bend it counts)')
         heights = sorted({round(float(v), 6) for v in spec['candidates']} | {now},
                          key=lambda h: (round(abs(h - now), 9), h))
         accept = spec.get('accept_cost')
@@ -494,7 +501,25 @@ class IkClient:
                                                   next(iter(tools))):
                 raise TorsoError(f'{where}collision (idle arm included)')
         arm, flips, cost = main
-        return TorsoChoice(height, with_h, arm, flips, cost + weight * abs(height - now))
+        bend = self._wrist_bend(arm, goals[0] if goals else {})
+        if bend is not None:
+            cost += float((self.torso.get('weights') or {}).get('wrist', WRIST_WEIGHT)) * bend
+        return TorsoChoice(height, with_h, arm, flips, cost + weight * abs(height - now), wrist=bend)
+
+    def _wrist_bend(self, arm: dict, tools) -> float | None:
+        """Mean distance (joint units, rad) from mid-range of the ik.torso.wrist_joints of the solved ``tools`` in
+        ``arm``; None without wrist_joints. A joint with no limit pair is measured from 0."""
+        patterns = self.torso.get('wrist_joints')
+        if not patterns:
+            return None
+        bends = []
+        for tool in tools:
+            for pattern in patterns:
+                name = pattern.format(tool=tool)
+                if name in arm:
+                    lower, upper = (getattr(self, 'limits', None) or {}).get(name, (0.0, 0.0))
+                    bends.append(abs(float(arm[name]) - (lower + upper) / 2))
+        return sum(bends) / len(bends) if bends else None
 
     def _memo_key(self, tools, fixed, current, allow_flip, elbow) -> str:
         """Identifies a solve() call: the answer is a function of exactly these (and the scene, which stays within a

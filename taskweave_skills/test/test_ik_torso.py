@@ -223,3 +223,60 @@ def test_staying_at_the_current_height_skips_the_state_check_when_ik_avoids_coll
     ik.avoid_collisions = True
     choice = ik.solve_with_torso([TOOLS, TOOLS], {}, now(0.45))
     assert choice.height == pytest.approx(0.45) and ik.checked == [] and len(ik.solved) == 4
+
+
+# ---- the wrist-bend term ----------------------------------------------------------------------------------------
+
+class WristIk(FakeIk):
+    """The arm joint is the bend: falls with the height (0.2 rad per 0.1 m), no other arm cost; wrist_joints name it."""
+
+    def __init__(self, wrist, joints=('{tool}_j1',), limits=None, **kwargs):
+        super().__init__(reach=lambda tool, target, h: 2.0 * (0.7 - h), **kwargs)
+        self.torso = {**self.torso, 'accept_cost': 0.0, 'wrist_joints': list(joints),
+                      'weights': {'torso': 0.2, 'wrist': wrist}}
+        self.limits = limits or {}
+
+    def _arm_cost(self, arm, current):
+        return 0.0
+
+
+def test_the_wrist_term_changes_the_chosen_height():
+    off = WristIk(wrist=0.0).solve_with_torso([TOOLS], {}, now(0.1))
+    on = WristIk(wrist=1.0).solve_with_torso([TOOLS], {}, now(0.1))
+    assert off.height == pytest.approx(0.1)                       # torso travel alone: stay
+    assert on.height == pytest.approx(0.7)                        # 1 per rad of bend beats 0.2 per m of travel
+    assert on.wrist == pytest.approx(0.0) and off.wrist == pytest.approx(1.2)
+    assert on.report()['wrist_bend'] == pytest.approx(0.0) and off.report()['wrist_bend'] == pytest.approx(1.2)
+    assert on.cost == pytest.approx(0.2 * 0.6 + 0.0)             # torso travel 0.6 m at 0.2; the wrist cost is 0 there
+
+
+def test_a_small_wrist_weight_does_not_move_the_torso():
+    assert WristIk(wrist=0.05).solve_with_torso([TOOLS], {}, now(0.1)).height == pytest.approx(0.1)
+
+
+def test_the_wrist_bend_is_the_distance_from_mid_range_averaged_over_the_wrist_joints_of_the_hands():
+    # j1 = 2 (0.7 - h) at 0.4 -> 0.6; range [0, 1.2] has its middle at 0.6: no bend there; limits are per joint
+    limits = {'left_j1': (0.0, 1.2), 'right_j1': (0.0, 1.2)}
+    choice = WristIk(wrist=1.0, limits=limits).solve_with_torso([TOOLS], {}, now(0.1))
+    assert choice.height == pytest.approx(0.4) and choice.wrist == pytest.approx(0.0)
+    both = WristIk(wrist=1.0, joints=('{tool}_j1', '{tool}_j2'), grid=[0.1])      # j1 1.2, j2 0: the mean is 0.6
+    assert both.solve_with_torso([TOOLS], {}, now(0.1)).wrist == pytest.approx(0.6)
+
+
+def test_a_wrist_weight_without_wrist_joints_is_an_error_and_without_a_weight_nothing_changes():
+    ik = WristIk(wrist=1.0, joints=())
+    with pytest.raises(IkError, match='wrist_joints'):
+        ik.solve_with_torso([TOOLS], {}, now(0.1))
+    plain = FakeIk().solve_with_torso([TOOLS], {}, now(0.1))
+    assert plain.wrist is None and 'wrist_bend' not in plain.report()
+
+
+def test_the_profile_schema_takes_the_wrist_keys():
+    base = {'name': 'r', 'base': {'type': 'differential', 'frame': 'b'}, 'ik': {'groups': {}, 'joints': 'j'}}
+    validator = jsonschema.Draft202012Validator(schemas.ROBOT_PROFILE)
+    errors = lambda doc: [e.message for e in validator.iter_errors(doc)]   # noqa: E731
+    torso, without = {'joint': 'j', 'candidates': [0.0]}, errors(base)
+    assert errors({**base, 'ik': {**base['ik'], 'torso': {**torso, 'wrist_joints': ['{tool}_j6'],
+                                                          'weights': {'torso': 1.0, 'wrist': 0.5}}}}) == without
+    assert errors({**base, 'ik': {**base['ik'], 'torso': {**torso, 'weights': {'wrist': -1}}}})
+    assert schemas.default(schemas.ROBOT_PROFILE, 'ik', 'torso', 'weights', 'wrist') == 0.0

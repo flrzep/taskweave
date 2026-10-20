@@ -13,7 +13,15 @@ pytest.importorskip('rclpy')
 pytest.importorskip('tf2_ros')
 pytest.importorskip('moveit_msgs')
 
-from test_gripper_motion import FLANGES, hold_by_registry, object_x, run, shifted, system  # noqa: E402, F401
+from test_gripper_motion import (  # noqa: E402, F401
+    FLANGES,
+    hold_by_registry,
+    object_x,
+    run,
+    shifted,
+    system,
+    with_ik_torso,
+)
 
 from taskweave_core.validation import oneof_problems, validate_args  # noqa: E402
 from taskweave_interfaces.action import RunSkill  # noqa: E402
@@ -70,7 +78,8 @@ def test_the_schemas_pass_the_oneof_rule_and_carry_the_robots_hands(system):
     props = skill.args_schema['properties']
     assert [v['required'] for v in props['to']['oneOf']] == [['by'], ['at'], ['pose'], ['onto', 'contact']]
     assert props['hands']['anyOf'][0]['enum'] == ['auto', 'all', 'left', 'right']        # no any_one here
-    assert list(props['motion']['properties']) == ['mode', 'speed', 'speed_abs', 'accel', 'planner', 'tolerance']
+    assert list(props['motion']['properties']) == ['mode', 'speed', 'speed_abs', 'accel', 'planner', 'tolerance',
+                                                                   'torso']
     assert list(posture.args_schema['properties']['motion']['properties']) == ['speed', 'speed_abs', 'accel',
                                                                                 'tolerance']
     assert skill.implementation == 'script:ik_held' and posture.implementation == 'script:null_space'
@@ -350,3 +359,58 @@ def test_move_object_of_a_held_single_object_after_take_object(system):
     assert 'box_1' not in system.server.config.object_instances()      # taken: its type lives in the hold
     move(system, {'pose': 'carry'}, motion={'mode': 'linear'})
     move(system, {'onto': 'pile_1/top', 'contact': 'base'}, motion={'mode': 'linear'})
+
+
+# ---- motion torso: auto with a held object ------------------------------------------------------------------------
+
+def held_torso(system, mode, torso='auto'):
+    """Both hands hold the crate; only a lift of 0.2 solves; move_object by 0.1 up. Returns (result data, spy of
+    the hold follow calls)."""
+    with_ik_torso(system)
+    hold_box(system)
+    skill = system.server.skills['move_object']
+    followed, original = [], skill._follow_holds
+
+    def spy(holds, label):
+        followed.append([h['object'] for h in holds])
+        return original(holds, label)
+    skill._follow_holds = spy
+    system.ik.need_lift_given = 0.2      # only requests that name the lift (the search's), not the line's own steps
+    _, data = move(system, {'by': [0.0, 0.0, 0.1]}, motion={'mode': mode, 'torso': torso})
+    return data, followed
+
+
+@pytest.mark.parametrize('mode', ['free', 'linear'])
+def test_move_object_torso_auto_searches_one_height_for_both_hands(system, mode):
+    data, followed = held_torso(system, mode)
+    (leg,) = data['torso']
+    assert leg['height'] == pytest.approx(0.2) and {r['height'] for r in leg['rejected']} >= {0.0, 0.1}
+    assert system.sim.position['lift'] == pytest.approx(0.2, abs=0.02)
+    hands = {r['group'] for r in system.ik.requests if r['start'].get('lift') == pytest.approx(0.2)}
+    assert hands >= {'left_arm', 'right_arm'}                 # both hands solved at the searched height
+    assert data['hands'] == ['left', 'right'] and data['held_object'] == 'crate_1'
+    ox, _, oz = system.hold.held()['object_in_base'][:3, 3]
+    for hand in HANDS:
+        at(system, hand, ox - 0.1, oz + 0.3, 0.05)
+
+
+def test_move_object_torso_auto_lets_the_held_object_follow_the_lift(system):
+    data, followed = held_torso(system, 'linear')
+    assert followed and followed[0] == ['crate_1']            # the lift moved the base frame of the hold: followed
+    assert system.hold.hand_holds == {'left': 'crate_1', 'right': 'crate_1'}
+
+
+def test_move_object_keeps_the_torso_by_default_and_without_ik_torso(system):
+    with_ik_torso(system)
+    hold_box(system)
+    system.ik.need_lift = 0.2
+    result, _ = move(system, {'by': [0.0, 0.0, 0.1]}, FAILED, motion={'mode': 'free'})
+    assert 'no IK solution' in result.message and system.sim.position['lift'] == 0.0
+    assert 'torso' not in json.loads(run(system, 'move_object', {'to': {'by': [0, 0, 0]}}).data_json)
+
+
+def test_a_held_pose_that_sets_the_torso_keeps_it_with_torso_auto(system):
+    with_ik_torso(system)
+    hold_box(system)
+    _, data = move(system, {'pose': 'carry'}, motion={'mode': 'free', 'torso': 'auto'})
+    assert system.sim.position['lift'] == pytest.approx(0.1, abs=0.03) and 'torso' not in data
