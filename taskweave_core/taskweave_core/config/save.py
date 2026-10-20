@@ -85,11 +85,10 @@ def pack_lock(root: Path):
 
 # ---- paths and routing -----------------------------------------------------------------------------------------------
 def _split_pack(pack: str) -> str | None:
-    if pack == 'cell':
-        return None
-    if pack.startswith('robot:') and len(pack) > 6:
-        return pack[6:]
-    raise ValueError(f"pack is 'cell' or 'robot:<name>', not {pack!r}")
+    try:
+        return catalogue.robot_arg(pack)
+    except ValueError as error:
+        raise SaveError([_problem('', 'cell', str(error))]) from error
 
 
 def _clean(path: str) -> str:
@@ -99,10 +98,15 @@ def _clean(path: str) -> str:
     return clean.as_posix()
 
 
-def _target(path: str, pack: str) -> str:
+def _target(store_root: Path, path: str, pack: str) -> str:
     """The file a change lands in, relative to the cell pack: the file itself, or the cell override of a robot file."""
     robot = _split_pack(pack)
-    return path if robot is None else f'robots/{robot}/{path}'
+    target = path if robot is None else f'robots/{robot}/{path}'
+    try:
+        catalogue.guard(store_root, target)
+    except ValueError as error:
+        raise SaveError([_problem(path, pack, str(error))]) from error
+    return target
 
 
 def _kind(path: str, pack: str):
@@ -325,7 +329,8 @@ def save(store, path: str, content, pack: str = 'cell', base: str | None = None,
     the problems) when the result has errors; the file is then untouched. Returns ``{path, pack, hash, rev (commit
     or None), reload, warnings (messages and problems), override (the cell file written for a robot file)}``."""
     path = _clean(path)
-    kind, target = _kind(path, pack), _target(path, pack)
+    target = _target(store.root, path, pack)
+    kind = _kind(path, pack)
     with pack_lock(store.root):
         _check_base(store, path, pack, base, 'a save')
         text = _new_text(store, path, pack, content)
@@ -368,7 +373,8 @@ def delete(store, path: str, pack: str = 'cell', base: str | None = None, messag
     from . import check
 
     path = _clean(path)
-    kind, target = _kind(path, pack), _target(path, pack)
+    target = _target(store.root, path, pack)
+    kind = _kind(path, pack)
     with pack_lock(store.root):
         file = store.root / target
         if not file.is_file():
@@ -417,7 +423,10 @@ def set_robot(store, robot: str, base: str | None = None, message: str | None = 
 
 # ---- history ---------------------------------------------------------------------------------------------------------
 def _history_target(store, path: str, pack: str) -> Path:
-    return catalogue.file_path(store, _clean(path), pack)
+    try:
+        return catalogue.file_path(store, _clean(path), pack)
+    except ValueError as error:
+        raise SaveError([_problem(path, pack, str(error))]) from error
 
 
 def history(store, path: str, pack: str = 'cell', limit: int = 50) -> list[dict]:

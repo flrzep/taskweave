@@ -462,3 +462,45 @@ def test_cli_save_history_restore(store, repo, tmp_path, capsys):
     start = store.history(LOCATIONS)[-1]['rev'][:8]
     assert cli.main(['config', 'restore', target, start, '--base', store.file_hash(LOCATIONS)]) == 0
     assert 'x: 1.5' in text(store)
+
+
+# ---- P4 review: paths and robot names stay inside the pack ----------------------------------------------------------
+EVIL = ('robot:../../../tmp/x', 'robot:..', 'robot:a/b', 'robot:/abs', 'robot:1bad', 'robot:')
+
+
+def test_a_robot_name_stays_inside_the_pack(store, repo, tmp_path):
+    outside = tmp_path / 'tmp' / 'x'
+    for pack in EVIL:
+        with pytest.raises((SaveError, ValueError)):
+            store.save('profile.yaml', 'a: 1\n', pack=pack)
+        with pytest.raises((SaveError, ValueError)):
+            store.delete('profile.yaml', pack=pack, base='x')
+        with pytest.raises((SaveError, ValueError)):
+            store.show('profile.yaml', 'HEAD', pack=pack)
+        with pytest.raises((SaveError, ValueError)):
+            store.history('profile.yaml', pack=pack)
+    assert not outside.exists() and not any(tmp_path.glob('**/x/profile.yaml'))
+
+
+def test_a_conflict_stays_inside_the_pack(store, tmp_path):
+    (tmp_path / 'secret').mkdir()
+    (tmp_path / 'secret' / 'profile.yaml').write_text('secret: 1\n')
+    with pytest.raises((SaveError, ValueError)) as error:
+        store.save('profile.yaml', 'a: 1\n', pack='robot:../../../secret')
+    assert 'secret: 1' not in str(error.value)
+
+
+@posix_only
+def test_symlinks_stays_inside_the_pack(store, tmp_path):
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (store.root / 'linked').symlink_to(outside)
+    with pytest.raises(SaveError):
+        store.save('missions/../linked/x.yaml', 'a: 1\n')
+    (store.root / 'missions' / 'ln.yaml').symlink_to(outside / 'f.yaml')
+    with pytest.raises(SaveError):
+        store.save('missions/ln.yaml', 'goal: x\nsteps: []\n')
+    (store.root / 'robots' / 'link_bot').symlink_to(outside)
+    with pytest.raises(SaveError):
+        store.save('profile.yaml', 'a: 1\n', pack='robot:link_bot')
+    assert not list(outside.iterdir())
