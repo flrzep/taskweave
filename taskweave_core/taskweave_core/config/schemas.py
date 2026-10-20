@@ -235,6 +235,20 @@ ROBOT_PROFILE = {
                 # known-good postures IK starts from, in order (then the current state)
                 'seeds': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': FINITE}},
                 'avoid_collisions': {'type': 'boolean'},  # reject solutions in collision (robot + planning scene)
+                # torso height chosen by a search (taskweave_skills/ik.py solve_with_torso) for motion torso: auto;
+                # without it that keeps the torso_fallback list (first height that solves)
+                'torso': {
+                    'type': 'object',
+                    'required': ['joint', 'candidates'],
+                    'properties': {
+                        'joint': {'type': 'string', 'minLength': 1},
+                        'candidates': {'type': 'array', 'items': FINITE, 'minItems': 1},   # heights tried (joint units)
+                        'weights': {'type': 'object', 'additionalProperties': False,
+                                    'properties': {'torso': {'type': 'number', 'minimum': 0, 'default': 1.0}}},
+                        'line_sample_m': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.1},
+                    },
+                    'additionalProperties': False,
+                },
                 # deprecated (use arms.<tool>.swivel): the elbow jog's swivel joint, {tool} = tool name
                 'swivel_joint': {'type': 'string'},
                 # tool -> the tool whose joints it mirrors with the same values (names with the prefix swapped)
@@ -698,8 +712,9 @@ MOTION_PROPERTIES = {
                    'description': 'free mode: the last part of the way, straight along the approach. 0 = planned all '
                                   'the way.'},
     'torso': {'enum': ['keep', 'auto'], 'default': 'keep',
-              'description': 'auto: if the target is out of reach, try the configured torso heights. keep: never move '
-                             'the torso.'},
+              'description': 'auto: choose the torso height (robot profile ik.torso: the least torso and arm motion '
+                             'that is reachable and collision free, both hands at one height; else the first of the '
+                             'configured heights that is reachable). keep: never move the torso.'},
     'via': {'type': 'array', 'items': {'type': 'string', 'x-taskweave-point': 'via_target'},
             'description': 'Reserved. Waypoints to pass: "pose:<joint pose>" or "<instance>/<point>".'},
     'tolerance': {'type': 'number', 'exclusiveMinimum': 0,

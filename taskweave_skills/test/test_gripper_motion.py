@@ -73,7 +73,7 @@ class FakeIk(Node):
 
     def __init__(self):
         super().__init__('fake_ik')
-        self.requests, self.need_lift = [], None
+        self.requests, self.need_lift, self.need_lift_given = [], None, None
         self.blocked = set()          # sides ('left', 'right') whose targets are out of reach
         self.unreachable = None       # (side, xyz) -> True: that one flange target is out of reach
         self.create_service(GetPositionIK, '/compute_ik', self.ik)
@@ -90,6 +90,8 @@ class FakeIk(Node):
         response.solution.joint_state.name = [f'{side}_joint1', f'{side}_joint2']
         response.solution.joint_state.position = [pose.position.x, pose.position.z]
         reachable = self.need_lift is None or abs(start.get('lift', -1.0) - self.need_lift) < 1e-6
+        if self.need_lift_given is not None and 'lift' in start:   # only a request that names the lift (a search's)
+            reachable = reachable and abs(start['lift'] - self.need_lift_given) < 1e-6
         reachable = reachable and not (self.unreachable and self.unreachable(side, tuple(request_xyz)))
         response.error_code.val = 1 if reachable and side not in self.blocked else -31
         return response
@@ -378,6 +380,44 @@ def test_the_torso_is_tried_at_other_heights_with_torso_auto_only(system):
     go(system, {'to': {'pose': 'present_left'}})                         # the skill's torso: auto
     at(system, 'left', 0.6, 0.4)
     assert system.sim.position['lift'] == pytest.approx(0.2, abs=0.02)
+
+
+def with_ik_torso(system, candidates='[0.0, 0.1, 0.2, 0.3]'):
+    """The profile's ik.torso (the search), edited in on the running skill server."""
+    path = system.config / 'robots' / 'duo_bot' / 'profile.yaml'
+    torso = f'  torso: {{joint: lift, candidates: {candidates}}}'
+    path.write_text(path.read_text().replace('  timeout_s: 0.2', '  timeout_s: 0.2\n' + torso, 1))
+
+
+def test_ik_torso_searches_the_height_and_the_result_reports_it_and_the_rejected_ones(system):
+    with_ik_torso(system)
+    system.ik.need_lift = 0.2                                            # only this height solves
+    result, data = go(system, {'to': {'pose': 'present_left'}})
+    at(system, 'left', 0.6, 0.4)
+    assert system.sim.position['lift'] == pytest.approx(0.2, abs=0.02)
+    (leg,) = data['torso']
+    assert leg['height'] == pytest.approx(0.2) and 'torso 0.2' in result.message
+    assert {r['height'] for r in leg['rejected']} >= {0.0, 0.1} and all(r['reason'] for r in leg['rejected'])
+    system.ik.need_lift = None
+    result, data = go(system, {'to': {'pose': 'present_left'}, 'motion': {'torso': 'keep'}})   # keep: no search
+    assert 'torso' not in data
+
+
+def test_ik_torso_with_no_feasible_height_fails_with_every_height_and_its_reason(system):
+    with_ik_torso(system)
+    system.ik.blocked = {'left'}
+    result, data = go(system, {'to': {'pose': 'present_left'}}, FAILED)
+    assert 'no torso height works' in result.message
+    assert sorted(r['height'] for r in data['torso'][0]['rejected']) == [0.0, 0.1, 0.2, 0.3]
+    assert system.sim.position['lift'] == 0.0
+
+
+def test_ik_torso_sets_the_height_once_before_a_straight_line(system):
+    with_ik_torso(system)
+    system.ik.need_lift_given = 0.1                                      # the line itself names no lift
+    result, data = go(system, {'to': {'by': [0.0, 0.0, 0.05]}, 'hands': ['left'], 'motion': {'mode': 'linear'}})
+    assert data['torso'][0]['height'] == pytest.approx(0.1)
+    assert system.sim.position['lift'] == pytest.approx(0.1, abs=0.02)
 
 
 def test_approach_m_comes_from_the_step_then_the_point_then_the_skill(system):

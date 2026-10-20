@@ -175,6 +175,7 @@ class MoveGripper(_PointMotion):
         if refusal is not None:
             return refusal
         self.hold.leave(target.hands)      # these hands go elsewhere: no longer at a point
+        self.torso_reports = []            # per leg: the torso height chosen and the rejected ones (ik.torso)
         self._refresh_ik()
         saved = self.p, self.tcp_speed, self.tcp_turn, self.plan_scale
         self._speeds(m)
@@ -197,27 +198,97 @@ class MoveGripper(_PointMotion):
             self.hold.reach(target.hands, *target.reached)
         picked = {'choice': target.choice} if target.choice else {}
         chosen = f' (any_one chose {target.hands[0]})' if target.choice else ''
-        return SkillResult.succeeded(f'at {label}{chosen} (max error {worst:.3f})', world_state={'arm_pose': label},
-                                     hands=target.hands, mode=mode, path=kind, max_error=float(worst), motion=m,
-                                     **picked)
+        torso = {'torso': self.torso_reports} if self.torso_reports else {}
+        height = f', torso {self.torso_reports[-1]["height"]:g}' if self.torso_reports else ''
+        return SkillResult.succeeded(f'at {label}{chosen} (max error {worst:.3f}{height})',
+                                     world_state={'arm_pose': label}, hands=target.hands, mode=mode, path=kind,
+                                     max_error=float(worst), motion=m, **picked, **torso)
 
     def _leg(self, ctx, leg: Target, m: dict, mode: str, planner: str, final: bool):
         """One leg to ``leg``'s tools: (failure or None, worst joint error, label, path kind)."""
         label, elbow = leg.label, m.get('elbow')
+        approach = float(m.get('approach_m', 0.0)) if final and leg.before and mode != 'linear' else 0.0
+        chosen = None
+        if m.get('torso', 'keep') == 'auto' and self._searches(leg):   # ik.torso: the height by search, else the list
+            chosen = self._torso_choice(ctx, leg, m, mode, approach, label)
+            if isinstance(chosen, SkillResult):
+                return chosen, 0, label, 'free'
+            self.torso_reports.append({'leg': leg.label, **chosen.report()})
         if mode == 'linear' and leg.tools:   # a via pose of joints only has no line to follow
             label += ' (linear)'
+            if chosen is not None:           # the height is chosen for the whole line: set it, the line keeps it
+                result = self._set_torso(ctx, chosen, label, planner)
+                if result is not None:
+                    return result, 0, label, 'linear'
             result, worst = self._linear(ctx, leg.tools, label)
             return result, worst, label, 'linear'
-        torso = m.get('torso', 'keep') == 'auto' and self.lift_joint
+        torso = m.get('torso', 'keep') == 'auto' and self.lift_joint and chosen is None
         lifts = [{**leg.joints, self.lift_joint: float(v)} for v in self.lift_values] if torso else []
-        approach = float(m.get('approach_m', 0.0)) if final and leg.before else 0.0
+        joints = chosen.fixed if chosen is not None else leg.joints
         if approach > 0:                      # planned to offset + approach, then straight in
-            result, worst, label = self._approach_in(ctx, leg.tools, leg.before(approach), lifts, label, elbow,
-                                                     approach, planner)
+            result, worst, label = self._approach_in(ctx, leg.tools, leg.before(approach),
+                                                     [chosen.fixed] if chosen is not None else lifts, label, elbow,
+                                                     approach, planner, exact=chosen is not None)
             return result, worst, label, 'approach'
-        result, worst = self._reach(ctx, leg.joints, leg.tools, label, fallback_joints=lifts, elbow=elbow,
+        result, worst = self._reach(ctx, joints, leg.tools, label, fallback_joints=lifts, elbow=elbow,
                                     planner=planner)
         return result, worst, label, self.path_kind
+
+    def _searches(self, leg: Target) -> bool:
+        """Does the torso height of this leg come from the profile's ik.torso search? Not when the leg's own joints
+        (a named pose) already set it."""
+        return bool(self.ik is not None and self.ik.torso and leg.tools and self.ik.torso['joint'] not in leg.joints)
+
+    def _torso_choice(self, ctx, leg: Target, m: dict, mode: str, approach: float, label: str):
+        """ik.solve_with_torso for the leg: the target and, with an approach, the pre-grasp; for a straight line the
+        points along it (spaced ik.torso.line_sample_m), so the height holds for the whole line. A TorsoChoice or a
+        FAILED result naming every rejected height."""
+        from .ik import IkError
+
+        current = self._start()
+        if current is None:
+            return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)')
+        ctx.feedback(0.0, 'choosing the torso height')
+        try:
+            samples = self._line_samples(leg.tools, current) if mode == 'linear' else [
+                leg.tools, *([leg.before(approach)] if approach > 0 else [])]
+            return self.ik.solve_with_torso(samples, leg.joints, current, lambda: ctx.should_stop,
+                                            elbow=m.get('elbow'), allow_flip=mode != 'linear')
+        except LookupError as error:
+            return SkillResult.failed(f'{label}: where is the gripper? {error}')
+        except IkError as error:
+            return SkillResult.failed(f'{label}: {error}', torso=[{'leg': leg.label, 'height': None,
+                                                                   'rejected': getattr(error, 'rejected', [])}])
+
+    def _line_samples(self, tools: dict, current: dict):
+        """A function of the torso height: the target sets along the straight line the TCPs would move on from where
+        a torso at that height leaves them (arms keeping their joints) to their goals; the goals first."""
+        from .cartesian import interpolate, matching_flip, tcp_targets
+        from .ik import LINE_SAMPLE_M
+        from .points import target_of
+
+        starts = self.hold.tcp_poses(tools)
+        goals = matching_flip(tcp_targets(tools), starts, self.robot.data.get('tool_frames', {}))
+        joint, step = self.ik.torso['joint'], float(self.ik.torso.get('line_sample_m', LINE_SAMPLE_M))
+
+        def at(height: float) -> list:
+            moved = self.ik.tcps_at(goals, {**current, joint: height})
+            begin = {tool: moved.get(tool, starts[tool]) for tool in goals}
+            long = max(float(np.linalg.norm(goals[t][:3, 3] - begin[t][:3, 3])) for t in goals)
+            parts = max(1, math.ceil(long / step))
+            return [{t: target_of(goals[t]) for t in goals},
+                    *({t: target_of(interpolate(begin[t], goals[t], i / parts)) for t in goals}
+                      for i in range(parts))]
+        return at
+
+    def _set_torso(self, ctx, chosen, label: str, planner: str):
+        """Move the torso to the chosen height before a straight line (the line keeps it). A failure or None."""
+        joint = self.ik.torso['joint']
+        current = self._start()
+        if current is None or abs(chosen.height - current[joint]) <= self.p.position_tolerance:
+            return None
+        result, _ = self._go(ctx, {joint: chosen.height}, f'{label} (torso {chosen.height:g})', planner=planner)
+        return result
 
     def _unfit(self, target: Target, mode: str, planner: str):
         """A REJECTED result if this robot cannot do what the options ask for."""
@@ -321,7 +392,15 @@ class MoveGripper(_PointMotion):
         self._refresh_ik()
         start = self._start()
         stop = (lambda: ctx.should_stop) if ctx is not None else (lambda: False)
+        search = m.get('torso', 'keep') == 'auto' and self.ik.torso and not linear
         for tools, joints in goals:
+            if search and self.ik.torso['joint'] not in joints:   # ik.torso: the height by search
+                try:
+                    choice = self.ik.solve_with_torso([tools], joints, start, stop, elbow=m.get('elbow'))
+                except IkError as error:
+                    return Probe(False, 0.0, str(error))
+                fixed, arm = choice.fixed, choice.solution
+                continue
             fixeds = [{} if linear else joints]
             if m.get('torso', 'keep') == 'auto' and self.lift_joint and not linear:
                 fixeds += [{**joints, self.lift_joint: float(v)} for v in self.lift_values]

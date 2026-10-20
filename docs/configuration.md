@@ -320,6 +320,15 @@ motion_tuning:                # optional, every key defaults (schemas.MOTION_TUN
 
 Skills ask for roles (`base`, `joints`, `grippers.left`, `tool_frames.left`, `ik`); only this file knows the hardware names.
 
+`ik.torso: {joint, candidates, weights: {torso}, line_sample_m}` is optional. With it `motion: {torso: auto}` searches the
+torso height: every candidate (and the current height) is tried with all hands at that one height, the arms are solved
+by IK, and the full state (the idle arm as it is now) is checked for collisions with `/check_state_validity`. The least
+cost wins: the `ik.choose` arm cost plus `weights.torso` per metre of torso travel; ties go to the smaller move, then
+the lower height. A straight line (`mode: linear`) is sampled every `line_sample_m` along its length and the one height
+that holds for all samples is set before the line. The step result lists `data.torso` (per leg: the chosen `height`
+and every `rejected` height with its reason). Without `ik.torso`, `auto` keeps the skill's `torso_fallback` list
+(the first height that solves) and linear moves keep the lift.
+
 `arms.<tool>.elbow` names the links at an IK arm's shoulder, elbow and wrist centres: the elbow side (`ik.choose.elbow`,
 a point's `elbow`), straight lines and elbow swings use it. An arm without it has no elbow control (an elbow side is
 ignored with a warning, an elbow swing fails with a message). Only `elbow` and `swivel` are read under `arms.<tool>`;

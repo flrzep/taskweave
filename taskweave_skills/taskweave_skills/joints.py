@@ -369,7 +369,9 @@ class _PoseMotion(_JointSkill):
     def _refresh_ik(self) -> None:
         """The profile's current ik.choose (edited in the HMI) for the next solve."""
         if self.ik is not None:
-            self.ik.set_choice(self.config.robot(self.robot.name).data['ik'].get('choose'))
+            spec = self.config.robot(self.robot.name).data['ik']
+            self.ik.set_choice(spec.get('choose'))
+            self.ik.torso = spec.get('torso')
 
     def _arm_joints(self, joints: dict) -> list[str]:
         """The joints of ``joints`` that belong to a tool's arm (all of them if the profile has no ik section)."""
@@ -568,13 +570,14 @@ class _PointMotion(_PoseMotion):
         super().configure(params)
 
     def _approach_in(self, ctx, tools: dict, before: dict, lifts: list, label: str, elbow=None, approach=0.0,
-                     planner='auto'):
+                     planner='auto', exact=False):
         """Planned (free) path to ``before`` (the tools ``approach`` m back along their approach), then straight in to
-        ``tools``. Returns (failure or None, worst joint error at the end, label)."""
+        ``tools``. ``exact``: ``lifts`` is the one choice (a torso search's), the current lift is not tried first.
+        Returns (failure or None, worst joint error at the end, label)."""
         from .cartesian import PathError, linear_path, tcp_targets
         from .ik import flipped
 
-        end = self._end_of_approach(ctx, tools, lifts, label, elbow)  # how the point is reached decides
+        end = self._end_of_approach(ctx, tools, lifts, label, elbow, exact)  # how the point is reached decides
         if isinstance(end, SkillResult):
             return end, 0, label
         lift, flips, solution = end
@@ -595,15 +598,16 @@ class _PointMotion(_PoseMotion):
         result, final = self._move(ctx, last, label, path=path)
         return result, 0 if result is not None else max(abs(last[n] - final[n]) for n in last), label
 
-    def _end_of_approach(self, ctx, tools: dict, lifts: list, label: str, elbow=None):
-        """Solve the point itself first: the lift height (current, else the first of ``lifts``), the tools whose grasp
-        is reached flipped and the arm joints there, so the approach can be solved back from it."""
+    def _end_of_approach(self, ctx, tools: dict, lifts: list, label: str, elbow=None, exact=False):
+        """Solve the point itself first: the lift height (current, else the first of ``lifts``; ``exact``: only
+        those), the tools whose grasp is reached flipped and the arm joints there, so the approach can be solved back
+        from it."""
         from .ik import IkError
 
         if self.ik is None:
             return SkillResult.rejected(f'{label}: a straight approach needs the profile ik section')
         first_error = None
-        for attempt in [{}, *lifts]:
+        for attempt in [*([] if exact else [{}]), *lifts]:
             try:
                 solution = self.ik.solve(tools, attempt, lambda: ctx.should_stop,
                                          current=self._start(), elbow=elbow)

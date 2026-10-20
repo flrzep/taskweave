@@ -53,6 +53,9 @@ object), the elbow away from the preferred side (the swivel of the elbow about t
 of the move from the current joints. With ``mirror``, an arm is solved after the arm it mirrors, starts from the mirror
 image of that arm's solution and prefers it (``symmetry``): symmetric targets give mirrored arms. Industrial
 controllers store such a configuration with every taught point; here the profile gives the default.
+
+With the profile's ``ik.torso`` ({joint, candidates, weights: {torso}, line_sample_m}) ``solve_with_torso`` also
+chooses the torso height: see there.
 """
 
 from __future__ import annotations
@@ -60,6 +63,7 @@ from __future__ import annotations
 import math
 import re
 import time
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -74,6 +78,29 @@ VALIDITY_POLL_S = 0.002  # poll period of a collision check
 
 class IkError(RuntimeError):
     """No joint solution for a tool target; the message names the tool and target."""
+
+
+class TorsoError(IkError):
+    """No torso height works; ``rejected`` lists every height with its reason."""
+
+    def __init__(self, message: str, rejected: list | None = None):
+        super().__init__(message)
+        self.rejected = rejected or []
+
+
+@dataclass
+class TorsoChoice:
+    """solve_with_torso's answer: the torso ``height`` (also in ``fixed``, the fixed joints with it set), the arm
+    joints of the first sample, which tools' grasps are flipped, the ``cost`` and every ``rejected`` height."""
+    height: float
+    fixed: dict
+    solution: dict
+    flips: set
+    cost: float
+    rejected: list = field(default_factory=list)
+
+    def report(self) -> dict:
+        return {'height': round(self.height, 4), 'cost': round(self.cost, 4), 'rejected': self.rejected}
 
 
 def tcp_matrix(target: dict) -> np.ndarray:
@@ -208,6 +235,8 @@ def limit_cost(values: dict, limits: dict, margin: float) -> float:
 WEIGHTS = IK_WEIGHTS                                                       # ik.choose.weights defaults
 LIMIT_MARGIN_DEG = default(ROBOT_PROFILE, 'ik', 'choose', 'limit_margin_deg')   # ik.choose.limit_margin_deg default
 START_TIMEOUT_S = default(ROBOT_PROFILE, 'ik', 'choose', 'start_timeout_s')     # ik.choose.start_timeout_s default
+TORSO_WEIGHT = default(ROBOT_PROFILE, 'ik', 'torso', 'weights', 'torso')           # ik.torso.weights.torso default
+LINE_SAMPLE_M = default(ROBOT_PROFILE, 'ik', 'torso', 'line_sample_m')             # ik.torso.line_sample_m default
 
 
 class IkClient:
@@ -224,6 +253,7 @@ class IkClient:
         self.service = spec.get('service', '/compute_ik')
         self.fallback_groups = spec.get('fallback_groups', {})
         self.avoid_collisions = bool(spec.get('avoid_collisions', False))
+        self.torso = spec.get('torso')     # {joint, candidates, weights}: the torso height search (solve_with_torso)
         self.seeds = [{name: float(value) for name, value in seed.items()} for seed in spec.get('seeds', [])]
         self.Request = GetPositionIK.Request
         self.client = node.create_client(GetPositionIK, self.service, callback_group=ReentrantCallbackGroup())
@@ -382,6 +412,99 @@ class IkClient:
             chosen[tool] = arm
             result.update(arm)
         return result
+
+    def solve_with_torso(self, samples, fixed: dict, current: dict, should_stop=lambda: False, elbow=None,
+                         allow_flip: bool = True) -> TorsoChoice:
+        """The torso height (profile ik.torso) that solves ``samples`` for every hand at once, with the least cost.
+        ``samples``: a list of tool target sets {tool: target} (or a function of the height returning it: a line moves
+        with the torso); the first is the main one (its arm cost counts), the others (the pre-grasp, points along a
+        line) must be solvable and collision free too. For each candidate height (the profile's grid and the current
+        one, nearest first) every sample is solved (``solve``) and its full state checked (/check_state_validity: the
+        torso, the solved arms and the idle arms as they are now). Cost: the arm cost of the main
+        sample (ik.choose weights: joint limits, elbow, arm motion) + ik.torso.weights.torso * |height change|; ties go
+        to the smaller change, then the lower height, so the same input gives the same height. Raises TorsoError."""
+        spec = self.torso
+        joint = spec['joint']
+        if joint not in current:
+            raise IkError(f'torso joint {joint} has no state yet')
+        now, weight = float(current[joint]), float((spec.get('weights') or {}).get('torso', TORSO_WEIGHT))
+        heights = sorted({round(float(v), 6) for v in spec['candidates']} | {now},
+                         key=lambda h: (round(abs(h - now), 9), h))
+        best, rejected = None, []
+        for index, height in enumerate(heights):
+            if best is not None and weight * abs(height - now) >= best.cost:   # every later one costs more
+                rejected += [{'height': round(h, 4), 'reason': 'not tried: moves the torso more than the best'}
+                             for h in heights[index:]]
+                break
+            try:
+                choice = self._torso_height(samples, height, fixed, current, joint, now, weight, should_stop, elbow,
+                                            allow_flip)
+            except TorsoError as error:
+                rejected.append({'height': round(height, 4), 'reason': str(error)})
+                continue
+            if best is None or (round(choice.cost, 9), round(abs(choice.height - now), 9), choice.height) < (
+                    round(best.cost, 9), round(abs(best.height - now), 9), best.height):
+                best = choice
+        rejected.sort(key=lambda item: item['height'])
+        if best is None:
+            raise TorsoError('no torso height works: ' + '; '.join(f'{r["height"]:g}: {r["reason"]}' for r in rejected),
+                             rejected)
+        best.rejected = rejected
+        return best
+
+    def _torso_height(self, samples, height, fixed, current, joint, now, weight, should_stop, elbow,
+                      allow_flip) -> TorsoChoice:
+        """One candidate of solve_with_torso, or TorsoError saying why it is out."""
+        with_h = {**fixed, joint: height}
+        goals = samples(height) if callable(samples) else samples
+        main = None
+        for k, tools in enumerate(goals):
+            where = f'sample {k}: ' if k else ''
+            try:
+                arm = self.solve(tools, with_h, should_stop, current=current, allow_flip=allow_flip, elbow=elbow)
+            except TorsoError:
+                raise
+            except IkError as error:
+                raise TorsoError(f'{where}{str(error).split(":")[0]}') from error
+            if k == 0:
+                main = (arm, {t for t, info in self.last.items() if info.get('flipped')}, self._arm_cost(arm, current))
+            if not self._state_valid({joint: height, **self.idle_joints(tools, current), **arm}, next(iter(tools))):
+                raise TorsoError(f'{where}collision (idle arm included)')
+        arm, flips, cost = main
+        return TorsoChoice(height, with_h, arm, flips, cost + weight * abs(height - now))
+
+    def idle_joints(self, tools, current: dict) -> dict[str, float]:
+        """The arm joints of ``current`` that no tool of ``tools`` moves: the idle arms, kept where they are, so a
+        collision check sees the same state every time (not MoveIt's live one)."""
+        patterns = [re.compile(self.joint_pattern.format(tool=t)) for t in self.groups if t not in tools]
+        return {n: float(v) for n, v in current.items() if any(p.fullmatch(n) for p in patterns)}
+
+    def _state_valid(self, joints: dict, tool: str) -> bool:
+        """Full-state collision check of ``joints`` (on the current state); True without the check service."""
+        return True if getattr(self, 'validity', None) is None else self.valid(joints, self.groups[tool])
+
+    def _arm_cost(self, arm: dict, current: dict) -> float:
+        """The cost solve() chose by for the arms it just solved (self.last): joint-limit room, elbow side and the
+        size of the arm move (symmetry left out: it only breaks ties between mirrored solutions)."""
+        weights = {**WEIGHTS, **(self.choose or {}).get('weights', {})}
+        cost = 0.0
+        for tool, info in self.last.items():
+            joints = [n for n in arm if re.fullmatch(self.joint_pattern.format(tool=tool), n)]
+            motion = sum(abs(arm[n] - current[n]) for n in joints if n in current) / max(len(joints), 1)
+            cost += (weights['limits'] * info.get('limit_cost', 0.0) + weights['motion'] * motion
+                     + weights['elbow'] * math.radians(info.get('elbow_deg', 0.0)) / math.pi)
+        return cost
+
+    def tcps_at(self, tools, state: dict) -> dict[str, np.ndarray]:
+        """TCP poses (4x4, base frame) of ``tools`` for the joints in ``state`` (chains only; tools without a chain
+        are left out): where the hands would be after a torso move with the arms keeping their joints."""
+        poses = {}
+        for tool in tools:
+            if tool in getattr(self, 'chains', {}) and tool in self.tools:
+                frame = self.tools[tool]
+                poses[tool] = self.chains[tool][0].fk(state) @ rpy_matrix(frame.get('xyz', [0, 0, 0]),
+                                                                          frame.get('rpy', [0, 0, 0]))
+        return poses
 
     def _continue(self, tool: str, variants: list, positions: dict):
         """The continuation of the arm's configuration to a target a short move away (at most motion_tuning
