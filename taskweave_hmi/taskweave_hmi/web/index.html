@@ -37,6 +37,13 @@
   <span id="speed-msg" class="speed-msg" hidden></span>
 </div>
 
+<!-- a skill started from the HMI outside a mission (drive, pose or point test, carry pose): on every tab while it
+     runs, with Abort (one press, or Escape: stopping is the safe direction) -->
+<div id="manual" class="manual" role="status" hidden>
+  <span id="manual-text" class="manual-text"></span>
+  <button id="manual-abort" class="btn small danger solid" title="Abort this skill (Esc)">Abort</button>
+</div>
+
 <nav class="tabs" role="tablist">
   <button role="tab" data-view="run" aria-selected="true">Run</button>
   <button role="tab" data-view="missions" aria-selected="false">Missions</button>

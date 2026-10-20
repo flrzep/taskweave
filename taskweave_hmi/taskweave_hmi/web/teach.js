@@ -111,7 +111,7 @@ function positionItem(p) {
     const { ok, data: result } = await api('POST', `/api/teach/arm/${encodeURIComponent(p.scope)}/${encodeURIComponent(p.name)}/test`, { at: at() });
     test.disabled = changed;
     if (!ok) { message(msg, failText(result, 'not moved'), true); return; }
-    message(msg, `${result.outcome}${result.message ? ': ' + result.message : ''}`, result.outcome !== 'succeeded');
+    skillResult(msg, result);
   });
 
   // numbers: each hand as x y z (m) and roll pitch yaw (°), then joints (lift first)

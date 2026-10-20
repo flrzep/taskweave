@@ -96,6 +96,14 @@ button, input, select, textarea { font-family: inherit; }
   .speed-msg { order: 2; }
 }
 
+/* a manual skill while it runs: a strip below the speed strip, running blue, with a solid red Abort (one press) */
+.manual { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4);
+          border-bottom: 1px solid var(--border); box-shadow: inset 4px 0 0 var(--brand);
+          background: color-mix(in srgb, var(--brand) 5%, var(--surface-card)); }
+.manual-text { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.manual .btn { flex: none; }
+@media (max-width: 600px) { .manual-text { white-space: normal; overflow-wrap: anywhere; } }  /* the target matters more than one line */
+
 /* tabs: equal width while they fit, scrolling inside the bar (not the page) on a narrow phone */
 .tabs { display: flex; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--border); }
 .tabs::-webkit-scrollbar { display: none; }
@@ -165,6 +173,7 @@ h2 { margin: 0; font: 600 var(--fs-xl)/1.2 var(--sans); letter-spacing: -.01em; 
 .error { white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 9%, var(--surface-card)); }
 .msg.bad { border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 9%, var(--surface-card)); }
+.msg.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, var(--surface-card)); }
 
 /* buttons: secondary by default, the primary one in brand blue, danger red (solid once it asks to confirm) */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: var(--tap);
@@ -178,6 +187,9 @@ h2 { margin: 0; font: 600 var(--fs-xl)/1.2 var(--sans); letter-spacing: -.01em; 
 .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 60%, var(--border)); background: var(--surface-card); }
 .btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 9%, var(--surface-card)); }
 .btn.danger.confirm, .btn.danger.confirm:hover:not(:disabled) { background: var(--bad); border-color: var(--bad); color: var(--on-fill); }
+/* solid from the first press: a one-press stop (the manual skill's Abort) */
+.btn.danger.solid { background: var(--bad); border-color: var(--bad); color: var(--on-fill); }
+.btn.danger.solid:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 85%, var(--text)); }
 .btn.small { min-height: var(--tap-s); padding: 0 var(--sp-3); font-size: var(--fs-s); }
 .btn.ghost { background: none; border-color: transparent; padding-left: 0; color: var(--brand-text); }
 .btn.ghost:hover:not(:disabled) { background: none; text-decoration: underline; }

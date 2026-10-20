@@ -28,7 +28,16 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 function show(node, visible) { node.hidden = !visible; }
-function message(node, text, bad = false) { node.textContent = text; node.classList.toggle('bad', bad); show(node, !!text); }
+function message(node, text, bad = false) {  // bad: true (red), 'warn' (amber) or false
+  const warn = bad === 'warn';
+  node.textContent = text; node.classList.toggle('bad', !!bad && !warn); node.classList.toggle('warn', warn); show(node, !!text);
+}
+// a manual skill's answer (drive, pose and point tests, carry poses) under the button that started it; aborted from the
+// top bar is the operator's doing, not a failure
+function skillResult(node, result) {
+  if (result.aborted && result.outcome === 'canceled') { message(node, 'aborted', 'warn'); return; }
+  message(node, `${result.outcome}${result.message ? ': ' + result.message : ''}`, result.outcome !== 'succeeded');
+}
 function argsText(args) { return Object.entries(args || {}).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' '); }
 
 // ---------- tabs ----------
@@ -61,11 +70,12 @@ function connect() {
   source.onerror = () => { $('conn').classList.remove('on'); renderSpeed(); };
   source.onmessage = (event) => {
     const { type, data } = JSON.parse(event.data);
-    if (type === 'state') { state.snapshot = data; renderSpeed(); }
+    if (type === 'state') { state.snapshot = data; renderSpeed(); renderManual(); }
     else if (!state.snapshot) return;
     else if (type === 'status') state.snapshot.status = data;
     else if (type === 'pad_mode') state.snapshot.pad_mode = data;
     else if (type === 'speed') { state.snapshot.speed = data; renderSpeed(); return; }
+    else if (type === 'manual') { state.snapshot.manual = data; renderManual(); return; }
     else if (type === 'notice') { padNotice(data); if (data.taught) teachTaught(); return; }
     else if (type === 'plan') { if (state.snapshot.plan?.plan_id !== data.plan_id) state.snapshot.outcomes = {}; state.snapshot.plan = data; }
     else if (type === 'episode') {
@@ -256,6 +266,45 @@ $('speed-up').addEventListener('click', () => stepSpeed(1));
 $('speed-range').addEventListener('input', () => { speedUi.dragging = true; $('speed-value').textContent = `${$('speed-range').value} %`; });
 $('speed-range').addEventListener('change', () => { speedUi.dragging = false; setSpeed({ percent: Number($('speed-range').value) }); });
 $('speed-test').addEventListener('click', () => setSpeed({ test_mode: !speedNow()?.test_mode }));
+
+// ---------- manual skill: Abort ----------
+// A skill started from here outside a mission (Drive here, Move here, Go here, a carry pose's Test) shows in the top
+// bar while it runs, on every tab, with Abort: one press, no second tap (stopping is the safe direction), and Escape
+// does the same unless a text field has the focus. The seconds count on the browser's clock from the server's
+// elapsed_s, so the two clocks need not agree. Missions keep their own Abort (two taps, Run tab).
+const manualUi = { since: null, start: 0, timer: null };
+function manualText() {
+  const m = state.snapshot?.manual;
+  if (!m) return;
+  const seconds = Math.floor((performance.now() - manualUi.start) / 1000);
+  $('manual-text').textContent = `Running ${m.label} (${m.skill}) · ${seconds} s`;
+  $('manual-text').title = $('manual-text').textContent;
+}
+function renderManual() {
+  const m = state.snapshot?.manual || null;
+  show($('manual'), !!m);
+  if (!m) { clearInterval(manualUi.timer); manualUi.timer = null; manualUi.since = null; return; }
+  if (manualUi.since !== m.since) {  // a new one: count from its elapsed time, Abort pressable again
+    manualUi.since = m.since;
+    manualUi.start = performance.now() - m.elapsed_s * 1000;
+    $('manual-abort').disabled = false; $('manual-abort').textContent = 'Abort';
+  }
+  if (!manualUi.timer) manualUi.timer = setInterval(manualText, 1000);
+  manualText();
+}
+async function abortManual() {
+  const button = $('manual-abort');
+  if (!state.snapshot?.manual || button.disabled) return;
+  button.disabled = true; button.textContent = 'Aborting…';  // the bar goes when the skill has stopped
+  const { ok, data } = await api('POST', '/api/skill/abort');
+  if (!ok) { button.disabled = false; button.textContent = 'Abort'; padNotice({ text: data.message || data.error || 'not aborted', ok: false }); }
+}
+$('manual-abort').addEventListener('click', abortManual);
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.repeat || !state.snapshot?.manual) return;
+  const typing = e.target.closest?.('textarea, select, [contenteditable], input:not([type="range"], [type="checkbox"], [type="radio"], [type="button"])');
+  if (!typing) abortManual();
+});
 
 // ---------- start at a step ----------
 // With no mission active, the Run tab shows the selected mission's last run (with its outcomes) or, if it has not
@@ -692,7 +741,7 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
     const { ok, data } = await api('POST', '/api/points/drive', { target });
     driveButton.disabled = changed;
     if (!ok) { message(msg, (data.problems || [data.error || 'not driven']).join('\n'), true); return; }
-    message(msg, `${data.outcome}${data.message ? ': ' + data.message : ''}`, data.outcome !== 'succeeded');
+    skillResult(msg, data);
   });
 
   robotButton.addEventListener('click', async () => {

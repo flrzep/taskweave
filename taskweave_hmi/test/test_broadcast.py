@@ -33,7 +33,7 @@ def test_step_events_are_numbered_and_read_since_a_number():
     bridge = bridge_with()
     bridge.events, bridge.event_seq, bridge.outcomes = deque(maxlen=3), 0, {}
     bridge.robot, bridge.status, bridge.plan, bridge.pad_mode, bridge.recorder = 'r', {}, None, '', None
-    bridge.speed_state = {}
+    bridge.speed_state, bridge.manual = {}, None
     for n in range(5):
         bridge._episode(type('Msg', (), {'data': json.dumps({'event': 'step_started', 'step_id': f's{n}'})}))
     state = bridge.snapshot()
@@ -74,7 +74,7 @@ class FakeStore:
 def test_a_pose_test_runs_move_joints_or_move_gripper_and_pickers_list_held_poses_and_via_targets():
     bridge = bridge_with()
     bridge.config, bridge.robot, runs = FakeStore(), 'r', []
-    bridge.run_skill = lambda skill, args: runs.append((skill, args)) or {'outcome': 'succeeded'}
+    bridge.run_skill = lambda skill, args, **_: runs.append((skill, args)) or {'outcome': 'succeeded'}
     bridge.go_to_pose('home')
     bridge.go_to_pose('reach')
     bridge.test_position('frame', 'grasp', {'at': 'bin_a'})

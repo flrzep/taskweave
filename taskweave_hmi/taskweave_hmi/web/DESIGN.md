@@ -99,6 +99,7 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 
 - **Buttons** (`.btn`): secondary by default (field surface, strong border, text colour). `.primary`: brand fill,
   white text. `.danger`: red text and border on the card; `.danger.confirm` (the second press) is a solid red fill.
+  `.danger.solid`: red fill from the first press, for a stop that needs no second tap (the manual skill's Abort).
   `.small`: `--tap-s` high, 14px. `.ghost`: a text link in brand colour. Hover darkens or tints, active moves down
   1px, disabled is 45% opacity. `.icon`: a square small button for ↑ ↓ ✕.
 - **Inputs and selects**: field surface, strong border, 6px radius, 44px high; brand border on focus; red border and
@@ -114,6 +115,12 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   segmented control, and a test mode toggle that turns amber with its cap (the value turns amber too). The
   handler's message on a clamped or refused request below, for 8 s. Greyed out with a hint without the task handler.
   On a phone: value and presets, then slider and test mode.
+- **Manual skill** (`.manual`): a strip in the sticky top bar below the speed strip, on every tab, only while a skill
+  started from the HMI outside a mission runs (Drive here, Move here, Go here, a carry pose's Test). "Running
+  <label> (<skill>) · <n> s" in 600 weight on a 5% brand tint with a 4px brand left rule (running blue), one line
+  with an ellipsis on a laptop, wrapping on a phone, and a small `.danger.solid` **Abort** on the right: one press,
+  Escape does the same (not while typing in a field). The button that started the skill then says "aborted" as a
+  `.msg.warn`.
 - **Cards** (`.card`): card surface, hairline border, 10px radius, 16px padding, a grid with 12px gaps.
   `details.card` opens from its whole title row.
 - **Status card** (`.card.status`): the andon panel. A 10px rail and a solid badge (`.chip` inside it) in the state
@@ -124,7 +131,8 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 - **Chips** (`.chip`): a dot and the word, in the state colour on an 11% tint. Each state sets `--c` (text), `--fill`
   and `--ink` (for the solid badge).
 - **Details and summary**: summaries in brand text, 44px high; nested ones inside a point are muted and monospace.
-- **Messages** (`.msg`, `.msg.bad`, `.error`): a 4px left rule in green or red on a 9% tint, body text colour.
+- **Messages** (`.msg`, `.msg.bad`, `.msg.warn`, `.error`): a 4px left rule in green, red or amber (canceled,
+  aborted by the operator) on a 9% tint, body text colour.
 - **Joint and limit bars** (`.joint-row`, `.limit-bar`): a pill track with a 4px brand marker at `--at`; within 10° of
   a limit the track, marker, name and value turn red. On a laptop one row per joint (name, bar, value, −, target, +;
   gripper rows put Open and Close under the last three columns). On a phone the row wraps: name and value, the bar
