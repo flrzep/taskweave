@@ -218,3 +218,55 @@ def test_cli(tmp_path, capsys):
     assert cli.main(['config', 'import', str(tmp_path / 'c.tar.gz'), str(tmp_path / 'd')]) == 1
     assert 'error' in capsys.readouterr().err
     assert cli.main(['config', 'import', str(tmp_path / 'c.tar.gz'), str(tmp_path / 'd'), '--force']) == 0
+
+
+# ---- P4 review: import into a git tree is locked and rolled back ---------------------------------------------------
+def _git_target(tmp_path):
+    """(repo, archive): a repo with an old pack in config/, and an archive of a different pack."""
+    build_cell(tmp_path / 'a')
+    export_cell(tmp_path / 'a', tmp_path / 'a.tar.gz')
+    repo = tmp_path / 'repo'
+    init_cell(repo / 'config', ROBOT, 'old')
+    (repo / 'config' / 'missions' / 'stale.yaml').write_text(yaml.safe_dump(MISSION))
+    git(repo, 'init', '-q')
+    git(repo, 'add', '-A')
+    git(repo, 'commit', '-qm', 'base')
+    return repo, tmp_path / 'a.tar.gz'
+
+
+@pytest.mark.skipif(shutil.which('git') is None, reason='git')
+def test_a_git_import_takes_the_pack_lock(tmp_path, monkeypatch):
+    import contextlib
+
+    repo, archive = _git_target(tmp_path)
+    held = []
+
+    @contextlib.contextmanager
+    def lock(root):
+        held.append(Path(root).resolve())
+        yield
+
+    monkeypatch.setattr(packfile, 'pack_lock', lock)
+    import_cell(archive, repo / 'config')
+    assert held == [(repo / 'config').resolve()]
+
+
+@pytest.mark.skipif(shutil.which('git') is None, reason='git')
+def test_a_failing_git_import_restores_the_pack_and_commits_nothing(tmp_path, monkeypatch):
+    repo, archive = _git_target(tmp_path)
+    before, head = tree(repo / 'config'), git(repo, 'rev-parse', 'HEAD')
+    real, calls = shutil.copyfile, []
+
+    def flaky(src, dst, *args, **kwargs):
+        calls.append(dst)
+        if len(calls) == 4:
+            raise PermissionError(13, 'Permission denied', str(dst))
+        return real(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(packfile.shutil, 'copyfile', flaky)
+    with pytest.raises(PackfileError, match='restored'):
+        import_cell(archive, repo / 'config')
+    assert len(calls) == 4
+    assert {k: v for k, v in tree(repo / 'config').items() if k != '.taskweave.lock'} == before
+    assert git(repo, 'rev-parse', 'HEAD') == head
+    assert git(repo, 'status', '--porcelain') == ''
