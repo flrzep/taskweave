@@ -356,7 +356,10 @@ def dry_run_pack(store: ConfigStore, path: str, data_or_text, pack: str = 'cell'
         temp = Path(temp)
         root = temp / 'cell'
         shutil.copytree(store.root, root, ignore=ignore)
-        system = store.system()
+        try:
+            system = store.system()
+        except ConfigError:     # system.yaml is invalid: the copy has it too, as it is
+            system = {}
         first = []
         for name in {catalogue.robot_of(path, pack)} - {None}:  # the edited robot pack, copied, searched first
             if pack != 'cell':

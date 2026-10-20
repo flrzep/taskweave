@@ -234,7 +234,11 @@ def files(store, hashes: bool = True) -> list[dict]:
         kind = kind_of(path) or OTHER
         found.append(_entry(kind, path, 'cell', 'cell' if kind.pack == 'cell' else 'override', robot_of(path, 'cell'),
                             target, hashes))
-    for robot in store.robot_names():
+    try:
+        robots = store.robot_names()
+    except ConfigError:     # system.yaml does not load: check_pack reports it, the cell's own files stay editable
+        robots = []
+    for robot in robots:
         seen = set()
         try:
             robot_packs = store.robot_packs(robot)

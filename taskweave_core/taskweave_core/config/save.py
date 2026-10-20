@@ -23,7 +23,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 
 from . import catalogue, overlay, packs, schemas
-from .store import _pop, _yaml_handler
+from .store import ConfigError, _pop, _yaml_handler
 
 try:
     import fcntl
@@ -353,6 +353,14 @@ def save(store, path: str, content, pack: str = 'cell', base: str | None = None,
                 'override': target if pack != 'cell' else None}
 
 
+def _loads(store) -> bool:
+    try:
+        store.system()
+    except ConfigError:
+        return False
+    return True
+
+
 def _validate(store, path, pack, content, target, text, kind) -> list:
     """Refuse (SaveError) on errors in the file or new ones in the pack with it in place; the warnings."""
     from . import check
@@ -367,6 +375,8 @@ def _validate(store, path, pack, content, target, text, kind) -> list:
         skip = (target, 'cell') if pack == 'cell' or own else None
         new = [p for p in check.dry_run_pack(store, target, text, 'cell')
                if _problem_key(p) not in known and (p['path'], p['pack']) != skip]
+        if target == 'system.yaml' and not _loads(store):    # the fix of a broken system.yaml: no baseline to compare
+            new = [{**p, 'severity': 'warning'} for p in new]
     problems = own + new
     if any(p['severity'] == 'error' for p in problems):
         raise SaveError(problems)

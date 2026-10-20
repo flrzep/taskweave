@@ -553,3 +553,19 @@ def test_a_change_during_the_delete_check_is_a_conflict(store, monkeypatch):
     with pytest.raises(SaveConflict):
         store.delete('objects/shelf.yaml', base=made['hash'])
     assert (store.root / 'objects/shelf.yaml').is_file()
+
+
+# ---- P4 review: an invalid system.yaml can be fixed through the API ------------------------------------------------
+@pytest.mark.parametrize('broken', ['robot_packs: 5\n', 'robot: [unclosed\n'])
+def test_an_invalid_system_yaml_is_a_problem_and_can_be_fixed_by_a_save(store, broken, capsys):
+    (store.root / 'system.yaml').write_text(broken)
+    store.reload()
+    problems = store.check_pack()
+    assert any(p['path'] == 'system.yaml' and p['severity'] == 'error' for p in problems)
+    assert cli.check(str(store.root)) == 1
+    assert 'FAIL  system.yaml' in capsys.readouterr().out
+    store.save('missions/ok.yaml', 'goal: g\nsteps:\n  - instruction: w\n    skill: wait\n')   # other files still work
+    store.save('system.yaml', 'robot: demo_bot\n', base=store.file_hash('system.yaml'))
+    assert text(store, 'system.yaml') == 'robot: demo_bot\n' and not any(
+        p['path'] == 'system.yaml' for p in store.check_pack())
+    store.delete('missions/ok.yaml', base=store.file_hash('missions/ok.yaml'))
