@@ -40,6 +40,12 @@
                                           the JSON Schema of a file kind (object_type, mission, profile ...)
     taskweave config validate PATH [--cell CELL_DIR] [--pack P] [--json]
                                           check one file as it is on disk (schema and cross-file checks)
+    taskweave config save PATH --from FILE [--base HASH] [--message M] [--cell CELL_DIR] [--pack P]
+                                          validate and write a file (conflict: exit 3), commit it in a git repo
+    taskweave config history PATH [--limit N] [--cell CELL_DIR] [--pack P]
+                                          the commits of a file
+    taskweave config restore PATH REV [--base HASH] [--cell CELL_DIR] [--pack P]
+                                          save a file as it was at a commit
 """
 
 from __future__ import annotations
@@ -126,12 +132,11 @@ def config_schema(target: str, pack: str) -> int:
     return 0
 
 
-def config_validate(path: str, cell: str | None, pack: str, as_json: bool) -> int:
-    """Validate one file as it is on disk. ``path`` is a file (inside a cell pack, or with ``cell`` inside a robot
-    pack) or, with ``cell``, a path relative to ``pack``."""
+def _config_target(path: str, cell: str | None, pack: str):
+    """(cell pack folder, path relative to its pack, pack) of a file or of a path relative to ``pack``; None and a
+    message on stderr if it cannot be told."""
     from pathlib import Path
 
-    from .config import ConfigStore
     from .config.packs import CELL_SCHEMA, cell_schema
 
     target = Path(path).expanduser().resolve()
@@ -139,20 +144,29 @@ def config_validate(path: str, cell: str | None, pack: str, as_json: bool) -> in
         folder = next((p for p in target.parents if (p / 'pack.yaml').is_file()), None)
         if folder is None:
             print(f'{path} is in no pack (no pack.yaml above it)', file=sys.stderr)
-            return 2
+            return None
         if cell_schema(folder) == CELL_SCHEMA:
-            cell, relative, pack = str(folder), target.relative_to(folder).as_posix(), 'cell'
-        elif cell:
-            relative, pack = target.relative_to(folder).as_posix(), f'robot:{folder.name}'
-        else:
-            print(f'{path} is in a robot pack: give the cell pack with --cell', file=sys.stderr)
-            return 2
-    elif cell:
-        relative = path
-    else:
-        print(f'{path} is not a file; for a path inside a pack give --cell', file=sys.stderr)
+            return str(folder), target.relative_to(folder).as_posix(), 'cell'
+        if cell:
+            return cell, target.relative_to(folder).as_posix(), f'robot:{folder.name}'
+        print(f'{path} is in a robot pack: give the cell pack with --cell', file=sys.stderr)
+        return None
+    if cell:
+        return cell, path, pack
+    print(f'{path} is not a file; for a path inside a pack give --cell', file=sys.stderr)
+    return None
+
+
+def config_validate(path: str, cell: str | None, pack: str, as_json: bool) -> int:
+    """Validate one file as it is on disk. ``path`` is a file (inside a cell pack, or with ``cell`` inside a robot
+    pack) or, with ``cell``, a path relative to ``pack``."""
+    from .config import ConfigStore
+
+    found = _config_target(path, cell, pack)
+    if found is None:
         return 2
-    store = ConfigStore(cell or folder)
+    cell, relative, pack = found
+    store = ConfigStore(cell)
     problems = store.validate_file(relative, None, pack)
     if as_json:
         print(json.dumps(problems, indent=2))
@@ -162,6 +176,44 @@ def config_validate(path: str, cell: str | None, pack: str, as_json: bool) -> in
             print(f'{problem["severity"]:<7} {relative}{line} {_say(problem)}')
         print(f'{relative}: ' + ('ok' if not problems else f'{len(problems)} problem(s)'))
     return 1 if any(p['severity'] == 'error' for p in problems) else 0
+
+
+def config_write(options) -> int:
+    """config save | history | restore (config/save.py): through core, validated, committed when in a repo."""
+    from .config import ConfigStore, SaveConflict, SaveError
+
+    found = _config_target(options.path, options.cell, options.pack)
+    if found is None:
+        return 2
+    cell, relative, pack = found
+    store = ConfigStore(cell)
+    try:
+        if options.action == 'history':
+            for row in store.history(relative, pack, options.limit):
+                print(f'{row["rev"][:8]}  {row["time"]}  {row["author"]}  {row["message"].splitlines()[0]}')
+            return 0
+        if options.action == 'save':
+            text = sys.stdin.read() if options.source == '-' else open(options.source, encoding='utf-8').read()
+            result = store.save(relative, text, pack, options.base, options.message)
+        else:
+            result = store.restore(relative, options.rev, pack, options.base)
+    except SaveConflict as error:
+        print(f'conflict: {error} (the file is now {error.current_hash})', file=sys.stderr)
+        return 3
+    except SaveError as error:
+        for problem in error.problems:
+            line = f':{problem["line"]}' if problem['line'] else ''
+            print(f'{problem["severity"]:<7} {problem["path"]}{line} {_say(problem)}', file=sys.stderr)
+        print('nothing written', file=sys.stderr)
+        return 1
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 2
+    for warning in result['warnings']:
+        print(f'warning {warning if isinstance(warning, str) else warning["message"]}')
+    print(f'{relative}: saved, hash {result["hash"]}, rev {result["rev"] or "-"}, '
+          f'reload: {", ".join(result["reload"])}')
+    return 0
 
 
 def packfile_command(options) -> int:
@@ -388,6 +440,21 @@ def main(argv=None) -> int:
     validate_parser.add_argument('--cell', help='the cell pack (for a robot pack file, or a path relative to it)')
     validate_parser.add_argument('--pack', default='cell', help="for a relative path: 'cell' or robot:<name>")
     validate_parser.add_argument('--json', action='store_true')
+    save_parser = config_sub.add_parser('save', help='validate and write a file, commit it when in a git repo')
+    save_parser.add_argument('path')
+    save_parser.add_argument('--from', dest='source', required=True, metavar='FILE', help="the new text ('-': stdin)")
+    save_parser.add_argument('--base', help='the hash the text is based on (config files); needed to replace a file')
+    save_parser.add_argument('--message', '-m')
+    history_parser = config_sub.add_parser('history', help='the commits that changed a file')
+    history_parser.add_argument('path')
+    history_parser.add_argument('--limit', type=int, default=50)
+    restore_parser = config_sub.add_parser('restore', help='save a file as it was at a commit')
+    restore_parser.add_argument('path')
+    restore_parser.add_argument('rev')
+    restore_parser.add_argument('--base', help='the hash of the file now')
+    for each in (save_parser, history_parser, restore_parser):
+        each.add_argument('--cell', help='the cell pack (for a robot pack file, or a path relative to it)')
+        each.add_argument('--pack', default='cell', help="for a relative path: 'cell' or robot:<name>")
     options = parser.parse_args(argv)
     if options.command == 'smoke':
         return smoke.main(options)
@@ -396,6 +463,8 @@ def main(argv=None) -> int:
             return packfile_command(options)
         if options.action == 'schema':
             return config_schema(options.target, options.pack)
+        if options.action in ('save', 'history', 'restore'):
+            return config_write(options)
         if options.action == 'validate':
             return config_validate(options.path, options.cell, options.pack, options.json)
         if options.action == 'files':

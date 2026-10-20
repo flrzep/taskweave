@@ -14,7 +14,7 @@ taskweave runs robot tasks on ROS 2 Jazzy, driven entirely by YAML.
 | Path | Contents |
 |---|---|
 | `taskweave_interfaces/` | msgs, srvs, `RunSkill` action (CMake package) |
-| `taskweave_core/taskweave_core/` | `config/` (store, schemas, packs, overlay, catalogue, check, migrate*, slim, packfile), `planner.py`, `executive.py`, `task_handler.py`, `skill.py` (base class), `skill_server.py`, `validation.py`, `motion.py` (motion option resolution), `speed.py`, `speed_gate.py`, `smoke.py`, `teach.py`, `operator_joy.py`, `cli.py` |
+| `taskweave_core/taskweave_core/` | `config/` (store, schemas, packs, overlay, catalogue, check, save, migrate*, slim, packfile), `planner.py`, `executive.py`, `task_handler.py`, `skill.py` (base class), `skill_server.py`, `validation.py`, `motion.py` (motion option resolution), `speed.py`, `speed_gate.py`, `smoke.py`, `teach.py`, `operator_joy.py`, `cli.py` |
 | `taskweave_skills/taskweave_skills/` | the generic skills: `basic` (wait), `navigate`, `drive`, `joint_motion`, `gripper_motion`, `object_motion`; helpers `joints`, `ik`, `chain`, `cartesian`, `motion_plan`, `hold`, `points`, `tcp_jog`, `nav2` |
 | `taskweave_hmi/taskweave_hmi/` | web HMI (`server.py`, `web/*.js`): status, control, mission editor, teach, record |
 | `taskweave_bringup/` | launch files `taskweave_bringup.launch.py` (taskweave, HMI, optional Nav2/MoveIt), `taskweave_nav2.launch.py`, `taskweave_moveit.launch.py`; `taskweave_bringup/` (`nav2.py`, `moveit.py`, `hmi.py`, `robot_files.py`: the logic, testable without launching), `config/nav2_params.yaml` (default Nav2 tuning) |
@@ -253,6 +253,15 @@ and editability; a kind's id is its schema id. `ConfigStore.files()`, `file_kind
 A new config file: add a `Kind` (with a schema or a `no_schema_reason`), a `CROSS` entry if it refers to other files,
 `ENUM_HINTS` for names that depend on the pack; `test_catalogue.py` checks the table. A new schema key: optional only, and
 `json_schema` exports it with no further work.
+
+### Writing config (save, history, restore)
+Every write to a config file goes through `ConfigStore.save` / `delete` / `create` / `save_mission` / `set_robot`
+(`config/save.py`); the HMI and tools never write YAML themselves. Contract (full text in docs/configuration.md): `base`
+is the hash read, a stale or missing base for an existing file raises `SaveConflict(current_hash, current_text)`; errors
+raise `SaveError(problems)` with nothing written; one flock per pack around compare-validate-write; atomic write keeping
+owner, group and mode; robot pack files are written as keyed overrides into the cell pack (the pack is never touched);
+exactly the written path is committed when in a git work tree (failure = warning); `history`, `show`, `restore` read
+git. Any new cache of file contents must be dropped in `save._refresh`. Tests: `test_save.py` (tmp git repo above the pack).
 
 ### Write a mission
 See [docs/missions.md](docs/missions.md). Put it in `<cell>/missions/<name>.yaml`. Validate in layers:

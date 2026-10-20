@@ -157,9 +157,20 @@ def file_path(store, path: str, pack: str = 'cell') -> Path:
                 else store.root / 'robots' / pack.split(':', 1)[1] / path)
 
 
+def _sha(*parts: bytes) -> str:
+    return hashlib.sha256(b'\0'.join(parts)).hexdigest()
+
+
 def file_hash(store, path: str, pack: str = 'cell') -> str | None:
+    """sha256 of a file's bytes (None if absent). A robot pack file the cell has an override of (written by a save)
+    hashes the pack file and the override together: a change of either is a change of what is in effect."""
     target = file_path(store, path, pack)
-    return hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else None
+    if pack == 'cell':
+        return _sha(target.read_bytes()) if target.is_file() else None
+    over = store.root / 'robots' / pack.split(':', 1)[1] / path
+    if not over.is_file():
+        return hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else None
+    return _sha(target.read_bytes() if target.is_file() else b'', over.read_bytes())
 
 
 def _schema_fields(kind: Kind) -> dict:
@@ -208,6 +219,8 @@ def files(store, hashes: bool = True) -> list[dict]:
                 seen.add(path)
                 source = 'robot_pack' if pack.location.writable else 'installed'
                 found.append(_entry(kind, path, f'robot:{robot}', source, robot, target, hashes))
+                if found[-1]['hash']:
+                    found[-1]['hash'] = file_hash(store, path, f'robot:{robot}')
     return found
 
 
