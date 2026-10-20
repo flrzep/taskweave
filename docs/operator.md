@@ -92,7 +92,8 @@ with its fixtures, and the taught locations, objects and points. **Robot** frame
 A note `no robot pose` means the stack has no position of the robot: the 3D view and every drive are off until it
 has one again.
 
-The HMI has no speed control or test-mode switch yet: set them from a terminal (section 3).
+The **speed strip** in the top bar (on every tab) sets the global speed override and test mode, also while a mission
+runs (section 3).
 
 ### From the command line
 
@@ -235,7 +236,14 @@ pack's `skill_overrides.yaml` and the point's own data. At 100 % the robot moves
 
 The override belongs to the task handler and is not saved: after a restart of the task handler it is 100 % and test
 mode is off. Defaults for the start value and the cap are the handler parameters `speed_test_percent` (10) and
-`speed_cap_percent` (50). Set it from a terminal:
+`speed_cap_percent` (50).
+
+**In the HMI**: the speed strip in the top bar shows the override in effect. The presets (10, 50, 100 %), the slider
+(1 to 100 %) and − / + (5 % steps) set it; **Test mode** switches test mode on and off and shows the cap while it is
+on (the strip turns amber). When the handler clamps or refuses a value, its note shows under the strip. The strip is
+greyed out while the task handler is not reachable.
+
+**From a terminal**:
 
 ```bash
 ros2 service call /taskweave/task_handler/set_speed_override taskweave_interfaces/srv/SetSpeedOverride "{percent: 50}"
@@ -246,8 +254,8 @@ ros2 service call /taskweave/task_handler/set_speed_override taskweave_interface
 `percent: 0` means "leave unchanged". A value outside 1-100 is refused with a message. Use test mode for a first run of
 any new or changed mission, with the people and the cell in the state you want when it goes wrong.
 
-The HMI does not set the override or test mode yet; it uses the override the handler has, so what you set from the
-terminal applies to runs started from the HMI too.
+Both ways set the same value in the handler: what you set from the terminal shows in the HMI's strip, and applies to
+runs started from either.
 
 **Timeouts scale with the speed.** A step's `timeout_s` is counted in *work time*, not wall time: time passes at the
 effective override. At 10 % a step gets ten times as long; at 100 % it is exactly the stated time. Retries and
