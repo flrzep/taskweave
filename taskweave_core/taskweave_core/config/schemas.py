@@ -311,7 +311,12 @@ ROBOT_PROFILE = {
                  'additionalProperties': {'type': 'object', 'properties': {
                      'elbow': ELBOW, 'swivel': {'type': 'string', 'minLength': 1}}}},
         'motion_tuning': MOTION_TUNING,
-        'torso': {'type': 'object'},
+        # the torso as the base drives: joint (profile joints) and drive_m, the height navigate_to and drive_straight
+        # move it to first when it is further off than tolerance_m; without drive_m the torso is left alone
+        'torso': {'type': 'object', 'additionalProperties': False, 'required': ['joint'],
+                  'properties': {'joint': {'type': 'string', 'minLength': 1},
+                                 'drive_m': FINITE,
+                                 'tolerance_m': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.02}}},
         'cameras': {'type': 'object'},
         'teleop': {'type': 'object'},
     },

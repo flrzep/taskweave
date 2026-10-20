@@ -320,16 +320,29 @@ motion_tuning:                # optional, every key defaults (schemas.MOTION_TUN
 
 Skills ask for roles (`base`, `joints`, `grippers.left`, `tool_frames.left`, `ik`); only this file knows the hardware names.
 
-`ik.torso: {joint, candidates, weights: {torso}, accept_cost, line_sample_m}` is optional. With it `motion: {torso: auto}` searches the
+`ik.torso: {joint, candidates, weights: {torso, wrist}, wrist_joints, accept_cost, line_sample_m}` is optional. With it `motion: {torso: auto}` searches the
 torso height: the current height is tried first and wins at once when it is feasible and its arm cost is at most
 `accept_cost` (default: any), so the usual case costs one IK solve and check per sample. Otherwise the candidates are
 tried outward from it (local IK only, no global search) until the torso cost alone passes the best total. Each is tried
 with all hands at that one height, the arms are solved by IK, and the full state (the idle arm as it is now) is checked for collisions with `/check_state_validity`. The least
-cost wins: the `ik.choose` arm cost plus `weights.torso` per metre of torso travel; ties go to the smaller move, then
-the lower height. A straight line (`mode: linear`) is sampled at its ends and every `line_sample_m` between, and the one height
+cost wins: the `ik.choose` arm cost plus `weights.torso` per metre of torso travel plus `weights.wrist` per radian of
+wrist bend (default 0 = off); ties go to the smaller move, then the lower height. The bend is the mean distance from
+mid-range of `wrist_joints` (names with `{tool}`, e.g. `['{tool}_joint6']`) over the hands of the first sample; a joint
+without limits counts from 0. It is reported as `wrist_bend` (rad). A weight needs `wrist_joints`. Use it where both
+hands are locked to an object and the wrist angle at the goal decides the height: `move_object` takes
+`motion: {torso: auto}` too, then both holding hands are solved at one height, set before the move, and the held
+object goes up or down with the torso. A straight line (`mode: linear`) is sampled at its ends and every `line_sample_m` between, and the one height
 that holds for all samples is set before the line. The step result lists `data.torso` (per leg: the chosen `height`
 and every `rejected` height with its reason). Without `ik.torso`, `auto` keeps the skill's `torso_fallback` list
 (the first height that solves) and linear moves keep the lift.
+
+`torso: {joint, drive_m, tolerance_m}` is optional and separate from `ik.torso` (it is the height for driving, not a
+search). With `drive_m`, `navigate_to` and `drive_straight` (and the Nav2 `navigate_to`) first move the torso `joint`
+to it, as a `move_joints` step (planner, speed override), when it is further off than `tolerance_m` (default 0.02),
+and only then drive. A hand that holds something keeps the torso where it is (the object would go with it and the
+carry height was chosen on purpose): the drive goes on and the result says `skipped`. The result lists
+`data.torso_drive` (`from_m`, `to_m`, `moved`, `skipped`). Without `drive_m` the torso is never touched. Skill servers
+read the key at start (restart after adding `torso`); the value itself is read at every drive.
 
 `arms.<tool>.elbow` names the links at an IK arm's shoulder, elbow and wrist centres: the elbow side (`ik.choose.elbow`,
 a point's `elbow`), straight lines and elbow swings use it. An arm without it has no elbow control (an elbow side is

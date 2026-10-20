@@ -3,11 +3,16 @@
 A direct controller without obstacle avoidance; taskweave_skills.nav2 serves the same skill through Nav2 and uses
 this controller for the final approach.
 Robot roles used: ``base.type``, ``base.cmd_vel``, ``base.odom`` (pose in the cell frame), ``base.limits``.
+With the profile's ``torso: {joint, drive_m, tolerance_m}`` the torso goes to ``drive_m`` before the base moves (a
+move_joints step: planner, speed override, joint limits), unless it is within ``tolerance_m`` of it or a hand holds
+something (the carry height stays; the result says so). The result's ``data.torso_drive`` reports it; drive_straight
+and the Nav2 implementation do the same. Without ``drive_m`` the torso is never touched.
 Parameters (``skills/navigate_to.yaml``; values below are defaults, each capped by the robot's base limits):
 """
 
 from __future__ import annotations
 
+import functools
 import math
 import threading
 import time
@@ -18,9 +23,12 @@ from nav_msgs.msg import Odometry
 
 from taskweave_core.config import Pose2D, wrap_angle
 from taskweave_core.config.limits import base_limits, capped_by
+from taskweave_core.config.schemas import ROBOT_PROFILE, default
+from taskweave_core.executive import Outcome
 from taskweave_core.skill import Skill, SkillResult
 
 MIN_DT_S = 1e-3           # s, floor of a control step (first tick, coarse clock): keeps the accel limits finite
+TORSO_TOLERANCE_M = default(ROBOT_PROFILE, 'torso', 'tolerance_m')   # torso.tolerance_m default
 REVERSE_HYSTERESIS = 0.3  # rad, differential base: once reversing, keep reversing until the target is this much
                           # further in front than straight across
 
@@ -123,6 +131,23 @@ def command(pose: Pose2D, target: Pose2D, base_type: str, p: Params, previous: t
             _limit(wz, previous[2], p.max_angular, p.angular_accel * dt))
 
 
+def _with_drive_height(execute):
+    """``execute`` of a skill that drives the base, preceded by the move of the torso to the profile's torso.drive_m
+    and followed by its report in ``data.torso_drive``. A torso move that fails ends the step before the base moves."""
+    @functools.wraps(execute)
+    def wrapper(self, ctx, args):
+        if self.base['type'] == 'fixed':
+            return execute(self, ctx, args)
+        drive, failure = self._drive_height(ctx)
+        if failure is not None:
+            return failure
+        result = execute(self, ctx, args)
+        if drive and hasattr(result, 'data'):
+            result.data['torso_drive'] = drive
+        return result
+    return wrapper
+
+
 class NavigateTo(Skill):
     name = 'navigate_to'
     description = ('Drive the robot base to a named location or stance and stop there, '
@@ -143,6 +168,11 @@ class NavigateTo(Skill):
     achieves = ['robot base at the target pose']
     default_timeout_s = 120.0
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if 'execute' in cls.__dict__:
+            cls.execute = _with_drive_height(cls.__dict__['execute'])
+
     def configure(self, params):
         super().configure(params)
         self.base = self.robot.base
@@ -158,6 +188,40 @@ class NavigateTo(Skill):
         self.lock = threading.Lock()
         self.cmd = node.create_publisher(Twist, self.base['cmd_vel'], 10)
         node.create_subscription(Odometry, self.base['odom'], self._odom, 10)
+        self._lift = None   # the torso's move to torso.drive_m: a move_joints of its own, for robots with that key
+        if (robot.data.get('torso') or {}).get('joint') and robot.data.get('joints'):
+            from .joint_motion import MoveJoints
+            implementation, _ = config.select_implementation('move_joints', robot.name)
+            self._lift = MoveJoints()
+            self._lift.setup(node, config, robot, config.skill_params('move_joints', implementation))
+
+    def _drive_height(self, ctx):
+        """Move the torso to the profile's torso.drive_m: (what to report in the result or None, a failure result or
+        None). Nothing without drive_m; not while a hand holds something (the object would go with the torso)."""
+        spec = self.config.robot(self.robot.name).data.get('torso') or {}
+        target = spec.get('drive_m')
+        if target is None:
+            return None, None
+        if self._lift is None:
+            return None, SkillResult.failed('torso.drive_m is set, but this skill server started without it: '
+                                             'restart it')
+        joint, target = spec['joint'], float(target)
+        here = self._lift.joints.current([joint], self._lift.p.state_timeout_s)
+        if here is None:
+            return None, SkillResult.failed(f'no joint states on {self._lift.joints.state_topic} (torso {joint})')
+        drive = {'joint': joint, 'from_m': round(here[joint], 4), 'to_m': target, 'moved': False}
+        holding = self._lift.hold.hand_holds
+        if holding:
+            drive['skipped'] = f'{", ".join(sorted(set(holding.values())))} held: the torso stays at its carry height'
+            return drive, None
+        if abs(here[joint] - target) <= float(spec.get('tolerance_m', TORSO_TOLERANCE_M)):
+            return drive, None
+        ctx.feedback(0.0, f'torso to the drive height {target:g}')
+        result = self._lift.execute(ctx, {'joints': {joint: target}})
+        if result.outcome != Outcome.SUCCEEDED:
+            return None, replace(result, message=f'torso to the drive height {target:g}: {result.message}')
+        drive['moved'] = True
+        return drive, None
 
     def _odom(self, msg: Odometry) -> None:
         q = msg.pose.pose.orientation
@@ -190,6 +254,8 @@ class NavigateTo(Skill):
         if self._current() is None:
             return SkillResult.failed(f'no odometry on {self.base["odom"]}')
         return self._drive(ctx, target, args['target'])
+
+    execute = _with_drive_height(execute)
 
     def _drive(self, ctx, target: Pose2D, label: str) -> SkillResult:
         """Direct controller loop to ``target`` (cell frame) until settled, stuck, lost or interrupted. The velocity

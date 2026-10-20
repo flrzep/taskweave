@@ -49,7 +49,8 @@ ik:                         # tool targets in poses.yaml: solved by MoveIt (ros/
     joint: body_joint         # both hands solved at one height, full state collision checked (idle arm too)
     candidates: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75]   # coarse grid over the lift range
     accept_cost: 1.5          # the current height wins at once when feasible and its arm cost is at most this
-    weights: {torso: 1.0}     # cost per m of torso travel, next to the ik.choose arm cost
+    weights: {torso: 1.0, wrist: 1.0}   # cost per m of torso travel and per rad of wrist bend, next to the ik.choose arm cost
+    wrist_joints: ['{tool}_joint6']     # the bending wrist joint (5 and 7 roll); its bend is the distance from mid-range (0)
     line_sample_m: 0.3        # a straight line is checked at its ends, and every 30 cm between for the height
   mirror: {right: left}       # the S1's right arm mirrors the left with the same joint values (URDF FK, 13 Oct)
   choose:                     # best of several solutions (taskweave_skills/ik.py), not the first
@@ -75,6 +76,10 @@ motion_tuning:              # how the arm motion code steps (taskweave schemas.M
           probe_rad: 0.01, progress_rad: 0.0001, limit_edge_parts: 5}
   continuation: {max_m: 0.25, max_deg: 45.0, elbow_deg: 90.0, jump_deg: 120.0}   # short moves: no wrist flips
   plan: {tries: 3, deeper_m: 0.005, unknown_depth_m: 0.3}
+torso:                      # the lift as the base drives (navigate_to, drive_straight move it here first)
+  joint: body_joint
+  drive_m: 0.494            # the height of the old home pose; a hold keeps the carry height instead
+  tolerance_m: 0.02
 cameras:
   head: {color: /head_camera/color/image_raw, depth: /head_camera/aligned_depth_to_color/image_raw, info: /head_camera/color/camera_info, frame: head_camera_optical_frame}
   left_wrist: {color: /left_wrist_camera/color/image_raw, depth: /left_wrist_camera/aligned_depth_to_color/image_raw, info: /left_wrist_camera/color/camera_info, frame: left_wrist_camera_optical_frame}

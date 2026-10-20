@@ -416,6 +416,7 @@ All optional (Motion (advanced)). Defaults are those of the skill yaml, the robo
 | `accel` | number | no | `1` | fraction | Fraction of the standard acceleration. (above 0; max 1) |
 | `planner` | one of `auto`, `direct`, `planned` | no | `auto` | - | auto: straight joint move if free, else elbow swing first, else planner. direct: straight joint move only. planned: always the planner. |
 | `tolerance` | number | no | - | - | End accuracy: m for hand skills, rad or m for joints. (above 0) |
+| `torso` | one of `keep`, `auto` | no | `keep` | - | auto: choose the torso height (robot profile ik.torso: the least torso and arm motion that is reachable and collision free, both hands at one height; else the first of the configured heights that is reachable). keep: never move the torso. |
 
 #### `motion.speed_abs` options
 
