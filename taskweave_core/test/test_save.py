@@ -515,3 +515,41 @@ def test_a_cross_file_error_the_pack_had_does_not_block_a_valid_save(store):
     store.reload()
     store.save(LOCATIONS, text(store) + '# note\n', base=store.file_hash(LOCATIONS))
     store.save('missions/ok.yaml', 'goal: g\nsteps:\n  - instruction: w\n    skill: wait\n')
+
+
+# ---- P4 review: the file is hashed again right before the write ----------------------------------------------------
+def test_a_change_during_validation_is_a_conflict(store, monkeypatch):
+    from taskweave_core.config import save as save_module
+
+    real = save_module._validate
+    other = text(store) + '# by an ssh editor\n'
+
+    def slow(*args, **kwargs):
+        result = real(*args, **kwargs)
+        (store.root / LOCATIONS).write_text(other)     # nobody holds the flock
+        return result
+
+    monkeypatch.setattr(save_module, '_validate', slow)
+    base = store.file_hash(LOCATIONS)
+    with pytest.raises(SaveConflict) as error:
+        store.save(LOCATIONS, text(store).replace('x: 1.5', 'x: 2.5'), base=base)
+    assert text(store) == other and error.value.current_text == other
+
+
+def test_a_change_during_the_delete_check_is_a_conflict(store, monkeypatch):
+    from taskweave_core.config import check
+
+    made = store.save('objects/shelf.yaml', 'name: shelf\n')
+    real = check.check_pack
+    calls = []
+
+    def slow(s):
+        calls.append(1)
+        if len(calls) == 1:
+            (s.root / 'objects/shelf.yaml').write_text('name: shelf\n# changed\n')
+        return real(s)
+
+    monkeypatch.setattr(check, 'check_pack', slow)
+    with pytest.raises(SaveConflict):
+        store.delete('objects/shelf.yaml', base=made['hash'])
+    assert (store.root / 'objects/shelf.yaml').is_file()

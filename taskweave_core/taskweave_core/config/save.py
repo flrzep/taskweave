@@ -318,6 +318,13 @@ def _check_base(store, path: str, pack: str, base: str | None, what: str) -> str
     return current
 
 
+def _still(store, path: str, pack: str, current: str | None) -> None:
+    """Hash again right before the write: an editor that does not take the lock may have changed the file meanwhile."""
+    now = store.file_hash(path, pack)
+    if now != current:
+        raise SaveConflict(now, _current_text(store, path, pack))
+
+
 def save(store, path: str, content, pack: str = 'cell', base: str | None = None, message: str | None = None,
          author: str | None = None) -> dict:
     """Write ``content`` (YAML text, as given; or data, merged into the loaded file keeping its comments and order:
@@ -332,10 +339,11 @@ def save(store, path: str, content, pack: str = 'cell', base: str | None = None,
     target = _target(store.root, path, pack)
     kind = _kind(path, pack)
     with pack_lock(store.root):
-        _check_base(store, path, pack, base, 'a save')
+        current = _check_base(store, path, pack, base, 'a save')
         text = _new_text(store, path, pack, content)
         warnings = _validate(store, path, pack, content, target, text, kind)
         file = store.root / target
+        _still(store, path, pack, current)
         if not (file.is_file() and file.read_bytes() == text.encode('utf-8')):
             _write(file, text.encode('utf-8'))
         _refresh(store)
@@ -380,8 +388,9 @@ def delete(store, path: str, pack: str = 'cell', base: str | None = None, messag
         if not file.is_file():
             raise SaveError([_problem(path, pack, 'there is no such file to delete' if pack == 'cell' else
                                       'no cell override of this robot pack file: nothing to delete')])
-        _check_base(store, path, pack, base, 'a delete')
+        current = _check_base(store, path, pack, base, 'a delete')
         before = {_problem_key(p) for p in check.check_pack(store)}
+        _still(store, path, pack, current)
         file.unlink()
         _refresh(store)
         warnings = [p for p in check.check_pack(store) if _problem_key(p) not in before]
