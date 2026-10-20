@@ -1,11 +1,12 @@
 'use strict';
-// taskweave HMI, Teach tab: arm positions (robot poses and points on objects, one list, one editor) and the live
-// joints. A position that is open receives the pad's teach press (L1 + L3); Capture does the same from here.
-// Uses helpers and state from app.js ($, el, api, message, show, state, DEG, NAME_RE, fillSelect) and robot.js
-// (jointGroup).
+// taskweave HMI, Teach tab: Poses (relative to the robot, poses.yaml) and Points (on objects, objects/<type>.yaml),
+// one editor for both (the server's arm positions, arm.py). A pose or point that is open receives the pad's teach
+// press (L1 + L3); Capture does the same from here.
+// Uses helpers and state from app.js ($, el, api, message, show, state, DEG, NAME_RE, fillSelect).
 
 const ROBOT_SCOPE = 'robot';
-const teach = { data: null, open: null, joints: null, jointInputs: {} };
+const teach = { data: null, open: null };
+const OPEN_ITEMS = '#pose-list li.point.pad-target, #point-list li.point.pad-target';
 
 const keyOf = (p) => `${p.scope}/${p.name}`;
 const isLinear = (joint) => (teach.data?.linear_joints || []).includes(joint);
@@ -16,10 +17,9 @@ const failText = (data, fallback) => (data.problems || [data.error || fallback])
 
 async function loadArm() {
   const { ok, data } = await api('GET', '/api/teach/arm');
-  if (!ok) { $('arm-list').replaceChildren(el('li', { class: 'error', text: failText(data, 'arm positions unavailable') })); return; }
+  if (!ok) { $('pose-list').replaceChildren(el('li', { class: 'error', text: failText(data, 'poses and points unavailable') })); return; }
   teach.data = data;
   renderArm();
-  loadJoints(true);
 }
 
 // Where the pad's teach press goes: the open position (or none).
@@ -29,20 +29,23 @@ function setTeachTarget(target) {
   message($('arm-target'), text);
 }
 
+const empty = (text) => el('li', { class: 'muted small-text empty', text });
+
 function renderArm() {
   const data = teach.data;
-  const groups = [[ROBOT_SCOPE, 'Relative to the robot', 'Poses in the robot\'s own frame: the same wherever it stands.'],
-    ...data.object_types.map((type) => [type, `On ${type}`, `Points in the ${type}'s frame: every ${type} follows. Taught and tested at the placed one chosen here.`])];
-  const nodes = [];
-  groups.forEach(([scope, title, note]) => {
-    const positions = data.positions.filter((p) => p.scope === scope);
-    if (scope !== ROBOT_SCOPE && !positions.length && !(data.placed[scope] || []).length) return;
-    const head = el('div', { class: 'row between wrap' }, el('div', { class: 'sub', text: title }));
-    if (scope !== ROBOT_SCOPE) head.append(atPicker(scope));
-    nodes.push(el('li', { class: 'arm-group' }, head, el('p', { class: 'muted small-text', text: note }),
-      el('ul', { class: 'points' }, positions.map((p) => positionItem(p)))));
-  });
-  $('arm-list').replaceChildren(...nodes);
+  const poses = data.positions.filter((p) => p.scope === ROBOT_SCOPE);
+  $('pose-list').replaceChildren(...(poses.length ? poses.map((p) => positionItem(p))
+    : [empty('No poses yet: put the arms where they should be, then + Pose.')]));
+  const groups = data.object_types.filter((type) => data.positions.some((p) => p.scope === type) || (data.placed[type] || []).length);
+  $('point-list').replaceChildren(...(groups.length ? groups.map((type) => {
+    const points = data.positions.filter((p) => p.scope === type);
+    const head = el('div', { class: 'row between wrap' }, el('div', { class: 'sub', text: `On ${type}` }), atPicker(type));
+    return el('li', { class: 'arm-group' }, head,
+      el('ul', { class: 'points' }, points.length ? points.map((p) => positionItem(p))
+        : [empty(`No points on ${type} yet: put the gripper on one, then + Point.`)]));
+  }) : [empty(data.object_types.length
+    ? 'No placed objects yet: place one in cell/objects.yaml to teach points on it.'
+    : 'No object types yet: add config/objects/<type>.yaml, place one in cell/objects.yaml, then teach points on it.')]));
   if (typeof renderHeld === 'function') renderHeld();  // held.js
   if (teach.open && !data.positions.some((p) => keyOf(p) === teach.open)) { teach.open = null; setTeachTarget(null); }
 }
@@ -81,7 +84,7 @@ function numberInput(label, value, attrs = {}) {
   return [el('div', { class: 'field' }, el('label', { text: label }), input), input];
 }
 
-// One arm position: capture / test, numbers, advanced settings, rename, delete.
+// One pose or point: capture / test, numbers, advanced settings, rename, delete.
 function positionItem(p) {
   const data = teach.data;
   const robotScope = p.scope === ROBOT_SCOPE;
@@ -224,7 +227,7 @@ function positionItem(p) {
   };
   head.addEventListener('click', () => {
     const opening = edit.hidden;
-    document.querySelectorAll('#arm-list li.point.pad-target').forEach((other) => { if (other !== item) other._open(false); });
+    document.querySelectorAll(OPEN_ITEMS).forEach((other) => { if (other !== item) other._open(false); });
     open(opening);
     teach.open = opening ? keyOf(p) : null;
     setTeachTarget(opening ? { scope: p.scope, name: p.name, at: at() } : null);
@@ -234,32 +237,38 @@ function positionItem(p) {
   return item;
 }
 
-// New position: name, relative to what, stored as hands or joints; made by capturing the robot (button or pad).
-$('btn-add-arm').addEventListener('click', () => {
+// New pose (relative to the robot: hands or joints) or point (on an object type); made by capturing the robot (button
+// or pad).
+function newPosition(kind) {
   if (!teach.data || $('arm-new')) return;
-  const name = el('input', { autocomplete: 'off', spellcheck: 'false', placeholder: 'e.g. pre_grasp' });
-  const scope = el('select', { 'aria-label': 'Relative to' });
-  scope.replaceChildren(el('option', { value: ROBOT_SCOPE, text: 'the robot' }),
-    ...teach.data.object_types.map((t) => el('option', { value: t, text: `${t} (a point on it)` })));
+  const isPose = kind === 'pose';
+  const list = $(isPose ? 'pose-list' : 'point-list');
+  if (!isPose && !teach.data.object_types.length) return;
+  const name = el('input', { autocomplete: 'off', spellcheck: 'false', placeholder: isPose ? 'e.g. look_down' : 'e.g. grasp_top' });
+  const scope = el('select', { 'aria-label': 'On object type' });
+  scope.replaceChildren(...(isPose ? [el('option', { value: ROBOT_SCOPE, text: 'the robot' })]
+    : teach.data.object_types.map((t) => el('option', { value: t, text: t }))));
+  const scopeField = el('div', { class: 'field' }, el('label', { text: 'On' }), scope);
+  scopeField.hidden = isPose;
   const form = el('select', { 'aria-label': 'Stored as' });
   form.replaceChildren(...(teach.data.tools.length ? [el('option', { value: 'hands', text: 'hand positions (IK)' })] : []),
     el('option', { value: 'joints', text: 'joint angles' }));
   const formField = el('div', { class: 'field' }, el('label', { text: 'Stored as' }), form);
+  formField.hidden = !isPose;
   const msg = el('div', { class: 'msg', hidden: '' });
   const capture = el('button', { class: 'btn primary', text: 'Capture from robot', 'data-edit': '' });
   const cancel = el('button', { class: 'btn', text: 'Cancel' });
-  const target = () => ({ scope: scope.value, name: name.value.trim(), at: scope.value === ROBOT_SCOPE ? null : teach.at[scope.value] || null,
-    form: scope.value === ROBOT_SCOPE ? form.value : null });
+  const target = () => ({ scope: scope.value, name: name.value.trim(), at: isPose ? null : teach.at[scope.value] || null,
+    form: isPose ? form.value : null });
   const update = () => {
-    formField.hidden = scope.value !== ROBOT_SCOPE;
     const t = target();
     setTeachTarget(NAME_RE.test(t.name) ? t : null);
   };
   [name, scope, form].forEach((input) => input.addEventListener('input', update));
   const box = el('div', { class: 'point-edit', id: 'arm-new' },
-    el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { text: 'Name' }), name),
-      el('div', { class: 'field' }, el('label', { text: 'Relative to' }), scope), formField),
-    el('p', { class: 'muted small-text', text: 'Put the arm where it should go (pad), then capture here or press L1 + L3.' }),
+    el('div', { class: 'grid2' }, el('div', { class: 'field' }, el('label', { text: 'Name' }), name), scopeField, formField),
+    el('p', { class: 'muted small-text', text: isPose ? 'Put the arms where they should be (pad), then capture here or press L1 + L3.'
+      : 'Put the gripper on the object (pad), then capture here or press L1 + L3.' }),
     msg, el('div', { class: 'row gap' }, cancel, capture));
   cancel.addEventListener('click', () => { box.remove(); setTeachTarget(null); });
   capture.addEventListener('click', async () => {
@@ -274,79 +283,16 @@ $('btn-add-arm').addEventListener('click', () => {
     teach.open = keyOf(t);
     await loadArm();
   });
-  $('arm-list').before(box);
+  list.before(box);
   if (teach.open) {
-    document.querySelectorAll('#arm-list li.point.pad-target').forEach((other) => other._open(false));
+    document.querySelectorAll(OPEN_ITEMS).forEach((other) => other._open(false));
     teach.open = null;
   }
   update();
   name.focus();
-});
+}
+$('btn-add-pose').addEventListener('click', () => newPosition('pose'));
+$('btn-add-point').addEventListener('click', () => newPosition('point'));
 
 // A pad teach press saved a position: show the new numbers.
 function teachTaught() { if (pointsVisible) loadArm(); }
-
-// ---------- live joints: watch every joint against its limits, set one directly ----------
-const JOINT_SKIP = /wheel|passive|active|^base_/;
-
-async function loadJoints(rebuild = false) {
-  if (!teach.data) return;
-  const { ok, data } = await api('GET', '/api/robot/joints');
-  if (!ok) { message($('joints-msg'), data.error || 'no joint states', true); return; }
-  message($('joints-msg'), '');
-  teach.joints = data;
-  const limits = teach.data.joint_limits;
-  const names = Object.keys(data).filter((j) => !JOINT_SKIP.test(j) && limits[j]);
-  if (rebuild || names.some((j) => !teach.jointInputs[j])) buildJoints(names);
-  names.forEach((joint) => {
-    const row = teach.jointInputs[joint];
-    const value = data[joint];
-    const [lower, upper] = limits[joint];
-    row.now.textContent = `${showJoint(joint, value)}`;
-    if (lower !== null && upper !== null) {
-      const share = (value - lower) / (upper - lower);
-      row.bar.style.setProperty('--at', `${Math.min(Math.max(share, 0), 1) * 100}%`);
-      const room = Math.min(value - lower, upper - value);
-      row.row.classList.toggle('near-limit', room < (isLinear(joint) ? 0.02 : 10 / DEG));
-    }
-  });
-}
-
-function buildJoints(names) {
-  const limits = teach.data.joint_limits;
-  const groups = {};
-  names.forEach((joint) => { (groups[jointGroup(joint)] ||= []).push(joint); });
-  teach.jointInputs = {};
-  $('joint-list').replaceChildren(...Object.entries(groups).map(([group, members]) => el('details', { class: 'joint-live' },
-    el('summary', { text: group }),
-    ...members.map((joint) => {
-      const [lower, upper] = limits[joint];
-      const range = {};  // a bound may be missing (null: unbounded)
-      if (lower !== null) range.min = showJoint(joint, lower);
-      if (upper !== null) range.max = showJoint(joint, upper);
-      const input = el('input', { type: 'number', step: isLinear(joint) ? '0.01' : '1', inputmode: 'decimal', 'aria-label': `${joint} target`, ...range });
-      input.value = showJoint(joint, teach.joints[joint]);
-      const now = el('span', { class: 'mono' });
-      const bar = el('span', { class: 'limit-bar', title: `${range.min ?? '–∞'} to ${range.max ?? '∞'} ${jointUnit(joint)}` });
-      const send = async (value) => {
-        input.value = value;
-        const { ok, data } = await api('PUT', '/api/robot/joints', { joints: { [joint]: unshowJoint(joint, Number(value)) } });
-        message($('joints-msg'), ok ? '' : failText(data, 'not sent'), !ok);
-        setTimeout(() => loadJoints(), 600);
-      };
-      const nudge = (delta) => el('button', { class: 'btn small', text: delta > 0 ? '+' : '−', 'data-edit': '' });
-      const minus = nudge(-1);
-      const plus = nudge(1);
-      const stepOf = () => (isLinear(joint) ? 0.01 : 5);
-      minus.addEventListener('click', () => send(+(Number(input.value) - stepOf()).toFixed(4)));
-      plus.addEventListener('click', () => send(+(Number(input.value) + stepOf()).toFixed(4)));
-      input.addEventListener('change', () => send(input.value));
-      const row = el('div', { class: 'joint-row' },
-        el('span', { class: 'joint-name', text: `${joint.startsWith(`${group}_`) ? joint.slice(group.length + 1) : joint} ${jointUnit(joint)}` }),
-        bar, now, minus, input, plus);
-      teach.jointInputs[joint] = { input, now, bar, row };
-      return row;
-    }))));
-  setPointsBusy(pointsBusy);
-}
-setInterval(() => { if (pointsVisible && !document.hidden && teach.data) loadJoints(); }, 1000);

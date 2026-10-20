@@ -26,8 +26,8 @@
 <nav class="tabs" role="tablist">
   <button role="tab" data-view="run" aria-selected="true">Run</button>
   <button role="tab" data-view="missions" aria-selected="false">Missions</button>
-  <button role="tab" data-view="points" aria-selected="false">Teach</button>
   <button role="tab" data-view="robot" aria-selected="false">Robot</button>
+  <button role="tab" data-view="points" aria-selected="false">Teach</button>
   <button role="tab" data-view="record" aria-selected="false" hidden>Record</button>
   <button role="tab" data-view="log" aria-selected="false">Log</button>
 </nav>
@@ -117,24 +117,74 @@
   <!-- POINTS -->
   <section id="view-points" class="view" hidden>
     <div id="points-busy" class="error" hidden></div>
+    <div class="teach-head">
+      <span class="muted small-text">Robot now</span>
+      <div id="teach-pose" class="mono">–</div>
+      <div id="arm-target" class="msg" hidden></div>
+    </div>
+    <div id="teach-panes" class="segmented teach-panes" role="tablist" aria-label="What to teach">
+      <button role="tab" data-pane="locations">Locations</button>
+      <button role="tab" data-pane="stances">Stances</button>
+      <button role="tab" data-pane="poses">Poses</button>
+      <button role="tab" data-pane="points">Points</button>
+      <button role="tab" data-pane="carry">Carry poses</button>
+    </div>
+    <div class="teach-pane" data-pane="locations">
+      <div class="card">
+        <div class="row between"><div class="label">Locations</div><button id="btn-add-location" class="btn small">+ Location</button></div>
+        <p class="muted small-text">Where the robot drives to: base poses in the cell frame. Drive there, then + Location
+          (or the pad) saves where it stands · <span id="locations-file" class="mono"></span></p>
+        <ul id="location-list" class="points"></ul>
+      </div>
+    </div>
+    <div class="teach-pane" data-pane="stances">
+      <p class="muted small-text">Where the robot stands to work at an object, relative to the object: every placed object of
+        a type follows. Placed objects come from the cell layout (cell/objects.yaml) and are read-only here.</p>
+      <div id="stance-cards" class="stack"></div>
+    </div>
+    <div class="teach-pane" data-pane="poses">
+      <div class="card">
+        <div class="row between"><div class="label">Poses</div><button id="btn-add-pose" class="btn small" data-edit>+ Pose</button></div>
+        <p class="muted small-text">Where the robot holds its arms, torso and head, relative to itself: the same wherever it
+          stands (missions: <span class="mono">pose:</span>). Open one, put the arm there with the pad and press L1 + L3, or
+          Capture. Saved at once, used from the next move.</p>
+        <ul id="pose-list" class="points"></ul>
+      </div>
+    </div>
+    <div class="teach-pane" data-pane="points">
+      <div class="card">
+        <div class="row between"><div class="label">Points</div><button id="btn-add-point" class="btn small" data-edit>+ Point</button></div>
+        <p class="muted small-text">Where the gripper goes on an object (a grasp, a place), relative to the object: every
+          placed object of the type follows (missions: <span class="mono">point:</span>). Taught and tested at the placed
+          one chosen per type.</p>
+        <ul id="point-list" class="arm-groups"></ul>
+      </div>
+    </div>
+    <div class="teach-pane" data-pane="carry">
+      <div class="card">
+        <div class="label">Carry poses</div>
+        <p class="muted small-text">Where the robot carries an object it holds (move_object <span class="mono">pose:</span>):
+          some joints first (e.g. the body), then the object along straight lines through the waypoints, in the robot's
+          base frame. Typed in here; Test needs the robot holding one.</p>
+        <ul id="held-list" class="arm-groups"></ul>
+      </div>
+    </div>
+    <p class="muted small-text">Saved points are used at the next mission start. A point a mission refers to cannot be
+      renamed or deleted.</p>
+  </section>
+
+  <!-- ROBOT -->
+  <section id="view-robot" class="view" hidden>
+    <div id="robot-busy" class="error" hidden></div>
     <div class="card">
-      <div class="row between"><div class="label">Robot pose</div><span id="pose-age" class="muted mono"></span></div>
+      <div class="label">Robot pose</div>
       <div id="robot-pose" class="mono">–</div>
     </div>
-    <div class="card">
-      <div class="row between"><div class="label">Arm positions</div><button id="btn-add-arm" class="btn small" data-edit>+ Position</button></div>
-      <p class="muted small-text">Everywhere the arms are taught to go: poses relative to the robot and points on objects
-        (grasps). Open one, put the arm there with the pad and press L1 + L3, or Capture. Saved at once, used from the
-        next move.</p>
-      <div id="arm-target" class="msg" hidden></div>
-      <ul id="arm-list" class="arm-groups"></ul>
-    </div>
-    <div class="card">
-      <div class="label">Held poses</div>
-      <p class="muted small-text">Where move_object takes an object the robot holds: some joints first (e.g. the body),
-        then the object along straight lines through the waypoints, in the robot's base frame. Typed in here; Test
-        needs the robot holding one.</p>
-      <ul id="held-list" class="arm-groups"></ul>
+    <div id="gripper-card" class="card" hidden>
+      <div class="label">Grippers</div>
+      <p class="muted small-text">Finger opening now, from the robot profile's opening table. Open and Close move at once.</p>
+      <div id="gripper-msg" class="msg" hidden></div>
+      <div id="gripper-list"></div>
     </div>
     <div class="card">
       <div class="label">Joints</div>
@@ -143,21 +193,9 @@
       <div id="joints-msg" class="msg" hidden></div>
       <div id="joint-list"></div>
     </div>
-    <div class="card">
-      <div class="row between"><div class="label">Locations</div><button id="btn-add-location" class="btn small">+ Location</button></div>
-      <p class="muted small-text">Base poses in the cell frame · <span id="locations-file" class="mono"></span></p>
-      <ul id="location-list" class="points"></ul>
-    </div>
-    <div id="stance-cards" class="stack"></div>
-    <p class="muted small-text">Saved points are used at the next mission start. A point a mission refers to cannot be
-      renamed or deleted. Placed objects come from the cell layout and are read-only here.</p>
-  </section>
-
-  <!-- ROBOT -->
-  <section id="view-robot" class="view" hidden>
-    <div id="robot-busy" class="error" hidden></div>
-    <div class="card">
-      <div class="label">Navigation</div>
+    <div class="sub settings-head">Settings</div>
+    <details class="card">
+      <summary class="label">Navigation</summary>
       <div class="sub">Clearance</div>
       <p class="muted small-text">Room the path planner keeps around the robot while driving: the envelope covers the robot in
         its driving pose (arms included), measured from the base frame. Saved to <span id="nav-file" class="mono"></span>
@@ -185,11 +223,11 @@
       </div>
       <div id="nav-msg" class="msg" hidden></div>
       <div class="row gap"><button id="btn-nav-save" class="btn primary" data-edit>Save and apply</button></div>
-    </div>
-    <div id="ik-card" class="card" hidden>
-      <div class="label">Arm solutions</div>
+    </details>
+    <details id="ik-card" class="card" hidden>
+      <summary class="label">Arm solutions</summary>
       <p class="muted small-text">An arm can usually reach a target in several ways. The robot prefers this elbow side, as
-        seen from the robot (out = away from the body; the right arm is mirrored). An arm position can set its own in the
+        seen from the robot (out = away from the body; the right arm is mirrored). A pose or point can set its own in the
         Teach tab. Saved to <span id="ik-file" class="mono"></span>, used from the next arm move.</p>
       <div id="ik-elbow" class="segmented choice" role="group" aria-label="Preferred elbow side"></div>
       <details>
@@ -206,7 +244,7 @@
       </details>
       <div id="ik-msg" class="msg" hidden></div>
       <div class="row gap"><button id="btn-ik-save" class="btn primary" data-edit>Save</button></div>
-    </div>
+    </details>
   </section>
 
   <!-- LOG -->

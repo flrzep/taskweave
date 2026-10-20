@@ -16,7 +16,7 @@ from collections.abc import Iterable, Mapping
 from jsonschema import Draft202012Validator
 
 from taskweave_core.config import ConfigError, ConfigStore, schemas
-from taskweave_core.config.limits import joint_limits, joint_problems, pose_problems
+from taskweave_core.config.limits import joint_limits, joint_problems, mimic_joints, pose_problems
 
 HMI_NOTE = 'edited in the HMI'
 POSE_KINDS = ('joint_pose', 'joint_pose_only', 'tool_pose')    # x-taskweave-point kinds that name a pose of poses.yaml
@@ -73,6 +73,7 @@ def overview(store: ConfigStore, robot: str, args: set[tuple[str, str]]) -> dict
     profile = store.robot(robot)
     joints = profile.data.get('joints', {})
     used = pose_usage(store, args)
+    mimics = mimic_joints(store, robot)
     return {
         'robot': robot,
         'files': {name: store.display_path(store.robot_save_path(robot, f'{name}.yaml'))  # where edits go
@@ -81,9 +82,11 @@ def overview(store: ConfigStore, robot: str, args: set[tuple[str, str]]) -> dict
         'poses': [{'name': name, **store.named_pose(robot, name), 'used_by': used.get(name, []),
                    'problems': pose_problems(store, robot, name)}    # e.g. copied from another robot
                   for name in store.joint_poses(robot)],     # joints set directly, tools solved by IK
-        # joint -> [lower, upper] (rad or m; null = unbounded) for the editor's input ranges and checks
+        # joint -> [lower, upper] (rad or m; null = unbounded) for the editor's input ranges and checks; mimic joints
+        # (they follow another joint) left out: they cannot be set
         'joint_limits': {joint: [None if math.isinf(v) else v for v in bounds]
-                         for joint, bounds in joint_limits(store, robot).items()},
+                         for joint, bounds in joint_limits(store, robot).items() if joint not in mimics},
+        'grippers': grippers(profile.data.get('grippers', {})),
         'tools': list(profile.data.get('ik', {}).get('groups', {})),     # tools a pose can place (IK available)
         'navigation': store.navigation(robot),
         'footprint': profile.base.get('footprint'),
@@ -91,6 +94,14 @@ def overview(store: ConfigStore, robot: str, args: set[tuple[str, str]]) -> dict
         'limits': profile.base.get('limits', {}),       # linear (m/s), angular (rad/s): caps for the driving speeds
         'ik_choice': ik_choice(profile.data.get('ik', {})),
     }
+
+
+def grippers(spec: Mapping) -> dict:
+    """tool -> {joint, open, closed, opening_m} of the profile's joint grippers, for the Robot tab's live view:
+    opening_m ([[joint value, finger opening in m], ...]) or null when the profile has no table."""
+    return {tool: {'joint': g['joint'], 'open': float(g.get('open', 0.0)), 'closed': float(g['closed']),
+                   'opening_m': g.get('opening_m')}
+            for tool, g in spec.items() if 'joint' in g and 'closed' in g}
 
 
 def ik_choice(ik: Mapping) -> dict | None:

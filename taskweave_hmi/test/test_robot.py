@@ -34,6 +34,15 @@ def store(tmp_path):
     return ConfigStore(tmp_path / 'config')
 
 
+def test_grippers_lists_the_joint_grippers_with_their_opening_table():
+    spec = {'left': {'joint': 'left_gripper_joint', 'open': 0.0, 'closed': 1.7, 'opening_m': [[0.0, 0.12], [1.7, 0.0]]},
+            'right': {'joint': 'right_gripper_joint', 'closed': 1.7},
+            'hand': {'action': '/hand/command', 'open': 1.0, 'closed': 0.0}}   # action grippers: no joint to show
+    assert robot.grippers(spec) == {
+        'left': {'joint': 'left_gripper_joint', 'open': 0.0, 'closed': 1.7, 'opening_m': [[0.0, 0.12], [1.7, 0.0]]},
+        'right': {'joint': 'right_gripper_joint', 'open': 0.0, 'closed': 1.7, 'opening_m': None}}
+
+
 def test_overview_lists_poses_with_their_missions(store):
     data = robot.overview(store, ROBOT, robot.pose_args(CATALOG))
     poses = {p['name']: p for p in data['poses']}
