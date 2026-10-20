@@ -131,7 +131,7 @@ All optional (Motion (advanced)). Defaults are those of the skill yaml, the robo
 | `elbow` | one of `down`, `up`, `out`, `in`, `back`, `forward` | no | - | - | Elbow side kept or reached (robot frame). Default: the point's, else the robot's. |
 | `planner` | one of `auto`, `direct`, `planned` | no | `auto` | - | auto: straight joint move if free, else elbow swing first, else planner. direct: straight joint move only. planned: always the planner. |
 | `approach_m` | number | no | - | m | free mode: the last part of the way, straight along the approach. 0 = planned all the way. (min 0; only with `mode` = `free`) |
-| `torso` | one of `keep`, `auto` | no | `keep` | - | auto: if the target is out of reach, try the configured torso heights. keep: never move the torso. |
+| `torso` | one of `keep`, `auto` | no | `keep` | - | auto: choose the torso height (robot profile ik.torso: the least torso and arm motion that is reachable and collision free, both hands at one height; else the first of the configured heights that is reachable). keep: never move the torso. |
 | `via` | list of string | no | - | - | Reserved. Waypoints to pass: "pose:&lt;joint pose&gt;" or "&lt;instance&gt;/&lt;point&gt;". |
 | `tolerance` | number | no | - | - | End accuracy: m for hand skills, rad or m for joints. (above 0) |
 

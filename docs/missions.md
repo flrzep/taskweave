@@ -132,7 +132,7 @@ takes `speed`, `accel` and `tolerance`. The tables are in [skills.md](skills.md)
 | `elbow` | Side the elbows keep or reach: `down`, `up`, `out`, `in`, `back`, `forward` (robot frame). |
 | `planner` | `auto`: straight joint move if free, else an elbow swing, else the planner. `direct`: straight move only. `planned`: always the planner. |
 | `approach_m` | Length of the straight approach in `free` mode; `0` plans all the way. |
-| `torso` | `keep` or `auto` (try the configured torso heights when a target is out of reach). |
+| `torso` | `keep` or `auto`: choose the torso height (robot profile `ik.torso`: least motion, reachable and collision free; else the first reachable of the `torso_fallback` heights). |
 | `via` | Waypoints to pass (`move_joints`: joint pose names or `{joint: value}` maps). |
 | `tolerance` | End accuracy. |
 
