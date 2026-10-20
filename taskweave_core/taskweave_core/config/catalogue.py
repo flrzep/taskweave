@@ -148,14 +148,43 @@ def robot_of(path: str, pack: str) -> str | None:
     return parts[1] if len(parts) > 2 and parts[0] == 'robots' else None
 
 
+def robot_arg(pack: str) -> str | None:
+    """The robot of ``pack`` ('cell': None, 'robot:<name>': the name); ValueError for anything else, a name that is
+    not a plain name included (it becomes a folder name)."""
+    if pack == 'cell':
+        return None
+    name = pack[6:] if pack.startswith('robot:') else ''
+    if not re.fullmatch(schemas.NAME['pattern'], name):
+        raise ValueError(f"pack is 'cell' or 'robot:<name>' (letters, digits, \"_\", \"-\"), not {pack!r}")
+    return name
+
+
+def guard(base: Path, path: str) -> Path:
+    """``base / path``, checked: ``path`` relative without '..', no symlink in it (parents and file), inside ``base``.
+    ValueError otherwise."""
+    rel = PurePosixPath(path)
+    if not rel.parts or rel.is_absolute() or '..' in rel.parts or '\\' in path or ':' in rel.parts[0]:
+        raise ValueError(f'{path!r} is not a path inside the pack')
+    target = base
+    for part in rel.parts:
+        target = target / part
+        if target.is_symlink():
+            raise ValueError(f'{path!r}: {part} is a symbolic link')
+    if not target.resolve().is_relative_to(base.resolve()):
+        raise ValueError(f'{path!r} is outside the pack')
+    return target
+
+
 def file_path(store, path: str, pack: str = 'cell') -> Path:
     """The file of ``path`` in ``pack`` on disk (existing or not): the cell pack, or the first pack of the robot
-    that has it, else the robot's first pack."""
-    if pack == 'cell':
-        return store.root / path
-    packs = store.robot_packs(pack.split(':', 1)[1])
-    return next((p.path / path for p in packs if (p.path / path).exists()), packs[0].path / path if packs
-                else store.root / 'robots' / pack.split(':', 1)[1] / path)
+    that has it, else the robot's first pack. ValueError for a path or robot name that leaves the pack."""
+    robot = robot_arg(pack)
+    if robot is None:
+        return guard(store.root, path)
+    packs = store.robot_packs(robot)
+    base = next((p.path for p in packs if (p.path / path).exists()), packs[0].path if packs
+                else store.root / 'robots' / robot)
+    return guard(base, path)
 
 
 def _sha(*parts: bytes) -> str:
@@ -168,7 +197,7 @@ def file_hash(store, path: str, pack: str = 'cell') -> str | None:
     target = file_path(store, path, pack)
     if pack == 'cell':
         return _sha(target.read_bytes()) if target.is_file() else None
-    over = store.root / 'robots' / pack.split(':', 1)[1] / path
+    over = guard(store.root, f'robots/{robot_arg(pack)}/{path}')
     if not over.is_file():
         return hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else None
     return _sha(target.read_bytes() if target.is_file() else b'', over.read_bytes())
@@ -206,7 +235,11 @@ def files(store, hashes: bool = True) -> list[dict]:
         kind = kind_of(path) or OTHER
         found.append(_entry(kind, path, 'cell', 'cell' if kind.pack == 'cell' else 'override', robot_of(path, 'cell'),
                             target, hashes))
-    for robot in store.robot_names():
+    try:
+        robots = store.robot_names()
+    except ConfigError:     # system.yaml does not load: check_pack reports it, the cell's own files stay editable
+        robots = []
+    for robot in robots:
         seen = set()
         try:
             robot_packs = store.robot_packs(robot)

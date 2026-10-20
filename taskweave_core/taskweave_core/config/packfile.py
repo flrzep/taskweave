@@ -25,6 +25,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 
 from . import packs
+from .save import pack_lock
 
 MANIFEST = 'manifest.yaml'
 SKIP_DIRS = {'.git', '__pycache__', 'state'}
@@ -297,9 +298,26 @@ def _commit_identity(cwd: Path) -> list[str]:
     return [] if configured else ['-c', 'user.name=taskweave', '-c', 'user.email=taskweave@localhost']
 
 
+def _writable(cell: Path, rel: str, exists: bool) -> bool:
+    target = cell / rel
+    if exists and not os.access(target, os.W_OK):
+        return False
+    folder = target.parent
+    while not folder.exists():
+        folder = folder.parent
+    return os.access(folder, os.W_OK | os.X_OK)
+
+
 def _import_git(source: Path, cell: Path, manifest: dict, force: bool) -> dict:
-    """Replace the pack files of the work tree folder ``cell`` by ``source``'s and commit exactly those paths."""
+    """Replace the pack files of the work tree folder ``cell`` by ``source``'s and commit exactly those paths. Every
+    target is checked writable first; a failure while applying restores the touched files (HEAD), drops new ones."""
     old = _pack_files(cell)[0]
+    new = _tree_files(source)
+    removed = [f for f in old if f not in new]
+    touched = [*new, *removed]
+    locked = [f for f in touched if not _writable(cell, f, (cell / f).exists())]
+    if locked:
+        raise PackfileError(f'not writable, nothing changed: {", ".join(locked[:5])}')
     dirty = [line for line in _git(cell, 'status', '--porcelain', '-z', '--', '.').split('\0') if line]
     ident = _commit_identity(cell)
     if dirty and not force:
@@ -307,9 +325,38 @@ def _import_git(source: Path, cell: Path, manifest: dict, force: bool) -> dict:
     if dirty:   # keep them in history before they are replaced
         _git(cell, *ident, 'add', '-A', '--', '.')
         _git(cell, *ident, 'commit', '-m', 'taskweave: snapshot before import', '--', '.')
-    new = _tree_files(source)
-    removed = [f for f in old if f not in new]
-    warnings = []
+    tracked = set(_git(cell, 'ls-files', '-z', '--', '.').split('\0'))
+    created = [f for f in new if not (cell / f).exists()]
+    try:
+        return _apply_git(source, cell, manifest, ident, new, removed, touched)
+    except BaseException as error:
+        problem = _rollback(cell, [f for f in touched if f in tracked], created)
+        raise PackfileError(f'import failed: {error}; ' + (f'the pack could not be fully restored ({problem}): '
+                                                          f'git status shows what is left' if problem
+                                                          else 'the pack is restored, nothing committed')) from error
+
+
+def _rollback(cell: Path, tracked: list[str], created: list[str]) -> str:
+    """Put the tracked files back from HEAD, drop the new ones; '' or what went wrong."""
+    problems = []
+    try:
+        if tracked:
+            _git(cell, 'checkout', 'HEAD', '--pathspec-from-file=-', '--pathspec-file-nul',
+                 stdin='\0'.join(tracked) + '\0')
+        if created:
+            _git(cell, 'rm', '-q', '-f', '--cached', '--ignore-unmatch', '--pathspec-from-file=-',
+                 '--pathspec-file-nul', stdin='\0'.join(created) + '\0')
+    except PackfileError as error:
+        problems.append(str(error))
+    for rel in created:
+        try:
+            (cell / rel).unlink(missing_ok=True)
+        except OSError as error:
+            problems.append(str(error))
+    return '; '.join(problems)
+
+
+def _apply_git(source: Path, cell: Path, manifest: dict, ident: list, new: list, removed: list, touched: list) -> dict:
     for rel in removed:
         (cell / rel).unlink()
     for rel in new:
@@ -319,7 +366,6 @@ def _import_git(source: Path, cell: Path, manifest: dict, force: bool) -> dict:
         shutil.copyfile(source / rel, target)   # in place: an existing file keeps owner and mode
         if not existed and cell.stat().st_mode & stat.S_IWGRP:
             os.chmod(target, stat.S_IMODE(target.stat().st_mode) | stat.S_IWGRP)
-    touched = [*new, *removed]
     paths = '\0'.join(touched) + '\0'
     spec = ['--pathspec-from-file=-', '--pathspec-file-nul']
     _git(cell, 'add', '-A', *spec, stdin=paths)
@@ -330,7 +376,7 @@ def _import_git(source: Path, cell: Path, manifest: dict, force: bool) -> dict:
         commit = _git(cell, 'rev-parse', 'HEAD').strip()
     else:
         commit = None   # identical to what is there
-    return {'mode': 'git', 'commit': commit, 'backup': None, 'warnings': warnings}
+    return {'mode': 'git', 'commit': commit, 'backup': None, 'warnings': []}
 
 
 def import_cell(file: str | Path, cell: str | Path, force: bool = False) -> dict:
@@ -355,7 +401,8 @@ def import_cell(file: str | Path, cell: str | Path, force: bool = False) -> dict
         report = {'name': manifest['name'], 'schema_version': manifest['schema_version'],
                   'git_rev': manifest.get('git_rev'), 'files': len(manifest['files'])}
         if git_target:
-            return {**report, **_import_git(work, cell, manifest, force)}
+            with pack_lock(cell):
+                return {**report, **_import_git(work, cell, manifest, force)}
         warnings, backup = [], None
         if occupied:
             warnings = _fit(work, cell)

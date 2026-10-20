@@ -462,3 +462,138 @@ def test_cli_save_history_restore(store, repo, tmp_path, capsys):
     start = store.history(LOCATIONS)[-1]['rev'][:8]
     assert cli.main(['config', 'restore', target, start, '--base', store.file_hash(LOCATIONS)]) == 0
     assert 'x: 1.5' in text(store)
+
+
+# ---- P4 review: paths and robot names stay inside the pack ----------------------------------------------------------
+EVIL = ('robot:../../../tmp/x', 'robot:..', 'robot:a/b', 'robot:/abs', 'robot:1bad', 'robot:')
+
+
+def test_a_robot_name_stays_inside_the_pack(store, repo, tmp_path):
+    outside = tmp_path / 'tmp' / 'x'
+    for pack in EVIL:
+        with pytest.raises((SaveError, ValueError)):
+            store.save('profile.yaml', 'a: 1\n', pack=pack)
+        with pytest.raises((SaveError, ValueError)):
+            store.delete('profile.yaml', pack=pack, base='x')
+        with pytest.raises((SaveError, ValueError)):
+            store.show('profile.yaml', 'HEAD', pack=pack)
+        with pytest.raises((SaveError, ValueError)):
+            store.history('profile.yaml', pack=pack)
+    assert not outside.exists() and not any(tmp_path.glob('**/x/profile.yaml'))
+
+
+def test_a_conflict_stays_inside_the_pack(store, tmp_path):
+    (tmp_path / 'secret').mkdir()
+    (tmp_path / 'secret' / 'profile.yaml').write_text('secret: 1\n')
+    with pytest.raises((SaveError, ValueError)) as error:
+        store.save('profile.yaml', 'a: 1\n', pack='robot:../../../secret')
+    assert 'secret: 1' not in str(error.value)
+
+
+@posix_only
+def test_symlinks_stays_inside_the_pack(store, tmp_path):
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (store.root / 'linked').symlink_to(outside)
+    with pytest.raises(SaveError):
+        store.save('missions/../linked/x.yaml', 'a: 1\n')
+    (store.root / 'missions' / 'ln.yaml').symlink_to(outside / 'f.yaml')
+    with pytest.raises(SaveError):
+        store.save('missions/ln.yaml', 'goal: x\nsteps: []\n')
+    (store.root / 'robots' / 'link_bot').symlink_to(outside)
+    with pytest.raises(SaveError):
+        store.save('profile.yaml', 'a: 1\n', pack='robot:link_bot')
+    assert not list(outside.iterdir())
+
+
+# ---- P4 review: old errors are not new ones ------------------------------------------------------------------------
+def test_a_cross_file_error_the_pack_had_does_not_block_a_valid_save(store):
+    (store.root / 'missions' / 'outer.yaml').write_text(
+        'goal: g\nsteps:\n  - instruction: x\n    include: gone_mission\n')
+    errors = [p for p in store.check_pack() if p['path'] == 'missions/outer.yaml' and p['severity'] == 'error']
+    assert errors and str(store.root) in errors[0]['message']    # a message with the real path
+    store.reload()
+    store.save(LOCATIONS, text(store) + '# note\n', base=store.file_hash(LOCATIONS))
+    store.save('missions/ok.yaml', 'goal: g\nsteps:\n  - instruction: w\n    skill: wait\n')
+
+
+# ---- P4 review: the file is hashed again right before the write ----------------------------------------------------
+def test_a_change_during_validation_is_a_conflict(store, monkeypatch):
+    from taskweave_core.config import save as save_module
+
+    real = save_module._validate
+    other = text(store) + '# by an ssh editor\n'
+
+    def slow(*args, **kwargs):
+        result = real(*args, **kwargs)
+        (store.root / LOCATIONS).write_text(other)     # nobody holds the flock
+        return result
+
+    monkeypatch.setattr(save_module, '_validate', slow)
+    base = store.file_hash(LOCATIONS)
+    with pytest.raises(SaveConflict) as error:
+        store.save(LOCATIONS, text(store).replace('x: 1.5', 'x: 2.5'), base=base)
+    assert text(store) == other and error.value.current_text == other
+
+
+def test_a_change_during_the_delete_check_is_a_conflict(store, monkeypatch):
+    from taskweave_core.config import check
+
+    made = store.save('objects/shelf.yaml', 'name: shelf\n')
+    real = check.check_pack
+    calls = []
+
+    def slow(s):
+        calls.append(1)
+        if len(calls) == 1:
+            (s.root / 'objects/shelf.yaml').write_text('name: shelf\n# changed\n')
+        return real(s)
+
+    monkeypatch.setattr(check, 'check_pack', slow)
+    with pytest.raises(SaveConflict):
+        store.delete('objects/shelf.yaml', base=made['hash'])
+    assert (store.root / 'objects/shelf.yaml').is_file()
+
+
+# ---- P4 review: an invalid system.yaml can be fixed through the API ------------------------------------------------
+@pytest.mark.parametrize('broken', ['robot_packs: 5\n', 'robot: [unclosed\n'])
+def test_an_invalid_system_yaml_is_a_problem_and_can_be_fixed_by_a_save(store, broken, capsys):
+    (store.root / 'system.yaml').write_text(broken)
+    store.reload()
+    problems = store.check_pack()
+    assert any(p['path'] == 'system.yaml' and p['severity'] == 'error' for p in problems)
+    assert cli.check(str(store.root)) == 1
+    assert 'FAIL  system.yaml' in capsys.readouterr().out
+    store.save('missions/ok.yaml', 'goal: g\nsteps:\n  - instruction: w\n    skill: wait\n')   # other files still work
+    store.save('system.yaml', 'robot: demo_bot\n', base=store.file_hash('system.yaml'))
+    assert text(store, 'system.yaml') == 'robot: demo_bot\n' and not any(
+        p['path'] == 'system.yaml' for p in store.check_pack())
+    store.delete('missions/ok.yaml', base=store.file_hash('missions/ok.yaml'))
+
+
+# ---- P4 review: shared git repository ------------------------------------------------------------------------------
+def _object_dirs(repo) -> set:
+    return {p for p in (repo / '.git' / 'objects').iterdir() if p.is_dir() and len(p.name) == 2}
+
+
+@posix_only
+def test_the_shared_repo_commit_runs_with_umask_002(store, repo):
+    old = os.umask(0o022)
+    try:
+        before = _object_dirs(repo)
+        store.save(LOCATIONS, text(store) + '# note\n', base=store.file_hash(LOCATIONS))
+    finally:
+        os.umask(old)
+    made = _object_dirs(repo) - before
+    assert made and all(d.stat().st_mode & 0o020 for d in made)
+
+
+@posix_only
+def test_a_shared_repo_without_shared_repository_warns(store, repo):
+    objects = repo / '.git' / 'objects'
+    save = lambda: store.save(LOCATIONS, text(store) + '# note\n', base=store.file_hash(LOCATIONS))   # noqa: E731
+    assert not any('sharedRepository' in str(w) for w in save()['warnings'])    # no setgid: nothing to say
+    objects.chmod(objects.stat().st_mode | 0o2000)
+    assert any('core.sharedRepository group' in str(w) for w in save()['warnings'])
+    git(repo, 'config', 'core.sharedRepository', 'group')
+    assert not any('sharedRepository' in str(w) for w in save()['warnings'])

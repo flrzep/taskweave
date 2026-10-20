@@ -23,7 +23,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 
 from . import catalogue, overlay, packs, schemas
-from .store import _pop, _yaml_handler
+from .store import ConfigError, _pop, _yaml_handler
 
 try:
     import fcntl
@@ -85,11 +85,10 @@ def pack_lock(root: Path):
 
 # ---- paths and routing -----------------------------------------------------------------------------------------------
 def _split_pack(pack: str) -> str | None:
-    if pack == 'cell':
-        return None
-    if pack.startswith('robot:') and len(pack) > 6:
-        return pack[6:]
-    raise ValueError(f"pack is 'cell' or 'robot:<name>', not {pack!r}")
+    try:
+        return catalogue.robot_arg(pack)
+    except ValueError as error:
+        raise SaveError([_problem('', 'cell', str(error))]) from error
 
 
 def _clean(path: str) -> str:
@@ -99,10 +98,15 @@ def _clean(path: str) -> str:
     return clean.as_posix()
 
 
-def _target(path: str, pack: str) -> str:
+def _target(store_root: Path, path: str, pack: str) -> str:
     """The file a change lands in, relative to the cell pack: the file itself, or the cell override of a robot file."""
     robot = _split_pack(pack)
-    return path if robot is None else f'robots/{robot}/{path}'
+    target = path if robot is None else f'robots/{robot}/{path}'
+    try:
+        catalogue.guard(store_root, target)
+    except ValueError as error:
+        raise SaveError([_problem(path, pack, str(error))]) from error
+    return target
 
 
 def _kind(path: str, pack: str):
@@ -235,8 +239,12 @@ def _write(target: Path, data: bytes) -> None:
 
 
 # ---- git -------------------------------------------------------------------------------------------------------------
-def _git(cwd: Path, *args: str, config: tuple = ()) -> subprocess.CompletedProcess:
+def _git(cwd: Path, *args: str, config: tuple = (), shared: bool = False) -> subprocess.CompletedProcess:
+    """``shared``: run under umask 002, so new object folders stay group-writable (a shell, not preexec_fn: the HMI
+    is multi-threaded)."""
     cmd = ['git', *(a for c in config for a in ('-c', c)), *args]
+    if shared and os.name == 'posix':
+        cmd = ['sh', '-c', 'umask 002; exec "$@"', 'sh', *cmd]
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding='utf-8', errors='replace')
 
 
@@ -276,6 +284,20 @@ def _ignore_lock(lock: Path) -> None:
         pass
 
 
+def _shared_hint(repo: Path) -> list:
+    """The objects folder has setgid (set up for a group) but core.sharedRepository is unset: new object folders of
+    other users' commits may come out 755."""
+    try:
+        objects = Path(_git(repo, 'rev-parse', '--git-path', 'objects').stdout.strip())
+        objects = objects if objects.is_absolute() else repo / objects
+        unset = _git(repo, 'config', '--get', 'core.sharedRepository').returncode != 0
+        if objects.stat().st_mode & stat.S_ISGID and unset:
+            return ['git repository shared by several users: set git config core.sharedRepository group']
+    except OSError:
+        pass
+    return []
+
+
 def _commit(target: Path, message: str, author: str | None, removed: bool = False) -> tuple[str | None, list]:
     """Commit exactly ``target`` if it is in a git work tree: (rev, warnings). A git failure is a warning."""
     repo = _repo(target.parent if target.parent.exists() else target.parent.parent)
@@ -284,17 +306,17 @@ def _commit(target: Path, message: str, author: str | None, removed: bool = Fals
     name, email = _author(author)
     config = (f'user.name={name}', f'user.email={email}')
     try:
-        stage = (_git(repo, 'rm', '-q', '--cached', '--ignore-unmatch', '--', str(target)) if removed
-                 else _git(repo, 'add', '--', str(target)))
+        stage = (_git(repo, 'rm', '-q', '--cached', '--ignore-unmatch', '--', str(target), shared=True) if removed
+                 else _git(repo, 'add', '--', str(target), shared=True))
         if stage.returncode:
             return None, [f'not committed: git {stage.args[1]}: {stage.stderr.strip()}']
         if _git(repo, 'diff', '--cached', '--quiet', '--', str(target)).returncode == 0:
             return _last_rev(repo, target), []     # nothing changed
         run = _git(repo, 'commit', '-q', '--only', '-m', message, f'--author={name} <{email}>', '--', str(target),
-                   config=config)
+                   config=config, shared=True)
         if run.returncode:
             return None, [f'not committed: {(run.stderr or run.stdout).strip()}']
-        return _git(repo, 'rev-parse', 'HEAD').stdout.strip() or None, []
+        return _git(repo, 'rev-parse', 'HEAD').stdout.strip() or None, _shared_hint(repo)
     except OSError as error:
         return None, [f'not committed: {error}']
 
@@ -314,6 +336,13 @@ def _check_base(store, path: str, pack: str, base: str | None, what: str) -> str
     return current
 
 
+def _still(store, path: str, pack: str, current: str | None) -> None:
+    """Hash again right before the write: an editor that does not take the lock may have changed the file meanwhile."""
+    now = store.file_hash(path, pack)
+    if now != current:
+        raise SaveConflict(now, _current_text(store, path, pack))
+
+
 def save(store, path: str, content, pack: str = 'cell', base: str | None = None, message: str | None = None,
          author: str | None = None) -> dict:
     """Write ``content`` (YAML text, as given; or data, merged into the loaded file keeping its comments and order:
@@ -325,12 +354,14 @@ def save(store, path: str, content, pack: str = 'cell', base: str | None = None,
     the problems) when the result has errors; the file is then untouched. Returns ``{path, pack, hash, rev (commit
     or None), reload, warnings (messages and problems), override (the cell file written for a robot file)}``."""
     path = _clean(path)
-    kind, target = _kind(path, pack), _target(path, pack)
+    target = _target(store.root, path, pack)
+    kind = _kind(path, pack)
     with pack_lock(store.root):
-        _check_base(store, path, pack, base, 'a save')
+        current = _check_base(store, path, pack, base, 'a save')
         text = _new_text(store, path, pack, content)
         warnings = _validate(store, path, pack, content, target, text, kind)
         file = store.root / target
+        _still(store, path, pack, current)
         if not (file.is_file() and file.read_bytes() == text.encode('utf-8')):
             _write(file, text.encode('utf-8'))
         _refresh(store)
@@ -338,6 +369,14 @@ def save(store, path: str, content, pack: str = 'cell', base: str | None = None,
         return {'path': path, 'pack': pack, 'hash': store.file_hash(path, pack), 'rev': rev,
                 'reload': list(kind.reload), 'warnings': warnings + notes,
                 'override': target if pack != 'cell' else None}
+
+
+def _loads(store) -> bool:
+    try:
+        store.system()
+    except ConfigError:
+        return False
+    return True
 
 
 def _validate(store, path, pack, content, target, text, kind) -> list:
@@ -354,6 +393,8 @@ def _validate(store, path, pack, content, target, text, kind) -> list:
         skip = (target, 'cell') if pack == 'cell' or own else None
         new = [p for p in check.dry_run_pack(store, target, text, 'cell')
                if _problem_key(p) not in known and (p['path'], p['pack']) != skip]
+        if target == 'system.yaml' and not _loads(store):    # the fix of a broken system.yaml: no baseline to compare
+            new = [{**p, 'severity': 'warning'} for p in new]
     problems = own + new
     if any(p['severity'] == 'error' for p in problems):
         raise SaveError(problems)
@@ -368,14 +409,16 @@ def delete(store, path: str, pack: str = 'cell', base: str | None = None, messag
     from . import check
 
     path = _clean(path)
-    kind, target = _kind(path, pack), _target(path, pack)
+    target = _target(store.root, path, pack)
+    kind = _kind(path, pack)
     with pack_lock(store.root):
         file = store.root / target
         if not file.is_file():
             raise SaveError([_problem(path, pack, 'there is no such file to delete' if pack == 'cell' else
                                       'no cell override of this robot pack file: nothing to delete')])
-        _check_base(store, path, pack, base, 'a delete')
+        current = _check_base(store, path, pack, base, 'a delete')
         before = {_problem_key(p) for p in check.check_pack(store)}
+        _still(store, path, pack, current)
         file.unlink()
         _refresh(store)
         warnings = [p for p in check.check_pack(store) if _problem_key(p) not in before]
@@ -417,7 +460,10 @@ def set_robot(store, robot: str, base: str | None = None, message: str | None = 
 
 # ---- history ---------------------------------------------------------------------------------------------------------
 def _history_target(store, path: str, pack: str) -> Path:
-    return catalogue.file_path(store, _clean(path), pack)
+    try:
+        return catalogue.file_path(store, _clean(path), pack)
+    except ValueError as error:
+        raise SaveError([_problem(path, pack, str(error))]) from error
 
 
 def history(store, path: str, pack: str = 'cell', limit: int = 50) -> list[dict]:

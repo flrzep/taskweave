@@ -356,7 +356,10 @@ def dry_run_pack(store: ConfigStore, path: str, data_or_text, pack: str = 'cell'
         temp = Path(temp)
         root = temp / 'cell'
         shutil.copytree(store.root, root, ignore=ignore)
-        system = store.system()
+        try:
+            system = store.system()
+        except ConfigError:     # system.yaml is invalid: the copy has it too, as it is
+            system = {}
         first = []
         for name in {catalogue.robot_of(path, pack)} - {None}:  # the edited robot pack, copied, searched first
             if pack != 'cell':
@@ -379,9 +382,21 @@ def dry_run_pack(store: ConfigStore, path: str, data_or_text, pack: str = 'cell'
         target = root / path if pack == 'cell' else temp / 'packs' / catalogue.robot_of(path, pack) / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding='utf-8')
+        # messages name files of the copy: show the real ones, so they compare equal to the pack's own
+        names = {str(root): str(store.root), str(root.resolve()): str(store.root)}
+        for folder in first:
+            orig = next(iter(store.robot_packs(folder.name)), None)
+            names.update({str(folder): str(orig.path), str(folder.resolve()): str(orig.path)} if orig else {})
+
+        def real(problems: list[dict]) -> list[dict]:
+            for problem in problems:
+                for fake, true in sorted(names.items(), key=lambda kv: -len(kv[0])):
+                    problem['message'] = problem['message'].replace(fake, true)
+            return problems
+
         if not first and pack != 'cell':    # no pack of that robot yet: a new pack folder
-            return validate_file(copy_store, path, text, pack)
+            return real(validate_file(copy_store, path, text, pack))
         copy_store.reload()
         problems = check_pack(copy_store)
         edited = validate_file(copy_store, path, text, pack)   # the edit again, with line and column
-        return [p for p in problems if not (p['path'] == path and p['pack'] == pack)] + edited
+        return real([p for p in problems if not (p['path'] == path and p['pack'] == pack)] + edited)
