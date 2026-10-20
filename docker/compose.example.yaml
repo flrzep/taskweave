@@ -1,0 +1,19 @@
+# Example: the taskweave image running taskweave_bringup with a cell pack mounted from the host.
+#   docker build -t taskweave .            (from the repository root)
+#   docker compose -f docker/compose.example.yaml up
+# Host network: ROS 2 discovery and the HMI (http://<host>:8090) work without port mappings. Use the ROS_DOMAIN_ID of
+# the robot (or its simulator) you talk to.
+services:
+  taskweave:
+    image: taskweave
+    build:
+      context: ..
+    network_mode: host
+    environment:
+      ROS_DOMAIN_ID: "42"
+    volumes:
+      - ../docs/examples/cell:/cell:ro        # your cell pack: replace by its folder
+      # - ./my_robot_packs:/robot_packs:ro    # robot packs of your own (add TASKWEAVE_ROBOT_PACKS: /robot_packs to environment)
+    command: >
+      ros2 launch taskweave_bringup taskweave_bringup.launch.py
+      config_dir:=/cell robot:=duo_bot skills:=wait use_sim_time:=false
