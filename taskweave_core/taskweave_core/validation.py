@@ -354,7 +354,8 @@ def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
                         f'{", ".join(names) or "none"})')
         elif kind == 'held_object':  # the placed object a skill acts on while it is held
             if str(value) not in store.object_instances():
-                return f'unknown placed object {value!r}: held objects are placed objects of cell/objects.yaml'
+                return str(store.missing_instance(
+                    str(value), f'unknown placed object {value!r}: held objects are placed objects').args[0])
         else:
             return f'unknown point kind {kind!r} in skill schema'
     except KeyError as error:

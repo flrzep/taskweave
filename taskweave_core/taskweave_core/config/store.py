@@ -706,6 +706,15 @@ class ConfigStore:
             result.update(self.robot_object_points(robot).get(obj, {}).get(point, {}))
         return result
 
+    def missing_instance(self, name: str, unknown: str) -> KeyError:
+        """The error for an instance that cannot be used: one that is in cell/objects.yaml but taken in the object
+        state (gone, or a stack at count 0) says so; any other is ``unknown`` plus the instances that exist."""
+        current = self.object_instances()
+        if name in self.object_instances(state=False) and (name not in current or current[name].stack_count == 0):
+            return KeyError(f'{name!r} was taken in an earlier step or run (object state: state/objects.yaml); reset '
+                            'the sim (Stop + Play) or run `taskweave state clear` to put it back')
+        return KeyError(f'{unknown}, instances in cell/objects.yaml: {", ".join(sorted(current)) or "none"}')
+
     def instance_point(self, reference: str, robot: str | None = None,
                        near: Pose2D | None = None) -> tuple[ObjectInstance, dict]:
         """Resolve ``<instance>/<point>``: a placed object (cell/objects.yaml) and a point of its type, as
@@ -714,10 +723,9 @@ class ConfigStore:
         name, _, point = reference.partition(VARIANT_SEPARATOR)
         instances = self.object_instances()
         if name not in instances or not point:
-            raise KeyError(f'unknown object point {reference!r}: expected <instance>/<point>, instances in '
-                           f'cell/objects.yaml: {", ".join(sorted(instances)) or "none"}')
+            raise self.missing_instance(name, f'unknown object point {reference!r}: expected <instance>/<point>')
         if instances[name].stack_count == 0:
-            raise KeyError(f'{name} is empty: no items left on the stack (object state)')
+            raise self.missing_instance(name, '')
         instance = instances[name] if robot is None else self.handling_instance(instances[name], robot, near)
         return instance, self.object_point(instance.object, point, robot)
 
@@ -734,8 +742,7 @@ class ConfigStore:
         name, _, contact = reference.partition(VARIANT_SEPARATOR)
         instances = self.object_instances()
         if name not in instances or not contact:
-            raise KeyError(f'unknown object contact {reference!r}: expected <instance>/<contact>, instances in '
-                           f'cell/objects.yaml: {", ".join(sorted(instances)) or "none"}')
+            raise self.missing_instance(name, f'unknown object contact {reference!r}: expected <instance>/<contact>')
         return instances[name], self.object_contact(instances[name].object, contact)
 
     def base_target(self, reference: str, robot: str, near: Pose2D | None = None) -> Pose2D:

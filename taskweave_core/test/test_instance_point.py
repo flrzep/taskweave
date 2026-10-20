@@ -101,7 +101,7 @@ def test_object_state_takes_items_off_stacks_and_puts_objects_down(config_dir):
     assert store.take_object('pile') == 'took one off pile, 1 left'
     assert store.object_instances()['pile'].top_z == pytest.approx(0.1)        # the top item is the bottom one now
     assert store.take_object('pile') == 'took one off pile, 0 left'
-    with pytest.raises(KeyError, match='pile is empty'):
+    with pytest.raises(KeyError, match="'pile' was taken"):
         store.instance_point('pile/top_grasp')
     store.take_object('single')
     assert 'single' not in store.object_instances() and 'single' in store.object_instances(state=False)
@@ -133,3 +133,33 @@ def test_held_poses_and_via_targets_are_listed(config_dir):
     assert names['joint poses'] == ['home', 'ready']
     assert names['via targets'] == ['pose:home', 'pose:ready'] + names['placed object points']
     assert 'box_1/top_grasp' in names['via targets']
+
+
+TAKEN = 'was taken in an earlier step or run (object state: state/objects.yaml)'
+
+
+def test_a_taken_object_says_so_not_unknown(config_dir):
+    import re
+
+    import pytest
+    (config_dir / 'cell' / 'objects.yaml').write_text(
+        'pile: {object: box, frame: cell, x: 1.0, y: 2.0, yaw: 0.0, stack: {count: 1, pitch: 0.05}}\n'
+        'single: {object: box, frame: cell, x: 3.0, y: 0.0, yaw: 0.0}\n')
+    store = ConfigStore(config_dir)
+    store.take_object('single')
+    store.take_object('pile')
+    for call, name in ((lambda: store.instance_point('single/top_grasp'), 'single'),
+                       (lambda: store.instance_point('pile/top_grasp'), 'pile'),
+                       (lambda: store.instance_contact('single/lid'), 'single')):
+        with pytest.raises(KeyError, match=f"'{name}' {re.escape(TAKEN)}; reset the sim .* `taskweave state clear`"):
+            call()
+    assert TAKEN in check_point('instance_point', 'single/top_grasp', store, 'demo_bot')
+    assert TAKEN in check_point('held_object', 'single', store, 'demo_bot')
+
+
+def test_a_truly_unknown_instance_keeps_the_old_message(config_dir):
+    import pytest
+    store = placed(config_dir)
+    with pytest.raises(KeyError, match='unknown object point .nope/top_grasp.: expected <instance>/<point>'):
+        store.instance_point('nope/top_grasp')
+    assert 'unknown placed object' in check_point('held_object', 'nope', store, 'demo_bot')

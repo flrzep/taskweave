@@ -297,6 +297,11 @@ See [docs/missions.md](docs/missions.md). Put it in `<cell>/missions/<name>.yaml
 - `taskweave config reload [--ros | --hmi URL]` calls every process. Which file kinds apply live and which need a
   restart: docs/configuration.md "Reload without a restart". A new kind goes in the handler's `RESTARTS` or gets a
   `live`/`reload_service` value in `catalogue.py`.
+- `taskweave state show|clear [CELL_DIR]` (`cli.py`): the run-time object state (`state/objects.yaml`;
+  `ConfigStore.take_object`, `put_object`, `clear_object_state`). No process caches it (`_load` re-reads by file
+  stamp), so `clear` needs no reload. The hold registry is separate: only a sim-time jump (`hold.on_reset`) ends holds.
+  An instance taken in the state gets `ConfigStore.missing_instance`'s message everywhere; use that helper for any new
+  "unknown instance" error. Test: `test_cli_state.py`, `test_instance_point.py`.
 - Test: `test_reload_ros.py` in `taskweave_core/test` and `taskweave_skills/test`.
 
 ### Smoke test

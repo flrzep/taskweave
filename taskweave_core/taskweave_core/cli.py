@@ -11,6 +11,9 @@
                                           or for this instance only)
     taskweave teach point INSTANCE/POINT [--tool TOOL ...]
                                           save the tools' current TCP poses as a point on the object type
+    taskweave state show [CELL_DIR]       the run-time object state: what is taken, stack counts, placed objects
+    taskweave state clear [CELL_DIR]      forget it (objects back as in cell/objects.yaml); running processes see it
+                                          on their next read (the store re-reads by file stamp), no reload needed
     taskweave describe [CONFIG_DIR ROBOT]  robot card + skills (running system, or offline from config)
     taskweave smoke run MISSION [--reference FILE] [--save-reference FILE] [--hmi URL] [--cycles N]
                                           run a mission in the sim from a clean start (HMI recording API), check
@@ -369,6 +372,34 @@ def config_reload(hmi: str | None, paths) -> int:
         return print_reload(json.load(reply)['nodes'])
 
 
+def state_show(cell_dir: str) -> int:
+    """The object state over cell/objects.yaml, one line per changed object."""
+    from .config import ConfigStore
+
+    store = ConfigStore(cell_dir)
+    state = store.object_state()
+    print(f'object state: {store.state_path()}' if state else
+          f'no object state ({store.state_path()}): objects as in cell/objects.yaml')
+    for name, change in sorted(state.items()):
+        if change.get('gone'):
+            print(f'  {name}: taken')
+        elif 'object' in change:
+            print(f'  {name}: placed ({change["object"]} at x={change["x"]}, y={change["y"]}, yaw={change["yaw"]})')
+        else:
+            print(f'  {name}: {change["count"]} left')
+    return 0
+
+
+def state_clear(cell_dir: str) -> int:
+    from .config import ConfigStore
+
+    store = ConfigStore(cell_dir)
+    existed = store.state_path().exists()
+    store.clear_object_state()
+    print(f'object state cleared ({store.state_path()})' if existed else 'no object state to clear')
+    return 0
+
+
 def skills(node) -> int:
     from taskweave_interfaces.srv import ListSkills
 
@@ -460,6 +491,9 @@ def main(argv=None) -> int:
                               help='stance: store for this object instance only, not for its object type')
     teach_parser.add_argument('--tool', action='append', dest='tools',
                               help='point: store only this tool (repeatable; default: every tool)')
+    state_parser = sub.add_parser('state', help='run-time object state').add_subparsers(dest='action', required=True)
+    for action, text in (('show', 'what is taken, stack counts, placed objects'), ('clear', 'put every object back')):
+        state_parser.add_parser(action, help=text).add_argument('cell_dir', nargs='?', default='.')
     describe_parser = sub.add_parser('describe')
     describe_parser.add_argument('config_dir', nargs='?')
     describe_parser.add_argument('robot', nargs='?')
@@ -551,6 +585,8 @@ def main(argv=None) -> int:
         from .config.migrate import migrate
 
         return migrate(options.cell_dir, options.robot_packs, options.name, options.dry_run)
+    if options.command == 'state':
+        return (state_show if options.action == 'show' else state_clear)(options.cell_dir)
     if options.command == 'check':
         return check(options.config_dir)
     if options.command == 'skills':
