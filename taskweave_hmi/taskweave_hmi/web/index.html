@@ -24,6 +24,19 @@
   <span id="conn" class="conn" title="live connection"></span>
 </header>
 
+<!-- global speed override: in the sticky top bar, so it is in reach on every tab and while a mission runs -->
+<div id="speed" class="speed off" role="group" aria-label="Speed override">
+  <div class="speed-read"><span class="sub">Speed</span><output id="speed-value" class="speed-value" aria-live="polite">–</output></div>
+  <div class="speed-set">
+    <button id="speed-down" class="icon" aria-label="Slower" title="Slower">−</button>
+    <input id="speed-range" type="range" min="1" max="100" step="1" value="100" aria-label="Speed override in percent">
+    <button id="speed-up" class="icon" aria-label="Faster" title="Faster">+</button>
+  </div>
+  <div id="speed-presets" class="segmented" role="group" aria-label="Speed presets"></div>
+  <button id="speed-test" class="btn small speed-test" aria-pressed="false">Test mode</button>
+  <span id="speed-msg" class="speed-msg" hidden></span>
+</div>
+
 <nav class="tabs" role="tablist">
   <button role="tab" data-view="run" aria-selected="true">Run</button>
   <button role="tab" data-view="missions" aria-selected="false">Missions</button>

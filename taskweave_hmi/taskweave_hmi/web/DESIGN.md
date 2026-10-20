@@ -109,6 +109,11 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 - **Tabs** (`.tabs`): in the sticky top bar with the header (`.top` wraps both). Uppercase 14px, 48px high, equal
   width; the selected one in brand text with a 3px underline. At 400px and below they drop the uppercase so all six
   fit; if they still do not, they scroll inside the bar, never the page.
+- **Speed override** (`.speed`): a strip in the sticky top bar between header and tabs, on every tab. The percent
+  big (Barlow Semi Condensed 30px), − / + icon buttons around a range slider in brand colour, the presets as a
+  segmented control, and a test mode toggle that turns amber with its cap (the value turns amber too). The
+  handler's message on a clamped or refused request below, for 8 s. Greyed out with a hint without the task handler.
+  On a phone: value and presets, then slider and test mode.
 - **Cards** (`.card`): card surface, hairline border, 10px radius, 16px padding, a grid with 12px gaps.
   `details.card` opens from its whole title row.
 - **Status card** (`.card.status`): the andon panel. A 10px rail and a solid badge (`.chip` inside it) in the state
