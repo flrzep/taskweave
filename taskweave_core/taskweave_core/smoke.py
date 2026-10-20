@@ -11,7 +11,10 @@ A run (and a reference, which is a saved run) is YAML::
     outcome: 1 cycle done          # the recording's outcome
     steps:
     - {cycle: 1, step_id: s3, skill: navigate_to, instruction: ..., outcome: SUCCEEDED, duration_s: 12.4,
-       max_error: 0.005, attempts: 1, message: ...}
+       max_error: 0.005, attempts: 1, message: ..., data: {path: planned, plan_s: 1.2, scale: 0.5}}
+
+``data`` (optional, absent in older files) says how the step moved: path kind, any_one choice, planner time and
+points, speed scale; a duration failure names both path kinds when known.
 
 Comparison: every reference step must come in the same order with outcome SUCCEEDED, its duration within
 ±tolerance (relative; per skill, see DEFAULT_SKILL_TOLERANCE) plus an absolute slack, its max error not above
@@ -36,6 +39,7 @@ DEFAULT_HMI = 'http://localhost:8090'
 STATE_EVENTS = 50  # /api/state shows the latest 50 events
 END_MARGIN_S = 300.0  # beyond the mission time limit: sim reset before, recording finish after
 # duration tolerance per skill (relative), over the general one: Nav2 drives vary ~±8 % between identical runs
+DATA_KEYS = ('path', 'mode', 'choice', 'plan_s', 'plan_points')  # per-step data kept in a run (see executive)
 DEFAULT_SKILL_TOLERANCE = {'navigate_to': 0.25}
 
 
@@ -51,6 +55,13 @@ def event_key(event: dict) -> tuple:
 def max_error(message: str) -> float | None:
     match = ERROR_RE.search(message or '')
     return float(match.group(1)) if match else None
+
+
+def step_data(event: dict) -> dict:
+    """How the step moved, from its step_finished event: the whitelisted skill data and the speed scale."""
+    data = {k: v for k, v in (event.get('data') or {}).items() if k in DATA_KEYS}
+    scale = (event.get('speed') or {}).get('scale')
+    return {**data, **({'scale': scale} if scale is not None else {})}
 
 
 def step_results(events: list[dict], cycles: int | None = None) -> list[dict]:
@@ -76,6 +87,10 @@ def step_results(events: list[dict], cycles: int | None = None) -> list[dict]:
             continue
         result['outcome'], result['message'] = event.get('outcome', ''), event.get('message', '')
         result['max_error'] = max_error(result['message'])
+        summary = step_data(event)
+        result.pop('data', None)
+        if summary:
+            result['data'] = summary
         if result['_start'] is not None and event.get('time') is not None:
             result['duration_s'] = round(float(event['time']) - float(result['_start']), 3)
     return [{k: v for k, v in r.items() if not k.startswith('_')} for r in results.values()]
@@ -138,7 +153,9 @@ def _judge(ref: dict, now: dict, tolerance: float, slack_s: float, error_slack: 
     if ref_s is not None and now_s is not None:
         row['delta_pct'] = round(100.0 * (now_s - ref_s) / ref_s, 1) if ref_s else None
         if abs(now_s - ref_s) > duration_tolerance * ref_s + slack_s:
-            problems.append(f'{"slower" if now_s > ref_s else "faster"} than {ref_s:g} s ±{duration_tolerance:.0%}')
+            paths = [(d or {}).get('path') for d in (now.get('data'), ref.get('data'))]
+            why = f' (path {paths[0]}, ref {paths[1]})' if all(paths) else ''
+            problems.append(f'{"slower" if now_s > ref_s else "faster"} than {ref_s:g} s ±{duration_tolerance:.0%}{why}')
     elif ref_s is not None:
         problems.append('no duration')
     ref_e, now_e = ref.get('max_error'), now.get('max_error')
