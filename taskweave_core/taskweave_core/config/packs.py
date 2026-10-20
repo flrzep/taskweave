@@ -72,19 +72,26 @@ def read_pack(folder: Path) -> dict | None:
 
 
 def taskweave_version() -> str:
-    """The version of this taskweave: the installed taskweave_core, else the package.xml of the source tree."""
-    try:
-        from importlib.metadata import version
-
-        return version('taskweave_core')
-    except Exception:  # not installed (run from a source tree)
-        pass
+    """The version of the taskweave_core that is running: the package.xml of its source tree, else the metadata of the
+    installed copy this file belongs to (not just any installed taskweave_core: an older one may come first on the
+    path), else any installed one."""
     import re
 
-    xml = Path(__file__).resolve().parents[2] / 'package.xml'
+    here = Path(__file__).resolve()
+    xml = here.parents[2] / 'package.xml'
+    if xml.is_file():
+        found = re.search(r'<version>([^<]+)</version>', xml.read_text(encoding='utf-8'))
+        if found:
+            return found.group(1).strip()
     try:
-        return re.search(r'<version>([^<]+)</version>', xml.read_text(encoding='utf-8')).group(1).strip()
-    except (OSError, AttributeError):
+        from importlib.metadata import distributions, version
+
+        for dist in distributions():
+            if (dist.metadata['Name'] or '').replace('-', '_') == 'taskweave_core' and \
+                    here.is_relative_to(Path(dist.locate_file('')).resolve()):
+                return dist.version
+        return version('taskweave_core')
+    except Exception:  # metadata missing or unreadable
         return 'unknown'
 
 

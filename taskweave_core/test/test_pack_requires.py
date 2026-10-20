@@ -82,3 +82,16 @@ def test_shipped_packs_admit_this_taskweave(monkeypatch):
     for path in found:
         spec = yaml.safe_load(path.read_text())['requires']['taskweave']
         assert SpecifierSet(spec).contains(version), path
+
+
+def test_the_version_is_the_running_source_trees(monkeypatch):
+    """An older installed taskweave_core (e.g. a deployed workspace on the path) must not decide the version of the
+    code that runs: the package.xml next to the source wins."""
+    import importlib
+    import re
+
+    real = importlib.reload(packs).taskweave_version   # the fixture replaced it; this test checks the real one
+    xml = Path(packs.__file__).resolve().parents[2] / 'package.xml'
+    expected = re.search(r'<version>([^<]+)</version>', xml.read_text(encoding='utf-8')).group(1).strip()
+    monkeypatch.setattr('importlib.metadata.version', lambda name: '0.0.1')
+    assert real() == expected
