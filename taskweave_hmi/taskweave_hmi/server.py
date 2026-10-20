@@ -45,8 +45,9 @@ HTTP API (JSON):
   GET  /api/robot/base             the base pose in the cell from TF {frame, child, xyz, quat: [w, x, y, z], stamp}
                                    (503 without the transform)
   GET  /api/scene                  {frame, objects, skipped, placed, locations, points, updated}: MoveIt's world
-                                   collision objects (fetched every 10 s; [] and updated null without move_group) and
-                                   the config's placed objects, locations and object points (scene.py)
+                                   collision objects ([] and updated null without move_group) and the config's
+                                   placed objects, locations and object points (scene.py). Only while it is asked for:
+                                   the object names at most every 10 s, the geometry when they change
   PUT  /api/robot/poses/<name>     {joints[, rename, create]};  DELETE the same
   PUT  /api/robot/navigation       {envelope: {front, back, left, right}, padding, inflation_radius, driving}: checked
                                    against the robot's base, saved and applied to the running costmaps
@@ -128,7 +129,8 @@ NAV_COSTMAPS = ['/local_costmap/local_costmap', '/global_costmap/global_costmap'
 NAV_CONTROLLER = '/controller_server'
 FK_SERVICE = '/compute_fk'  # MoveIt move_group
 SCENE_SERVICE = '/get_planning_scene'  # MoveIt move_group
-SCENE_PERIOD_S = 10.0  # how often the 3D view's collision objects are fetched
+SCENE_CHECK_S = 10.0  # while a 3D view asks: how often move_group's object names are compared (cheap); the geometry
+                      # (every mesh of the cell, a stall of move_group's scene monitor) only when they change
 SCENE_GIVE_UP_S = 30.0  # a fetch with no answer by then is dropped (move_group gone mid-call)
 SPEED_CHECK_S = 2.0  # how often the HMI checks that the task handler serves set_speed_override (greys the control out)
 OUTCOMES = ['succeeded', 'failed', 'timeout', 'canceled', 'rejected']
@@ -293,18 +295,20 @@ class Bridge(Node):
             keep=self.get_parameter('recordings_keep').value,
             min_free_gb=self.get_parameter('recording_min_free_gb').value,
             post=self.get_parameter('recording_post').value) if directory else None
-        # 3D view: the base pose from TF; MoveIt's collision objects fetched by a timer (HTTP threads read the copy)
+        # 3D view: the base pose from TF; MoveIt's collision objects fetched when /api/scene asks (HTTP threads read
+        # the copy), never without a 3D view open
         self.tf, self.tf_listener = tf_util.buffer(self)  # cleared when sim time jumps back
         self.cell_frame = self._cell_frame()
         self.collision: dict = {'objects': [], 'skipped': 0, 'updated': None}
         self.scene_sent = 0.0  # monotonic time of the fetch in flight, 0: none
+        self.scene_checked = 0.0  # monotonic time of the last names check
+        self.scene_names = None  # the object names the geometry copy is of (None: no copy yet)
         try:
             from moveit_msgs.srv import GetPlanningScene
         except ImportError:  # no MoveIt installed: no collision objects
             self.scene_client = None
         else:
             self.scene_client = self.create_client(GetPlanningScene, SCENE_SERVICE, callback_group=self.group)
-            self.create_timer(SCENE_PERIOD_S, self._fetch_scene, callback_group=self.group)
 
     # ---- ROS -> state ------------------------------------------------------------
     def _broadcast(self, kind: str, data) -> None:
@@ -406,35 +410,63 @@ class Bridge(Node):
                 'stamp': stamp.sec + stamp.nanosec * 1e-9}
 
     def _fetch_scene(self) -> None:
-        """Ask move_group for the world collision objects; the answer replaces the copy /api/scene serves."""
+        """Called by /api/scene: at most every SCENE_CHECK_S, ask move_group for its world object names; the geometry
+        follows only when they differ from the copy's (_names_received). Nothing is asked while no 3D view is open."""
         from moveit_msgs.msg import PlanningSceneComponents
+
+        if self.scene_client is None:
+            return
+        if not self.scene_client.service_is_ready():
+            self.collision, self.scene_names = {'objects': [], 'skipped': 0, 'updated': None}, None
+            return
+        now = time.monotonic()
+        if self.scene_sent and now - self.scene_sent < SCENE_GIVE_UP_S:
+            return  # the last one is still on its way
+        if now - self.scene_checked < SCENE_CHECK_S:
+            return
+        self.scene_checked = now
+        self._ask_scene(PlanningSceneComponents.WORLD_OBJECT_NAMES, self._names_received)
+
+    def _ask_scene(self, components: int, done) -> None:
         from moveit_msgs.srv import GetPlanningScene
 
-        if not self.scene_client.service_is_ready():
-            self.collision = {'objects': [], 'skipped': 0, 'updated': None}
-            return
-        if self.scene_sent and time.monotonic() - self.scene_sent < SCENE_GIVE_UP_S:
-            return  # the last one is still on its way
         request = GetPlanningScene.Request()
-        request.components.components = PlanningSceneComponents.WORLD_OBJECT_GEOMETRY
+        request.components.components = components
         self.scene_sent = time.monotonic()
-        self.scene_client.call_async(request).add_done_callback(self._scene_received)
+        self.scene_client.call_async(request).add_done_callback(done)
 
-    def _scene_received(self, future) -> None:
+    def _scene_answer(self, future):
+        """The response of a scene request, or None (failed: the last copy is kept, the next check tries again)."""
         self.scene_sent = 0.0
         try:
-            response = future.result()
-        except Exception as error:  # noqa: BLE001 - keep the last copy; the next fetch tries again
+            return future.result()
+        except Exception as error:  # noqa: BLE001 - keep the last copy; the next check tries again
             self.get_logger().warning(f'{SCENE_SERVICE}: {error}')
-            return
+            return None
+
+    def _names_received(self, future) -> None:
+        from moveit_msgs.msg import PlanningSceneComponents
+
+        response = self._scene_answer(future)
         if response is None:
             return
-        objects, skipped = scene.collision_objects(response.scene.world.collision_objects, self.cell_frame,
-                                                   self.frame_pose)
+        names = sorted(o.id for o in response.scene.world.collision_objects)
+        if names != self.scene_names:
+            self._ask_scene(PlanningSceneComponents.WORLD_OBJECT_GEOMETRY, self._scene_received)
+
+    def _scene_received(self, future) -> None:
+        response = self._scene_answer(future)
+        if response is None:
+            return
+        world = response.scene.world.collision_objects
+        objects, skipped = scene.collision_objects(world, self.cell_frame, self.frame_pose)
         self.collision = {'objects': objects, 'skipped': skipped, 'updated': time.time()}
+        self.scene_names = sorted(o.id for o in world)
 
     def scene_view(self) -> dict:
-        """The 3D view's scene: the last fetched collision objects and the config's points (scene.py)."""
+        """The 3D view's scene: the last fetched collision objects and the config's points (scene.py). Asking for it
+        keeps the copy current (_fetch_scene); the first answer of a newly opened view may still be the old copy."""
+        self._fetch_scene()
         collision = self.collision
         return {'frame': self.cell_frame, 'objects': collision['objects'], 'skipped': collision['skipped'],
                 **scene.config_scene(self.config), 'updated': collision['updated']}

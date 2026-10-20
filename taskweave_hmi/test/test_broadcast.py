@@ -103,3 +103,65 @@ def test_a_planning_scene_answer_replaces_the_cached_collision_objects():
     assert bridge.scene_sent == 0.0 and bridge.collision['updated'] is not None
     assert bridge.collision['objects'] == [{'id': 'table', 'type': 'box', 'size': [1.0, 2.0, 3.0],
                                             'xyz': [0.0, 0.0, 0.0], 'quat': [1.0, 0.0, 0.0, 0.0]}]
+    assert bridge.scene_names == ['table']
+
+
+class FakeSceneClient:
+    """move_group's /get_planning_scene: records the components asked for, answers with objects named ``ids``."""
+
+    def __init__(self, ids):
+        self.ids, self.asked, self.ready = list(ids), [], True
+
+    def service_is_ready(self):
+        return self.ready
+
+    def call_async(self, request):
+        from types import SimpleNamespace as NS
+
+        self.asked.append(request.components.components)
+        answer = NS(scene=NS(world=NS(collision_objects=[NS(id=i) for i in self.ids])))
+        return NS(add_done_callback=lambda done: done(NS(result=lambda: answer)))
+
+
+def scene_bridge(client):
+    bridge = bridge_with()
+    bridge.scene_client, bridge.scene_sent, bridge.scene_checked, bridge.scene_names = client, 0.0, 0.0, None
+    bridge.collision = {'objects': [], 'skipped': 0, 'updated': None}
+    bridge.cell_frame, bridge.frame_pose = 'world', lambda frame: None
+    return bridge
+
+
+def test_the_scene_is_asked_for_only_by_the_3d_view_and_its_geometry_only_when_the_names_change(monkeypatch):
+    pytest.importorskip('moveit_msgs')
+    from moveit_msgs.msg import PlanningSceneComponents as Components
+
+    from taskweave_hmi import server
+
+    clock = [100.0]
+    monkeypatch.setattr(server.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(server.scene, 'collision_objects', lambda objects, frame, pose: ([], 0))  # no geometry here
+    client = FakeSceneClient(['rack', 'table'])
+    bridge = scene_bridge(client)
+    names, geometry = Components.WORLD_OBJECT_NAMES, Components.WORLD_OBJECT_GEOMETRY
+    assert client.asked == []  # nothing until a 3D view asks (no timer)
+    bridge._fetch_scene()
+    assert client.asked == [names, geometry] and bridge.scene_names == ['rack', 'table']
+    clock[0] += 2.0  # the view's next poll, within SCENE_CHECK_S: nothing is asked
+    bridge._fetch_scene()
+    assert len(client.asked) == 2
+    clock[0] += server.SCENE_CHECK_S  # the names again, unchanged: no geometry
+    bridge._fetch_scene()
+    assert client.asked[2:] == [names]
+    client.ids.append('tray')  # an object added: the geometry follows
+    clock[0] += server.SCENE_CHECK_S
+    bridge._fetch_scene()
+    assert client.asked[3:] == [names, geometry] and bridge.scene_names == ['rack', 'table', 'tray']
+
+
+def test_without_move_group_the_scene_copy_is_emptied_and_nothing_is_asked():
+    client = FakeSceneClient(['table'])
+    client.ready = False
+    bridge = scene_bridge(client)
+    bridge.collision, bridge.scene_names = {'objects': [{'id': 'old'}], 'skipped': 0, 'updated': 1.0}, ['old']
+    bridge._fetch_scene()
+    assert client.asked == [] and bridge.collision['objects'] == [] and bridge.scene_names is None
