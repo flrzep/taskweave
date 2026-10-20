@@ -33,6 +33,8 @@ from . import clock_jump, names, tf_util
 from .config import ConfigError, ConfigStore, Pose2D
 from .config.poses import quaternion_from_rpy, quaternion_multiply, rotate
 
+MAX_POSE_AGE_S = 1.0  # default of max_tf_age_s (the HMI imports it)
+
 
 def yaw_from_quaternion(q) -> float:
     return math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
@@ -49,7 +51,7 @@ class Teach(Node):
         self.cell_frame = self.get_parameter('cell_frame').value or self._skill_cell_frame()
         self.pose: Pose2D | None = None
         self.stamp = 0.0
-        self.declare_parameter('max_tf_age_s', 1.0)   # refuse to save from TF or a base pose older than this
+        self.declare_parameter('max_tf_age_s', MAX_POSE_AGE_S)   # refuse to save from TF or a base pose older than this
         self.declare_parameter('after_jump_s', 2.0)   # ... and for this long after a clock jump
         self.max_age_s = self.get_parameter('max_tf_age_s').value
         self.after_jump_s = self.get_parameter('after_jump_s').value

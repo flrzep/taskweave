@@ -95,11 +95,11 @@ change. Launch files go to `share/<name>/launch` through `data_files` in `setup.
 
 ### Sim clock jumps (Stop/Play)
 A node that holds a TF buffer gets it from `tf_util.buffer(node)`, never `tf2_ros.Buffer()` directly:
-`taskweave_core/clock_jump.py` (`watch(node)`, one per node) clears every registered buffer when ROS time goes back
+`taskweave_core/taskweave_core/clock_jump.py` (`watch(node)`, one per node) clears every registered buffer when ROS time goes back
 (and again while the clock settles) and calls `watcher.callbacks` (`hold.py` ends holds, `teach` drops its base pose).
 New state that must forget the old run goes into `watch(node).callbacks`. `teach` refuses to save while TF or the base
 pose is older than `max_tf_age_s` (1 s) or within `after_jump_s` (2 s) of a jump. Nav2 and MoveIt cannot be fixed from
-inside: the optional `clock_guard` node (`taskweave_bringup/clock_guard.py`, launch arg `clock_guard:=true`, default
+inside: the optional `clock_guard` node (`taskweave_bringup/taskweave_bringup/clock_guard.py`, launch arg `clock_guard:=true`, default
 off) resets the Nav2 lifecycle nodes and restarts move_group; its decisions are pure functions (`nav2_reset_due`,
 `move_group_restart_due`, `inactive_update`), node names and timing are ROS parameters (`clock_guard_params:=<yaml>`).
 
