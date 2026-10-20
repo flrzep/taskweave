@@ -1,19 +1,92 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-10-20
 
-- **Reload without a restart.** `<node>/reload_config` (`ReloadConfig`) on the task handler and every skill server
-  re-reads the config between missions and goals; `taskweave config reload [--ros | --hmi URL]` calls them all and
-  prints what was reloaded and what needs a restart. Skill yaml parameters and `base.limits` apply live; the catalogue
-  value of `skills/*.yaml` is now `reload_service` (was `skill_server`). Skills read their parameters in
-  `Skill.configure`, split off `setup`. See `docs/configuration.md`, "Reload without a restart".
-- **Container image.** A `Dockerfile` (ROS 2 Jazzy, all packages built from the checkout, entrypoint sourcing ROS and
-  the install, `taskweave` on the PATH), `docker/compose.example.yaml` and a CI job that builds the image without
+### Breaking changes
+- **Reload value renamed.** The catalogue `reload` value of `skills/*.yaml` is now `reload_service` (was `skill_server`).
+  Any tool or saved file that used the old value must change.
+- **`taskweave check` output changed.** One line per file (`ok`, `FAIL` or `warn`, with `file:line` and the message),
+  then a summary: `N file(s) with problems`, or `config ok (skill arguments are checked against a running catalog)`.
+  The old `ok    <file>` / `N problem(s)` lines are gone; scripts that parse them must change. Exit code 1 still means
+  an error.
+- **Packs need `requires: {taskweave: ">=0.2,<0.3"}`.** The example cell and the bundled robot packs now require it;
+  a pack requiring another range is refused by this release (the error names both versions). Robot packs are version
+  0.2.0.
+- **New run-time dependency:** `python3-packaging` (`exec_depend` of `taskweave_core`). Install it on hosts that run
+  the core from source.
+- **Interfaces:** new `ReloadConfig` service and `RestartItem` message in `taskweave_interfaces` (additive).
+- **Limitations of 0.1.0 resolved:** arm selection exists (`hands: any_one` in `move_gripper` and `grip`), so the
+  "no arm auto-selection" limitation is gone; the other limitations of 0.1.0 still apply.
+
+### Arm selection and one-hand work (P3)
+- `hands: any_one` for `move_gripper` and `grip`: a free, IK-feasible hand with the least motion; the profile order
+  breaks ties; a repeatable hand ranks before one that needed the global IK search; a FAILED target (TF) is passed on.
+- Free arm moves while the other hand holds: only motions of holding hands and their arms are refused. IK
+  collision-checks the free arm against the other arms' current joints.
+- A holding hand is not a reached hand in `grip close any_one`; `grip open` with several holding hands names them in an
+  ambiguity.
+- Motions within a tolerance of the least are equal, and the profile order decides. The probe counts the torso and the
+  pose's fixed joints in `motion_rad`.
+- `move_gripper` via-poses: a pose with nothing for the target hands adds no leg (was a crash); via legs take only the
+  target's hands.
+- `move_joints` on a holding gripper joint is refused like the arm joints.
+
+### Held objects
+- Held objects are collision objects in MoveIt's planning scene.
+- A planned motion keeps the holding arms where they are; holds are followed however a motion ends, not only on
+  success; `move_object`'s lift segment follows the other holds.
+- Moving a held object drops the stale reach of hands that are not in the hold.
+- A hold records the object type, so a taken single object can be placed (`place_as`) and moved again; the type is
+  published only when known. `grip open` with `place_as` rejects when two holds would be released.
+- A hold that cannot be registered (no TF) fails `grip close` instead of reporting holding.
+- Object types may carry a free-form `sim:` key for the simulator integration.
+
+### Config API
+- **Catalogue** (`config/catalogue.py`): one table of every config file kind (pattern, schema, reload value,
+  editability). `taskweave config files`, `config schema` (JSON Schema export), and `config validate <file>` (one file as on disk); problems are
+  structured (`path`, `pack`, `where`, `line`, `col`, `message`, `severity`).
+- **Save, delete, create, save_mission, set_robot** go through core: a stale base hash raises `SaveConflict`; errors
+  write nothing; one lock per pack around compare, validate and write; atomic write keeping owner, group and mode;
+  robot-pack edits are written as overrides into the cell pack; the written path is committed when the pack is a git
+  work tree. Commits use umask 002 and warn about a shared repo without `core.sharedRepository`.
+- **`config save`, `config history`, `config restore`** (CLI) use the same core calls; history and restore read git.
+- **Init, export, import:** `taskweave config init <dir> --robot <pack>` (a cell pack from nothing, passes `check`);
+  `config export <cell> f.tar.gz`; `config import f.tar.gz <cell> [--force]` (checked before anything changes; folder
+  swap with `.bak-<time>`, or a commit in a git tree; pack lock and rollback on failure).
+- **Reload without a restart:** `<node>/reload_config` on the task handler and every skill server;
+  `taskweave config reload [--ros | --hmi URL]` prints what was reloaded and what needs a restart. Skill yaml parameters
+  and `base.limits` apply live. Skills read their parameters in `configure`, split off `setup`.
+- An invalid `system.yaml` is a problem of that file and can be fixed by a save; dry-run messages name the real files.
+
+### Pack versions
+- `requires: {taskweave: <PEP 440 specifier>}` in a cell or robot `pack.yaml`. Loading and `taskweave check` refuse a
+  pack that does not admit the installed taskweave and name both versions; a missing `requires` is allowed.
+- The example cell and the bundled robot packs require `>=0.2,<0.3`; `config migrate` writes robot pack version 0.2.0.
+
+### Container image
+- `Dockerfile` (ROS 2 Jazzy, all packages built from the checkout, entrypoint sourcing ROS and the install,
+  `taskweave` on the PATH), `docker/compose.example.yaml`, `.dockerignore`, and a CI job that builds the image without
   pushing it. Nothing is published. See `docs/install.md`, "Container".
-- **Pack versions.** A cell or robot `pack.yaml` may carry `requires: {taskweave: ">=0.1,<0.2"}` (a PEP 440
-  specifier). Loading and `taskweave check` refuse a pack that does not admit the installed taskweave and name both
-  versions; a missing `requires` is allowed. The example cell and the bundled robot packs require `>=0.1,<0.2`. New
-  run-time dependency: `python3-packaging`.
+
+### CLI on PATH
+- `taskweave` is a wrapper in `bin/` (installed through `data_files`), so it is on the PATH after sourcing the install.
+  The console scripts stay in `lib/taskweave_core` for `ros2 run`. `python3 -m taskweave_core.cli` is unchanged.
+
+### CI and test robustness
+- The skills ROS tests are independent of the runner's load; wall-clock tolerances scale with
+  `TASKWEAVE_TEST_TIME_SCALE` (CI: 4).
+- Per-node singletons are dropped on `destroy_node`, with a guard against id reuse (also for `HoldCollision`).
+- `test_pack_requires` cases live in their own folders (the pack.yaml mtime cache), and the shipped packs are tested
+  against the package version.
+
+### Fixes
+- Record tab: Download all (the whole recording, bag included, as one tar); a stopped recording shows that it is
+  finishing and Stop is disabled meanwhile.
+- Save and delete hash the file again right before the write (no lost update).
+- Import into a git tree: writable check first, rollback on failure.
+- Review findings of the P3 and P4 reviews (`any_one` ranking, probe motion, hold reach, registry,
+  `teach_then_drive_back` checks against the taught point, `test_move_follows_the_planned_path` records the detour).
+- Docs: the skill step format in `docs/skills.md` and the taskweave-on-PATH notes in `docs/install.md`.
 
 ## 0.1.0 (2026-10-19)
 
