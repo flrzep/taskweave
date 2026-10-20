@@ -47,9 +47,10 @@ ik:                         # tool targets in poses.yaml: solved by MoveIt (ros/
   avoid_collisions: true      # collision hulls: moveit/meshes (tools/export_collision.py), pairs: tools/collision_matrix.py
   torso:                      # motion torso: auto searches this grid (taskweave_skills/ik.py solve_with_torso, Oct 2026)
     joint: body_joint         # both hands solved at one height, full state collision checked (idle arm too)
-    candidates: [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75]   # lift range
+    candidates: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75]   # coarse grid over the lift range
+    accept_cost: 1.5          # the current height wins at once when feasible and its arm cost is at most this
     weights: {torso: 1.0}     # cost per m of torso travel, next to the ik.choose arm cost
-    line_sample_m: 0.1        # a straight line is checked every 10 cm for the height
+    line_sample_m: 0.3        # a straight line is checked at its ends, and every 30 cm between for the height
   mirror: {right: left}       # the S1's right arm mirrors the left with the same joint values (URDF FK, 13 Oct)
   choose:                     # best of several solutions (taskweave_skills/ik.py), not the first
     elbow: down               # 13 Oct: top-down grasps keep the most joint-limit room elbow out/up, not down

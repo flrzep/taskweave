@@ -60,6 +60,7 @@ chooses the torso height: see there.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import time
@@ -98,9 +99,11 @@ class TorsoChoice:
     flips: set
     cost: float
     rejected: list = field(default_factory=list)
+    skipped: str = ''     # why the other heights were not tried
 
     def report(self) -> dict:
-        return {'height': round(self.height, 4), 'cost': round(self.cost, 4), 'rejected': self.rejected}
+        more = {'skipped': self.skipped} if self.skipped else {}
+        return {'height': round(self.height, 4), 'cost': round(self.cost, 4), 'rejected': self.rejected, **more}
 
 
 def tcp_matrix(target: dict) -> np.ndarray:
@@ -271,6 +274,7 @@ class IkClient:
         """How to choose between solutions (profile ik.choose; None: the first solution wins, seed order). Skills
         set it from the profile before solving, so an edit (HMI) applies without a restart."""
         self.choose = choose
+        self.memo = {}      # solve() answers of this run (see _memo_key)
         if choose is not None and self.fk is None:
             from moveit_msgs.srv import GetPositionFK
             from rclpy.callback_groups import ReentrantCallbackGroup
@@ -336,10 +340,16 @@ class IkClient:
         return future.result().valid
 
     def solve(self, tools: dict, fixed: dict, should_stop=lambda: False, current: dict | None = None,
-              allow_flip: bool = True, elbow=None) -> dict[str, float]:
+              allow_flip: bool = True, elbow=None, global_search: bool = True) -> dict[str, float]:
         """Joint values for every tool target (plus nothing else); raises IkError. ``current``: the joints now, for
         the size-of-move cost when choosing. ``allow_flip`` False: solve the targets as given (no flipped grasp).
-        ``elbow``: preferred elbow side for this solve (e.g. an object point's), else the profile's."""
+        ``elbow``: preferred elbow side for this solve (e.g. an object point's), else the profile's.
+        ``global_search`` False: no fallback to the global solver (slow, and its answer is not repeatable)."""
+        memo = getattr(self, 'memo', {}).get(self._memo_key(tools, fixed, current, allow_flip, elbow))
+        if memo is not None:    # the torso search solved exactly this
+            self.elbow_side = elbow or (self.choose or {}).get('elbow')
+            self.last = {t: dict(v) for t, v in memo[1].items()}
+            return dict(memo[0])
         if not self.client.wait_for_service(timeout_sec=2.0):
             raise IkError(f'no IK service {self.service} (is MoveIt running?)')
         self.elbow_side = elbow or (self.choose or {}).get('elbow')
@@ -376,8 +386,8 @@ class IkClient:
             if self.choose is not None:
                 local += [(self.groups[tool], start, float(self.choose.get('start_timeout_s', START_TIMEOUT_S)))
                           for start in self._starts(tool)]
-            fallback = [(self.fallback_groups[tool], {}, self.fallback_timeout_s)] if tool in self.fallback_groups \
-                else []
+            fallback = [(self.fallback_groups[tool], {}, self.fallback_timeout_s)] if global_search and \
+                tool in self.fallback_groups else []
             candidates, response, searched = [], None, False
             for attempts in (local, fallback):  # the global search only if no local descent converged
                 if attempts is fallback and fallback:
@@ -422,7 +432,10 @@ class IkClient:
         one, nearest first) every sample is solved (``solve``) and its full state checked (/check_state_validity: the
         torso, the solved arms and the idle arms as they are now). Cost: the arm cost of the main
         sample (ik.choose weights: joint limits, elbow, arm motion) + ik.torso.weights.torso * |height change|; ties go
-        to the smaller change, then the lower height, so the same input gives the same height. Raises TorsoError."""
+        to the smaller change, then the lower height, so the same input gives the same height. The current height
+        comes first and wins at once when it is feasible and its cost is at most ``accept_cost`` (default: always), so
+        the common case is one solve per sample; otherwise heights are tried outward from it and the search stops
+        when the torso cost alone passes the best total. Raises TorsoError."""
         spec = self.torso
         joint = spec['joint']
         if joint not in current:
@@ -430,6 +443,7 @@ class IkClient:
         now, weight = float(current[joint]), float((spec.get('weights') or {}).get('torso', TORSO_WEIGHT))
         heights = sorted({round(float(v), 6) for v in spec['candidates']} | {now},
                          key=lambda h: (round(abs(h - now), 9), h))
+        accept = spec.get('accept_cost')
         best, rejected = None, []
         for index, height in enumerate(heights):
             if best is not None and weight * abs(height - now) >= best.cost:   # every later one costs more
@@ -442,6 +456,9 @@ class IkClient:
             except TorsoError as error:
                 rejected.append({'height': round(height, 4), 'reason': str(error)})
                 continue
+            if height == now and (accept is None or choice.cost <= float(accept)):   # staying put is good enough
+                choice.skipped = 'the current height is feasible and cheap enough'
+                return choice
             if best is None or (round(choice.cost, 9), round(abs(choice.height - now), 9), choice.height) < (
                     round(best.cost, 9), round(abs(best.height - now), 9), best.height):
                 best = choice
@@ -461,7 +478,9 @@ class IkClient:
         for k, tools in enumerate(goals):
             where = f'sample {k}: ' if k else ''
             try:
-                arm = self.solve(tools, with_h, should_stop, current=current, allow_flip=allow_flip, elbow=elbow)
+                arm = self.solve(tools, with_h, should_stop, current=current, allow_flip=allow_flip, elbow=elbow,
+                                 global_search=False)    # a height only the global search solves is no candidate
+                self._remember(tools, with_h, current, allow_flip, elbow, arm)
             except TorsoError:
                 raise
             except IkError as error:
@@ -472,6 +491,18 @@ class IkClient:
                 raise TorsoError(f'{where}collision (idle arm included)')
         arm, flips, cost = main
         return TorsoChoice(height, with_h, arm, flips, cost + weight * abs(height - now))
+
+    def _memo_key(self, tools, fixed, current, allow_flip, elbow) -> str:
+        """Identifies a solve() call: the answer is a function of exactly these (and the scene, which stays within a
+        run: set_choice clears the memo)."""
+        side = elbow or (self.choose or {}).get('elbow')
+        return json.dumps([tools, fixed, current or {}, bool(allow_flip), side], sort_keys=True, default=float)
+
+    def _remember(self, tools, fixed, current, allow_flip, elbow, arm) -> None:
+        """Keep the solve() answer so the move that follows the torso search does not solve it again."""
+        memo = self.__dict__.setdefault('memo', {})
+        memo[self._memo_key(tools, fixed, current, allow_flip, elbow)] = (dict(arm), {t: dict(v) for t, v in
+                                                                                       self.last.items()})
 
     def idle_joints(self, tools, current: dict) -> dict[str, float]:
         """The arm joints of ``current`` that no tool of ``tools`` moves: the idle arms, kept where they are, so a

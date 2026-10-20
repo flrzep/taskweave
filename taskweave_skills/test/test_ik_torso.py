@@ -18,13 +18,15 @@ class FakeIk(IkClient):
     """solve(): ``reach(tool, target, height)`` -> an arm joint value or None (out of reach); valid(): ``collides``
     (joints) -> True when the state is in collision. No ROS."""
 
-    def __init__(self, reach=lambda tool, target, h: 0.0, collides=lambda joints: False, weight=1.0, grid=GRID):
-        self.torso = {'joint': 'lift', 'candidates': grid, 'weights': {'torso': weight}}
+    def __init__(self, reach=lambda tool, target, h: 0.0, collides=lambda joints: False, weight=1.0, grid=GRID,
+                 accept=None):
+        self.torso = {'joint': 'lift', 'candidates': grid, 'weights': {'torso': weight}, 'accept_cost': accept}
         self.choose, self.last, self.validity = None, {}, object()
         self.groups, self.joint_pattern = {'left': 'left_arm', 'right': 'right_arm'}, '{tool}_j[12]'
         self.reach, self.collides, self.solved, self.checked = reach, collides, [], []
 
-    def solve(self, tools, fixed, should_stop=lambda: False, current=None, allow_flip=True, elbow=None):
+    def solve(self, tools, fixed, should_stop=lambda: False, current=None, allow_flip=True, elbow=None,
+              global_search=True):
         result, self.last = {}, {}
         for tool, target in tools.items():
             value = self.reach(tool, target, fixed['lift'])
@@ -80,8 +82,8 @@ def test_the_torso_weight_trades_torso_travel_against_arm_motion():
         def _arm_cost(self, arm, current):
             return 0.2 * (0.7 - arm['left_j1'])
     reach = lambda tool, target, h: h                  # noqa: E731
-    assert Arm(reach=reach, weight=0.1).solve_with_torso([TOOLS], {}, now(0.1)).height == pytest.approx(0.7)
-    assert Arm(reach=reach, weight=1.0).solve_with_torso([TOOLS], {}, now(0.1)).height == pytest.approx(0.1)
+    assert Arm(reach=reach, weight=0.1, accept=0).solve_with_torso([TOOLS], {}, now(0.1)).height == pytest.approx(0.7)
+    assert Arm(reach=reach, weight=1.0, accept=0).solve_with_torso([TOOLS], {}, now(0.1)).height == pytest.approx(0.1)
 
 
 def test_a_height_where_the_idle_arm_collides_is_rejected():
@@ -119,7 +121,7 @@ def test_a_line_is_sampled_and_a_height_that_fails_mid_line_is_rejected():
 
 
 def test_the_search_stops_when_no_farther_height_can_win_and_says_so():
-    ik = FakeIk(weight=1.0)
+    ik = FakeIk(weight=1.0, accept=-1)                 # never accepted at once: the search runs
     choice = ik.solve_with_torso([TOOLS], {}, now(0.5))
     assert choice.height == pytest.approx(0.5) and choice.cost == pytest.approx(0.0)
     assert {r['height'] for r in choice.rejected} == {h for h in GRID if h != 0.5}
@@ -184,3 +186,33 @@ def test_the_profile_schema_takes_ik_torso_as_an_optional_key():
     assert errors({**base, 'ik': {**base['ik'], 'torso': {'joint': 'j'}}})                  # candidates are needed
     assert errors({**base, 'ik': {**base['ik'], 'torso': {'joint': 'j', 'candidates': [0], 'x': 1}}})
     assert schemas.default(schemas.ROBOT_PROFILE, 'ik', 'torso', 'weights', 'torso') == 1.0
+
+
+# ---- the common case: the current height is fine ---------------------------------------------------------------
+
+def test_a_feasible_current_height_is_accepted_after_one_solve_and_check_per_sample():
+    ik = FakeIk()                                     # accept_cost None: any feasible current height wins at once
+    choice = ik.solve_with_torso([TOOLS, TOOLS], {}, now(0.45))
+    assert choice.height == pytest.approx(0.45) and choice.skipped and choice.rejected == []
+    assert len(ik.solved) == 4 and len(ik.checked) == 2        # 2 samples x 2 hands solved, 2 states checked
+    assert choice.report()['skipped']
+
+
+def test_a_current_height_whose_arm_cost_is_too_high_starts_the_search():
+    class Arm(FakeIk):
+        def _arm_cost(self, arm, current):             # the arm is cheaper the higher the torso
+            return 2.0 - arm['left_j1']
+    ik = Arm(reach=lambda tool, target, h: h, weight=0.1, accept=1.5)
+    assert ik.solve_with_torso([TOOLS], {}, now(0.1)).height == pytest.approx(0.7)
+    ik = Arm(reach=lambda tool, target, h: h, weight=0.1, accept=1.5)
+    choice = ik.solve_with_torso([TOOLS], {}, now(0.6))        # cost 1.4 at 0.6: accepted
+    assert choice.height == pytest.approx(0.6) and len(ik.solved) == 2
+
+
+def test_the_answers_of_the_search_are_reused_by_the_move_that_follows(monkeypatch):
+    ik = FakeIk()
+    ik.memo = {}
+    ik.solve_with_torso([TOOLS], {}, now(0.45))
+    assert len(ik.memo) == 1
+    key = ik._memo_key(TOOLS, {'lift': 0.45}, now(0.45), True, None)
+    assert key in ik.memo

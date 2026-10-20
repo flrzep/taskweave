@@ -403,6 +403,18 @@ def test_ik_torso_searches_the_height_and_the_result_reports_it_and_the_rejected
     assert 'torso' not in data
 
 
+def test_ik_torso_costs_no_extra_ik_call_when_the_current_height_is_fine(system):
+    go(system, {'to': {'pose': 'present_left'}, 'motion': {'torso': 'keep'}})
+    plain = len(system.ik.requests)
+    go(system, {'to': {'pose': 'present_left'}, 'motion': {'torso': 'keep'}})
+    again = len(system.ik.requests) - plain
+    with_ik_torso(system)
+    before = len(system.ik.requests)
+    result, data = go(system, {'to': {'pose': 'present_left'}})
+    assert len(system.ik.requests) - before <= again          # the search's solve is the move's solve (memo)
+    assert data['torso'][0]['skipped'] and data['torso'][0]['rejected'] == []
+
+
 def test_ik_torso_with_no_feasible_height_fails_with_every_height_and_its_reason(system):
     with_ik_torso(system)
     system.ik.blocked = {'left'}

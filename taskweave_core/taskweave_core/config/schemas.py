@@ -245,7 +245,9 @@ ROBOT_PROFILE = {
                         'candidates': {'type': 'array', 'items': FINITE, 'minItems': 1},   # heights tried (joint units)
                         'weights': {'type': 'object', 'additionalProperties': False,
                                     'properties': {'torso': {'type': 'number', 'minimum': 0, 'default': 1.0}}},
-                        'line_sample_m': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.1},
+                        # the current height wins at once when feasible and its arm cost is at most this (default: any)
+                        'accept_cost': {'type': 'number', 'minimum': 0},
+                        'line_sample_m': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.3},
                     },
                     'additionalProperties': False,
                 },

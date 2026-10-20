@@ -320,11 +320,13 @@ motion_tuning:                # optional, every key defaults (schemas.MOTION_TUN
 
 Skills ask for roles (`base`, `joints`, `grippers.left`, `tool_frames.left`, `ik`); only this file knows the hardware names.
 
-`ik.torso: {joint, candidates, weights: {torso}, line_sample_m}` is optional. With it `motion: {torso: auto}` searches the
-torso height: every candidate (and the current height) is tried with all hands at that one height, the arms are solved
-by IK, and the full state (the idle arm as it is now) is checked for collisions with `/check_state_validity`. The least
+`ik.torso: {joint, candidates, weights: {torso}, accept_cost, line_sample_m}` is optional. With it `motion: {torso: auto}` searches the
+torso height: the current height is tried first and wins at once when it is feasible and its arm cost is at most
+`accept_cost` (default: any), so the usual case costs one IK solve and check per sample. Otherwise the candidates are
+tried outward from it (local IK only, no global search) until the torso cost alone passes the best total. Each is tried
+with all hands at that one height, the arms are solved by IK, and the full state (the idle arm as it is now) is checked for collisions with `/check_state_validity`. The least
 cost wins: the `ik.choose` arm cost plus `weights.torso` per metre of torso travel; ties go to the smaller move, then
-the lower height. A straight line (`mode: linear`) is sampled every `line_sample_m` along its length and the one height
+the lower height. A straight line (`mode: linear`) is sampled at its ends and every `line_sample_m` between, and the one height
 that holds for all samples is set before the line. The step result lists `data.torso` (per leg: the chosen `height`
 and every `rejected` height with its reason). Without `ik.torso`, `auto` keeps the skill's `torso_fallback` list
 (the first height that solves) and linear moves keep the lift.

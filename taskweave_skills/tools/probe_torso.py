@@ -2,14 +2,15 @@
 only /compute_ik, /compute_fk and /check_state_validity with MODEL joint names (profile joints.groups; never base or
 wheel joints) and the robot's current state from its joint state topic.
 
-For a grasp point on an object whose origin is at (``--object`` x y z) in the stance frame (the robot at the origin,
-x forward), with the tool pose ``--tool-xyz`` / ``--tool-rpy`` in the object frame, it prints for each hand alone:
-every candidate height with its verdict (valid or the reason), the chosen height, the idle arm there and what the
-old first-success list (torso_fallback) would take. Run on the ROS domain of the live system, from a sourced
-workspace (the robot packs of the checkout in TASKWEAVE_ROBOT_PACKS):
+The target is given in the robot's base frame: an object pose (``--object`` x y z yaw) and, per hand, the tool pose in
+the object frame (``--tool`` hand x y z roll pitch yaw, as in an object's points). ``--offset`` stops that far back
+along the approach; ``--approach`` adds the pre-grasp sample a free move to a point also checks. The probe prints what
+the search decided for all given hands at once (height, rejected heights, skipped note) and how long it took
+(``--repeat`` times, each from a cold memo). Run on the ROS domain of the live system, from a sourced workspace (the
+robot packs of the checkout in TASKWEAVE_ROBOT_PACKS):
 
-    python3 probe_torso.py --config /workspace/frame-sim/config --robot <name> --object 0.8 0 0.6 \
-        --tool-xyz 0 0 0.07 --tool-rpy 0 3.1416 -1.5708 [--approach 0.1] [--first-success 0.0 0.2 ...]
+    python3 probe_torso.py --config /workspace/frame-sim/config --robot <name> --object 1.0 0 0.38 0 \
+        --tool left 0.1 0.25 0.07 -1.9 0 -1.5 --tool right 0.1 -0.25 0.07 -1.9 0 -1.5 --offset 0.15 --elbow up
 """
 
 import argparse
@@ -41,11 +42,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--config', required=True)
     parser.add_argument('--robot', required=True)
-    parser.add_argument('--object', type=float, nargs=3, required=True, metavar=('X', 'Y', 'Z'))
-    parser.add_argument('--tool-xyz', type=float, nargs=3, default=[0.0, 0.0, 0.0])
-    parser.add_argument('--tool-rpy', type=float, nargs=3, default=[0.0, 0.0, 0.0])
-    parser.add_argument('--approach', type=float, default=0.1, help='pre-grasp distance back along the approach (m)')
-    parser.add_argument('--first-success', type=float, nargs='*', default=[], help="the old list's heights")
+    parser.add_argument('--object', type=float, nargs=4, required=True, metavar=('X', 'Y', 'Z', 'YAW'))
+    parser.add_argument('--tool', nargs=7, action='append', required=True,
+                        metavar=('HAND', 'X', 'Y', 'Z', 'R', 'P', 'W'))
+    parser.add_argument('--offset', type=float, default=0.0, help='stop this far back along the approach (m)')
+    parser.add_argument('--approach', type=float, default=0.0, help='also check the pre-grasp this far back (m)')
+    parser.add_argument('--elbow', default=None)
+    parser.add_argument('--repeat', type=int, default=3)
     args = parser.parse_args()
 
     store = ConfigStore(args.config)
@@ -57,69 +60,39 @@ def main() -> None:
     threading.Thread(target=executor.spin, daemon=True).start()
     ik = IkClient(node, robot, limits=joint_limits(store, args.robot))
     ik.attach_chains(urdf_path(store, args.robot), (robot.data.get('planning') or {}).get('group'))
-    spec = ik.torso
-    if not spec:
-        raise SystemExit('the robot profile has no ik.torso')
     for client in (ik.client, ik.validity):
         client.wait_for_service(timeout_sec=10.0)
+    if not ik.torso:
+        raise SystemExit('the robot profile has no ik.torso')
     names = {n for group in robot.data['joints']['groups'].values() for n in group}
     current = model_state(node, names, robot.data['joints']['state'])
-    joint = spec['joint']
-    if joint not in current:
-        raise SystemExit(f'no state for {joint}: {sorted(current)}')
-    now = current[joint]
-    print(f'{joint} now {now:.3f}; {len(current)} model joints read; validity group {ik.validity_group!r}')
+    joint = ik.torso['joint']
+    print(f'{joint} now {current[joint]:.3f}; {len(current)} model joints read; validity group {ik.validity_group!r}')
 
     box = np.eye(4)
-    box[:3, 3] = args.object
-    tool = box @ rpy_matrix(args.tool_xyz, args.tool_rpy)
-    point, before = target_of(tool), target_of(tool, args.approach)
-    print(f'TCP {point["tcp"]} approach {point["approach"]} closing {point["closing"]}')
-    weight = float((spec.get('weights') or {}).get('torso', 1.0))
-    for hand in robot.data['tool_frames']:
-        idle = [t for t in ik.groups if t != hand]
-        print(f'\n== {hand} hand alone (idle: {", ".join(idle)})')
-        samples = [{hand: point}, {hand: before}]
-        feasible = []
-        for height in sorted({float(v) for v in spec['candidates']} | {now}):
-            try:
-                choice = ik._torso_height(samples, height, {}, current, joint, now, weight, lambda: False, None, True)
-            except IkError as error:
-                print(f'  {height:5.3f}  rejected: {error}')
-                continue
-            feasible.append(height)
-            print(f'  {height:5.3f}  valid  cost {choice.cost:.3f}')
+    c, s = np.cos(args.object[3]), np.sin(args.object[3])
+    box[:2, :2] = [[c, -s], [s, c]]
+    box[:3, 3] = args.object[:3]
+
+    def targets(back: float) -> dict:
+        return {hand: target_of(box @ rpy_matrix([float(v) for v in pose[:3]], [float(v) for v in pose[3:]]), back)
+                for hand, *pose in args.tool}
+
+    samples = [targets(args.offset)]
+    if args.approach > 0:
+        samples.append(targets(args.offset + args.approach))
+    for hand, target in samples[0].items():
+        print(f'{hand}: TCP {target["tcp"]} approach {target["approach"]}')
+    for run in range(args.repeat):
+        ik.memo = {}
+        started = time.monotonic()
         try:
-            best = ik.solve_with_torso(samples, {}, current)
+            report = ik.solve_with_torso(samples, {}, current, elbow=args.elbow).report()
+            rejected = ', '.join(f'{r["height"]:g}: {r["reason"][:40]}' for r in report['rejected'])
+            print(f'run {run}: {time.monotonic() - started:.2f} s  height {report["height"]}  cost {report["cost"]}  '
+                  f'{report.get("skipped", "")}  rejected [{rejected}]')
         except IkError as error:
-            print(f'  search: {error}')
-            continue
-        again = ik.solve_with_torso(samples, {}, current).height
-        print(f'  repeat: {again:.3f} ({"same" if again == best.height else "DIFFERENT"})')
-        arm = best.solution
-        print(f'  search chose {best.height:.3f} (cost {best.cost:.3f}); valid heights {feasible}')
-        print('  arm joints ' + ' '.join(f'{n}={v:.2f}' for n, v in sorted(arm.items())))
-        for other in idle:
-            state = {**current, joint: best.height}
-            hand_at = ik.tcps_at([other], state).get(other)
-            posture = {n: round(v, 2) for n, v in current.items() if n.startswith(other)}
-            ok = ik.valid({joint: best.height, **ik.idle_joints([hand], current), **arm}, ik.groups[hand])
-            where = '' if hand_at is None else f'hand at {np.round(hand_at[:3, 3], 3).tolist()}'
-            print(f'  idle {other}: {where}, joints {posture}, full-state check valid={ok}')
-        if args.first_success:
-            for height in [None, *args.first_success]:
-                fixed = {} if height is None else {joint: height}
-                try:
-                    ik.solve({hand: point}, fixed, current=current)
-                except IkError:
-                    continue
-                at = now if height is None else height
-                solved = ik.solve({hand: point}, fixed, current=current)
-                ok = ik.valid({joint: at, **ik.idle_joints([hand], current), **solved}, ik.groups[hand])
-                print(f'  old list takes {at:.3f}; full-state check valid={ok}')
-                break
-            else:
-                print('  old list: nothing solves')
+            print(f'run {run}: {time.monotonic() - started:.2f} s  FAILED {str(error)[:300]}')
     rclpy.shutdown()
 
 
