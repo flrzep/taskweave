@@ -7,12 +7,12 @@ cell, without a robot or a simulator. Everything below also works in a container
 docker run -it --rm ros:jazzy-ros-base bash
 ```
 
-(The base image has `rosdep` but not `colcon`, and no `git`; step 1 installs both.)
+(The base image has `rosdep` but not `colcon`; step 1 installs it, and `git` in case the image lacks it.)
 
 ## 1. Prerequisites
 
 ```bash
-sudo apt-get update          # no sudo inside the container
+sudo apt-get update          # as root (e.g. in a container) sudo is optional
 sudo apt-get install -y git python3-colcon-common-extensions python3-rosdep
 source /opt/ros/jazzy/setup.bash
 sudo rosdep init 2>/dev/null || true   # once per machine; the ros: image has done it already
@@ -69,8 +69,8 @@ taskweave check ~/example_cell
 ```
 
 It lists every file as `ok`, `warn` or an error; exit code 0 means the pack is valid. The two `warn` lines about a
-missing elbow description of `duo_bot` are expected (the neutral test robot has none). (Add the PATH line in every shell
-that uses it; `python3 -m taskweave_core.cli` (after sourcing the workspace) runs the same commands; `ros2: command not
+missing elbow description of `duo_bot` are expected (the neutral test robot has none). (Source the workspace in every shell
+that uses `taskweave`; `python3 -m taskweave_core.cli` (after sourcing the workspace) runs the same commands; `ros2: command not
 found` means `~/tw_ws/install/setup.bash` is not sourced. The checkout's own copy,
 `taskweave check ~/tw_ws/src/taskweave/docs/examples/cell`, works too.)
 
@@ -89,12 +89,12 @@ trusted network address only). Without a robot, a simulator or controllers, what
 - a mission made of `wait` steps runs and shows its status;
 - `taskweave status`, `describe`, `skills`, the speed override and pause / resume / abort work.
 
-In a second terminal (sourced the same way, same `ROS_DOMAIN_ID`, the PATH line added):
+In a second terminal (sourced the same way, same `ROS_DOMAIN_ID`):
 
 ```bash
 taskweave skills
-taskweave run wait_demo          # two waits, three seconds
-taskweave status
+taskweave run wait_demo          # starts the mission and returns at once: two waits, three seconds
+taskweave status                 # [running] ... step 1/2, then [succeeded] once both waits are done
 ```
 
 The node log of the launch prints one `ERROR ... not served` for any skill whose `skills/<name>.yaml` the cell does
