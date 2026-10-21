@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypelocation="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>taskweave_hmi</name>
-  <version>0.2.1</version>
+  <version>0.2.2</version>
   <description>Web HMI for taskweave: live mission status, control and a validated mission editor.</description>
   <maintainer email="f.rzepczyk@gmail.com">Florian Rzepczyk</maintainer>
   <license>TBD</license>

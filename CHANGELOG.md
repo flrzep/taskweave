@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.2 — 2026-10-21
+
+### Torso chosen by IK
+- `motion: {torso: auto}` searches torso heights (`ik.torso` profile keys): the current height first when its arm cost
+  is acceptable (`accept_cost`), else outward over a grid; both hands at one height; the full robot collision-checked
+  (idle arm included); a global-IK fallback at the nearest heights when no height solves locally; straight lines
+  checked along their real path; a pre-grasp / pre-approach offset target also has to serve the line onto the point.
+  Cost: arm cost + torso travel + optional wrist bend (`weights.wrist`). `data.torso` reports the choice.
+- `move_object` with `motion: {torso: auto}` chooses one height for all holding hands; the hold follows the torso.
+- Profile `torso: {joint, drive_m, tolerance_m}`: `navigate_to` and `drive_straight` bring the torso to the drive
+  height first (left alone while holding).
+- Galbot S1: `home` no longer sets the torso; `ik.torso` grid 0-0.75 m, `torso.drive_m` 0.494.
+
+### Clock jumps (sim Stop + Play)
+- One clock-jump helper clears the TF buffers of tcp_jog, teach, operator_joy and the skill server.
+- `teach` refuses to save a point, stance or location while its TF is stale or right after a jump (the old age check
+  went negative after a jump and let a pre-reset base pose through).
+- Optional `clock_guard` node in `taskweave_bringup` (`clock_guard:=true`): resets Nav2 and restarts move_group after
+  a jump.
+
+### Fixes
+- A folder without pack.yaml and without cell folders says "no cell pack here" instead of asking to migrate.
+
 ## 0.2.1 — 2026-10-20
 
 ### Fixes
