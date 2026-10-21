@@ -262,6 +262,19 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
 .log li { font: var(--fs-sm)/1.45 var(--mono); border-bottom: 1px solid var(--border); padding: 6px 0; overflow-wrap: anywhere; }
 .edit-step { border: 1px solid var(--border); border-radius: var(--r-s); padding: var(--sp-3); display: grid; gap: var(--sp-2); background: var(--surface-card); }
 .edit-step .step-no { font: 600 var(--fs-base) var(--cond); color: var(--brand-text); }
+/* reorder by drag: the handle takes the pointer (no page scroll on touch), the step follows it lifted, a brand line in
+   the gap marks where it lands */
+.edit-step { position: relative; }
+.edit-step .handle { cursor: grab; touch-action: none; color: var(--text-muted); border-color: var(--border); background: none; }
+.edit-step .handle svg { fill: currentColor; }
+.edit-steps.dragging { user-select: none; -webkit-user-select: none; }
+.edit-steps.dragging .handle { cursor: grabbing; }
+.edit-step.dragging { z-index: 2; border-color: var(--brand-text); box-shadow: var(--shadow-2); }
+.edit-step.dragging > :not(.step-head, .field:has([data-k="instruction"])) { display: none; }  /* small while carried */
+.edit-step.drop-before::before, .edit-step.drop-after::after { content: ""; position: absolute; z-index: 3; left: -1px; right: -1px;
+                                                               height: 3px; border-radius: var(--r-pill); background: var(--brand-text); }
+.edit-step.drop-before::before { top: calc(-1 * var(--sp-1) - 3px); }
+.edit-step.drop-after::after { bottom: calc(-1 * var(--sp-1) - 3px); }
 .args { display: grid; gap: var(--sp-2); }
 .sticky-actions { position: sticky; bottom: 0; background: var(--surface-card); padding: var(--sp-3) 0; border-top: 1px solid var(--border); }
 li.empty { list-style: none; padding: 6px 2px; }

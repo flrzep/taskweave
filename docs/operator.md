@@ -60,7 +60,7 @@ that changed something, such as a taught point, shows there for a moment.
 | Tab | What it is for |
 |---|---|
 | **Run** | Start, pause, resume and abort a mission; its status, its plan step by step, and the robot live in the cell (3D). |
-| **Missions** | Read and edit the mission files, checked before they are saved (writing missions: [missions.md](missions.md)). |
+| **Missions** | Read and edit the mission files, checked before they are saved (writing missions: [missions.md](missions.md)). Move a step by dragging its handle (the dots left of its number, also by touch), with its ↑ ↓ buttons, or with Alt + ↑ / ↓ on the handle; a `replan_from` keeps pointing at the same step. |
 | **Robot** | The robot now: its position, grippers and joints, in 3D with the room the planner keeps around it; below, the navigation and arm settings. |
 | **Teach** | Locations, stances, poses, points and carry poses: where the robot drives to, stands and puts its hands. |
 | **Record** | Record a run (bag, the simulator's videos) and download the recordings. Only there when the stack has a recordings folder. |

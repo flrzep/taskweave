@@ -127,7 +127,10 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   colour, a 5% tint on the card, the goal as the headline, a 10px progress bar in the state colour.
 - **Lists and rows**: mission rows (`.list li`) with a brand left rule (red when invalid); plan steps (`.steps`) with a
   numbered dot that fills green or red when done, rings blue while running; points, poses and recordings (`.point`)
-  open into an editor, the pad's target gets a brand inset rule.
+  open into an editor, the pad's target gets a brand inset rule. Mission editor steps (`.edit-step`) have a drag
+  handle left of the step number (an `.icon` with six dots in `--text-muted` on a hairline border, `touch-action:
+  none`); while dragged the step shrinks to its head and instruction and follows the pointer with a brand border and
+  `--shadow-2`, and a 3px brand line in the gap marks where it lands.
 - **Chips** (`.chip`): a dot and the word, in the state colour on an 11% tint. Each state sets `--c` (text), `--fill`
   and `--ink` (for the solid badge).
 - **Details and summary**: summaries in brand text, 44px high; nested ones inside a point are muted and monospace.

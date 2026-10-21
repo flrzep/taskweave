@@ -434,9 +434,18 @@ function stepCard(step, index, steps) {
   q('skill').addEventListener('change', () => { renderArgs({}); markDirty(); });
   card.addEventListener('input', markDirty);
   card.addEventListener('change', markDirty);
-  card.querySelector('[data-act="up"]').addEventListener('click', () => move(index, -1));
-  card.querySelector('[data-act="down"]').addEventListener('click', () => move(index, 1));
-  card.querySelector('[data-act="remove"]').addEventListener('click', () => { const s = readSteps(); s.splice(index, 1); renderSteps(s); markDirty(); });
+  card.querySelector('[data-act="up"]').disabled = index === 0;
+  card.querySelector('[data-act="down"]').disabled = index === steps.length - 1;
+  card.querySelector('[data-act="up"]').addEventListener('click', () => move(index, -1, 'up'));
+  card.querySelector('[data-act="down"]').addEventListener('click', () => move(index, 1, 'down'));
+  card.querySelector('[data-act="remove"]').addEventListener('click', () => editSteps((items) => items.splice(index, 1)));
+  const handle = card.querySelector('[data-act="drag"]');
+  handle.addEventListener('pointerdown', (e) => dragStep(card, e));
+  handle.addEventListener('keydown', (e) => {
+    if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+    e.preventDefault();
+    move(index, e.key === 'ArrowUp' ? -1 : 1, 'drag');
+  });
   card._read = () => {
     const including = q('skill').value.startsWith(INCLUDE);
     const out = including ? { instruction: q('instruction').value.trim(), include: q('skill').value.slice(INCLUDE.length), with: {} }
@@ -486,13 +495,96 @@ function argField(key, spec, required, value) {
   return el('div', { class: 'field' }, label, input);
 }
 
-function move(index, delta) {
-  const steps = readSteps();
-  const target = index + delta;
-  if (target < 0 || target >= steps.length) return;
-  [steps[index], steps[target]] = [steps[target], steps[index]];
-  renderSteps(steps);
+// Change the step list and draw it again: change gets [{step, open}] (the steps as edited now, rules folded out or
+// not) to reorder, remove or insert. A step without an id of its own is s<position>, so a moved step's id changes:
+// replan_from follows the step it named; one that named a removed step falls back to the step itself (and says so).
+// Returns the new step cards.
+function editSteps(change) {
+  const items = [...$('step-editor').children].map((card, i) => {
+    const step = card._read();
+    return { step, open: card.querySelector('.rules').open, was: step.id || `s${i + 1}` };
+  });
+  const before = new Set(items.map((item) => item.was));
+  change(items);
+  const now = new Map();
+  items.forEach((item, i) => { if (item.was) now.set(item.was, item.step.id || `s${i + 1}`); });
+  const lost = [];
+  items.forEach((item, i) => {
+    const target = item.step.replan_from;
+    if (!target || !before.has(target)) return;  // not a step of this list (already wrong): Check reports it
+    if (now.has(target)) item.step.replan_from = now.get(target);
+    else { delete item.step.replan_from; lost.push(i + 1); }
+  });
+  renderSteps(items.map((item) => item.step));
+  const cards = [...$('step-editor').children];
+  cards.forEach((card, i) => { card.querySelector('.rules').open = items[i].open; });
+  message($('save-msg'), lost.length ? `Step ${lost.join(', ')} replanned from the removed step: now from itself.` : '', 'warn');
   markDirty();
+  return cards;
+}
+
+// One place up or down (the arrow buttons, Alt + arrow on the handle); the focus stays on the control used.
+function move(index, delta, control) {
+  const target = index + delta;
+  if (target < 0 || target >= $('step-editor').children.length) return;
+  const card = editSteps((items) => items.splice(target, 0, ...items.splice(index, 1)))[target];
+  const button = card.querySelector(`[data-act="${control}"]`);
+  (button.disabled ? card.querySelector('[data-act="drag"]') : button).focus();
+}
+
+// Drag a step by its handle (mouse, pen or touch: pointer events; the handle has touch-action none, so a touch drags
+// instead of scrolling). The step follows the pointer, a line marks where it lands, and near the top bar or the
+// bottom of the window the page scrolls. Escape or a lost pointer puts it back.
+const DRAG_EDGE = 72;  // px from the top bar or the window's bottom where the page scrolls while dragging
+function dragStep(card, e) {
+  const list = $('step-editor');
+  const cards = [...list.children];
+  if (e.button !== 0 || cards.length < 2) return;
+  e.preventDefault();
+  const handle = e.currentTarget;
+  handle.setPointerCapture(e.pointerId);
+  const from = cards.indexOf(card);
+  const start = { y: e.clientY, scroll: window.scrollY };
+  let y = e.clientY, to = from, frame = 0, done = false;
+  list.classList.add('dragging'); card.classList.add('dragging');
+  const mark = () => {
+    card.style.transform = `translateY(${y - start.y + window.scrollY - start.scroll}px)`;
+    let slot = cards.length;  // it lands before cards[slot]: the first other step whose middle is below the pointer
+    for (let i = 0; i < cards.length; i += 1) {
+      const box = cards[i].getBoundingClientRect();
+      if (i !== from && y < box.top + box.height / 2) { slot = i; break; }
+    }
+    to = slot > from ? slot - 1 : slot;
+    cards.forEach((c) => c.classList.remove('drop-before', 'drop-after'));
+    if (to !== from) cards[Math.min(slot, cards.length - 1)].classList.add(slot < cards.length ? 'drop-before' : 'drop-after');
+  };
+  const scroll = () => {
+    const top = document.querySelector('.top').getBoundingClientRect().bottom + DRAG_EDGE;
+    const bottom = window.innerHeight - $('editor').querySelector('.sticky-actions').offsetHeight - DRAG_EDGE;
+    const speed = y < top ? -Math.min(top - y, DRAG_EDGE) : y > bottom ? Math.min(y - bottom, DRAG_EDGE) : 0;
+    if (speed) { window.scrollBy(0, speed / 4); mark(); }
+    frame = requestAnimationFrame(scroll);
+  };
+  const onMove = (ev) => { y = ev.clientY; mark(); };
+  const onKey = (ev) => { if (ev.key === 'Escape') end(false); };  // not stopped: Escape still aborts a manual skill
+  function end(drop) {
+    if (done) return;
+    done = true;
+    cancelAnimationFrame(frame);
+    handle.removeEventListener('pointermove', onMove);
+    document.removeEventListener('keydown', onKey);
+    list.classList.remove('dragging'); card.classList.remove('dragging'); card.style.transform = '';
+    cards.forEach((c) => c.classList.remove('drop-before', 'drop-after'));
+    if (drop && to !== from) {
+      editSteps((items) => items.splice(to, 0, ...items.splice(from, 1)))[to].querySelector('[data-act="drag"]').focus({ preventScroll: true });
+    }
+  }
+  handle.addEventListener('pointermove', onMove);
+  handle.addEventListener('pointerup', () => end(true), { once: true });
+  handle.addEventListener('pointercancel', () => end(false), { once: true });
+  handle.addEventListener('lostpointercapture', () => end(false), { once: true });
+  document.addEventListener('keydown', onKey);
+  frame = requestAnimationFrame(scroll);
 }
 
 function readMission() {

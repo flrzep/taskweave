@@ -322,7 +322,14 @@
 <template id="step-template">
   <li class="edit-step">
     <div class="row between step-head">
-      <span class="mono step-no"></span>
+      <div class="row gap-s">
+        <!-- drag to reorder (mouse or touch); from the keyboard Alt + ↑ / ↓ on it, or the arrow buttons -->
+        <button class="icon handle" data-act="drag" aria-label="Move step: drag, or Alt + arrow keys"
+                title="Drag to move (Alt + ↑ / ↓)"><svg viewBox="0 0 10 16" width="10" height="16" aria-hidden="true">
+          <circle cx="2.5" cy="3" r="1.5"/><circle cx="7.5" cy="3" r="1.5"/><circle cx="2.5" cy="8" r="1.5"/>
+          <circle cx="7.5" cy="8" r="1.5"/><circle cx="2.5" cy="13" r="1.5"/><circle cx="7.5" cy="13" r="1.5"/></svg></button>
+        <span class="mono step-no"></span>
+      </div>
       <div class="row gap-s">
         <button class="icon" data-act="up" aria-label="Move up">↑</button>
         <button class="icon" data-act="down" aria-label="Move down">↓</button>
