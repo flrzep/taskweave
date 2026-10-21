@@ -332,3 +332,32 @@ def test_a_line_whose_real_path_runs_out_of_reach_rejects_the_height_even_when_e
     line.verify = lambda height: 'out of reach'
     with pytest.raises(TorsoError, match='line: out of reach'):
         FakeIk(accept=-1).solve_with_torso(line, {}, now(0.6))
+
+
+# ---- staying put: no endless outward search --------------------------------------------------------------------
+
+def test_a_height_within_half_a_grid_step_of_the_current_one_is_the_current_height():
+    ik = FakeIk(accept=-1)
+    ik.solve_with_torso([TOOLS], {}, now(0.494))
+    assert 0.5 not in {h for _, h in ik.solved} and 0.494 in {h for _, h in ik.solved}
+
+
+def test_a_costly_current_height_is_kept_when_the_neighbours_cost_more_and_only_they_are_tried():
+    class Arm(FakeIk):
+        def _arm_cost(self, arm, current):
+            return 3.0                                    # above accept_cost, the same everywhere
+    ik = Arm(accept=1.5)
+    choice = ik.solve_with_torso([TOOLS], {}, now(0.494))
+    assert choice.height == pytest.approx(0.494) and choice.report()['search_s'] >= 0
+    assert {h for _, h in ik.solved} == {0.494, 0.4, 0.6}      # one neighbour a side, then the directions close
+    assert all(r['reason'].startswith('not tried') for r in choice.rejected)
+
+
+def test_a_direction_stays_open_while_the_cost_keeps_falling():
+    class Arm(FakeIk):
+        def _arm_cost(self, arm, current):
+            return 3.0 - 2.0 * arm['left_j1']                # falls with the height (the reach value is h)
+    ik = Arm(reach=lambda tool, target, h: h, weight=0.1, accept=1.5)
+    choice = ik.solve_with_torso([TOOLS], {}, now(0.494))
+    assert choice.height == pytest.approx(0.7)               # keeps going up, never down
+    assert min(h for _, h in ik.solved) == 0.4

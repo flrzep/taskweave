@@ -28,7 +28,8 @@ from .planner import Planner
 from .speed import WorkClock
 from .world_state import WorldState
 
-EPISODE_DATA = ('path', 'mode', 'choice', 'plan_s', 'plan_points')  # skill data kept in step_finished (smoke test)
+# skill data kept in step_finished (smoke test)
+EPISODE_DATA = ('path', 'mode', 'choice', 'plan_s', 'plan_points', 'torso')
 
 
 class Outcome(Enum):

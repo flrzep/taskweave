@@ -48,7 +48,7 @@ ik:                         # tool targets in poses.yaml: solved by MoveIt (ros/
   torso:                      # motion torso: auto searches this grid (taskweave_skills/ik.py solve_with_torso, Oct 2026)
     joint: body_joint         # both hands solved at one height, full state collision checked (idle arm too)
     candidates: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75]   # coarse grid over the lift range
-    accept_cost: 1.5          # the current height wins at once when feasible and its arm cost is at most this
+    accept_cost: 2.5          # the current height wins at once when feasible and its cost is at most this (rails 1.4)
     weights: {torso: 1.0, wrist: 1.0}   # cost per m of torso travel and per rad of wrist bend, next to the ik.choose arm cost
     wrist_joints: ['{tool}_joint6']     # the bending wrist joint (5 and 7 roll); its bend is the distance from mid-range (0)
     line_sample_m: 0.3        # a straight line is checked at its ends, and every 30 cm between for the height

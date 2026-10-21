@@ -101,10 +101,12 @@ class TorsoChoice:
     rejected: list = field(default_factory=list)
     skipped: str = ''     # why the other heights were not tried
     wrist: float | None = None    # mean wrist bend (rad) of the first sample, when ik.torso.wrist_joints is set
+    elapsed_s: float | None = None    # how long the search took
 
     def report(self) -> dict:
         more = {'skipped': self.skipped} if self.skipped else {}
         more |= {'wrist_bend': round(self.wrist, 4)} if self.wrist is not None else {}
+        more |= {'search_s': round(self.elapsed_s, 2)} if self.elapsed_s is not None else {}
         return {'height': round(self.height, 4), 'cost': round(self.cost, 4), 'rejected': self.rejected, **more}
 
 
@@ -443,7 +445,18 @@ class IkClient:
         when the torso cost alone passes the best total. If no height solves with local IK, the nearest
         ``global_heights`` heights are tried with the global search (what the move itself would do). A ``samples``
         function with a ``verify(height)`` attribute returns why the real path fails at that height, or None.
-        Raises TorsoError."""
+        Raises TorsoError.
+
+        Heights within half a grid step of the current one are the current one (0.494 and 0.5 are the same height).
+        Above ``accept_cost`` the search goes outward in each direction only while the cost keeps falling (or the
+        first height is feasible): a direction whose next height costs more than the last, or is out after one
+        that worked, is closed. So staying put costs one neighbour on each side at most."""
+        started = time.monotonic()
+        choice = self._search_torso(samples, fixed, current, should_stop, elbow, allow_flip)
+        choice.elapsed_s = time.monotonic() - started
+        return choice
+
+    def _search_torso(self, samples, fixed, current, should_stop, elbow, allow_flip) -> TorsoChoice:
         spec = self.torso
         joint = spec['joint']
         if joint not in current:
@@ -452,11 +465,18 @@ class IkClient:
         now, weight = float(current[joint]), float(weights.get('torso', TORSO_WEIGHT))
         if float(weights.get('wrist', WRIST_WEIGHT)) > 0 and not spec.get('wrist_joints'):
             raise IkError('ik.torso.weights.wrist needs ik.torso.wrist_joints (the joints whose bend it counts)')
-        heights = sorted({round(float(v), 6) for v in spec['candidates']} | {now},
+        grid = sorted({round(float(v), 6) for v in spec['candidates']})
+        step = min((b - a for a, b in zip(grid, grid[1:], strict=False)), default=0.0)
+        heights = sorted({h for h in grid if abs(h - now) >= step / 2} | {now},
                          key=lambda h: (round(abs(h - now), 9), h))
         accept = spec.get('accept_cost')
         best, rejected = None, []
+        last, closed = {}, set()      # per direction (-1 below, +1 above): the last feasible cost; directions given up
         for index, height in enumerate(heights):
+            way = (height > now) - (height < now)
+            if way in closed:
+                rejected.append({'height': round(height, 4), 'reason': 'not tried: the cost was rising that way'})
+                continue
             if best is not None and weight * abs(height - now) >= best.cost:   # every later one costs more
                 rejected += [{'height': round(h, 4), 'reason': 'not tried: moves the torso more than the best'}
                              for h in heights[index:]]
@@ -466,10 +486,18 @@ class IkClient:
                                             allow_flip)
             except TorsoError as error:
                 rejected.append({'height': round(height, 4), 'reason': str(error)})
+                if last.get(way) is not None:
+                    closed.add(way)
                 continue
             if height == now and (accept is None or choice.cost <= float(accept)):   # staying put is good enough
                 choice.skipped = 'the current height is feasible and cheap enough'
                 return choice
+            if height == now:
+                last = {-1: choice.cost, 1: choice.cost}       # the neighbours must beat the current cost
+            elif last.get(way) is not None and choice.cost >= last[way]:
+                closed.add(way)
+            else:
+                last[way] = choice.cost
             if best is None or (round(choice.cost, 9), round(abs(choice.height - now), 9), choice.height) < (
                     round(best.cost, 9), round(abs(best.height - now), 9), best.height):
                 best = choice

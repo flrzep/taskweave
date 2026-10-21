@@ -49,6 +49,7 @@ def main() -> None:
     parser.add_argument('--approach', type=float, default=0.0, help='also check the pre-grasp this far back (m)')
     parser.add_argument('--elbow', default=None)
     parser.add_argument('--repeat', type=int, default=3)
+    parser.add_argument('--accept', type=float, default=None, help='override ik.torso.accept_cost')
     args = parser.parse_args()
 
     store = ConfigStore(args.config)
@@ -66,6 +67,8 @@ def main() -> None:
         raise SystemExit('the robot profile has no ik.torso')
     names = {n for group in robot.data['joints']['groups'].values() for n in group}
     current = model_state(node, names, robot.data['joints']['state'])
+    if args.accept is not None:
+        ik.torso = {**ik.torso, 'accept_cost': args.accept}
     joint = ik.torso['joint']
     print(f'{joint} now {current[joint]:.3f}; {len(current)} model joints read; validity group {ik.validity_group!r}')
 
