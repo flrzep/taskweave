@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Torso search finds narrow bands far from the current height (F13 batch D)
+- When the local IK pass finds no height, `solve_with_torso` tries the global solver at every height whose local
+  solve had no IK (the `global_heights` nearest always, as before), nearest first, then refines the first feasible
+  band; fine heights start from the feasible neighbour's arms. frame_carry's set_down now picks its torso (0.275)
+  instead of a hand-set 0.27, at the cost of a slower search (about 24 s) when only the global pass finds it.
+
 ### Held torso change moves the arms too (F16)
 - A torso change while a hand holds an object (a held pose's `joints`, `move_object` with `torso: auto` before a
   straight line, `move_joints` with a torso goal) is one whole-body motion: each holding hand's TCP goes to
