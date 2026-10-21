@@ -68,7 +68,7 @@ def test_every_target_in_linear_and_free(system):
         assert data['kind'] == 'object' and data['target'] == 'carry'
     for args, text in (({'to': 'carry', 'reference': 'x'}, 'option reference does not apply'),
                        ({'to': 'pile_1/top', 'reference': 'nope'}, "reference 'nope'"),
-                       ({'to': 'arm_pose'}, 'sets arm joints'), ({'to': 'pile_1/rim'}, 'moves a hand')):
+                       ({'to': 'arm_pose'}, 'sets arm joints'), ({'to': 'pile_1/rim'}, 'holds crate_1')):
         result = run(system, 'move', args)
         assert result.outcome == REJECTED and text in result.message, result.message
     assert run(system, 'move', {'to': 'pile_1/top', 'reference': 'base', 'offset_m': 0.05}).outcome == OK
