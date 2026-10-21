@@ -6,7 +6,7 @@ A cell pack file robots/<robot>/<file> of a robot pack file (MERGED_FILES) is on
     whole file   no MARKER: the cell file replaces the pack's file (a copy made before per-key overrides)
     keyed        top-level ``~override: keys``: only what the cell changes, laid over the pack's file:
                  mappings merge key by key, lists and scalars replace, ``<key>: ~delete`` removes the pack's key.
-                 poses.yaml merges one level deep: a pose is replaced whole (DEPTH).
+                 poses.yaml and targets.yaml merge one level deep: a pose or target is replaced whole (DEPTH).
 
 Saving (ConfigStore._edit_yaml) and ``taskweave config slim`` write keyed overrides: delta(pack, wanted). Only an
 explicit edit writes ~delete: slim reads a pack key a whole-file copy lacks as never had (the copy predates it).
@@ -19,8 +19,9 @@ import copy
 MARKER = '~override'    # top-level key of a keyed override
 KEYS = 'keys'           # its value
 DELETE = '~delete'      # value in a keyed override: remove this key of the pack's file
-DEPTH = {'poses.yaml': 1}   # levels merged key by key (default: all); below, entries are replaced whole
-MERGED_FILES = ('profile.yaml', 'embodiment.yaml', 'navigation.yaml', 'sim.yaml', 'poses.yaml', 'pose_targets.yaml')
+DEPTH = {'poses.yaml': 1, 'targets.yaml': 1}   # levels merged key by key (default: all); below, entries replaced whole
+MERGED_FILES = ('profile.yaml', 'embodiment.yaml', 'navigation.yaml', 'sim.yaml', 'poses.yaml', 'targets.yaml',
+                'pose_targets.yaml')
 
 
 def is_keyed(data) -> bool:

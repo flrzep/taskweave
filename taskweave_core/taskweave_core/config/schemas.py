@@ -455,6 +455,49 @@ COLLISION_SHAPE = {
     'additionalProperties': False,
 }
 
+# ---- targets (cell schema 4): what a robot moves to. One entry per name; the frame comes from the file (targets.py).
+# moves: base (x, y, yaw), hand (<tool>_tool poses), object (xyz, rpy of a held object's origin) or joints; every
+# spatial part may be given as a path of waypoints instead; joints is a part of any kind (required for joints).
+TOOL_POSE3D = {
+    'type': 'object', 'required': ['xyz', 'rpy'], 'additionalProperties': False,
+    'properties': {'xyz': {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3},
+                   'rpy': {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3}},
+}
+TOOL_KEY = r'^[A-Za-z_][A-Za-z0-9_\-]*_tool$'    # <tool>_tool: a hand's pose in a hand target
+# a joint group's value: a number, a list in the group's joint order (null leaves that joint), or for the torso
+# auto (search a height) / keep (do not move it)
+JOINT_GROUP_VALUE = {'anyOf': [FINITE, {'enum': ['auto', 'keep']},
+                               {'type': 'array', 'minItems': 1, 'items': {'type': ['number', 'null']}}]}
+TARGET_PROPERTIES = {
+    'moves': {'enum': ['base', 'hand', 'object', 'joints']},
+    'frame': {'enum': ['cell', 'base', 'object', 'none'],
+              'description': 'Optional: the file gives the frame; this must say the same.'},
+    'x': FINITE, 'y': FINITE, 'yaw': FINITE,
+    'xyz': {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3},
+    'rpy': {'type': 'array', 'items': FINITE, 'minItems': 3, 'maxItems': 3},
+    'path': {'type': 'array', 'minItems': 1, 'items': {'type': 'object'},
+             'description': 'Waypoints in the pose form of the kind, visited in order; the last is the target.'},
+    'alone': {'type': 'object', 'propertyNames': {'pattern': r'.+_tool$'}, 'additionalProperties': TOOL_POSE3D,
+              'description': "One-hand poses that replace the pair's pose when one hand goes alone."},
+    'tool_type': {'enum': sorted(TOOL_TYPES)},
+    'grip_width_m': {'type': 'number', 'exclusiveMinimum': 0},
+    'approach_m': {'type': 'number', 'minimum': 0},
+    'elbow': {'enum': ELBOW_SIDES},
+    'grip_m': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {'type': 'number', 'minimum': 0}},
+    'joints': {'type': 'object', 'propertyNames': NAME, 'minProperties': 1, 'additionalProperties': JOINT_GROUP_VALUE},
+    'type': NAME,
+    'reference': NAME,
+}
+TARGET_SETTINGS = {     # an entry that may be settings only (no moves): a robot's elbow, grip_m on a type's target
+    'type': 'object', 'properties': TARGET_PROPERTIES, 'patternProperties': {TOOL_KEY: TOOL_POSE3D},
+    'additionalProperties': False,
+}
+TARGET = {**TARGET_SETTINGS, 'required': ['moves']}
+TARGETS = {'type': 'object', 'propertyNames': NAME, 'additionalProperties': TARGET}
+INSTANCE_TARGETS = {    # per placed object: its overrides of the type's targets, per name and key
+    'type': 'object', 'propertyNames': NAME,
+    'additionalProperties': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': TARGET_SETTINGS}}
+
 OBJECT = {
     'type': 'object',
     'required': ['name'],
@@ -497,6 +540,9 @@ OBJECT = {
         # frames on the object where it meets another (a hook plate, the hook it goes on): z = the direction the held
         # object moves to engage (e.g. down onto a hook); move_object puts a held object's contact onto a placed one's
         'contacts': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': POSE3D},
+        # cell schema 4: the type's robot-independent targets (hand points, contacts) and per-instance overrides
+        'targets': TARGETS,
+        'instances': INSTANCE_TARGETS,
     },
 }
 
@@ -523,6 +569,21 @@ HELD_POSES = {
         'type': 'object', 'additionalProperties': False,
         'properties': {'joints': {'type': 'object', 'additionalProperties': FINITE},
                        'path': {'type': 'array', 'items': POSE3D}}}},
+}
+
+# cell/targets.yaml: targets in the cell frame; robots/<model>/targets.yaml (robot pack, cell override per key): in the
+# base frame and joint targets. One namespace together (names are unique, check.py)
+CELL_TARGETS = TARGETS
+ROBOT_TARGETS = TARGETS
+
+# robots/<model>/objects/<type>.yaml: this robot on an object type: its own targets on the object (base stances) and
+# its settings on the type's targets (elbow, grip_m), then per placed object. handled_from: the base target that
+# decides which side a turned object (yaw_symmetry_deg) is handled from.
+ROBOT_OBJECT_FILE = {
+    'type': 'object', 'additionalProperties': False,
+    'properties': {'handled_from': NAME,
+                   'targets': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': TARGET_SETTINGS},
+                   'instances': INSTANCE_TARGETS},
 }
 
 OPERATOR = {

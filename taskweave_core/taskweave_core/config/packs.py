@@ -29,16 +29,20 @@ from packaging.version import InvalidVersion, Version
 
 from . import schemas
 
-CELL_SCHEMA = 3         # cell pack layout this taskweave reads (1: one config directory with whole robot folders,
-                        # 2: robot packs, old skills move_to_pose / go_to_point / gripper / old move_object)
-ROBOT_SCHEMA = 1        # robot pack layout this taskweave reads
+CELL_SCHEMA = 4         # cell pack layout this taskweave writes and reads (1: one config directory with whole robot
+                        # folders, 2: robot packs, 3: skills move_to_pose / go_to_point / gripper / old move_object
+                        # replaced, 4: targets: cell/targets.yaml, targets in objects/*.yaml, robots/<r>/objects/*.yaml)
+CELL_SCHEMA_OLDEST = 3  # the oldest cell layout still read (the targets migration, 3 -> 4, is a separate task)
+ROBOT_SCHEMA = 2        # robot pack layout this taskweave writes and reads (2: targets.yaml in place of poses.yaml)
+ROBOT_SCHEMA_OLDEST = 1  # the oldest robot pack layout still read
 PACK_FILE = 'pack.yaml'
 ROBOT_PACKS_ENV = 'TASKWEAVE_ROBOT_PACKS'
 INSTALLED_PACKAGE = 'taskweave_robots'
 ROBOT_PACK_FILES = ('profile.yaml', 'embodiment.yaml', 'moveit', 'navigation.yaml', 'sim.yaml', 'poses.yaml',
-                    'pose_targets.yaml', 'skill_overrides.yaml')    # robot-intrinsic: what the robot pack holds
-# (moveit/ is one unit)
+                    'targets.yaml', 'pose_targets.yaml', 'skill_overrides.yaml')    # robot-intrinsic: what the robot
+# pack holds (moveit/ is one unit)
 CELL_ROBOT_FILES = ('stances.yaml', 'held_poses.yaml', 'object_points.yaml')  # robot data about this cell
+CELL_ROBOT_FOLDERS = ('objects',)   # the robot's targets on object types (cell schema 4): objects/<type>.yaml
 
 
 def _error(path, message: str, key: str = ''):
@@ -131,13 +135,18 @@ def check_cell_schema(folder: Path) -> None:
         # no pack.yaml and none of an old cell's folders: not a cell at all (not one to migrate)
         raise _error(Path(folder), 'no cell pack here: pass the cell pack folder (the one with pack.yaml, e.g. config)')
     version = cell_schema(folder)
-    if version < CELL_SCHEMA:
+    if version < CELL_SCHEMA_OLDEST:
         command = 'migrate-skills' if version == 2 else 'migrate'   # 2 -> 3 is the skill migration (migrate_skills.py)
-        raise _error(Path(folder) / PACK_FILE, f'cell pack schema {version}, this taskweave needs {CELL_SCHEMA}: '
-                                               f'run taskweave config {command} {folder}')
+        raise _error(Path(folder) / PACK_FILE, f'cell pack schema {version}, this taskweave needs '
+                                               f'{CELL_SCHEMA_OLDEST}: run taskweave config {command} {folder}')
     if version > CELL_SCHEMA:
         raise _error(Path(folder) / PACK_FILE, f'cell pack schema {version}, this taskweave reads schema '
                                                f'{CELL_SCHEMA}: update taskweave')
+
+
+def targets_format(folder: Path) -> bool:
+    """The cell pack is in the targets layout (cell schema 4 and up)."""
+    return cell_schema(folder) >= 4
 
 
 @functools.lru_cache(maxsize=1)
@@ -227,10 +236,10 @@ def robot_pack(location: Location, robot: str) -> RobotPack | None:
         raise _error(folder / PACK_FILE, f'name is {pack["name"]!r}, expected {robot!r}', 'name')
     check_requires(pack, folder / PACK_FILE, f'robot pack {robot}')
     version = int(pack['schema_version'])
-    if version != ROBOT_SCHEMA:
-        hint = f'run taskweave config migrate {folder}' if version < ROBOT_SCHEMA else 'update taskweave'
-        raise _error(folder / PACK_FILE, f'robot pack schema {version}, this taskweave reads schema {ROBOT_SCHEMA}: '
-                                         f'{hint}')
+    if not ROBOT_SCHEMA_OLDEST <= version <= ROBOT_SCHEMA:
+        hint = f'run taskweave config migrate {folder}' if version < ROBOT_SCHEMA_OLDEST else 'update taskweave'
+        raise _error(folder / PACK_FILE, f'robot pack schema {version}, this taskweave reads schema '
+                                         f'{ROBOT_SCHEMA_OLDEST} to {ROBOT_SCHEMA}: {hint}')
     return RobotPack(folder, robot, location)
 
 

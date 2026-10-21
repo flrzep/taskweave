@@ -22,6 +22,8 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
 from . import catalogue, overlay, packs
+from . import target_store as ts
+from . import targets as model
 from .limits import joint_limits, joint_problems
 from .store import ConfigError, ConfigStore
 
@@ -186,7 +188,7 @@ def _cross_object_type(store, c):
             continue
         for point, settings in c.data.get('points', {}).items():
             out += [(['points', point], f'robot {robot!r}: {m}', WARNING) for m in check_grasp(settings, embodiment)]
-    return out
+    return out + (_cross_object_type_targets(store, c) if store.targets_format() else [])
 
 
 def navigation_problems(data: dict, base: dict) -> list[tuple[list, str]]:
@@ -247,15 +249,230 @@ def _cross_operator(store, c):
             for i, a in enumerate((c.data.get('joy') or {}).get('actions', [])) if a.get('skill') not in skills]
 
 
+# ---- targets (cell schema 4) ----------------------------------------------------------------------------------------
+def _place_as_names(store) -> set[str]:
+    """Names missions give to objects they put down (grip place_as): run-time instances."""
+    found = set()
+    for name in store.mission_names():
+        try:
+            steps = store.mission(name).get('steps', [])
+        except ConfigError:
+            continue
+        found |= {s['args']['place_as'] for s in steps if isinstance(s.get('args'), dict)
+                  and isinstance(s['args'].get('place_as'), str)}
+    return found
+
+
+def _joints_part(store, robot, joints, parts, severity=ERROR):
+    """Problems of a ``joints:`` part for one robot: groups, list lengths, values in range, torso auto without a
+    torso to search or lift."""
+    from .limits import target_joint_problems
+
+    out = [(parts, message, severity) for message in target_joint_problems(store, robot, joints)]
+    data = store.robot(robot).data
+    if joints.get('torso') == 'auto' and not (data.get('torso') or {}).get('joint') \
+            and not (data.get('ik') or {}).get('torso'):
+        out.append((parts + ['torso'], 'torso: auto, but this robot has no torso search or lift', severity))
+    return out
+
+
+def _target_entries(store, robot, table, frame, parts, joints_severity=ERROR):
+    """Checks of every complete target of a table: its own rules, joints part, tools against the robot."""
+    from ..embodiment import check_grasp
+
+    out = []
+    for name, entry in table.items():
+        if 'moves' not in entry:
+            continue
+        out += [(parts + [name], m, ERROR) for m in model.target_problems(entry, frame)]
+        if entry['moves'] == 'joints' and frame != 'base':
+            out.append((parts + [name], "a joints target has no frame: it goes to the robot's targets.yaml", ERROR))
+        if robot and entry.get('joints'):
+            out += _joints_part(store, robot, entry['joints'], parts + [name, 'joints'], joints_severity)
+        if robot and entry['moves'] == 'hand':
+            out += [(parts + [name], m, WARNING)
+                    for m in check_grasp({**entry, **entry.get('alone', {})}, store.embodiment(robot))]
+            tools = store.embodiment(robot).get('tools', {})
+            out += [(parts + [name, 'grip_m', t], f'robot has no tool {t!r}', WARNING)
+                    for t in entry.get('grip_m', {}) if tools and t not in tools]
+    return out
+
+
+def _held_references(store, entry_type, reference, parts):
+    """An object target's ``type`` and ``reference`` name a type and one of its object targets."""
+    out = []
+    types = catalogue.enum_values(store, 'objects')
+    if entry_type is not None and entry_type not in types:
+        out.append((parts + ['type'], f'object type {entry_type!r} does not exist (objects/{entry_type}.yaml)',
+                    WARNING))
+    if reference is not None:
+        names = {t: [n for n, m in ts.type_target_kinds(store, None, t).items() if m == 'object']
+                 for t in ([entry_type] if entry_type in types else types)}
+        if not any(reference in n for n in names.values()):
+            out.append((parts + ['reference'], f'no object target {reference!r}'
+                        + (f' on {entry_type}' if entry_type in types else ' on any object type'), ERROR))
+    return out
+
+
+def _loads(store, robot) -> bool:
+    try:
+        store.robot(robot)
+        return True
+    except ConfigError:
+        return False
+
+
+def _cross_cell_targets(store, c):
+    out = []
+    for robot in store.robot_names():   # 2.8: a plain name has one meaning
+        try:
+            mine = ts.robot_targets(store, robot)
+        except ConfigError:
+            continue
+        out += [([name], f'target {name!r} is in {ts.CELL_FILE} and {ts.robot_file_label(robot)}: rename one', ERROR)
+                for name in mine if name in c.data]
+    out += _target_entries(store, None, c.data, 'cell', [])
+    robots = [r for r in store.robot_names() if _loads(store, r)]
+    for name, entry in c.data.items():
+        if entry.get('moves') == 'object':
+            out += _held_references(store, entry.get('type'), entry.get('reference'), [name])
+        if entry.get('joints') and robots:  # a cell target may suit one robot only: the first one tells the groups
+            out += _joints_part(store, robots[0], entry['joints'], [name, 'joints'], WARNING)
+    return out
+
+
+def _cross_robot_targets(store, c):
+    try:
+        cell = ts.cell_targets(store)
+    except ConfigError:
+        cell = {}
+    out = [([name], f'target {name!r} is in {ts.CELL_FILE} and {ts.robot_file_label(c.robot)}: rename one', ERROR)
+           for name in c.data if name in cell]
+    out += _target_entries(store, c.robot, c.data, 'base', [])
+    for name, entry in c.data.items():
+        if entry.get('moves') == 'object':
+            out += _held_references(store, entry.get('type'), entry.get('reference'), [name])
+    return out
+
+
+def _instance_tables(file_data):
+    return [(['instances', i], table) for i, table in file_data.get('instances', {}).items()]
+
+
+def _type_checks(store, robot, type, own, theirs, here):
+    """What the two files of an object type (``own``: objects/<type>.yaml, ``theirs``: the robot's) say together:
+    settings need a target, moves agree, instances exist. ``here``: which of them is the one checked."""
+    out = []
+    own_t, their_t = own.get('targets', {}), theirs.get('targets', {})
+    defined = {n for table in (own_t, their_t) for n, e in table.items() if 'moves' in e}
+    for data in (own, theirs):
+        defined |= {n for _, table in _instance_tables(data) for n, e in table.items() if 'moves' in e}
+    checked = own if here == 'own' else theirs
+    for parts, table in [(['targets'], checked.get('targets', {})), *_instance_tables(checked)]:
+        for name, entry in table.items():
+            if 'moves' not in entry and name not in defined:
+                out.append((parts + [name], f'settings for an unknown target {name!r} of {type} objects: no target '
+                            'of that name says what it moves', ERROR))
+    for name in set(own_t) & set(their_t):
+        a, b = own_t[name].get('moves'), their_t[name].get('moves')
+        if a and b and a != b:
+            out.append((['targets', name, 'moves'], f'target {name!r} moves {a} in objects/{type}.yaml but {b} in '
+                        f'robots/{robot}/objects/{type}.yaml: they must agree (rename one of them)', ERROR))
+    placed, configured = store.object_instances(state=False), _place_as_names(store)
+    for inst in checked.get('instances', {}):
+        if inst not in placed and inst not in configured:
+            out.append((['instances', inst], f'placed object {inst!r} does not exist (cell/objects.yaml; no mission '
+                        'puts it down with place_as)', WARNING))
+        elif inst in placed and placed[inst].object != type:
+            out.append((['instances', inst], f'{inst!r} is a {placed[inst].object}, not a {type}', WARNING))
+    return out
+
+
+def _merged_problems(robot, type, own, theirs):
+    """The merged targets of a type (per name, no instance) must be complete and valid."""
+    out = []
+    tables = ((f'objects/{type}.yaml', own.get('targets', {})), (f'robots/{robot}/objects/{type}.yaml',
+                                                                 theirs.get('targets', {})))
+    for name in dict.fromkeys([*own.get('targets', {}), *theirs.get('targets', {})]):
+        layers = [(label, table[name]) for label, table in tables if name in table]
+        if not any('moves' in e for _, e in layers):
+            continue
+        try:
+            merged = model.merge_layers(name, layers)
+        except model.TargetError:
+            continue    # moves disagree: reported by _type_checks
+        out += [(['targets', name], f"merged with the robot's settings: {m}", ERROR)
+                for m in model.target_problems(merged, 'object')]
+    return out
+
+
+def _cross_object_type_targets(store, c):
+    """The targets part of objects/<type>.yaml (cell schema 4)."""
+    from ..embodiment import check_grasp
+
+    out = []
+    if not c.data.get('targets') and not c.data.get('instances'):
+        return out
+    out += _target_entries(store, None, c.data.get('targets', {}), 'object', ['targets'])
+    for name, entry in c.data.get('targets', {}).items():
+        if entry.get('moves') == 'object':
+            out += _held_references(store, entry.get('type'), entry.get('reference'), ['targets', name])
+    for robot in store.robot_names():
+        try:
+            embodiment = store.embodiment(robot)
+            theirs = ts.robot_object_file(store, robot, c.name)
+        except ConfigError:
+            continue
+        out += _type_checks(store, robot, c.name, c.data, theirs, 'own')
+        out += _merged_problems(robot, c.name, c.data, theirs)
+        for name, entry in c.data.get('targets', {}).items():
+            if entry.get('moves') == 'hand':
+                out += [(['targets', name], f'robot {robot!r}: {m}', WARNING)
+                        for m in check_grasp({**entry, **entry.get('alone', {})}, embodiment)]
+    return out
+
+
+def _cross_robot_objects(store, c):
+    robot, type = c.robot, c.name
+    out = [([], f'object type {type!r} does not exist (objects/{type}.yaml)', WARNING)
+           ] if type not in catalogue.enum_values(store, 'objects') else []
+    own = ts.object_file(store, type)
+    out += _target_entries(store, robot, c.data.get('targets', {}), 'object', ['targets'])
+    for parts, table in _instance_tables(c.data):
+        out += _target_entries(store, robot, table, 'object', parts)
+    out += _type_checks(store, robot, type, own, c.data, 'theirs')
+    out += _merged_problems(robot, type, own, c.data)
+    kinds = ts.type_target_kinds(store, robot, type)
+    kinds.update({n: e['moves'] for n, e in c.data.get('targets', {}).items() if 'moves' in e})
+    handled = c.data.get('handled_from')
+    if handled is not None:
+        if handled not in kinds:
+            out.append((['handled_from'], f'handled_from {handled!r} is not a target of {type} objects', ERROR))
+        elif kinds[handled] != 'base':
+            out.append((['handled_from'], f'handled_from {handled!r} moves {kinds[handled]}, it must be a base '
+                        'target', ERROR))
+    elif own.get('yaw_symmetry_deg') and any(m == 'base' for m in kinds.values()):
+        out.append(([], f'{type} objects have yaw_symmetry_deg, but handled_from names no base target: a turned '
+                        'object is handled as placed', WARNING))
+    tools = store.embodiment(robot).get('tools', {})
+    for name, entry in c.data.get('targets', {}).items():
+        out += [(['targets', name, 'grip_m', t], f'robot has no tool {t!r}', WARNING)
+                for t in entry.get('grip_m', {}) if tools and t not in tools]
+    return out
+
+
 def _cross_cell_pack(store, c):
     version = c.data.get('schema_version')
-    return [] if version == packs.CELL_SCHEMA else [
-        (['schema_version'], f'is {version}, this taskweave reads {packs.CELL_SCHEMA}', ERROR)]
+    return [] if isinstance(version, int) and packs.CELL_SCHEMA_OLDEST <= version <= packs.CELL_SCHEMA else [
+        (['schema_version'], f'is {version}, this taskweave reads {packs.CELL_SCHEMA_OLDEST} to {packs.CELL_SCHEMA}',
+         ERROR)]
 
 
 def _cross_robot_pack(store, c):
-    out = [] if c.data.get('schema_version') == packs.ROBOT_SCHEMA else [
-        (['schema_version'], f'is {c.data.get("schema_version")}, this taskweave reads {packs.ROBOT_SCHEMA}', ERROR)]
+    version = c.data.get('schema_version')
+    out = [] if isinstance(version, int) and packs.ROBOT_SCHEMA_OLDEST <= version <= packs.ROBOT_SCHEMA else [
+        (['schema_version'], f'is {version}, this taskweave reads {packs.ROBOT_SCHEMA_OLDEST} to {packs.ROBOT_SCHEMA}',
+         ERROR)]
     if c.robot and c.data.get('name') not in (None, c.robot):
         out.append((['name'], f'name is {c.data["name"]!r}, expected {c.robot!r}', ERROR))
     return out
@@ -272,7 +489,8 @@ CROSS = {'profile': _cross_profile, 'embodiment': _cross_embodiment, 'poses': _c
          'object_instances': _cross_object_instances, 'object_type': _cross_object_type,
          'navigation': _cross_navigation, 'mission': _cross_mission, 'skill': _cross_skill,
          'operator': _cross_operator, 'cell_pack': _cross_cell_pack, 'robot_pack': _cross_robot_pack,
-         'system': _cross_system}
+         'system': _cross_system, 'cell_targets': _cross_cell_targets, 'robot_targets': _cross_robot_targets,
+         'robot_objects': _cross_robot_objects}
 
 
 # ---- one file --------------------------------------------------------------------------------------------------------

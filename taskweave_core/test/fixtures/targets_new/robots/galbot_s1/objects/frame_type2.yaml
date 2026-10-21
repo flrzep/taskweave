@@ -1,0 +1,11 @@
+handled_from: pick              # which base target decides the side a turned object is handled from
+targets:
+  pick:                         # chassis front 0.44 m ahead of base_link: 5 cm before the bin front
+    moves: base
+    x: -1.0
+    y: 0.0
+    yaw: 0.0
+  rails_top: {elbow: up}        # the robot's setting on the type's target
+instances:                      # two_rows back row: the same aisle spot, reaching 0.528 m deeper
+  bay_1_stack_1_back: {pick: {x: -1.528, y: 1.0, yaw: 0.0}}
+  bay_2_stack_2_back: {pick: {x: -1.528, y: 0.0, yaw: 0.0}}

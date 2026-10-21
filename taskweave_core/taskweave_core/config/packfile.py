@@ -133,7 +133,8 @@ def init_cell(cell: str | Path, robot: str, name: str | None = None) -> Path:
         raise PackfileError(str(error)) from error
     if not found:
         raise PackfileError(f'no robot pack {robot!r} found (env {packs.ROBOT_PACKS_ENV}, installed taskweave_robots)')
-    pack = {'name': _name(name or cell.name), 'version': 1, 'schema_version': packs.CELL_SCHEMA}
+    # the files below are the old point files: the oldest layout until init writes the targets files (the migration)
+    pack = {'name': _name(name or cell.name), 'version': 1, 'schema_version': packs.CELL_SCHEMA_OLDEST}
     files = {packs.PACK_FILE: '# cell pack: everything about this cell; the robot comes from its robot pack\n'
                               + yaml.safe_dump(pack, sort_keys=False),
              'system.yaml': yaml.safe_dump({'robot': robot}), **{f: '{}\n' for f in EMPTY_FILES},
@@ -249,8 +250,9 @@ def _extract(file: Path, into: Path) -> dict:
 def _validate(folder: Path, manifest: dict) -> None:
     """Schema first (clear message), then the same check as ``taskweave check``."""
     version = manifest['schema_version']
-    if version != packs.CELL_SCHEMA:
-        hint = 'migrate it with the taskweave that wrote it' if version < packs.CELL_SCHEMA else 'update taskweave'
+    if not packs.CELL_SCHEMA_OLDEST <= version <= packs.CELL_SCHEMA:
+        hint = ('migrate it with the taskweave that wrote it' if version < packs.CELL_SCHEMA_OLDEST
+                else 'update taskweave')
         raise PackfileError(f'incompatible cell pack: schema {version}, this taskweave reads schema '
                             f'{packs.CELL_SCHEMA} ({hint})')
     pack = _read_pack(folder)

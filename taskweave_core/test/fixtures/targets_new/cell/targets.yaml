@@ -1,0 +1,7 @@
+# targets in the cell frame
+waiting: {moves: base, x: 2.0, y: 0.0, yaw: 0.0}       # centre of the waiting zone
+dropoff: {moves: base, x: 0.75, y: 0.0, yaw: 3.1416}   # centre of the drop-off zone, facing the rack
+point_a: {moves: base, x: 4.0, y: 3.5, yaw: 0.0}       # free floor between waiting zone and bins
+set_down: {moves: base, x: 1.5, y: 0.0, yaw: 3.1416}   # drop-off zone, facing the rack
+spawn: {moves: base, x: 2.0, y: -0.45, yaw: 0.0}       # sim start
+taught_dock: {moves: base, x: 9.3518, y: -0.4734, yaw: 0.404}

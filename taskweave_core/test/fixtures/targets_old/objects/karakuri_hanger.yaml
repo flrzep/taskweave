@@ -1,0 +1,7 @@
+name: karakuri_hanger
+points:
+  knob:
+    right_tool: {xyz: [0.086, -0.013, 0.428], rpy: [1.5708, 0.0, -1.5708]}
+    approach_m: 0.08
+contacts:
+  hook: {xyz: [0.0, 0.0, 0.0], rpy: [3.1416, 0.0, 0.0]}

@@ -1,0 +1,10 @@
+name: galbot_s1
+summary: Test robot with a torso lift, a head and two arms with parallel grippers.
+capabilities: [base.differential, arms.bimanual, gripper.parallel, torso.lift, head.pan_tilt]
+base: {footprint: [0.6, 0.45], max_speed: {linear: 1.0, angular: 1.5}}
+arms:
+  left: {dof: 7, reach_m: 0.8, tool: left}
+  right: {dof: 7, reach_m: 0.8, tool: right}
+tools:
+  left: {type: parallel_gripper, stroke_m: 0.1}
+  right: {type: parallel_gripper, stroke_m: 0.1}

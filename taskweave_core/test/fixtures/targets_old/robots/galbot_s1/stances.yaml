@@ -1,0 +1,14 @@
+objects:
+  frame_type2:
+    pick: {frame: object, x: -1.0, y: 0.0, yaw: 0.0}
+  karakuri_hanger:
+    staging: {x: 1.765, y: 0.0, yaw: 3.1416}
+    hang: {x: 1.1, y: 0.0, yaw: 3.1416}
+    knob: {x: 1.26, y: 0.0, yaw: 3.1416}
+  part_box:
+    pick: {x: -0.8, y: 0.0, yaw: 0.0}
+instances:
+  bay_1_stack_1_back:
+    pick: {x: -1.528, y: 1.0, yaw: 0.0}
+  bay_2_stack_2_back:
+    pick: {x: -1.528, y: 0.0, yaw: 0.0}

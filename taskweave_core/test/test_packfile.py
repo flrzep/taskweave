@@ -61,7 +61,7 @@ def test_init_is_valid_and_empty(tmp_path):
     store = ConfigStore(cell)
     assert store.object_instances() == {} and store.mission_names() == [] and store.locations() == {}
     assert yaml.safe_load((cell / 'pack.yaml').read_text()) == {'name': 'my_cell', 'version': 1,
-                                                                 'schema_version': packs.CELL_SCHEMA}
+                                                                 'schema_version': packs.CELL_SCHEMA_OLDEST}
     with pytest.raises(PackfileError, match='not an empty'):
         init_cell(cell, ROBOT)
     with pytest.raises(PackfileError, match='no robot pack'):
@@ -80,7 +80,7 @@ def test_build_export_import_roundtrip(tmp_path):
     (cell / 'state' / 'objects.yaml').write_text('crate_1: {gone: true}\n')
     manifest = export_cell(cell, tmp_path / 'out' / 'a.tar.gz')
     assert manifest['name'] == 'built_cell' and manifest['git_rev'] is None
-    assert manifest['schema_version'] == packs.CELL_SCHEMA and manifest['date'] and manifest['taskweave_version']
+    assert manifest['schema_version'] == packs.CELL_SCHEMA_OLDEST and manifest['date'] and manifest['taskweave_version']
     listed = {f['path'] for f in manifest['files']}
     assert {'pack.yaml', 'objects/crate.yaml', 'missions/once.yaml', 'robots/demo_bot/stances.yaml'} <= listed
     assert not any('pycache' in f or f.startswith('state') for f in listed)
@@ -121,7 +121,7 @@ def test_import_keeps_group_and_mode(tmp_path):
 
 def make_archive(path: Path, members: dict, manifest: dict | None = None, extra=()) -> Path:
     """An archive of ``members`` {name: bytes} with a matching manifest, keys overridden by ``manifest``."""
-    base = {'name': 'x', 'schema_version': packs.CELL_SCHEMA, 'git_rev': None,
+    base = {'name': 'x', 'schema_version': packs.CELL_SCHEMA_OLDEST, 'git_rev': None,
             'files': [{'path': n, 'sha256': hashlib.sha256(b).hexdigest()} for n, b in members.items()]}
     base.update(manifest or {})
     with tarfile.open(path, 'w:gz') as archive:

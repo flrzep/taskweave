@@ -1,0 +1,34 @@
+# test robot with a torso lift, a head and two 7-joint arms (names as in a real two-armed robot, nothing else)
+name: galbot_s1
+base: {type: differential, cmd_vel: /cmd_vel, odom: /odom, frame: base_link, limits: {linear: 1.0, angular: 1.5}}
+joints:
+  command: /joint_command
+  state: /joint_states
+  limits:
+    body_joint: [0.0, 0.75]
+    head_joint1: [-1.0, 1.0]
+    head_joint2: [-1.0, 1.0]
+    left_arm_joint1: [-3.2, 3.2]
+    left_arm_joint2: [-3.2, 3.2]
+    left_arm_joint3: [-3.2, 3.2]
+    left_arm_joint4: [-3.2, 3.2]
+    left_arm_joint5: [-3.2, 3.2]
+    left_arm_joint6: [-3.2, 3.2]
+    left_arm_joint7: [-3.2, 3.2]
+    right_arm_joint1: [-3.2, 3.2]
+    right_arm_joint2: [-3.2, 3.2]
+    right_arm_joint3: [-3.2, 3.2]
+    right_arm_joint4: [-3.2, 3.2]
+    right_arm_joint5: [-3.2, 3.2]
+    right_arm_joint6: [-3.2, 3.2]
+    right_arm_joint7: [-3.2, 3.2]
+  linear: [body_joint]
+  groups:
+    torso: [body_joint]
+    head: [head_joint1, head_joint2]
+    left_arm: [left_arm_joint1, left_arm_joint2, left_arm_joint3, left_arm_joint4, left_arm_joint5, left_arm_joint6, left_arm_joint7]
+    right_arm: [right_arm_joint1, right_arm_joint2, right_arm_joint3, right_arm_joint4, right_arm_joint5, right_arm_joint6, right_arm_joint7]
+grippers:
+  left: {action: /left_gripper/command, open: 0.0, closed: 1.0}
+  right: {action: /right_gripper/command, open: 0.0, closed: 1.0}
+torso: {joint: body_joint, drive_m: 0.5}

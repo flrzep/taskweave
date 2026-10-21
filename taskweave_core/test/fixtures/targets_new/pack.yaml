@@ -1,0 +1,4 @@
+# hand-made cell pack in the targets layout (cell schema 4): the examples of the targets design, see old twin ../targets_old
+name: targets_cell
+version: 1
+schema_version: 4

@@ -60,6 +60,8 @@ KINDS = (
     _K('system', 'cell', 'system.yaml', 'Installation', ('launch', 'sim'), schemas.SYSTEM, template={}),
     _K('operator', 'cell', 'operator.yaml', 'Operator inputs', ('launch',), schemas.OPERATOR, template={}),
     _K('locations', 'cell', 'cell/locations.yaml', 'Named base poses', ('live',), schemas.POINTS2D, template={}),
+    _K('cell_targets', 'cell', 'cell/targets.yaml', 'Targets in the cell frame', ('live',), schemas.CELL_TARGETS,
+       template={}),
     _K('object_instances', 'cell', 'cell/objects.yaml', 'Placed objects', ('live',), schemas.OBJECT_INSTANCES,
        template={}),
     _K('layout', 'cell', 'cell/layout.yaml', 'Cell layout', ('sim',),
@@ -80,12 +82,15 @@ KINDS = (
        template={}),
     _K('object_points', 'cell', 'robots/*/object_points.yaml', 'Object point settings of a robot', ('live',),
        schemas.ROBOT_OBJECT_POINTS, template={}),
+    _K('robot_objects', 'cell', 'robots/*/objects/*.yaml', 'Targets of a robot on an object type', ('live',),
+       schemas.ROBOT_OBJECT_FILE, template={}),
     # ---- robot pack (a cell pack copy of these is an override, found as robots/<robot>/<file>)
     _K('robot_pack', 'robot', 'pack.yaml', 'Robot pack', ('launch',), schemas.PACK, editable=False,
        editable_reason=MANAGED),
     _K('profile', 'robot', 'profile.yaml', 'Robot profile', ('launch',), schemas.ROBOT_PROFILE),
     _K('embodiment', 'robot', 'embodiment.yaml', 'Robot embodiment', ('launch',), schemas.EMBODIMENT),
     _K('poses', 'robot', 'poses.yaml', 'Named joint poses', ('live',), schemas.JOINT_POSES),
+    _K('robot_targets', 'robot', 'targets.yaml', 'Base-frame and joint targets', ('live',), schemas.ROBOT_TARGETS),
     _K('navigation', 'robot', 'navigation.yaml', 'Navigation envelope and driving', ('live', 'launch'),
        schemas.NAVIGATION),
     _K('skill_overrides', 'robot', 'skill_overrides.yaml', 'Motion options per skill', ('live',),
@@ -121,6 +126,18 @@ ENUM_HINTS = {
     'object_points': [((), 'objects', 'x-taskweave-enum-keys')],
     'skill_overrides': [((), 'skills', 'x-taskweave-enum-keys')],
     'poses': [(('additionalProperties', 'oneOf', 0), 'joints', 'x-taskweave-enum-keys')],
+    # targets (cell schema 4): the groups of a joints part, the type of an object target, the target a held one meets
+    'cell_targets': [(('additionalProperties', 'properties', 'joints'), 'joint_groups', 'x-taskweave-enum-keys'),
+                     (('additionalProperties', 'properties', 'type'), 'target_types', 'x-taskweave-enum'),
+                     (('additionalProperties', 'properties', 'reference'), 'object_targets', 'x-taskweave-enum')],
+    'robot_targets': [(('additionalProperties', 'properties', 'joints'), 'joint_groups', 'x-taskweave-enum-keys'),
+                      (('additionalProperties', 'properties', 'type'), 'target_types', 'x-taskweave-enum'),
+                      (('additionalProperties', 'properties', 'reference'), 'object_targets', 'x-taskweave-enum')],
+    'object_type': [(('properties', 'targets', 'additionalProperties', 'properties', 'reference'), 'object_targets',
+                     'x-taskweave-enum')],
+    'robot_objects': [(('properties', 'handled_from'), 'base_targets_of', 'x-taskweave-enum'),
+                      (('properties', 'targets', 'additionalProperties', 'properties', 'joints'), 'joint_groups',
+                       'x-taskweave-enum-keys')],
 }
 
 
@@ -321,11 +338,23 @@ def json_schema(kind_or_path: str, pack: str = 'cell') -> dict:
     return schema
 
 
+def _plain_target_names(store, robot: str) -> list[str]:
+    return [n for key, names in store.target_names(robot).items() if key != 'placed objects' for n in names
+            if '/' not in n]
+
+
+def _kinds_of(store, robot: str, type: str) -> dict[str, str]:
+    from .target_store import type_target_kinds
+
+    return type_target_kinds(store, robot, type)
+
+
 def enum_values(store, name: str, robot: str | None = None) -> list[str]:
     """Values of a dynamic enum in this pack: robots, skills, missions, objects (types), instances, locations,
-    stances, object_points, joint_poses, held_poses, hands, joints, tools. Robot-bound ones take ``robot`` (none:
-    the union over the cell's robots)."""
-    from .limits import joint_limits
+    stances, object_points, joint_poses, held_poses, hands, joints, tools, and for the targets layout targets (plain
+    names), object_targets (names on object types), target_types, base_targets_of (base targets on object types:
+    ``handled_from``), joint_groups. Robot-bound ones take ``robot`` (none: the union over the cell's robots)."""
+    from .limits import joint_groups, joint_limits
 
     robots = [robot] if robot else store.robot_names()
     root = store.root
@@ -354,6 +383,14 @@ def enum_values(store, name: str, robot: str | None = None) -> list[str]:
         'hands': lambda: per_robot(lambda r: store.robot(r).data.get('grippers', {})),
         'joints': lambda: per_robot(lambda r: joint_limits(store, r)),
         'tools': lambda: per_robot(lambda r: store.embodiment(r).get('tools', {})),
+        'targets': lambda: per_robot(lambda r: _plain_target_names(store, r)) if store.targets_format() else [],
+        'object_targets': lambda: sorted({n for names in store.object_target_names(robot).values() for n in names})
+        if store.targets_format() else [],
+        'target_types': lambda: stems('objects'),
+        'base_targets_of': lambda: per_robot(lambda r: {
+            n for t in store.object_target_names(r) for n, m in _kinds_of(store, r, t).items() if m == 'base'})
+        if store.targets_format() else [],
+        'joint_groups': lambda: per_robot(lambda r: joint_groups(store, r)),
     }
     if name not in table:
         raise KeyError(f'unknown enum {name!r}; known: {", ".join(table)}')
