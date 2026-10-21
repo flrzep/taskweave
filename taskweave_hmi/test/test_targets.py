@@ -349,3 +349,17 @@ def test_the_3d_view_shows_the_cell_base_targets_and_the_hand_targets(store):
     shown = {(p['object_type'], p['name']) for p in data['points']}
     assert ('frame_type2', 'rails_top') in shown and ('karakuri_hanger', 'knob') in shown
     assert ('frame_type2', 'hook_plate') not in shown                       # an object target is not a hand point
+
+
+def test_the_lists_read_merged_targets_and_name_a_bad_one_instead_of_failing(store):
+    stances = store.root / 'robots' / ROBOT / 'objects' / 'frame_type2.yaml'   # an override may give only some keys
+    stances.write_text(stances.read_text().replace('bay_2_stack_2_back: {pick: {x: -1.528, y: 0.0, yaw: 0.0}}',
+                                                   'bay_2_stack_2_back: {pick: {x: -1.6}}'))
+    poses = store.root / 'robots' / ROBOT / 'targets.yaml'
+    poses.write_text(poses.read_text() + 'bad: {moves: joints, joints: {head: [0.1]}}\n')
+    again = fresh(store)
+    frame = next(o for o in points.overview(again, ROBOT)['objects'] if o['object'] == 'frame_type2')
+    back = next(i for i in frame['instances'] if i['name'] == 'bay_2_stack_2_back')
+    assert back['overrides'][0]['offset'] == {'x': -1.6, 'y': 0.0, 'yaw': 0.0}
+    by_name = {p['name']: p for p in robot.overview(again, ROBOT, set())['poses']}
+    assert 'has 2 joints' in by_name['bad']['problems'][0] and by_name['home']['problems'] == []
