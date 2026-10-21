@@ -1,11 +1,15 @@
-# Save the robot's current base pose, or its tools' TCP poses, as a named point in config.
+# Save the robot's current pose as a target in config: its base pose, its tools' TCP poses, or its joint values.
 
-string name             # location name, for stances "<object instance>[/<variant>]", e.g. "bay_2_stack_1/pick",
-                        # for object points "<object instance>/<point>", e.g. "bay_2_stack_1/rails_top"
-string kind             # "location" (cell/locations.yaml), "stance" (robots/<robot>/stances.yaml, per object
-                        # type), "stance_instance" (same file, override for this object instance only) or
-                        # "object_point" (objects/<object>.yaml: each tool's canonical TCP relative to the object)
-string[] tools          # object_point: the tools to store (empty: every tool in the profile's tool_frames)
+string name             # a target reference: "<name>" for a cell, base-frame or joint target, "<object instance>/<name>"
+                        # for a target on an object (e.g. "bay_2_stack_1/pick", "bay_2_stack_1/rails_top")
+string kind             # "base" (a base pose: in the cell frame for "<name>", relative to the object for
+                        # "<instance>/<name>", a stance), "hand" (each tool's canonical TCP: relative to the object for
+                        # "<instance>/<name>", else in the base frame, or the cell frame for a cell-frame target),
+                        # "joints" (the joint values), "object" (a held object: not built); empty: "base".
+                        # A cell before schema 4 also takes "location", "stance", "stance_instance", "object_point".
+bool instance_override  # "<instance>/<name>": write the override for this object instance only, not the object type
+string[] tools          # hand: the tools to store (empty: every tool in the profile's tool_frames);
+                        # joints: the joint groups to store (empty: the target's own groups, else every group)
 ---
 bool success
 string message

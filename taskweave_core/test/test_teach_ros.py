@@ -147,3 +147,27 @@ def test_teach_refuses_a_stance_or_location_with_a_pose_from_before_a_jump(teach
     answer = teach_node._teach(TeachPoint.Request(name='bin_2', kind='location'), TeachPoint.Response())
     assert not answer.success and 'clock jump' in answer.message
     assert teach_node.pose is None  # the pre-jump base pose is gone
+
+
+def test_the_new_kinds_are_taken_for_the_old_ones_on_a_cell_before_schema_4(teach_node):
+    """base: a location (no /) or a stance (with /); hand: an object point; joints and object: not on this layout."""
+    from nav_msgs.msg import Odometry
+
+    from taskweave_interfaces.srv import TeachPoint
+
+    def ask(name, kind, instance_override=False):
+        request = TeachPoint.Request(name=name, kind=kind)
+        request.instance_override = instance_override
+        return teach_node._teach(request, TeachPoint.Response())
+
+    odom = Odometry()
+    odom.pose.pose.position.x, odom.pose.pose.orientation.w = 4.0, 1.0
+    teach_node._odom(odom)
+    store = ConfigStore(teach_node.config.root)
+    assert ask('spot', 'base').success and store.locations()['spot'].x == 4.0
+    assert ask('pile/pick', 'base', True).success
+    assert 'pile' in store.stance_offsets('demo_bot')['instances']
+    flange_at(teach_node, 0.0)
+    assert ask('pile/top_grasp', 'hand').success
+    refused = ask('home', 'joints')
+    assert not refused.success and 'before schema 4' in refused.message
