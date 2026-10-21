@@ -232,9 +232,13 @@ def test_partial_group_values_leave_joints_alone(old):
     new = ConfigStore(FIXTURES / 'targets_new')
     assert group_values(new, 'bot_lift', new.target('lift_high', 'bot_lift').joints) == {'lift_joint': 0.4}
     assert (
-        group_values(new, 'bot_lift', new.target('lift_high', 'bot_lift').joints) == old.named_pose('bot_lift', 'lift_high')['joints']
+        group_values(new, 'bot_lift', new.target('lift_high', 'bot_lift').joints)
+        == old.named_pose('bot_lift', 'lift_high')['joints']
     )
-    assert group_values(new, 'bot_lift', new.target('ready', 'bot_lift').joints) == old.named_pose('bot_lift', 'ready')['joints']
+    assert (
+        group_values(new, 'bot_lift', new.target('ready', 'bot_lift').joints)
+        == old.named_pose('bot_lift', 'ready')['joints']
+    )
 
 
 # ---- the deprecated readers over the targets ------------------------------------------------------
