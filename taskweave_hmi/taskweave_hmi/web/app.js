@@ -484,22 +484,26 @@ async function openEditor(name) {
   $('d-retries').value = d.retries ?? '';
   fillSelect($('d-fail'), ON_FAILURE, d.on_failure ?? '');
   $('d-replans').value = d.max_replans ?? '';
-  renderSteps(data.steps || []);
+  const steps = data.steps || [];
+  renderSteps(steps, steps.map(() => steps.length <= FOLD_ABOVE));  // a long mission opens folded, to reorder it
 }
 function alertInline(data) { message($('save-msg'), data.error || (data.problems || []).join('\n'), true); }
 
-function renderSteps(steps) {
+// expanded: per step, open (true) or folded to its summary line (false)
+function renderSteps(steps, expanded) {
   const list = $('step-editor');
   list.replaceChildren();
-  steps.forEach((step, index) => list.append(stepCard(step, index, steps)));
+  steps.forEach((step, index) => list.append(stepCard(step, index, steps, expanded[index])));
+  foldButton();
 }
 function readSteps() { return [...$('step-editor').children].map((card) => card._read()); }
 
-function stepCard(step, index, steps) {
+function stepCard(step, index, steps, expanded) {
   const card = $('step-template').content.firstElementChild.cloneNode(true);
   card.querySelectorAll('input[type="number"]').forEach(numberField);
   const q = (key) => card.querySelector(`[data-k="${key}"]`);
   card.querySelector('.step-no').textContent = `Step ${index + 1}`;
+  card.querySelector('[data-act="fold"]').addEventListener('click', () => { setExpanded(card, !isExpanded(card)); foldButton(); });
   q('instruction').value = step.instruction || '';
   const missions = state.missions.filter((m) => m.valid && m.name !== state.editing?.name).map((m) => INCLUDE + m.name);
   const chosen = step.include ? INCLUDE + step.include : step.skill;
@@ -529,6 +533,7 @@ function stepCard(step, index, steps) {
   q('skill').addEventListener('change', () => { renderArgs({}); markDirty(); });
   card.addEventListener('input', markDirty);
   card.addEventListener('change', markDirty);
+  ['input', 'change'].forEach((type) => card.addEventListener(type, () => stepSummary(card)));
   ['input', 'change'].forEach((type) => card.addEventListener(type, () => card.classList.remove('has-problem')));
   card.querySelector('[data-act="up"]').disabled = index === 0;
   card.querySelector('[data-act="down"]').disabled = index === steps.length - 1;
@@ -549,7 +554,7 @@ function stepCard(step, index, steps) {
     focusStep(editSteps((items) => {
       const copy = structuredClone(items[index].step);
       delete copy.id;
-      items.splice(index + 1, 0, { step: copy, open: items[index].open, was: null });
+      items.splice(index + 1, 0, { step: copy, open: items[index].open, expanded: true, was: null });
     })[index + 1]);
   });
   const handle = card.querySelector('[data-act="drag"]');
@@ -574,7 +579,64 @@ function stepCard(step, index, steps) {
     if (q('replan_from').value) out.replan_from = q('replan_from').value;
     return out;
   };
+  setExpanded(card, expanded);
+  stepSummary(card);
   return card;
+}
+
+// ---------- folded steps ----------
+// A step folds to its summary line (number, instruction, skill and a short reading of its arguments): a long mission
+// is reordered by dragging folded steps. The summary is the toggle (click, Enter, Space); the open state stays through
+// reorders (editSteps), Check, Save and point refreshes. A mission of more than FOLD_ABOVE steps opens folded; new and
+// duplicated steps open, and so do the steps a Check or Save names.
+const FOLD_ABOVE = 6;
+function setExpanded(card, open) {
+  card.classList.toggle('collapsed', !open);
+  card.querySelector('[data-act="fold"]').setAttribute('aria-expanded', String(open));
+}
+const isExpanded = (card) => !card.classList.contains('collapsed');
+// "Collapse all" while any step is open, else "Expand all"; none for a single step
+function foldButton() {
+  const cards = [...$('step-editor').children];
+  show($('btn-fold-steps'), cards.length > 1);
+  $('btn-fold-steps').textContent = cards.some(isExpanded) ? 'Collapse all' : 'Expand all';
+}
+$('btn-fold-steps').addEventListener('click', () => {
+  const cards = [...$('step-editor').children];
+  const open = !cards.some(isExpanded);
+  cards.forEach((card) => setExpanded(card, open));
+  foldButton();
+});
+function stepSummary(card) {
+  const step = card._read();
+  const instruction = card.querySelector('.sum-instruction');
+  instruction.textContent = step.instruction || 'no instruction';
+  instruction.classList.toggle('muted', !step.instruction);
+  const what = [step.include ? `include ${step.include}` : step.skill, argsSummary(step.include ? step.with : step.args)];
+  card.querySelector('.sum-args').textContent = what.filter(Boolean).join(' · ');
+  card.querySelector('[data-act="fold"]').title = `${step.instruction}\n${what.filter(Boolean).join(' · ')}`;
+}
+// Arguments in a few words: "by 0 / −15 / +6 cm · left", "onto tray_1/seat · base · 10 cm short", "linear · speed 50 %".
+const signed = (n) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0');
+const cm = (m) => +(m * 100).toFixed(1);
+function argsSummary(args) {
+  return Object.entries(args || {}).map(([key, value]) => argSummary(key, value)).filter(Boolean).join(' · ');
+}
+function argSummary(key, value) {
+  if (value === undefined || value === null) return '';
+  const vector = Array.isArray(value) && value.length === 3 && value.every((n) => typeof n === 'number');
+  if (vector && key === 'by') return `by ${value.map((n) => signed(cm(n))).join(' / ')} cm`;
+  if (vector && key.endsWith('_deg')) return `${key.replace(/_deg$/, '')} ${value.join(' / ')}°`;
+  if (vector) return `${key} ${value.join(' / ')} m`;
+  if (Array.isArray(value)) return value.map((item) => (typeof item === 'object' ? JSON.stringify(item) : item)).join(', ');
+  if (typeof value === 'object') return argsSummary(value);
+  if (typeof value === 'boolean') return value ? key : `no ${key}`;
+  if (typeof value === 'string') return key === 'onto' ? `onto ${value}` : value;
+  if (key === 'offset_m') return `${cm(value)} cm short`;
+  if (key === 'speed' || key === 'accel') return `${key} ${+(value * 100).toFixed(1)} %`;
+  if (key === 'seconds') return `${value} s`;
+  const unit = key.match(/_(m|mm|s|deg|rad)$/)?.[1];
+  return unit ? `${key.slice(0, -unit.length - 1)} ${value}${unit === 'deg' ? '°' : ` ${unit}`}` : `${key} ${value}`;
 }
 
 function argField(key, spec, required, value) {
@@ -611,14 +673,15 @@ function argField(key, spec, required, value) {
   return el('div', { class: 'field' }, label, input);
 }
 
-// Change the step list and draw it again: change gets [{step, open}] (the steps as edited now, rules folded out or
-// not) to reorder, remove or insert. A step without an id of its own is s<position>, so a moved step's id changes:
-// replan_from follows the step it named; one that named a removed step falls back to the step itself (and says so).
+// Change the step list and draw it again: change gets [{step, open, expanded}] (the steps as edited now, rules folded
+// out or not, the step open or folded) to reorder, remove or insert. A step without an id of its own is s<position>,
+// so a moved step's id changes: replan_from follows the step it named; one that named a removed step falls back to the
+// step itself (and says so).
 // Returns the new step cards.
 function editSteps(change) {
   const items = [...$('step-editor').children].map((card, i) => {
     const step = card._read();
-    return { step, open: card.querySelector('.rules').open, was: step.id || `s${i + 1}` };
+    return { step, open: card.querySelector('.rules').open, expanded: isExpanded(card), was: step.id || `s${i + 1}` };
   });
   const before = new Set(items.map((item) => item.was));
   change(items);
@@ -631,7 +694,7 @@ function editSteps(change) {
     if (now.has(target)) item.step.replan_from = now.get(target);
     else { delete item.step.replan_from; lost.push(i + 1); }
   });
-  renderSteps(items.map((item) => item.step));
+  renderSteps(items.map((item) => item.step), items.map((item) => item.expanded));
   const cards = [...$('step-editor').children];
   cards.forEach((card, i) => { card.querySelector('.rules').open = items[i].open; });
   message($('save-msg'), lost.length ? `Step ${lost.join(', ')} replanned from the removed step: now from itself.` : '', 'warn');
@@ -655,8 +718,8 @@ function move(index, delta, control) {
 }
 
 // Drag a step by its handle (mouse, pen or touch: pointer events; the handle has touch-action none, so a touch drags
-// instead of scrolling). The step follows the pointer, a line marks where it lands, and near the top bar or the
-// bottom of the window the page scrolls. Escape or a lost pointer puts it back.
+// instead of scrolling). The step follows the pointer (folded to its summary line while carried), a line marks where it
+// lands, and near the top bar or the bottom of the window the page scrolls. Escape or a lost pointer puts it back.
 const DRAG_EDGE = 72;  // px from the top bar or the window's bottom where the page scrolls while dragging
 function dragStep(card, e) {
   const list = $('step-editor');
@@ -735,13 +798,16 @@ function showProblems(problems) {
   [...$('step-editor').children].forEach((card, i) => {
     const step = card._read();
     const id = step.id || `s${i + 1}`;
-    card.classList.toggle('has-problem', named.some((n) => n === id || (!!step.include && n.startsWith(`${id}_`))));
+    const bad = named.some((n) => n === id || (!!step.include && n.startsWith(`${id}_`)));
+    card.classList.toggle('has-problem', bad);
+    if (bad) setExpanded(card, true);  // opens to show what is wrong
   });
+  foldButton();
 }
 
 $('btn-add-step').addEventListener('click', () => {
   const cards = editSteps((items) => items.push({ step: { instruction: '', skill: state.skills[0]?.name || 'wait', args: {} },
-    open: false, was: null }));
+    open: false, expanded: true, was: null }));
   focusStep(cards[cards.length - 1]);
 });
 $('btn-validate').addEventListener('click', async () => {

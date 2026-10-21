@@ -273,11 +273,32 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
 .log { gap: 0; }
 .log li { font: var(--fs-sm)/1.45 var(--mono); border-bottom: 1px solid var(--border); padding: 6px 0; overflow-wrap: anywhere; }
 .edit-step { border: 1px solid var(--border); border-radius: var(--r-s); padding: var(--sp-3); display: grid; gap: var(--sp-2); background: var(--surface-card); }
-.edit-step .step-no { font: 600 var(--fs-base) var(--cond); color: var(--brand-text); }
+.edit-step .step-no { font: 600 var(--fs-base) var(--cond); color: var(--brand-text); white-space: nowrap; }
+/* the head: handle, the toggle (number, and folded: the instruction and the skill with its arguments, one line each,
+   cut with an ellipsis), the buttons. On a phone the buttons go to a second row under the toggle */
+.edit-step .step-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.step-toggle { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; min-height: var(--tap-s); padding: 2px var(--sp-1);
+               border: 0; border-radius: var(--r-s); background: none; color: var(--text); font: var(--fs-base) var(--sans);
+               text-align: left; cursor: pointer; }
+.step-toggle:hover { background: var(--surface-hover); }
+.step-toggle::before { content: "▶"; flex: none; width: 12px; text-align: center; color: var(--text-muted); font-size: 10px;
+                       line-height: 1; transition: transform .15s; }  /* as a details marker */
+.step-toggle[aria-expanded="true"]::before { transform: rotate(90deg); }
+.step-sum { display: none; min-width: 0; line-height: 1.3; }
+.step-sum > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-sum .sum-args { font: var(--fs-sm) var(--mono); color: var(--text-muted); }
+.edit-step.collapsed { padding-block: var(--sp-2); }
+.edit-step.collapsed .step-body { display: none; }
+.edit-step.collapsed .step-sum { display: grid; }
+.edit-step.collapsed .step-no, .edit-step.dragging .step-no { min-width: 4.2em; }  /* the instructions line up */
+.step-body { display: grid; gap: var(--sp-2); min-width: 0; }
+@media (max-width: 600px) {
+  .edit-step .step-head { grid-template-columns: auto minmax(0, 1fr); }
+  .edit-step .step-buttons { grid-column: 2; justify-self: end; }
+}
 /* reorder by drag: the handle takes the pointer (no page scroll on touch), the step follows it lifted, a brand line in
    the gap marks where it lands */
 .edit-step { position: relative; }
-.edit-step .step-head { flex-wrap: wrap; gap: var(--sp-1); }
 .edit-step.has-problem { border-color: var(--bad); box-shadow: inset 4px 0 0 var(--bad); }  /* named by Check or Save */
 .edit-step.has-problem .step-no { color: var(--bad); }
 .edit-step .icon.confirm { width: auto; padding: 0 var(--sp-2); background: var(--bad); border-color: var(--bad); color: var(--on-fill);
@@ -287,7 +308,8 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
 .edit-steps.dragging { user-select: none; -webkit-user-select: none; }
 .edit-steps.dragging .handle { cursor: grabbing; }
 .edit-step.dragging { z-index: 2; border-color: var(--brand-text); box-shadow: var(--shadow-2); }
-.edit-step.dragging > :not(.step-head, .field:has([data-k="instruction"])) { display: none; }  /* small while carried */
+.edit-step.dragging .step-body { display: none; }  /* folded while carried */
+.edit-step.dragging .step-sum { display: grid; }
 .edit-step.drop-before::before, .edit-step.drop-after::after { content: ""; position: absolute; z-index: 3; left: -1px; right: -1px;
                                                                height: 3px; border-radius: var(--r-pill); background: var(--brand-text); }
 .edit-step.drop-before::before { top: calc(-1 * var(--sp-1) - 3px); }
