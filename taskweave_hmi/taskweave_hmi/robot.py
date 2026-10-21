@@ -257,8 +257,8 @@ def delete_pose(store: ConfigStore, robot: str, name: str, args: set[tuple[str, 
         _pose_kind(store, robot, name, exists=True)
         try:
             return store.display_path(store.delete_target(name, robot)[0])
-        except (ValueError, KeyError) as error:
-            raise _problem(error) from error
+        except targets.REFUSED as error:
+            raise RobotSettingsError(str(error)) from error
     try:
         path = store.delete_point(f'robots/{robot}/poses.yaml', [name])
     except ValueError as error:
@@ -267,11 +267,6 @@ def delete_pose(store: ConfigStore, robot: str, name: str, args: set[tuple[str, 
 
 
 # ---- the same on a targets cell (cell schema 4) ---------------------------------------------------------------------
-def _problem(error: Exception) -> RobotSettingsError:
-    """A store error as the HMI's: TargetError is a KeyError, its message the first argument."""
-    return RobotSettingsError(str(error.args[0]) if isinstance(error, KeyError) and error.args else str(error))
-
-
 def _pose_kind(store: ConfigStore, robot: str, name: str, exists: bool = False) -> str | None:
     """What the target ``name`` moves when it can be a pose (joints, or a hand in the base frame), None if there is
     none (``exists``: refused then too); refused for a target that is not a pose."""
@@ -290,7 +285,8 @@ def _save_pose_target(store: ConfigStore, robot: str, name: str, body: Mapping, 
                       rename: str | None) -> str:
     """save_pose() on a targets cell: a joint target, or with tools a hand target in the base frame, in
     robots/<robot>/targets.yaml. Keys the editor does not show (approach_m, grip_m, a path's earlier waypoints, a
-    torso ``auto`` / ``keep``) are kept; tools and elbow are as given, as poses.yaml had them."""
+    torso ``auto`` / ``keep``) are kept; tools and elbow are as given, as poses.yaml had them. An update is marked
+    ``edited in the HMI`` as set_named_pose marked it (a new target gets the store's ``saved <date>``)."""
     kind = _pose_kind(store, robot, name)
     entry = targets.plain_entry(store, robot, name)
     try:
@@ -313,9 +309,10 @@ def _save_pose_target(store: ConfigStore, robot: str, name: str, body: Mapping, 
     if groups:
         data['joints'] = groups
     try:
-        return store.display_path(store.save_target(name, data, robot, rename=rename)[0])
-    except (ValueError, KeyError) as error:
-        raise _problem(error) from error
+        paths = store.save_target(name, data, robot, rename=rename, note=HMI_NOTE if kind else None)
+    except targets.REFUSED as error:
+        raise RobotSettingsError(str(error)) from error
+    return store.display_path(paths[0])
 
 
 def check_navigation(settings: Mapping, base: Mapping) -> dict:

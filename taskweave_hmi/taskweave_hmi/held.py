@@ -138,8 +138,8 @@ def delete(store: ConfigStore, robot: str, obj: str, name: str) -> str:
         _held_entry(store, robot, obj, name, exists=True)
         try:
             return store.delete_target(name, robot)[0].relative_to(store.root).as_posix()
-        except (ValueError, KeyError) as error:
-            raise _problem(error) from error
+        except targets.REFUSED as error:
+            raise HeldError(str(error)) from error
     try:
         return str(store.delete_point(f'robots/{robot}/held_poses.yaml', [obj, name]).relative_to(store.root))
     except ValueError as error:
@@ -147,11 +147,6 @@ def delete(store: ConfigStore, robot: str, obj: str, name: str) -> str:
 
 
 # ---- the same on a targets cell (cell schema 4) ---------------------------------------------------------------------
-def _problem(error: Exception) -> HeldError:
-    """A store error as the HMI's: TargetError is a KeyError, its message the first argument."""
-    return HeldError(str(error.args[0]) if isinstance(error, KeyError) and error.args else str(error))
-
-
 def _held_entry(store: ConfigStore, robot: str, obj: str, name: str, exists: bool = False) -> dict:
     """The object target ``name`` of the robot as written ({} if there is none; refused with ``exists``), refused when
     the name is another kind of target or a held pose for another object type."""
@@ -191,5 +186,5 @@ def _save_object_target(store: ConfigStore, robot: str, obj: str, name: str, joi
         data['joints'] = groups
     try:
         return store.save_target(name, data, robot, rename=rename)[0].relative_to(store.root).as_posix()
-    except (ValueError, KeyError) as error:
-        raise _problem(error) from error
+    except targets.REFUSED as error:
+        raise HeldError(str(error)) from error

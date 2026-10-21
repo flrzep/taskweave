@@ -467,6 +467,16 @@ def test_the_lists_read_merged_targets_and_name_a_bad_one_instead_of_failing(sto
         again.named_pose(ROBOT, 'bad')
 
 
+def test_a_pose_update_is_marked_edited_in_the_hmi_and_a_new_one_saved(store):
+    robot.save_pose(store, ROBOT, 'lift_high', {'joints': {'body_joint': 0.62}}, set())
+    robot.save_pose(store, ROBOT, 'look', {'joints': {'head_joint2': -0.3}, 'create': True}, set())
+    lines = {line.split(':')[0]: line for line in (store.root / 'robots' / ROBOT / 'targets.yaml').read_text()
+             .splitlines() if line and not line.startswith((' ', '#'))}
+    assert lines['lift_high'].endswith('# edited in the HMI') and '0.62' in lines['lift_high']
+    assert '# saved 20' in lines['look']
+    assert lines['lift_carry'].endswith("# home's lift height without moving the arms")   # untouched
+
+
 def test_joints_keep_a_torso_word_and_a_joint_not_given_is_null(store):
     poses = store.root / 'robots' / ROBOT / 'targets.yaml'
     poses.write_text(poses.read_text() + 'lift_any_held: {moves: object, xyz: [0.7, 0.0, 0.3], rpy: [0.0, 0.0, 0.0], '

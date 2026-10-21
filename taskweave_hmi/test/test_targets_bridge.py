@@ -74,3 +74,13 @@ def test_the_points_list_over_http_has_the_target_groups(serve, config):  # noqa
     assert status == 200 and 'karakuri_hanger/hook' in names['object targets'] and 'locations' in names
     status, _ = request('PUT', '/api/points/location/spot', {'x': 0.5, 'y': -1.0, 'yaw': 0, 'create': True})
     assert status == 200 and 'spot' in request('GET', '/api/points')[1]['base targets']
+
+
+def test_a_refused_target_write_is_422_and_a_missing_target_404_over_http(serve, config):  # noqa: F811
+    request = serve(target_bridge(config, None))
+    status, data = request('DELETE', '/api/points/stance/objects/frame_type2/pick')   # overrides refer to it
+    assert status == 422 and 'instances.bay_1_stack_1_back.pick' in data['problems'][0]
+    status, data = request('PUT', '/api/points/stance/objects/nothing/front', {'x': 0, 'y': 0, 'yaw': 0})
+    assert status == 404 and "no object type 'nothing'" in data['problems'][0]
+    status, data = request('PUT', '/api/points/stance/objects/frame_type2/fresh', {'x': -0.9, 'y': 0, 'yaw': 0})
+    assert status == 200 and data['file'] == f'robots/{ROBOT}/objects/frame_type2.yaml'
