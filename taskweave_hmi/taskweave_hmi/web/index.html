@@ -123,7 +123,8 @@
           <div class="field"><label for="d-replans">Max replans</label><input id="d-replans" type="number" min="0"></div>
         </div>
       </details>
-      <div class="label">Steps</div>
+      <div class="row between"><div class="label">Steps</div>
+        <button id="btn-fold-steps" class="btn small ghost" hidden>Collapse all</button></div>
       <ol id="step-editor" class="edit-steps"></ol>
       <button id="btn-add-step" class="btn small">+ Add step</button>
       <div id="problems" class="error" hidden></div>
@@ -321,35 +322,39 @@
 
 <template id="step-template">
   <li class="edit-step">
-    <div class="row between step-head">
-      <div class="row gap-s">
-        <!-- drag to reorder (mouse or touch); from the keyboard Alt + ↑ / ↓ on it, or the arrow buttons -->
-        <button class="icon handle" data-act="drag" aria-label="Move step: drag, or Alt + arrow keys"
-                title="Drag to move (Alt + ↑ / ↓)"><svg viewBox="0 0 10 16" width="10" height="16" aria-hidden="true">
-          <circle cx="2.5" cy="3" r="1.5"/><circle cx="7.5" cy="3" r="1.5"/><circle cx="2.5" cy="8" r="1.5"/>
-          <circle cx="7.5" cy="8" r="1.5"/><circle cx="2.5" cy="13" r="1.5"/><circle cx="7.5" cy="13" r="1.5"/></svg></button>
-        <span class="mono step-no"></span>
-      </div>
-      <div class="row gap-s">
+    <div class="step-head">
+      <!-- drag to reorder (mouse or touch); from the keyboard Alt + ↑ / ↓ on it, or the arrow buttons -->
+      <button class="icon handle" data-act="drag" aria-label="Move step: drag, or Alt + arrow keys"
+              title="Drag to move (Alt + ↑ / ↓)"><svg viewBox="0 0 10 16" width="10" height="16" aria-hidden="true">
+        <circle cx="2.5" cy="3" r="1.5"/><circle cx="7.5" cy="3" r="1.5"/><circle cx="2.5" cy="8" r="1.5"/>
+        <circle cx="7.5" cy="8" r="1.5"/><circle cx="2.5" cy="13" r="1.5"/><circle cx="7.5" cy="13" r="1.5"/></svg></button>
+      <!-- the step folded to one line, or open: click it (or Enter / Space) -->
+      <button class="step-toggle" data-act="fold" aria-expanded="true">
+        <span class="step-no"></span>
+        <span class="step-sum"><span class="sum-instruction"></span><span class="sum-args"></span></span>
+      </button>
+      <div class="row gap-s step-buttons">
         <button class="icon" data-act="up" aria-label="Move up">↑</button>
         <button class="icon" data-act="down" aria-label="Move down">↓</button>
         <button class="icon" data-act="copy" aria-label="Duplicate step" title="Duplicate step (below this one)">⧉</button>
         <button class="icon" data-act="remove" aria-label="Remove step">✕</button>
       </div>
     </div>
-    <div class="field"><label>Instruction</label><textarea data-k="instruction" rows="2"></textarea></div>
-    <div class="field"><label>Skill</label><select data-k="skill"></select></div>
-    <div class="args"></div>
-    <details class="rules">
-      <summary>Rules for this step</summary>
-      <div class="grid2">
-        <div class="field"><label>Step id</label><input data-k="id" placeholder="auto" spellcheck="false"></div>
-        <div class="field"><label>Timeout (s)</label><input data-k="timeout_s" type="number" min="0" step="any" placeholder="default"></div>
-        <div class="field"><label>Retries</label><input data-k="retries" type="number" min="0" placeholder="default"></div>
-        <div class="field"><label>On failure</label><select data-k="on_failure"></select></div>
-        <div class="field span2"><label>Replan from step</label><select data-k="replan_from"></select></div>
-      </div>
-    </details>
+    <div class="step-body">
+      <div class="field"><label>Instruction</label><textarea data-k="instruction" rows="2"></textarea></div>
+      <div class="field"><label>Skill</label><select data-k="skill"></select></div>
+      <div class="args"></div>
+      <details class="rules">
+        <summary>Rules for this step</summary>
+        <div class="grid2">
+          <div class="field"><label>Step id</label><input data-k="id" placeholder="auto" spellcheck="false"></div>
+          <div class="field"><label>Timeout (s)</label><input data-k="timeout_s" type="number" min="0" step="any" placeholder="default"></div>
+          <div class="field"><label>Retries</label><input data-k="retries" type="number" min="0" placeholder="default"></div>
+          <div class="field"><label>On failure</label><select data-k="on_failure"></select></div>
+          <div class="field span2"><label>Replan from step</label><select data-k="replan_from"></select></div>
+        </div>
+      </details>
+    </div>
   </li>
 </template>
 

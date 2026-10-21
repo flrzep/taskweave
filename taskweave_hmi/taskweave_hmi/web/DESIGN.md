@@ -135,9 +135,21 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   numbered dot that fills green or red when done, rings blue while running; points, poses and recordings (`.point`)
   open into an editor, the pad's target gets a brand inset rule. Mission editor steps (`.edit-step`) have a drag
   handle left of the step number (an `.icon` with six dots in `--text-muted` on a hairline border, `touch-action:
-  none`); while dragged the step shrinks to its head and instruction and follows the pointer with a brand border and
-  `--shadow-2`, and a 3px brand line in the gap marks where it lands. A step that Check or Save names in its problems
+  none`), then the fold toggle (`.step-toggle`: a ▶ marker turned down when open, the step number in brand text and,
+  folded, the instruction over the skill and its arguments in a few words, monospace muted, each one line with an
+  ellipsis), then ↑ ↓ ⧉ ✕; on a phone the buttons go to a second row. Folded (`.collapsed`), only that head shows;
+  "Collapse all / Expand all" is a ghost button by the Steps title. While dragged the step folds and follows the
+  pointer with a brand border and `--shadow-2`, and a 3px brand line in the gap marks where it lands. A step that Check or Save names in its problems
   gets a red border, a 4px red inset rule and a red step number (`.has-problem`) until it is edited.
+- **Step arguments** (`.args`, made by `argField` in app.js from the skill's schema): each argument a `.field` with
+  its label (unit in brackets: "offset (m)", "turn (°)", "speed (0–1)"; the schema's description as the tooltip) and,
+  for structured ones, an "edit as text" ghost link at the right of the label row. Nested objects are indented on a
+  2px `--border` rule (`.arg-nest`), their fields in a grid of 200px columns (`.arg-fields`; vectors, variants, hands
+  and lists take the full row); four or more empty optional fields fold under a muted "more (…)" summary. A oneOf of
+  objects is a `.segmented.choice` of the variants' titles above the chosen one's fields. Vectors are a `.grid3` of
+  number fields labelled "x (m)", "y (m)", "z (m)". Hands are 20px checkboxes per hand, a muted "or", and the rule
+  words as a segmented control. An object marked as a group (Motion (advanced)) is a muted `details` summary, open
+  when it has a value. Text fallbacks are monospace textareas.
 - **Chips** (`.chip`): a dot and the word, in the state colour on an 11% tint. Each state sets `--c` (text), `--fill`
   and `--ink` (for the solid badge).
 - **Details and summary**: summaries in brand text, 44px high; nested ones inside a point are muted and monospace.

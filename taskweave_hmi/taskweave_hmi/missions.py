@@ -22,7 +22,9 @@ from taskweave_core.validation import validate_plan
 
 NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_\-]*$')
 TOP_LEVEL_ORDER = ('goal', 'robot', 'loop', 'max_cycles', 'stop_when', 'defaults', 'steps')
-STEP_ORDER = ('id', 'instruction', 'skill', 'args', 'timeout_s', 'retries', 'on_failure', 'replan_from', 'max_replans')
+# a step's keys in the file; an include step has include and with instead of skill and args
+STEP_ORDER = ('id', 'instruction', 'skill', 'args', 'include', 'with', 'timeout_s', 'retries', 'on_failure',
+              'replan_from', 'max_replans')
 
 
 class MissionError(ValueError):
@@ -107,10 +109,11 @@ def save(name: str, mission: Mapping, store: ConfigStore, catalog: Mapping[str, 
             steps = CommentedSeq()
             for step in value:
                 entry = CommentedMap((k, step[k]) for k in STEP_ORDER if k in step and step[k] not in (None, ''))
-                if isinstance(entry.get('args'), Mapping):
-                    args = CommentedMap(entry['args'])
-                    args.fa.set_flow_style()
-                    entry['args'] = args
+                for flow in ('args', 'with'):
+                    if isinstance(entry.get(flow), Mapping):
+                        values = CommentedMap(entry[flow])
+                        values.fa.set_flow_style()
+                        entry[flow] = values
                 steps.append(entry)
             value = steps
         elif key == 'defaults':

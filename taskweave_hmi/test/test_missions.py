@@ -47,6 +47,23 @@ def test_save_keeps_top_level_comments_and_round_trips(store):
     assert len(reloaded['steps']) == 2 and reloaded['defaults']['retries'] == 3
 
 
+def test_save_without_edits_keeps_every_step_key(store):
+    # what the HMI sends back for a mission it opened and saved unchanged: an include step keeps include and with
+    missions_dir = store.root / 'missions'
+    (missions_dir / 'go_to.yaml').write_text(
+        'goal: Drive somewhere\nparams:\n  where: {point: base_target, description: a stance}\nloop: once\n'
+        'steps:\n  - instruction: Drive to {where}\n    skill: navigate_to\n    args: {target: "{where}"}\n')
+    (missions_dir / 'tour.yaml').write_text(
+        'goal: A tour\nloop: once\nsteps:\n  - id: there\n    instruction: To the shelf\n    include: go_to\n'
+        '    with: {where: "stance:shelf_a"}\n    on_failure: skip\n'
+        '  - instruction: Wait\n    skill: wait\n    args: {seconds: 1}\n')
+    store.reload()
+    before = store.mission('tour')
+    save('tour', before, store, CATALOG, 'demo_bot')
+    assert ConfigStore(store.root).mission('tour') == before
+    assert '\n  with: {where: stance:shelf_a}\n' in (missions_dir / 'tour.yaml').read_text()
+
+
 def test_schema_and_robot_problems_are_reported(store):
     mission = {**template('demo_bot'), 'robot': 'other_bot'}
     mission['steps'][0]['on_failure'] = 'explode'
