@@ -239,15 +239,17 @@ def _cross_mission(store, c):
 
 
 def _cross_skill(store, c):
-    try:
-        from ..skill_server import load_skill_class
-    except ImportError:     # no ROS here: the classes cannot be loaded, so they cannot be checked
-        return []
+    from ..skill import load_skill_class
+
     out = []
     for i, implementation in enumerate(c.data.get('implementations', [])):
         try:
             load_skill_class(implementation['class'])
-        except (ImportError, AttributeError, TypeError, ValueError) as error:
+        except ImportError as error:
+            if (error.name or '').startswith('taskweave'):
+                out.append((['implementations', i, 'class'], f'cannot load {implementation["name"]}: {error}', ERROR))
+            # else: a ROS package this machine lacks (message types ...): the class cannot be checked here
+        except (AttributeError, TypeError, ValueError) as error:
             out.append((['implementations', i, 'class'], f'cannot load {implementation["name"]}: {error}', ERROR))
     return out
 

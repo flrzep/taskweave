@@ -35,16 +35,20 @@ from taskweave_core.config import Pose2D
 from taskweave_core.config.limits import group_values
 from taskweave_core.config.poses import Pose3D
 from taskweave_core.config.schemas import ELBOW_SIDES, VEC3, hands_schema, motion_schema
-from taskweave_core.config.targets import MOVES_WORD, TORSO, GroupError, move_option_problems
+from taskweave_core.config.targets import (
+    MOVES_WORD,
+    RELATIVE_KEYS,
+    RELATIVE_OPTIONS,
+    TORSO,
+    GroupError,
+    move_option_problems,
+)
 from taskweave_core.executive import Outcome
-from taskweave_core.skill import Skill, SkillResult
+from taskweave_core.skill import Skill, SkillResult, load_skill_class
 
 from .parts import PARTS, RESOLVED, part_name
 
 HAND_RULES = ('auto', 'any_one', 'all')
-RELATIVE_OPTIONS = ('by', 'at', 'rpy_deg', 'frame', 'turn_deg', 'tilt_deg')
-RELATIVE_KEYS = {'hand': {'by': ('by', 'frame', 'turn_deg', 'tilt_deg'), 'at': ('at', 'rpy_deg')},
-                 'object': {'by': ('by', 'turn_deg', 'tilt_deg'), 'at': ('at',)}}
 OPTIONS = ('hands', 'offset_m', 'reference', 'only', 'torso', 'tolerance_deg', 'motion')   # taskweave_core MOVE_OPTIONS
 ORIGIN = Pose3D((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 'object')
 
@@ -61,18 +65,21 @@ def _schema() -> dict:
                     'description': 'Waypoints to pass, in order: hand targets (hand move) or joint targets (joints '
                                    'move).'}
     either = [{'required': ['by']}, {'required': ['at']}]
+    exclusive = {'x-taskweave-exclusive': ['by', 'at']}   # one of the two (the root's `not` enforces it)
     return {
         'type': 'object',
         'additionalProperties': False,
         'oneOf': [
             {'title': 'Go to a target', 'required': ['to']},
-            {'title': 'Move hands relative to now', 'required': ['hand'], 'anyOf': either},
+            {'title': 'Move hands relative to now', 'required': ['hand'], 'anyOf': either,
+             **exclusive},
             {'title': 'Move a held object relative to now', 'required': ['object'], 'not': {'required': ['to']},
-             'anyOf': either},
+             'anyOf': either, **exclusive},
             {'title': 'Drive the base straight', 'required': ['base']},
             {'title': 'Elbow side', 'required': ['elbow']},
             {'title': 'Joint values', 'required': ['joints']},
         ],
+        'not': {'required': ['by', 'at'], 'x-taskweave-exclusive': ['by', 'at']},   # by or at, not both
         'x-taskweave-resources': ['base', 'hands', 'torso', 'joints'],
         'properties': {
             'to': {'type': 'string', 'x-taskweave-point': 'target',
@@ -80,7 +87,10 @@ def _schema() -> dict:
                    'description': 'A target: <name> (a cell, base or joint target) or <instance>/<name> (a target '
                                   'of a placed object). What moves (base, hands, held object, joints) comes from '
                                   'the target.'},
-            'hand': {'description': 'Which hands move relative to now (with by or at): a hand name, a list, or all.'},
+            'hand': {'anyOf': [{'type': 'string'},
+                               {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1, 'uniqueItems': True}],
+                     'x-taskweave-widget': 'hands',
+                     'description': 'Which hands move relative to now (with by or at): a hand name, a list, or all.'},
             'object': {'type': 'string',
                        'description': 'held: the held object moves relative to now (with by or at), or a '
                                       'placed-object name when several are held. With `to`: which held object.'},
@@ -116,7 +126,9 @@ def _schema() -> dict:
             'only': {'type': 'array', 'minItems': 1, 'uniqueItems': True,
                      'items': {'type': 'string', 'x-taskweave-point': 'joint_group'},
                      'description': 'A joint target: move only these groups of it.'},
-            'torso': {'description': 'The torso for this move: auto (choose a height; hand and object targets), '
+            'torso': {'anyOf': [{'enum': ['auto', 'keep']}, {'type': 'number'},
+                                {'type': 'array', 'items': {'type': ['number', 'null']}}],
+                      'description': 'The torso for this move: auto (choose a height; hand and object targets), '
                                      'keep (do not move it), or a value (a number, or a list for several joints).'},
             'tolerance_deg': {'type': 'number', 'exclusiveMinimum': 0, 'x-taskweave-unit': 'deg',
                               'description': 'Elbow: fail if the elbows would stop further than this from the side.'},
@@ -170,8 +182,6 @@ class Move(Skill):
         self._part_params: dict[str, dict] = {}
         self._used: list = []
         super().setup(node, config, robot, params)
-        from taskweave_core.skill_server import load_skill_class
-
         for part in PARTS:
             key = part_name(part)
             implementation, reasons = config.select_implementation(key, robot.name)
@@ -339,10 +349,10 @@ class Move(Skill):
         return self._reject(f'this robot cannot do {part} moves: {reasons}')
 
     def _options(self, form: str, options: dict, extra: list, ref: str | None = None, kind: str | None = None,
-                 allowed_extra=()):
+                 allowed_extra=(), relative: bool = False):
         """A REJECTED result if an option does not apply to this kind of motion (taskweave_core ``MOVE_OPTIONS``,
         which options each kind takes), else None."""
-        problems = move_option_problems(form, options)
+        problems = move_option_problems(form, options, relative, ref is not None)
         problems += [f'move {form}: option {key} does not apply' for key in extra if key not in allowed_extra]
         speed_abs = (options.get('motion') or {}).get('speed_abs')
         if speed_abs is not None and form in ('base', 'straight'):
@@ -430,8 +440,6 @@ class Move(Skill):
         refused = self._options(form, options, extra, ref, kind)
         if refused is not None:
             return refused
-        if kind == 'object' and options.get('hands') == 'any_one':
-            return self._reject(f'{ref!r} moves a held object; option hands any_one does not apply')
         return getattr(self, f'_target_{form}')(args, options, target)
 
     def _call_motion(self, options: dict, **more) -> dict:
@@ -624,12 +632,9 @@ class Move(Skill):
         module = self._part(which)
         if isinstance(module, SkillResult):
             return module
-        refused = self._options(form, options, [], None, None)
+        refused = self._options(form, options, [], None, None, relative=True)
         if refused is not None:
             return refused
-        for key in ('offset_m', 'reference'):
-            if key in options:
-                return self._reject(f'option {key} does not apply to a relative move', which)
         keys = RELATIVE_KEYS[which]
         use = 'by' if 'by' in args else 'at'
         if 'by' in args and 'at' in args:

@@ -28,7 +28,6 @@ Run: ros2 run taskweave_core skill_server --ros-args -p config_dir:=... -p robot
 from __future__ import annotations
 
 import copy
-import importlib
 import json
 import threading
 import traceback
@@ -48,7 +47,7 @@ from . import names
 from .config import ConfigError, ConfigStore, RobotProfile
 from .config.reload import Reloader
 from .executive import Outcome
-from .skill import Skill, SkillContext, SkillResult
+from .skill import Skill, SkillContext, SkillResult, load_skill_class  # noqa: F401  (load_skill_class: re-exported)
 from .speed import SpeedOverride
 from .validation import validate_args
 
@@ -80,21 +79,6 @@ def skill_of(path: str) -> str:
     """The skill a skill config file belongs to: ``skills/<skill>.yaml``, or ``skills/<skill>/<part>.yaml``."""
     file = Path(path)
     return file.parent.name if file.parent.name != 'skills' else file.stem
-
-
-def load_skill_class(path: str) -> type[Skill]:
-    module_name, _, class_name = path.partition(':')
-    if not class_name:
-        raise ValueError(f'skill {path!r} must be given as "package.module:ClassName"')
-    try:
-        cls = getattr(importlib.import_module(module_name), class_name)
-    except AttributeError:
-        from .config.migrate_skills import removed_class_message
-
-        raise ValueError(removed_class_message(module_name, class_name) or f'{path}: no such class') from None
-    if not (isinstance(cls, type) and issubclass(cls, Skill)):
-        raise TypeError(f'{path} is not a taskweave Skill')
-    return cls
 
 
 class SkillServer(Node):

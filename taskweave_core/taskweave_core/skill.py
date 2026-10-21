@@ -21,6 +21,7 @@ Point arguments are marked in the schema with ``"x-taskweave-point": "base_targe
 
 from __future__ import annotations
 
+import importlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -141,3 +142,18 @@ class Skill:
 
     def stop(self) -> None:
         """Bring the hardware this skill commands to a safe stop. Called after cancel, timeout and errors."""
+
+
+def load_skill_class(path: str) -> type[Skill]:
+    module_name, _, class_name = path.partition(':')
+    if not class_name:
+        raise ValueError(f'skill {path!r} must be given as "package.module:ClassName"')
+    try:
+        cls = getattr(importlib.import_module(module_name), class_name)
+    except AttributeError:
+        from .config.migrate_skills import removed_class_message
+
+        raise ValueError(removed_class_message(module_name, class_name) or f'{path}: no such class') from None
+    if not (isinstance(cls, type) and issubclass(cls, Skill)):
+        raise TypeError(f'{path} is not a taskweave Skill')
+    return cls
