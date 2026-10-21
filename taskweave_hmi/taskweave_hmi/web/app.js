@@ -450,7 +450,7 @@ async function refreshCatalog() {
   const { ok, data } = await api('GET', '/api/points');
   if (!ok || !state.editing) return;
   state.points = data;
-  $('step-editor').querySelectorAll('select[data-arg]').forEach((select) => select._fill?.());
+  $('step-editor').querySelectorAll('select[data-points]').forEach((select) => select._fill?.());
 }
 function fillSelect(select, values, selected) {
   select.replaceChildren(...values.map((v) => el('option', { value: v, text: v === '' ? 'default' : v })));
@@ -502,7 +502,7 @@ function stepCard(step, index, steps, expanded) {
   const card = $('step-template').content.firstElementChild.cloneNode(true);
   card.querySelectorAll('input[type="number"]').forEach(numberField);
   const q = (key) => card.querySelector(`[data-k="${key}"]`);
-  card.querySelector('.step-no').textContent = `Step ${index + 1}`;
+  card.querySelector('.step-no').replaceChildren(el('span', { class: 'step-word', text: 'Step ' }), String(index + 1));
   card.querySelector('[data-act="fold"]').addEventListener('click', () => { setExpanded(card, !isExpanded(card)); foldButton(); });
   q('instruction').value = step.instruction || '';
   const missions = state.missions.filter((m) => m.valid && m.name !== state.editing?.name).map((m) => INCLUDE + m.name);
@@ -517,17 +517,24 @@ function stepCard(step, index, steps, expanded) {
   fillSelect(q('replan_from'), [''].concat(ids), step.replan_from ?? '');
   q('replan_from').options[0].textContent = 'this step';
   const argsBox = card.querySelector('.args');
+  let order = [];  // the arguments' keys as the step had them: read back in that order
   const renderArgs = (args) => {
+    order = Object.keys(args);
+    // an argument the skill (or the included mission) does not have stays, as text, so Check can name it
+    const strays = (known) => order.filter((key) => !(key in known)).map((key) => argField(key,
+      { description: 'not an argument of this skill: remove the text to drop it' }, false, args[key]));
     if (q('skill').value.startsWith(INCLUDE)) {  // another mission's steps: its params
       const params = state.missions.find((m) => INCLUDE + m.name === q('skill').value)?.params || {};
       argsBox.replaceChildren(...Object.entries(params).map(([key, p]) => argField(key,
-        { type: 'string', 'x-taskweave-point': p.point, description: p.description }, true, args[key])));
+        { type: 'string', 'x-taskweave-point': p.point, description: p.description }, true, args[key])), ...strays(params));
       return;
     }
     const skill = state.skills.find((s) => s.name === q('skill').value);
     const props = skill?.args_schema?.properties || {};
     const required = skill?.args_schema?.required || [];
-    argsBox.replaceChildren(...Object.entries(props).map(([key, spec]) => argField(key, spec, required.includes(key), args[key])));
+    argsBox.replaceChildren(...Object.entries(props).map(([key, spec]) => argField(key, spec, required.includes(key), args[key])),
+      ...strays(props));
+    showIf(argsBox, [...argsBox.children].map((node) => ({ key: node.dataset.arg, spec: props[node.dataset.arg], node, read: node._value })));
   };
   renderArgs(step.include ? step.with || {} : step.args || {});
   q('skill').addEventListener('change', () => { renderArgs({}); markDirty(); });
@@ -568,9 +575,11 @@ function stepCard(step, index, steps, expanded) {
     const including = q('skill').value.startsWith(INCLUDE);
     const out = including ? { instruction: q('instruction').value.trim(), include: q('skill').value.slice(INCLUDE.length), with: {} }
       : { instruction: q('instruction').value.trim(), skill: q('skill').value, args: {} };
-    argsBox.querySelectorAll('[data-arg]').forEach((input) => {
-      const value = input._value();
-      if (value !== undefined) out[including ? 'with' : 'args'][input.dataset.arg] = value;
+    const fields = [...argsBox.querySelectorAll(':scope > [data-arg]')];
+    const keys = [...new Set([...order, ...fields.map((field) => field.dataset.arg)])];
+    keys.forEach((key) => {
+      const value = fields.find((field) => field.dataset.arg === key)?._value();
+      if (value !== undefined) out[including ? 'with' : 'args'][key] = value;
     });
     if (q('id').value.trim()) out.id = q('id').value.trim();
     if (q('timeout_s').value !== '') out.timeout_s = Number(q('timeout_s').value);
@@ -639,38 +648,358 @@ function argSummary(key, value) {
   return unit ? `${key.slice(0, -unit.length - 1)} ${value}${unit === 'deg' ? '°' : ` ${unit}`}` : `${key} ${value}`;
 }
 
+// ---------- argument fields ----------
+// A step's arguments as fields made from the skill's JSON schema (the catalog's args_schema): objects as nested fields
+// (many optional ones under "more"), oneOf / anyOf of objects as a variant chooser (the variants' titles) with that
+// variant's fields, three-number arrays as x / y / z, hands as checkboxes and the rule words, enums and points as
+// selects (points from state.points, refilled in place: refreshCatalog), numbers in the schema's unit (metres and
+// degrees step by 1 mm and 1°, as on the Teach tab), x-taskweave-show-if hides a field its siblings do not ask for.
+// Each editor is { node, read }: read() gives the value, or undefined for one left out. What the schema cannot
+// describe (an object of free keys, a value of another shape, a "{fact}" where a list or object belongs) is a JSON
+// text field; a structured argument has "edit as text" for the same. An argument that was not edited reads back as it
+// was loaded, so opening and saving a mission changes nothing; edited ones keep their keys in the order they had.
+const STRUCTURED = new Set(['object', 'variants', 'vec', 'hands', 'list']);
+const UNIT_LABEL = { m: 'm', mm: 'mm', deg: '°', s: 's', rad: 'rad', fraction: '0–1' };
+const unitStep = (unit) => ({ m: STEP_M, mm: '1', deg: STEP_DEG, fraction: '0.05' })[unit];  // STEP_*: Teach fields
+const isPlain = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
+const isPlaceholder = (value) => typeof value === 'string' && value.includes('{');  // a param or a fact, filled at run time
+const variantsOf = (spec) => spec.oneOf || spec.anyOf || [];
+function argKind(spec) {
+  const variants = variantsOf(spec);
+  if (spec['x-taskweave-widget'] === 'hands' && spec.anyOf?.[1]?.items?.enum) return 'hands';
+  const numbers = spec.type === 'array' && ['number', 'integer'].includes(spec.items?.type);
+  if (numbers && (spec['x-taskweave-widget'] === 'vec3' || (spec.minItems === spec.maxItems && spec.minItems >= 2 && spec.minItems <= 4))) return 'vec';
+  if (variants.length && variants.every((v) => v.properties)) return 'variants';
+  if (spec['x-taskweave-point'] && POINT_KINDS[spec['x-taskweave-point']]) return 'point';
+  if (spec.enum) return 'enum';
+  if (spec.type === 'number' || spec.type === 'integer') return 'number';
+  if (spec.type === 'boolean') return 'bool';
+  if (spec.type === 'string') return 'string';
+  if (spec.properties && (spec.type || 'object') === 'object') return 'object';
+  if (spec.type === 'array' && spec.items && ['point', 'enum', 'string', 'number'].includes(argKind(spec.items))) return 'list';
+  return 'text';
+}
+// Can the fields show this value as it is (else it is shown as text)?
+function fits(spec, value) {
+  if (value === undefined) return true;
+  const kind = argKind(spec);
+  if (kind === 'object') return isPlain(value) && Object.entries(value).every(([k, v]) => k in spec.properties && fits(spec.properties[k], v));
+  if (kind === 'variants') return variantOf(spec, value) >= 0;
+  if (kind === 'vec') return Array.isArray(value) && value.length === spec.minItems && value.every((n) => typeof n === 'number');
+  if (kind === 'hands') {
+    const names = Array.isArray(value) ? value : [value];
+    return names.length > 0 && names.every((n) => typeof n === 'string' && !isPlaceholder(n));
+  }
+  if (kind === 'list') return Array.isArray(value) && value.every((item) => fits(spec.items, item));
+  if (kind === 'number') return typeof value === 'number' || isPlaceholder(value);
+  if (kind === 'bool') return typeof value === 'boolean';
+  if (kind === 'enum') return !isPlain(value) && !Array.isArray(value);
+  if (kind === 'point' || kind === 'string') return typeof value === 'string';
+  return true;  // text
+}
+const variantOf = (spec, value) => variantsOf(spec).findIndex((v) => isPlain(value)
+  && (v.required || []).every((k) => k in value) && fits(v, value));
+// the unit: the schema's (x-taskweave-unit), else the key's suffix (offset_m, turn_deg), else the description's words
+function unitOf(key, spec) {
+  if (spec['x-taskweave-unit']) return spec['x-taskweave-unit'];
+  const suffix = key.match(/_(m|mm|deg|s|rad)$/)?.[1];
+  if (suffix) return suffix;
+  if (/\bin metres\b/.test(spec.description || '')) return 'm';
+  return /\bin degrees\b/.test(spec.description || '') ? 'deg' : '';
+}
+function labelText(key, spec) {
+  const unit = unitOf(key, spec);
+  const name = key.replace(/_(m|mm|deg|s|rad)$/, '').replace(/_/g, ' ');
+  return unit && UNIT_LABEL[unit] ? `${name} (${UNIT_LABEL[unit]})` : name;
+}
+function labelFor(key, spec, text = labelText(key, spec)) {
+  const label = el('label', { text });
+  if (spec.description) label.title = `${key}: ${spec.description}`;
+  return label;
+}
+
+// One argument of a step (or a param of an included mission): a .field with data-arg and _value(). Structured ones
+// can be switched to text and back ("edit as fields" only once the text fits the fields again).
 function argField(key, spec, required, value) {
-  const label = el('label', { text: `${key}${required ? '' : ' (optional)'}` });
+  const kind = argKind(spec);
+  const field = el('div', { class: `field arg${STRUCTURED.has(kind) ? ' wide' : ''}` });
+  field.dataset.arg = key;
+  const group = kind === 'object' && spec['x-taskweave-group'];  // e.g. Motion (advanced): folded until it has a value
+  const label = labelFor(key, spec, `${group || labelText(key, spec)}${required || group ? '' : ' (optional)'}`);
+  const body = el('div', { class: 'arg-body' });
+  const note = el('div', { class: 'msg bad', hidden: '' });
+  let asText = STRUCTURED.has(kind) && !fits(spec, value);
+  let editor = null;
+  const toggle = STRUCTURED.has(kind) ? el('button', { class: 'btn small ghost arg-mode', type: 'button' }) : '';
+  const build = (current) => {
+    editor = asText ? textEditor(current) : argEditor(key, spec, current, required);
+    body.replaceChildren(editor.node);
+    if (toggle) toggle.textContent = asText ? 'edit as fields' : 'edit as text';
+  };
+  build(value);
+  if (toggle) {
+    toggle.addEventListener('click', () => {
+      const current = editor.read();
+      if (asText && !fits(spec, current)) {
+        message(note, 'This value does not fit the fields: keep it as text, or change it to fit the schema.', true);
+        return;
+      }
+      message(note, '');
+      asText = !asText;
+      build(current);
+    });
+  }
+  let edited = false;  // not edited: read back exactly as loaded
+  ['input', 'change'].forEach((type) => field.addEventListener(type, () => { edited = true; }));
+  field._value = () => (edited ? editor.read() : value);
+  field._fields = () => editor.read();  // what the fields give now, edited or not (round-trip checks)
+  if (group) {
+    const fold = el('details', { class: 'arg-group' }, el('summary', {}, label), el('div', { class: 'arg-head' }, toggle), body, note);
+    fold.open = value !== undefined;
+    field.append(fold);
+  } else {
+    field.append(el('div', { class: 'arg-head' }, label, toggle), body, note);
+  }
+  return field;
+}
+// a field's value changed by a click (a variant, a rule word, a list row): as if typed
+const changed = (node) => node.dispatchEvent(new Event('change', { bubbles: true }));
+
+function argEditor(key, spec, value, required) {
+  const kind = argKind(spec);
+  if (kind === 'object') return objectEditor(spec, value);
+  if (kind === 'variants') return variantsEditor(spec, value);
+  if (kind === 'vec') return vecEditor(key, spec, value);
+  if (kind === 'hands') return handsEditor(spec, value);
+  if (kind === 'list') return listEditor(key, spec, value);
+  if (kind === 'text') return textEditor(value);
+  return scalarEditor(key, spec, value, required);
+}
+
+// A point picker or enum (select), number, string or boolean. A placeholder ("{part}/grasp") is a text field.
+function scalarEditor(key, spec, value, required) {
+  const kind = argKind(spec);
+  // the schema's default is a hint only (a skill or robot may set another): "default", left out when empty
+  const fallback = spec.default !== undefined ? 'default' : '';
   let input;
-  const kinds = POINT_KINDS[spec['x-taskweave-point']];
-  const isPlaceholder = typeof value === 'string' && value.includes('{');
-  if ((kinds || spec.enum) && !isPlaceholder) {
+  if ((kind === 'point' || kind === 'enum') && !isPlaceholder(value)) {
+    const kinds = POINT_KINDS[spec['x-taskweave-point']];
     input = el('select');
+    input.dataset.points = '';
     input._fill = (chosen = input.value) => {  // the choices from state.points (again: refreshCatalog), chosen kept
       const options = (spec.enum || kinds.flatMap((k) => state.points[k] || [])).map(String);
       fillSelect(input, ['', ...options], chosen);
       if (chosen !== '' && !options.includes(chosen)) input.append(el('option', { value: chosen, text: `${chosen} (unknown)` }));
       input.value = chosen;
-      input.options[0].textContent = required ? 'choose…' : 'none';
+      input.options[0].textContent = required ? 'choose…' : fallback || 'none';
     };
     input._fill(value === undefined ? '' : String(value));
-    input._value = () => (input.value === '' ? undefined : (spec.type === 'number' ? Number(input.value) : input.value));
-  } else if (spec.type === 'number' || spec.type === 'integer') {
-    input = el('input', { type: 'number', step: spec.type === 'integer' ? '1' : 'any' });
-    input.value = value ?? '';
-    input._value = () => (input.value === '' ? undefined : Number(input.value));
-  } else if (spec.type === 'string' || isPlaceholder) {
-    input = el('input', { spellcheck: 'false' });
-    input.value = value ?? '';
-    if (spec.description) input.placeholder = spec.description;
-    input._value = () => (input.value === '' ? undefined : input.value);
-  } else {
-    input = el('textarea', { rows: '2', spellcheck: 'false' });
-    input.value = value === undefined ? '' : JSON.stringify(value);
-    input._value = () => { if (!input.value.trim()) return undefined; try { return JSON.parse(input.value); } catch (_) { return input.value; } };
+    const read = () => {
+      if (input.value === '') return undefined;
+      const known = spec.enum?.find((option) => String(option) === input.value);
+      return known !== undefined ? known : input.value;
+    };
+    return { node: input, read };
   }
-  input.dataset.arg = key;
-  return el('div', { class: 'field' }, label, input);
+  if (kind === 'number' && !isPlaceholder(value)) {
+    const unit = unitOf(key, spec);
+    input = el('input', { type: 'number', step: unitStep(unit) || (spec.type === 'integer' ? '1' : 'any') });
+    const min = spec.minimum ?? spec.exclusiveMinimum, max = spec.maximum ?? spec.exclusiveMaximum;
+    if (min !== undefined) input.setAttribute('min', String(min));
+    if (max !== undefined) input.setAttribute('max', String(max));
+    input.value = value ?? '';
+    if (fallback) input.placeholder = fallback;
+    return { node: input, read: () => (input.value === '' ? undefined : Number(input.value)) };
+  }
+  if (kind === 'bool') {
+    input = el('input', { type: 'checkbox' });
+    input.checked = value === true;
+    // unchecked is left out, unless the step said false (or it must be given)
+    return { node: el('label', { class: 'check' }, input, 'yes'), read: () => (input.checked ? true : (value === false || required ? false : undefined)) };
+  }
+  input = el('input', { spellcheck: 'false' });
+  input.value = value ?? '';
+  if (spec.description && !isPlaceholder(value)) input.placeholder = spec.description;
+  return { node: input, read: () => (input.value === '' ? undefined : input.value) };
+}
+
+// JSON text: what the fields cannot show; text that is not JSON is kept as a string
+function textEditor(value) {
+  const input = el('textarea', { rows: '2', spellcheck: 'false', class: 'mono' });
+  input.value = value === undefined ? '' : JSON.stringify(value);
+  const read = () => {
+    if (!input.value.trim()) return undefined;
+    try { return JSON.parse(input.value); } catch (_) { return input.value; }
+  };
+  return { node: input, read };
+}
+
+// Nested fields in a grid, required ones first; more than MORE_FROM optional ones without a value go under "more".
+// Keys come back in the order the value had them, new ones in the schema's order.
+const MORE_FROM = 4;
+function objectEditor(spec, value) {
+  const required = spec.required || [];
+  const props = Object.entries(spec.properties).sort(([a], [b]) => required.includes(b) - required.includes(a));
+  const fields = props.map(([key, sub]) => {
+    const editor = argEditor(key, sub, value?.[key], required.includes(key));
+    const wide = STRUCTURED.has(argKind(sub));
+    const label = labelFor(key, sub, wide ? key.replace(/_/g, ' ') : labelText(key, sub));  // a vector's unit: on x, y, z
+    const node = el('div', { class: `field${wide ? ' wide' : ''}` }, label, editor.node);
+    return { key, spec: sub, node, read: editor.read, required: required.includes(key) };
+  });
+  const box = el('div', { class: 'arg-fields' });
+  const spare = fields.filter((f) => !f.required && value?.[f.key] === undefined);
+  const fold = !spec['x-taskweave-group'] && spare.length >= MORE_FROM;
+  box.append(...fields.filter((f) => !fold || !spare.includes(f)).map((f) => f.node));
+  const names = spare.map((f) => f.key).join(', ');
+  if (fold) box.append(el('details', { class: 'arg-more wide' }, el('summary', { text: spare.length < fields.length ? `more (${names})` : names }),
+    el('div', { class: 'arg-fields' }, spare.map((f) => f.node))));
+  showIf(box, fields);
+  const read = () => {
+    const out = {};
+    const order = [...Object.keys(value || {}), ...fields.map((f) => f.key)];
+    [...new Set(order)].forEach((key) => {
+      const v = fields.find((f) => f.key === key)?.read();
+      if (v !== undefined) out[key] = v;
+    });
+    return Object.keys(out).length || (isPlain(value) && !Object.keys(value).length) ? out : undefined;  // {} stays {}
+  };
+  return { node: el('div', { class: 'arg-nest' }, box), read };
+}
+// x-taskweave-show-if {sibling: [values]}: the field shows while a sibling has one of them, or while it has a value
+function showIf(box, fields) {
+  const conditional = fields.filter((f) => f.spec?.['x-taskweave-show-if']);
+  ['input', 'change'].forEach((type) => box.removeEventListener(type, box._showIf));  // the step's args drawn again
+  if (!conditional.length) return;
+  const update = () => conditional.forEach((f) => {
+    const wanted = Object.entries(f.spec['x-taskweave-show-if']).every(([sibling, values]) => {
+      const other = fields.find((g) => g.key === sibling);
+      return other && values.includes(other.read() ?? other.spec.default);
+    });
+    show(f.node, wanted || f.read() !== undefined);
+  });
+  box._showIf = update;
+  ['input', 'change'].forEach((type) => box.addEventListener(type, update));
+  update();
+}
+
+// oneOf / anyOf of objects: a segmented chooser of the variants (their titles), then the chosen one's fields. A
+// switch keeps the values the new variant also has (offset_m from a point to a contact); going back to a variant
+// brings its values back (while the step is open in the editor).
+function variantsEditor(spec, value) {
+  const variants = variantsOf(spec);
+  let chosen = Math.max(0, variantOf(spec, value));
+  let editor = null;
+  const memory = {};  // variant index -> its values when it was left
+  const body = el('div', { class: 'arg-variant' });
+  const chooser = el('div', { class: 'segmented choice', role: 'group' });
+  const title = (v) => {
+    const text = v.title || (v.required || Object.keys(v.properties)).join(' + ');
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  };
+  const pick = (index, current) => {
+    chosen = index;
+    editor = objectEditor(variants[index], current);
+    body.replaceChildren(editor.node);
+    chooser.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-pressed', String(i === index)));
+  };
+  chooser.append(...variants.map((v, index) => {
+    const button = el('button', { type: 'button', text: title(v), 'aria-pressed': 'false' });
+    if (v.description) button.title = v.description;
+    button.addEventListener('click', () => {
+      if (index === chosen) return;
+      const current = editor.read() || {};
+      memory[chosen] = current;
+      const kept = Object.fromEntries(Object.entries({ ...memory[index], ...current })
+        .filter(([k, x]) => variants[index].properties[k] && fits(variants[index].properties[k], x)));
+      pick(index, Object.keys(kept).length ? kept : undefined);
+      changed(chooser);
+    });
+    return button;
+  }));
+  pick(chosen, value);
+  return { node: el('div', { class: 'arg-variants' }, chooser, body), read: () => editor.read() };
+}
+
+// [x, y, z] (or roll, pitch, yaw) as three number fields in the unit; all empty: left out, one empty: 0
+function vecEditor(key, spec, value) {
+  const unit = unitOf(key, spec);
+  const names = key.startsWith('rpy') ? ['roll', 'pitch', 'yaw'] : ['x', 'y', 'z', 'w'].slice(0, spec.minItems);
+  const inputs = names.map((name, i) => {
+    const input = el('input', { type: 'number', step: unitStep(unit) || 'any', 'aria-label': `${key} ${name}` });
+    input.value = value?.[i] ?? '';
+    return input;
+  });
+  const grid = el('div', { class: names.length === 3 ? 'grid3' : 'arg-fields' }, names.map((name, i) => el('div', { class: 'field' },
+    el('label', { text: unit && UNIT_LABEL[unit] ? `${name} (${UNIT_LABEL[unit]})` : name }), inputs[i])));
+  const read = () => (inputs.every((input) => input.value === '') ? undefined : inputs.map((input) => (input.value === '' ? 0 : Number(input.value))));
+  return { node: grid, read };
+}
+
+// hands: a checkbox per hand of the robot, or one of the rule words (auto, any_one, all) as a segmented choice; a
+// rule clears the hands and a hand clears the rule, the chosen rule pressed again clears it (left out: the default).
+// A list is written in the robot's hand order, unless it holds the same hands as the step had (kept as it was).
+function handsEditor(spec, value) {
+  const names = [...spec.anyOf[1].items.enum];
+  const rules = spec.anyOf[0].enum.filter((word) => !names.includes(word));
+  const given = value === undefined ? [] : Array.isArray(value) ? value : [value];
+  given.filter((n) => !rules.includes(n) && !names.includes(n)).forEach((n) => names.push(n));  // unknown here: kept
+  let rule = typeof value === 'string' && rules.includes(value) ? value : null;
+  const boxes = names.map((name) => {
+    const input = el('input', { type: 'checkbox', value: name });
+    input.checked = !rule && given.includes(name);
+    input.addEventListener('change', () => { if (input.checked) setRule(null); });
+    return input;
+  });
+  const chooser = el('div', { class: 'segmented', role: 'group', 'aria-label': 'Hands rule' });
+  const ruleButtons = rules.map((word) => {
+    const button = el('button', { type: 'button', text: word, 'aria-pressed': 'false' });
+    button.addEventListener('click', () => {
+      setRule(rule === word ? null : word);
+      if (rule) boxes.forEach((input) => { input.checked = false; });
+      changed(chooser);
+    });
+    return button;
+  });
+  chooser.append(...ruleButtons);
+  function setRule(word) {
+    rule = word;
+    ruleButtons.forEach((b) => b.setAttribute('aria-pressed', String(b.textContent === word)));
+  }
+  setRule(rule);
+  const read = () => {
+    if (rule) return rule;
+    const picked = boxes.filter((input) => input.checked).map((input) => input.value);
+    if (!picked.length) return undefined;
+    if (typeof value === 'string' && picked.length === 1 && picked[0] === value) return value;
+    if (Array.isArray(value) && picked.length === value.length && value.every((n) => picked.includes(n))) return [...value];
+    return picked;
+  };
+  const node = el('div', { class: 'hands-pick' },
+    names.map((name, i) => el('label', { class: 'check' }, boxes[i], name)), el('span', { class: 'muted', text: 'or' }), chooser);
+  return { node, read };
+}
+
+// a list of points, names or numbers (only, via): a row per item with ✕, + Add; order kept
+function listEditor(key, spec, value) {
+  const rows = el('div', { class: 'arg-list' });
+  const editors = [];
+  const add = (item) => {
+    const editor = argEditor(key, spec.items, item, true);
+    const remove = el('button', { class: 'icon', type: 'button', text: '✕', 'aria-label': 'Remove' });
+    const row = el('div', { class: 'row gap' }, editor.node, remove);
+    editors.push(editor);
+    remove.addEventListener('click', () => { editors.splice(editors.indexOf(editor), 1); row.remove(); changed(rows); });
+    rows.append(row);
+  };
+  (value || []).forEach(add);
+  const more = el('button', { class: 'btn small', type: 'button', text: '+ Add' });
+  more.addEventListener('click', () => { add(undefined); changed(rows); });
+  const read = () => {
+    const items = editors.map((editor) => editor.read()).filter((item) => item !== undefined);
+    return items.length || Array.isArray(value) ? items : undefined;
+  };
+  return { node: el('div', { class: 'arg-list-box' }, rows, el('div', {}, more)), read };
 }
 
 // Change the step list and draw it again: change gets [{step, open, expanded}] (the steps as edited now, rules folded

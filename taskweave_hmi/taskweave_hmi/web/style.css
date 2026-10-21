@@ -295,6 +295,8 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
 @media (max-width: 600px) {
   .edit-step .step-head { grid-template-columns: auto minmax(0, 1fr); }
   .edit-step .step-buttons { grid-column: 2; justify-self: end; }
+  .edit-step.collapsed .step-word { display: none; }  /* folded: the number alone, the instruction gets the width */
+  .edit-step.collapsed .step-no { min-width: 1.6em; }
 }
 /* reorder by drag: the handle takes the pointer (no page scroll on touch), the step follows it lifted, a brand line in
    the gap marks where it lands */
@@ -314,7 +316,24 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
                                                                height: 3px; border-radius: var(--r-pill); background: var(--brand-text); }
 .edit-step.drop-before::before { top: calc(-1 * var(--sp-1) - 3px); }
 .edit-step.drop-after::after { bottom: calc(-1 * var(--sp-1) - 3px); }
-.args { display: grid; gap: var(--sp-2); }
+.args { display: grid; gap: var(--sp-3); }
+/* argument fields from the skill schema (app.js argField): nested objects indented on a hairline rule, their fields in
+   a grid (vectors, variants, hands and lists full width), a variant chooser, hands as checkboxes and rule words */
+.arg-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 0; }
+.arg-head .arg-mode { min-height: 0; padding: 0; font-size: var(--fs-sm); }
+.arg-body, .arg-variants, .arg-list-box, .arg-list { display: grid; gap: var(--sp-2); min-width: 0; }
+.arg-nest { display: grid; gap: var(--sp-2); min-width: 0; padding-left: var(--sp-3); border-left: 2px solid var(--border); }
+.arg-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr)); gap: var(--sp-2) var(--sp-3); }
+.arg-fields > .wide { grid-column: 1 / -1; }
+.arg-list .row > :first-child { flex: 1; min-width: 0; }
+.hands-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--sp-4); }
+.hands-pick .segmented button { min-width: var(--tap-s); }
+details.arg-group > summary { color: var(--text-muted); }
+details.arg-group > summary label { cursor: pointer; font-size: var(--fs-s); }
+details.arg-group[open] { display: grid; gap: var(--sp-2); }
+details.arg-group > .arg-head { justify-content: flex-end; margin-top: calc(-1 * var(--tap-min)); justify-self: end; }
+details.arg-more > summary { color: var(--text-muted); font-weight: 500; }
+details.arg-more[open] { display: grid; gap: var(--sp-2); }
 .sticky-actions { position: sticky; bottom: 0; background: var(--surface-card); padding: var(--sp-3) 0; border-top: 1px solid var(--border); }
 li.empty { list-style: none; padding: 6px 2px; }
 
