@@ -37,7 +37,8 @@ HTTP API (JSON):
   GET  /api/points/all             locations, stance offsets and placed objects, with the missions using each point
   PUT  /api/points/location/<name>                          {x, y, yaw[, rename]}  create, update or rename
   PUT  /api/points/stance/<objects|instances>/<owner>/<variant>  {x, y, yaw[, rename]}  (offset in the object frame)
-  DELETE the same addresses;  422 with {problems} if refused, nothing written
+  DELETE the same addresses;  422 with {problems} if refused, nothing written (on a targets cell: 404 with
+                                   {problems} when the target, object type or instance is not there)
   GET  /api/robot_pose             current base pose in the cell and relative to every placed object
   POST /api/points/drive {target}  run navigate_to now (no mission running): location name or stance:<object>/<variant>
                                    (when the skill catalog has move: move {to: <name> or <object>/<variant>})
@@ -113,7 +114,7 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
 from taskweave_core import names, tf_util
-from taskweave_core.config import ConfigError, ConfigStore, Pose2D
+from taskweave_core.config import ConfigError, ConfigStore, Pose2D, TargetError
 from taskweave_core.planner import MissionFilePlanner
 from taskweave_core.speed import MAX_PERCENT, MIN_PERCENT, PRESETS, SpeedOverride
 from taskweave_core.teach import MAX_POSE_AGE_S, yaw_from_quaternion
@@ -726,8 +727,8 @@ class Bridge(Node):
             try:
                 self.config.target(name, self.robot, kinds=('joints', 'hand'),
                                    context='a robot pose is a joint or hand target')
-            except KeyError as error:
-                raise arm.ArmError(str(error.args[0])) from error
+            except TargetError as error:
+                raise arm.ArmError(str(error)) from error
             return self.run_skill(targets.MOVE, targets.move_args(name), label=name)
         try:
             tools = self.config.named_pose(self.robot, name)['tools']
@@ -1152,6 +1153,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'problems': [str(error)]}, HTTPStatus.CONFLICT)
         except ConfigError as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)
+        except TargetError as error:  # a target, object type or instance a Teach edit names is not there
+            return self._json({'problems': [str(error)]}, HTTPStatus.NOT_FOUND)
         except (TimeoutError, KeyError, json.JSONDecodeError) as error:
             return self._json({'error': str(error)}, HTTPStatus.SERVICE_UNAVAILABLE
                               if isinstance(error, TimeoutError) else HTTPStatus.BAD_REQUEST)

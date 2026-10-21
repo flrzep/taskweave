@@ -20,9 +20,8 @@ from __future__ import annotations
 import math
 from collections.abc import Iterator, Mapping
 
-from taskweave_core.config import ConfigError, ConfigStore, Pose2D, schemas, target_store
+from taskweave_core.config import ConfigError, ConfigStore, Pose2D, TargetError, schemas, target_store
 from taskweave_core.config.store import LOCATION_PREFIX, STANCE_PREFIX, TOOL_SUFFIX, VARIANT_SEPARATOR
-from taskweave_core.config.targets import ROBOT_SETTINGS
 
 from . import targets
 
@@ -44,8 +43,9 @@ def robot_objects_file(robot: str, object_type: str = '<type>') -> str:
 
 
 def stance_offsets(store: ConfigStore, robot: str) -> dict:
-    """The robot's stances in the shape of stances.yaml (on a targets cell: its base targets on object types)."""
-    return targets.stance_offsets(store, robot) if targets.active(store) else store.stance_offsets(robot)
+    """The robot's stances in the shape of stances.yaml (on a targets cell the store's reader of its base targets on
+    object types: an instance override is merged with the type's layers, so one may give only some keys)."""
+    return store.stance_offsets(robot)
 
 
 def pose_dict(pose: Pose2D) -> dict:
@@ -385,42 +385,30 @@ def _type_has_variant(store: ConfigStore, robot: str, path: list[str]) -> bool:
 
 
 # ---- the same on a targets cell (cell schema 4) ---------------------------------------------------------------------
-def _problem(error: Exception) -> PointError:
-    """A store error as the HMI's: TargetError is a KeyError, its message the first argument."""
-    return PointError(str(error.args[0]) if isinstance(error, KeyError) and error.args else str(error))
-
-
 def _written(store: ConfigStore, paths) -> str:
     return paths[0].relative_to(store.root).as_posix() if paths else ''
 
 
-def type_reference(store: ConfigStore, object_type: str, name: str) -> str:
-    """``<instance>/<name>`` for a target of the type, through a placed object of it (save_target needs one)."""
-    instance = targets.placed_instance(store, object_type)
-    if instance is None:
-        raise PointError(f'no placed {object_type} in cell/objects.yaml: a target of the type is saved through a '
-                         'placed object of it')
-    return f'{instance}{VARIANT_SEPARATOR}{name}'
-
-
-def _target_address(store: ConfigStore, robot: str, kind: str, path: list[str]) -> tuple[str, bool, str, str]:
-    """(reference, instance override, object type or '', frame) of a point address on a targets cell."""
+def _target_address(store: ConfigStore, robot: str, kind: str, path: list[str]) -> tuple[str, bool, str | None, str]:
+    """(reference, instance override, ``type=`` of the store's target calls, frame) of a point address on a targets
+    cell: a location is its name, a stance of the type the bare variant with ``type=<type>`` (nothing needs to be
+    placed), an override ``<instance>/<variant>``."""
     _, _, frame = _keys(store, kind, path)
     if kind == 'location':
         moves = targets.plain_kind(store, robot, path[0])
         if moves is not None and (moves != 'base' or path[0] not in target_store.cell_targets(store)):
             raise PointError(f'{path[0]!r} is a target that moves {moves} in robots/{robot}/targets.yaml, not a '
                              'location: give the location another name')
-        return path[0], False, '', frame
+        return path[0], False, None, frame
     scope, owner, variant = path
     override = scope == 'instances'
-    object_type = store.object_instances()[owner].object if override else owner
-    reference = f'{owner}{VARIANT_SEPARATOR}{variant}' if override else type_reference(store, owner, variant)
-    moves = targets.type_kinds(store, robot, object_type, owner if override else None).get(variant)
+    moves = targets.type_kinds(store, robot, frame, owner if override else None).get(variant)
     if moves not in (None, 'base'):
-        raise PointError(f'{variant!r} is a target of {object_type} objects that moves {moves}, not a stance: give '
+        raise PointError(f'{variant!r} is a target of {frame} objects that moves {moves}, not a stance: give '
                          'the stance another name')
-    return reference, override, object_type, frame
+    if override:
+        return f'{owner}{VARIANT_SEPARATOR}{variant}', True, None, frame
+    return variant, False, owner, frame
 
 
 def _save_base_target(store: ConfigStore, robot: str, kind: str, path: list[str], body: Mapping) -> str:
@@ -428,7 +416,7 @@ def _save_base_target(store: ConfigStore, robot: str, kind: str, path: list[str]
     the type in the robot's objects file (an override: its instances entry). Keys the editor does not show (joints, a
     path's earlier waypoints) are kept."""
     store.reload()
-    reference, override, object_type, frame = _target_address(store, robot, kind, path)
+    reference, override, on_type, frame = _target_address(store, robot, kind, path)
     if body.get('create') and _exists(store, robot, kind, path):
         raise PointError(f'{"/".join(path)} already exists')
     rename = body.get('rename') or None
@@ -438,56 +426,54 @@ def _save_base_target(store: ConfigStore, robot: str, kind: str, path: list[str]
         users = _users(store, robot, kind, path)
         if users:
             raise PointError(f'{"/".join(path)} is used by {", ".join(users)}; change those missions first')
-        if override and path[2] in targets.type_kinds(store, robot, object_type):
-            raise PointError(f'{"/".join(path)} overrides the {object_type} stance {path[2]} and has its name: '
+        if override and path[2] in targets.type_kinds(store, robot, frame):
+            raise PointError(f'{"/".join(path)} overrides the {frame} stance {path[2]} and has its name: '
                              'rename the stance of the type')
     pose = parse_pose(body, frame)
     if kind == 'location':
         entry = targets.plain_entry(store, robot, path[0])
     else:
         keys = ['instances', path[1], path[2]] if override else ['targets', path[2]]
-        entry = targets.robot_layer(store, robot, object_type, keys)
+        entry = targets.robot_layer(store, robot, frame, keys)
     data = targets.placed({'moves': 'base', **entry}, pose_dict(pose))
     try:
-        return _written(store, store.save_target(reference, data, robot, instance_override=override, rename=rename))
-    except (ValueError, KeyError) as error:
-        raise _problem(error) from error
+        paths = store.save_target(reference, data, robot, instance_override=override, rename=rename, type=on_type)
+    except targets.REFUSED as error:
+        raise PointError(str(error)) from error
+    return _written(store, paths)
 
 
 def _delete_base_target(store: ConfigStore, robot: str, kind: str, path: list[str]) -> str:
+    """delete() on a targets cell. A stance of the type that instance overrides with only settings still refer to is
+    refused by the store, its message listing them (delete those first: the HMI offers no cascade)."""
     store.reload()
-    reference, override, object_type, _ = _target_address(store, robot, kind, path)
+    reference, override, on_type, _ = _target_address(store, robot, kind, path)
     users = _users(store, robot, kind, path)
     if users and not (kind == 'stance' and override and _type_has_variant(store, robot, path)):
         raise PointError(f'{"/".join(path)} is used by {", ".join(users)}; change those missions first')
-    if kind == 'stance' and not override:  # an override without its own moves would be left without a target
-        table = targets.robot_layer(store, robot, object_type, ['instances'])
-        left = sorted(instance for instance, entries in table.items() if isinstance(entries, Mapping)
-                      and isinstance(entries.get(path[2]), Mapping) and 'moves' not in entries[path[2]])
-        if left:
-            raise PointError(f'{"/".join(path)} is overridden for {", ".join(left)}: delete those overrides first')
     try:
-        return _written(store, store.delete_target(reference, robot, instance_override=override))
-    except (ValueError, KeyError) as error:
-        raise _problem(error) from error
+        paths = store.delete_target(reference, robot, instance_override=override, type=on_type)
+    except targets.REFUSED as error:
+        raise PointError(str(error)) from error
+    return _written(store, paths)
 
 
 def _save_hand_target(store: ConfigStore, object_type: str, point: str, settings: dict, poses: dict,
                       robot: str | None) -> str:
-    """save_object_point() on a targets cell: the hand target ``point`` of the type (objects/<type>.yaml), the
-    robot's elbow and grip_m in robots/<robot>/objects/<type>.yaml. Keys the editor does not show are kept."""
+    """save_object_point() on a targets cell: the hand target ``point`` of the type, addressed with ``type=`` (nothing
+    needs to be placed). The target as the type's and the robot's layers give it (``type_target``) with the editor's
+    changes; the store writes each key back to the layer it is in (a new elbow or grip_m to the robot's file), so keys
+    the editor does not show and a target defined in the robot's file stay where they are."""
     if not settings and not poses:
         raise PointError('nothing to save')
     if not robot:
         raise PointError('a target of an object type is saved for a robot: needs the robot')
     if targets.type_kinds(store, robot, object_type).get(point) != 'hand':
         raise PointError(f'object {object_type!r} has no point {point!r}')
-    own = targets.type_layer(store, object_type, point)
-    if 'moves' not in own:
-        raise PointError(f'{object_type} {point} is defined in {robot_objects_file(robot, object_type)}, not in '
-                         f'objects/{object_type}.yaml: edit it in the file')
-    mine = targets.robot_layer(store, robot, object_type, ['targets', point])
-    data = {**own, **{key: mine[key] for key in ROBOT_SETTINGS if key in mine}}
+    try:
+        data = {k: v for k, v in store.type_target(object_type, point, robot).data.items() if k != 'frame'}
+    except TargetError as error:  # it is there (type_kinds) but cannot be read
+        raise PointError(str(error)) from error
     for key in ('approach_m', 'elbow'):
         if key in settings:
             if settings[key] in (None, ''):
@@ -506,9 +492,9 @@ def _save_hand_target(store: ConfigStore, object_type: str, point: str, settings
             data['grip_m'] = grip
     data = targets.placed(data, {targets.tool_key(tool): pose for tool, pose in poses.items()})
     try:
-        return _written(store, store.save_target(type_reference(store, object_type, point), data, robot))
-    except (ValueError, KeyError) as error:
-        raise _problem(error) from error
+        return _written(store, store.save_target(point, data, robot, type=object_type))
+    except targets.REFUSED as error:
+        raise PointError(str(error)) from error
 
 
 def relative_poses(store: ConfigStore, pose: Pose2D) -> dict:

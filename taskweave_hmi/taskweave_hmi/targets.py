@@ -2,9 +2,13 @@
 
 The HMI's API stays as it was (locations, stances, object points, robot poses, held poses); on a schema 4 cell the
 modules points, arm, robot and held read and write targets through the store (``save_target``, ``delete_target``,
-``rename_target``) instead of the old point files. This module holds what they share: which target an old point is,
-the entries as written (so a save keeps the keys the HMI does not edit), joint values as joint groups, the missions
-that name a target, and the manual skill requests (``move {to}`` when the skill catalog has ``move``).
+``rename_target``; a type's own targets with ``type=``, so nothing needs to be placed) instead of the old point
+files. This module holds what they share: which target an old point is, the entries as written (so a save keeps the
+keys the HMI does not edit), the robot poses as the HMI lists them, the missions that name a target, and the manual
+skill requests (``move {to}`` when the skill catalog has ``move``).
+
+A write the store refuses is a TargetWriteError (``REFUSED``): the modules answer it as their own error (422). A
+target that is not there is a TargetError (a KeyError): the modules let it through and the server answers 404.
 
 On a schema 3 cell none of this is used: the modules keep their old calls.
 """
@@ -13,10 +17,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
 
-from taskweave_core.config import ConfigError, ConfigStore, Pose2D
+from taskweave_core.config import ConfigError, ConfigStore, TargetWriteError
 from taskweave_core.config import target_store as ts
-from taskweave_core.config.limits import joint_groups, torso_joint
-from taskweave_core.config.targets import TOOL_SUFFIX, axes_from_rpy, rpy_from_axes
+from taskweave_core.config.targets import TOOL_SUFFIX, rpy_from_axes
 
 MOVE = 'move'
 KIND_GROUPS = {'base': 'base targets', 'hand': 'hand targets', 'object': 'object targets', 'joints': 'joint targets'}
@@ -24,6 +27,9 @@ OLD_PREFIXES = ('location:', 'pose:')          # a reference of the old skills: 
 STANCE = 'stance:'                             # stance:<instance>[/<variant>]
 SEPARATOR = '/'
 ROUND = 4
+# a write the store refuses: TargetWriteError, and the plain ValueError of the file's schema check after the edit
+# (ConfigStore._edit_yaml -> store._check, not a TargetWriteError yet)
+REFUSED = (TargetWriteError, ValueError)
 
 
 def active(store: ConfigStore) -> bool:
@@ -48,12 +54,6 @@ def plain_entry(store: ConfigStore, robot: str, name: str) -> dict:
         if name in table:
             return {k: v for k, v in table[name].items() if k != 'frame'}
     return {}
-
-
-def placed_instance(store: ConfigStore, object_type: str) -> str | None:
-    """A placed object of ``object_type`` (the first by name): save_target addresses a type's targets through one."""
-    return next((name for name, instance in sorted(store.object_instances().items())
-                 if instance.object == object_type), None)
 
 
 def type_kinds(store: ConfigStore, robot: str | None, object_type: str, instance: str | None = None) -> dict:
@@ -107,100 +107,37 @@ def hand_from_axes(target: Mapping) -> dict:
             'rpy': [round(v, ROUND) + 0.0 for v in rpy_from_axes(target['approach'], target['closing'])]}
 
 
-def axes_from_hand(pose) -> dict:
-    """A Pose3D (xyz, rpy) -> {tcp, approach, closing}, the shape the HMI shows a robot pose's tools in."""
-    approach, closing = axes_from_rpy(pose.rpy)
-    return {'tcp': [round(float(v), ROUND) + 0.0 for v in pose.xyz],
-            'approach': [round(v, ROUND) + 0.0 for v in approach], 'closing': [round(v, ROUND) + 0.0 for v in closing]}
-
-
-# ---- joints: joint values <-> joint groups ------------------------------------------------------------------------
-def group_joints(store: ConfigStore, robot: str, values: Mapping[str, float], keep: Mapping | None = None) -> dict:
-    """``{joint: value}`` as the ``joints:`` part of a target: per group of the profile a number (a group of one
-    joint, or the torso's lift joint alone) or a list in the group's order with None for a joint not given. ``keep``:
-    the target's joints part before, whose ``auto`` / ``keep`` words stay for groups the values do not set. Raises
-    ValueError for a joint that is in no group."""
-    groups, lift = joint_groups(store, robot), torso_joint(store, robot)
-    left, result = dict(values), {}
-    for group, members in groups.items():
-        hit = [joint for joint in members if joint in left]
-        if not hit:
-            continue
-        if len(members) == 1:
-            result[group] = round(float(left.pop(members[0])), 5)
-        elif group == 'torso' and hit == [lift]:
-            result[group] = round(float(left.pop(lift)), 5)
-        else:
-            result[group] = [round(float(left.pop(joint)), 5) if joint in left else None for joint in members]
-    if left:
-        raise ValueError(f'not in a joint group of the robot profile (joints.groups): {", ".join(sorted(left))}')
-    for group, value in (keep or {}).items():
-        if isinstance(value, str) and group not in result:
-            result[group] = value
-    return result
-
-
 # ---- robot poses (robots/<robot>/targets.yaml, joint and hand targets) ---------------------------------------------
 def robot_poses(store: ConfigStore, robot: str) -> dict[str, dict]:
     """The joint and base-frame hand targets of the robot as the HMI shows a named pose: ``{name: {'joints':
-    {joint: value}, 'tools': {tool: {tcp, approach, closing}}, 'hands': {tool: {xyz, rpy}}, 'elbow', 'problems'}}``.
-    A target that cannot be read is listed with its problem instead of failing the whole list."""
-    from taskweave_core.config.limits import group_values, joint_limits, joint_problems
+    {joint: value}, 'tools': {tool: {tcp, approach, closing}}, 'hands': {tool: {xyz, rpy}}, 'elbow', 'problems'}}``,
+    file order. The core's reader (``joint_poses``) and, for a target it skips, its problem
+    (``target_store.pose_target_problems``): one bad target does not fail the list. ``hands`` are the tools as written
+    (xyz / rpy), which the old shape does not give; ``problems`` of a readable pose are its joints outside the limits
+    (as ``limits.pose_problems``)."""
+    from taskweave_core.config.limits import joint_limits, joint_problems
 
+    bad = ts.pose_target_problems(store, robot)
+    poses = store.joint_poses(robot)
     limits = joint_limits(store, robot)
     linear = set(store.robot(robot).data.get('joints', {}).get('linear', []))
     result = {}
     for name, entry in ts.robot_targets(store, robot).items():
-        if entry.get('moves') not in ('joints', 'hand'):
-            continue
-        problems, tools = [], {}
-        try:
-            tools = store.target(name, robot).tools
-        except KeyError as error:
-            problems.append(str(error))
-        try:
-            joints = group_values(store, robot, entry.get('joints') or {})
-        except ValueError as error:
-            joints = {}
-            problems.append(str(error))
-        problems += joint_problems(joints, limits, linear)
-        result[name] = {
-            'joints': joints, 'elbow': entry.get('elbow'),
-            'tools': {key[:-len(TOOL_SUFFIX)]: axes_from_hand(pose) for key, pose in tools.items()},
-            'hands': {key[:-len(TOOL_SUFFIX)]: {'xyz': [round(float(v), ROUND) + 0.0 for v in pose.xyz],
-                                                'rpy': [round(float(v), ROUND) + 0.0 for v in pose.rpy]}
-                      for key, pose in tools.items()},
-            'problems': problems}
+        if name in bad and entry.get('moves') in ('joints', 'hand'):
+            result[name] = {'joints': {}, 'elbow': entry.get('elbow'), 'tools': {}, 'hands': {},
+                            'problems': [bad[name]]}
+        elif name in poses:
+            pose = poses[name]
+            joints = pose.get('joints', {}) if 'tools' in pose else pose
+            hands = store.target(name, robot).tools
+            result[name] = {
+                'joints': joints, 'elbow': pose.get('elbow') if 'tools' in pose else None,
+                'tools': pose.get('tools', {}),
+                'hands': {key[:-len(TOOL_SUFFIX)]: {'xyz': [round(float(v), ROUND) + 0.0 for v in hand.xyz],
+                                                    'rpy': [round(float(v), ROUND) + 0.0 for v in hand.rpy]}
+                          for key, hand in hands.items()},
+                'problems': joint_problems(joints, limits, linear)}
     return result
-
-
-# ---- stances (robots/<robot>/objects/<type>.yaml, base targets) ---------------------------------------------------
-def _xyaw(pose: Pose2D) -> dict:
-    return {'x': pose.x, 'y': pose.y, 'yaw': pose.yaw}
-
-
-def stance_offsets(store: ConfigStore, robot: str) -> dict:
-    """The robot's base targets on object types in the shape of the old stances.yaml: ``{'objects': {type: {name:
-    {x, y, yaw}}}, 'instances': {instance: {name: {x, y, yaw}}}}``, file order kept. An instance override is the
-    merged pose (an override may give only some keys); one of an object that is not placed is left out."""
-    objects, instances = {}, {}
-    placed_objects = store.object_instances()
-    for object_type in ts.type_names(store, robot):
-        variants = {}
-        for name, moves in type_kinds(store, robot, object_type).items():
-            if moves == 'base':
-                variants[name] = _xyaw(ts.resolve_type(store, robot, object_type, name).pose)
-        if variants:
-            objects[object_type] = variants
-        for instance, table in ts.robot_object_file(store, robot, object_type).get('instances', {}).items():
-            if instance not in placed_objects or placed_objects[instance].object != object_type:
-                continue
-            kinds = type_kinds(store, robot, object_type, instance)
-            merged = store.stance_variants(robot, placed_objects[instance])
-            poses = {name: _xyaw(merged[name]) for name in table if kinds.get(name) == 'base' and name in merged}
-            if poses:
-                instances.setdefault(instance, {}).update(poses)
-    return {**({'objects': objects} if objects else {}), **({'instances': instances} if instances else {})}
 
 
 # ---- references in missions ---------------------------------------------------------------------------------------
