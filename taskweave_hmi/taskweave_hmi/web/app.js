@@ -33,9 +33,9 @@ function el(tag, attrs = {}, ...children) {
 // Every number field is a text field: Chrome and Edge show <input type="number"> with the browser's decimal separator
 // (a comma in a German browser), whatever the page's lang. el() turns type 'number' inputs into one, the page's own
 // are turned at load (below), the step editor's in stepCard. They show a dot; a comma typed or pasted becomes a dot as
-// it is typed, letters are dropped. ↑ / ↓ step the value by the step attribute (1 for 'any' or none) from where it is,
-// within min and max, and so do the arrows at the field's right end on a laptop (held down, they repeat); 'change'
-// follows when the key or button is let go. Readers keep Number(input.value). Not a number, or outside min / max:
+// it is typed, letters are dropped. ↑ / ↓ step the value by the step attribute (1 for 'any' or none; with Shift ten
+// steps) from where it is, within min and max, and so do the arrows at the field's right end on a laptop (held down,
+// they repeat; Shift-click: ten steps); 'change' follows when the key or button is let go. Readers keep Number(input.value). Not a number, or outside min / max:
 // :invalid (red), never dropped. data-spin="off": no arrows (a field with its own − / + buttons).
 const NUMBER_PATTERN = '[\\-+]?(\\d+\\.?\\d*|\\.\\d+)([eE][\\-+]?\\d+)?';
 const SPIN_W = 24;  // px at the field's right end that are the arrows
@@ -69,7 +69,7 @@ function numberField(input) {
   input.addEventListener('keydown', (e) => {
     if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || e.altKey || e.ctrlKey || e.metaKey) return;
     e.preventDefault();
-    stepNumber(input, e.key === 'ArrowUp' ? 1 : -1);
+    stepNumber(input, (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1));
     stepped = true;
   });
   input.addEventListener('keyup', (e) => {
@@ -89,13 +89,13 @@ function numberField(input) {
     if (!onArrows(e) || e.button !== 0 || input.disabled || input.readOnly) return;
     e.preventDefault();
     input.focus();
-    const direction = e.offsetY < input.clientHeight / 2 ? 1 : -1;
+    const direction = (e.offsetY < input.clientHeight / 2 ? 1 : -1) * (e.shiftKey ? 10 : 1);
     stepNumber(input, direction);
     repeat = setTimeout(() => { repeat = setInterval(() => stepNumber(input, direction), 60); }, 400);
   });
   ['pointerup', 'pointerleave', 'pointercancel', 'blur'].forEach((type) => input.addEventListener(type, stop));
 }
-function stepNumber(input, direction) {
+function stepNumber(input, direction) {  // direction: steps, signed
   const step = Number(input.getAttribute('step')) || 1;  // 'any' or none: 1
   const min = input.getAttribute('min'), max = input.getAttribute('max');
   const now = Number(input.value);
@@ -772,6 +772,10 @@ let pointsVisible = false;
 let robotVisible = false;
 let pointsBusy = '';
 const DEG = 180 / Math.PI;
+// arrow steps (↑ / ↓ and the field's arrows; Shift: 10 times): positions 1 mm, angles 1° (the fields show degrees).
+// Stored values keep their own precision (e.g. 0.6899 m): a step starts from the value, it does not round it.
+const STEP_M = '0.001';
+const STEP_DEG = '1';
 const fmt = (p) => `x ${p.x.toFixed(3)}  y ${p.y.toFixed(3)}  yaw ${(p.yaw * DEG).toFixed(1)}°`;
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 
@@ -892,9 +896,9 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
     return [el('div', { class: 'field' }, el('label', { text: label }), field), field];
   };
   const [nameField, nameInput] = input(nameLabel, name);
-  const [xField, xInput] = input('x (m)', String(pose.x), { type: 'number', step: 'any', inputmode: 'decimal' });
-  const [yField, yInput] = input('y (m)', String(pose.y), { type: 'number', step: 'any', inputmode: 'decimal' });
-  const [yawField, yawInput] = input('yaw (°)', String(+(pose.yaw * DEG).toFixed(2)), { type: 'number', step: 'any', inputmode: 'decimal' });
+  const [xField, xInput] = input('x (m)', String(pose.x), { type: 'number', step: STEP_M, inputmode: 'decimal' });
+  const [yField, yInput] = input('y (m)', String(pose.y), { type: 'number', step: STEP_M, inputmode: 'decimal' });
+  const [yawField, yawInput] = input('yaw (°)', String(+(pose.yaw * DEG).toFixed(2)), { type: 'number', step: STEP_DEG, inputmode: 'decimal' });
   const msg = el('div', { class: 'msg', hidden: '' });
   const robotButton = el('button', { class: 'btn small', text: 'Set from robot' });
   const driveButton = el('button', { class: 'btn small', text: 'Drive here', 'data-edit': '' });

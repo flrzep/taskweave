@@ -202,8 +202,10 @@ The Teach tab shows the robot's position at the top and one list at a time:
 
 An entry that is open is the one the pad's teach press (L1 + L3) goes to: open the one you mean before you press.
 Every entry shows which missions use it; one that a mission uses cannot be renamed or deleted. **Numbers** shows and
-edits the stored values, **Advanced** a point's elbow side, straight approach and finger opening. **Delete** needs a
-second tap. Saved values are used from the next move or mission start.
+edits the stored values, **Advanced** a point's elbow side, straight approach and finger opening. In a number field
+↑ / ↓ (on a laptop also the small arrows at its right end) change a position by 1 mm and an angle by 1°, with Shift
+by 10 mm or 10°; decimals are written with a dot in every browser language (a typed comma becomes one). **Delete**
+needs a second tap. Saved values are used from the next move or mission start.
 
 While a move started here runs (**Drive here**, **Move here**, **Go here**, a carry pose's **Test**), a bar in the top
 bar shows what it goes to and for how long, on every tab. Its red **Abort** stops it at once with one press, as does

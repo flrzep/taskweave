@@ -2,7 +2,8 @@
 // taskweave HMI, Teach tab, Carry poses: held poses (robots/<robot>/held_poses.yaml), where `move_object to: {pose: <name>}` takes
 // a held object: some joints first (e.g. the body), then the object's origin along straight lines through the waypoints (in
 // the robot's base frame). Typed in, not captured: a held object cannot be jogged. Uses app.js ($, el, api, message,
-// DEG, NAME_RE), robot.js (JOINT_SKIP) and teach.js (teach, showJoint, unshowJoint, jointUnit, numberInput, failText).
+// DEG, NAME_RE, STEP_M, STEP_DEG), robot.js (JOINT_SKIP) and teach.js (teach, showJoint, unshowJoint, jointUnit, jointStep,
+// numberInput, failText).
 
 const heldOpen = new Set();  // `${type}/${name}` of the open editors, kept over reloads
 
@@ -46,7 +47,7 @@ function heldItem(h, isNew = false) {
   const jointBox = el('div', { class: 'grid3' });
   const jointInputs = {};
   const addJointRow = (joint, value) => {
-    const [field, input] = numberInput(`${joint} ${jointUnit(joint)}`, showJoint(joint, value));
+    const [field, input] = numberInput(`${joint} ${jointUnit(joint)}`, showJoint(joint, value), { step: jointStep(joint) });
     const drop = el('button', { class: 'icon', text: '✕', title: `Leave ${joint} out`, 'aria-label': `Leave ${joint} out`, 'data-edit': '' });
     drop.addEventListener('click', () => { field.remove(); delete jointInputs[joint]; fillJointPicker(); edited(); });
     field.querySelector('label').append(' ', drop);
@@ -76,8 +77,8 @@ function heldItem(h, isNew = false) {
   const drawPath = (path) => {  // path values as shown (m, °)
     rows = [];
     pathBox.replaceChildren(...path.map((wp, index) => {
-      const xyz = ['x', 'y', 'z'].map((a, i) => numberInput(`${a} (m)`, wp.xyz[i]));
-      const rpy = ['roll', 'pitch', 'yaw'].map((a, i) => numberInput(`${a} (°)`, wp.rpy[i]));
+      const xyz = ['x', 'y', 'z'].map((a, i) => numberInput(`${a} (m)`, wp.xyz[i], { step: STEP_M }));
+      const rpy = ['roll', 'pitch', 'yaw'].map((a, i) => numberInput(`${a} (°)`, wp.rpy[i], { step: STEP_DEG }));
       rows.push({ xyz: xyz.map(([, i]) => i), rpy: rpy.map(([, i]) => i) });
       const button = (text, label, action, disabled) => {
         const b = el('button', { class: 'icon', text, title: label, 'aria-label': label, 'data-edit': '' });

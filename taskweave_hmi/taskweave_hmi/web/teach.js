@@ -2,7 +2,7 @@
 // taskweave HMI, Teach tab: Poses (relative to the robot, poses.yaml) and Points (on objects, objects/<type>.yaml),
 // one editor for both (the server's arm positions, arm.py). A pose or point that is open receives the pad's teach
 // press (L1 + L3); Capture does the same from here.
-// Uses helpers and state from app.js ($, el, api, message, show, state, DEG, NAME_RE, fillSelect).
+// Uses helpers and state from app.js ($, el, api, message, show, state, DEG, NAME_RE, fillSelect, STEP_M, STEP_DEG).
 
 const ROBOT_SCOPE = 'robot';
 const teach = { data: null, open: null };
@@ -13,6 +13,7 @@ const isLinear = (joint) => (teach.data?.linear_joints || []).includes(joint);
 const showJoint = (joint, value) => (isLinear(joint) ? +value.toFixed(4) : +(value * DEG).toFixed(2));
 const unshowJoint = (joint, value) => (isLinear(joint) ? value : value / DEG);
 const jointUnit = (joint) => (isLinear(joint) ? 'm' : '°');
+const jointStep = (joint) => (isLinear(joint) ? STEP_M : STEP_DEG);  // app.js
 const failText = (data, fallback) => (data.problems || [data.error || fallback]).join('\n');
 
 async function loadArm() {
@@ -117,8 +118,8 @@ function positionItem(p) {
   // numbers: each hand as x y z (m) and roll pitch yaw (°), then joints (lift first)
   const hands = {};
   const handNodes = Object.entries(p.hands).map(([tool, hand]) => {
-    const xyz = ['x', 'y', 'z'].map((a, i) => numberInput(`${a} (m)`, +hand.xyz[i].toFixed(4)));
-    const rpy = ['roll', 'pitch', 'yaw'].map((a, i) => numberInput(`${a} (°)`, +(hand.rpy[i] * DEG).toFixed(2)));
+    const xyz = ['x', 'y', 'z'].map((a, i) => numberInput(`${a} (m)`, +hand.xyz[i].toFixed(4), { step: STEP_M }));
+    const rpy = ['roll', 'pitch', 'yaw'].map((a, i) => numberInput(`${a} (°)`, +(hand.rpy[i] * DEG).toFixed(2), { step: STEP_DEG }));
     hands[tool] = { xyz: xyz.map(([, i]) => i), rpy: rpy.map(([, i]) => i) };
     return el('div', { class: 'joint-group' }, el('label', { text: `${tool} hand` }),
       el('div', { class: 'grid3' }, ...xyz.map(([f]) => f)), el('div', { class: 'grid3' }, ...rpy.map(([f]) => f)));
@@ -127,7 +128,7 @@ function positionItem(p) {
   const jointNames = Object.keys(p.joints).sort((a, b) => isLinear(b) - isLinear(a));
   const jointNodes = jointNames.length ? [el('div', { class: 'joint-group' }, el('label', { text: 'Joints' }),
     el('div', { class: 'grid3' }, ...jointNames.map((joint) => {
-      const [field, input] = numberInput(`${joint} ${jointUnit(joint)}`, showJoint(joint, p.joints[joint]));
+      const [field, input] = numberInput(`${joint} ${jointUnit(joint)}`, showJoint(joint, p.joints[joint]), { step: jointStep(joint) });
       jointInputs[joint] = input;
       return field;
     })))] : [];
