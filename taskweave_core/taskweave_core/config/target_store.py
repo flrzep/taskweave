@@ -298,12 +298,17 @@ def legacy_stance_offsets(store, robot: str) -> dict:
     objects: dict = {}
     instances: dict = {}
     placed = store.object_instances(state=False)
-    folder = store.root / 'robots' / robot / 'objects'
-    for path in sorted(folder.glob('*.yaml')):
-        file = robot_object_file(store, robot, path.stem)
-        poses = {name: _xyaw(entry) for name, entry in file.get('targets', {}).items() if entry.get('moves') == 'base'}
+    for type in type_names(store, robot):
+        poses = {}
+        for name, moves in type_target_kinds(store, robot, type).items():  # the type's layers with the robot's on top
+            if moves == 'base':
+                try:
+                    poses[name] = _xyaw(_merged(store, robot, type, name, f'{type}/{name}', None)[0])
+                except TargetError as error:
+                    log.warning('stance %r of %r objects is left out of the old offsets: %s', name, type, error)
         if poses:
-            objects[path.stem] = poses
+            objects[type] = poses
+        file = robot_object_file(store, robot, type)
         for instance, table in file.get('instances', {}).items():
             poses = {}
             for name, entry in table.items():

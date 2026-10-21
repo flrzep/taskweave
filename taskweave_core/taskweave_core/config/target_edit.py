@@ -102,7 +102,18 @@ def _walk(document, keys: list[str], create: bool):
     return node
 
 
-def _write(store, relative: str, keys: list[str], data: dict | None, note: str | None = None, auto: bool = True) -> Path:
+def _edit_file(store, relative: str, edit) -> Path:
+    """store._edit_yaml, with a refusal (a schema failure after the edit) as TargetWriteError."""
+    try:
+        return store._edit_yaml(relative, edit)
+    except TargetWriteError:
+        raise
+    except ValueError as error:
+        raise TargetWriteError(str(error)) from error
+
+
+def _write(store, relative: str, keys: list[str], data: dict | None, note: str | None = None,
+           auto: bool = True) -> Path:
     """Set the entry at ``keys`` (the last one is the name) of a target file to ``data``, or remove it (``None``).
     ``note`` is the entry's end-of-line comment (it replaces one); with ``auto`` a new entry gets ``saved <date>``."""
 
@@ -130,7 +141,7 @@ def _write(store, relative: str, keys: list[str], data: dict | None, note: str |
             parent.ca.items.pop(name, None)
             parent.yaml_add_eol_comment(text, name, column=2)
 
-    return store._edit_yaml(relative, edit)
+    return _edit_file(store, relative, edit)
 
 
 def _split(reference: str) -> tuple[str | None, str]:
@@ -170,7 +181,9 @@ def _on_type(store, reference: str, robot: str, type: str | None, verb: str, ove
     instance, name = _split(reference)
     if type is not None:
         if instance is not None:
-            raise TargetWriteError(f'{reference!r} with type={type!r}: give the bare target name, not <instance>/<name>')
+            raise TargetWriteError(
+                f'{reference!r} with type={type!r}: give the bare target name, not <instance>/<name>'
+            )
         if override:
             raise TargetWriteError('instance_override is for <instance>/<name> references')
         _check_type(store, robot, type)
@@ -278,14 +291,17 @@ def _save_on_type(
 def split_layers(entry: dict, own: dict, theirs: dict) -> tuple[dict, dict]:
     """Which layer each key of a complete hand or object target goes to: a key that is in the object type's entry
     (``own``) or the robot's (``theirs``) stays there (when both have it the robot's value is the one set, the type's
-    stays as it is), a new key goes to the robot's
-    when it is a robot setting (elbow, grip_m) and to the type's otherwise. Keys that merge per part (grip_m, alone,
+    stays as it is), a new key goes to the robot's when it is a robot setting (elbow, grip_m) and to the type's
+    otherwise. A target the type's file has no entry for (the robot's own hand target) keeps all new keys in the
+    robot's file, the layer that defines it. Keys that merge per part (grip_m, alone,
     joints) are split by part the same way. Returns ``(own part, robot part)``."""
     common: dict = {}
     mine: dict = {}
 
+    robot_only = not own and 'moves' in theirs  # defined by the robot's file alone: new keys stay with it
+
     def default(key: str, in_own: bool, in_theirs: bool) -> str:
-        if in_theirs and not in_own:
+        if (in_theirs and not in_own) or robot_only:
             return 'theirs'
         return 'own' if in_own else ('theirs' if key in model.ROBOT_SETTINGS else 'own')
 
@@ -344,8 +360,8 @@ def delete_target(
     cascade: bool = False,
 ) -> list[Path]:
     """Remove a target from the files that define it. Deleting a target of an object type that instance overrides
-    or other robots' settings still refer to is refused (``TargetWriteError`` listing them) unless ``cascade``: they
-    go too."""
+    or other robots' settings still refer to is refused (``TargetWriteError`` listing them) unless ``cascade=True``
+    (the API's choice, not shown to operators): they go too."""
     on_type, instance, name = _on_type(store, reference, robot, type, 'delete', instance_override)
     if on_type is None:
         cell, mine = ts.cell_targets(store), ts.robot_targets(store, robot)
@@ -363,7 +379,7 @@ def delete_target(
         listing = ', '.join(f'{relative} {".".join(path)}' for relative, path in orphans)
         raise TargetWriteError(
             f'target {name!r} of {on_type} objects is still used by settings that would be left without a target: '
-            f'{listing}; delete those first, or delete with cascade=True'
+            f'{listing}; remove those first, or delete them together'
         )
     written = [_write(store, relative, keys, None) for relative in found]
     written += [_write(store, relative, path, None) for relative, path in orphans]
@@ -455,11 +471,11 @@ def _rename_in(store, relative: str, keys: list[str], name: str, new_name: str) 
             raise TargetWriteError(f'no {name!r} in {relative}')
         store._rename_key(node, name, new_name, new_name, relative)
 
-    return store._edit_yaml(relative, edit)
+    return _edit_file(store, relative, edit)
 
 
 def _set_handled_from(store, relative: str, name: str) -> Path:
     def edit(document):
         document['handled_from'] = name
 
-    return store._edit_yaml(relative, edit)
+    return _edit_file(store, relative, edit)

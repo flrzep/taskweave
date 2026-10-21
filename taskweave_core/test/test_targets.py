@@ -1153,7 +1153,7 @@ def test_renaming_an_instance_only_target_changes_only_that_instance(cell):
 
 def test_deleting_a_type_target_with_overrides_is_refused_unless_cascaded(cell):
     store = ConfigStore(cell)  # pick has overrides in bay_1_stack_1_back and bay_2_stack_2_back, no moves in them
-    with pytest.raises(TargetWriteError, match=r'bay_1_stack_1_back.*cascade=True'):
+    with pytest.raises(TargetWriteError, match=r'bay_1_stack_1_back.*delete them together'):
         store.delete_target('bay_1_stack_1_front/pick', ROBOT)
     assert 'pick:' in (cell / 'robots' / ROBOT / 'objects' / 'frame_type2.yaml').read_text()
     store.delete_target('bay_1_stack_1_front/pick', ROBOT, cascade=True)
@@ -1179,7 +1179,7 @@ def test_save_target_notes_the_entry_and_rounds_to_four_decimals(cell):
     store = ConfigStore(cell)
     store.save_target('bench', {'moves': 'base', 'x': 1.234567, 'y': 2.0, 'yaw': 0.5}, ROBOT)
     text = (cell / 'cell' / 'targets.yaml').read_text()
-    assert f'bench: {{moves: base, x: 1.2346, y: 2.0, yaw: 0.5}}' in text
+    assert 'bench: {moves: base, x: 1.2346, y: 2.0, yaw: 0.5}' in text
     assert f'# saved {datetime.date.today().isoformat()}' in text
     store.save_target('waiting', {'moves': 'base', 'x': 2.5, 'y': 0.0, 'yaw': 0.0}, ROBOT)  # keeps its comment
     assert '# centre of the waiting zone' in (cell / 'cell' / 'targets.yaml').read_text()
@@ -1201,3 +1201,52 @@ def test_the_old_name_lists_include_a_hand_target_only_the_robot_has(cell):
     names = ConfigStore(cell).point_names(ROBOT)
     assert 'frame_type2.mine' in names['object points'] and 'bay_1_stack_1_front/mine' in names['placed object points']
     assert 'frame_type2.mine' not in ConfigStore(cell).point_names('bot_plain')['object points']
+
+
+# ---- second round of fixes (P6-1c) -------------------------------------------------------------------------------
+def test_a_schema_failure_after_an_edit_is_a_write_error_and_still_a_value_error(cell, monkeypatch):
+    from taskweave_core.config import store as store_module
+
+    def refuse(schema, data, label):
+        raise ValueError(f'{label}: nope; nothing written')
+
+    monkeypatch.setattr(store_module, '_check', refuse)
+    with pytest.raises(TargetWriteError, match='nothing written') as refused:
+        ConfigStore(cell).save_target('waiting', {'moves': 'base', 'x': 2.5, 'y': 0.0, 'yaw': 0.0}, ROBOT)
+    assert isinstance(refused.value, ValueError)
+
+
+def test_a_new_key_of_a_target_only_the_robot_file_defines_stays_in_that_file():
+    from taskweave_core.config.target_edit import split_layers
+
+    entry = {'moves': 'hand', 'left_tool': {'xyz': [0, 0, 0], 'rpy': [0, 0, 0]}, 'approach_m': 0.04}
+    robot_only = {'moves': 'hand', 'left_tool': {'xyz': [0, 0, 0], 'rpy': [0, 0, 0]}}
+    assert split_layers(entry, {}, robot_only) == ({}, entry)
+    common, mine = split_layers(entry, {'moves': 'hand'}, {'elbow': 'up'})  # the type defines it: as before
+    assert common['approach_m'] == 0.04 and 'approach_m' not in mine
+
+
+def test_an_unknown_or_taken_instance_is_a_lookup_error(cell):
+    assert isinstance(ConfigStore(cell).missing_instance('nothing', 'unknown nothing'), TargetError)
+    with pytest.raises(TargetError):
+        ConfigStore(cell).save_target('nothing/pick', {'elbow': 'in'}, ROBOT)
+
+
+def test_the_old_stance_offsets_use_the_type_and_robot_layers_of_every_base_target(cell):
+    edit(cell / 'objects' / 'part_box.yaml', (cell / 'objects' / 'part_box.yaml').read_text()
+         + '  side: {moves: base, x: 0.5, y: 0.25, yaw: 1.5}\n')
+    robot_file = cell / 'robots' / ROBOT / 'objects' / 'part_box.yaml'
+    edit(robot_file, robot_file.read_text() + '  side: {y: 0.75}\n')   # a partial entry over the type's
+    objects = ConfigStore(cell).stance_offsets(ROBOT)['objects']
+    assert objects['part_box']['side'] == {'x': 0.5, 'y': 0.75, 'yaw': 1.5}
+    assert objects['part_box']['pick'] == {'x': -0.8, 'y': 0.0, 'yaw': 0.0}   # defined in objects/part_box.yaml only
+    assert objects['frame_type2']['pick']['x'] == -1.0   # a base target of the robot's file alone
+
+
+def test_the_delete_refusal_for_operators_does_not_name_the_code_argument(cell):
+    path = cell / 'robots' / ROBOT / 'objects' / 'frame_type2.yaml'
+    edit(path, path.read_text().replace('{pick: {x: -1.528, y: 0.0, yaw: 0.0}}',
+                                        '{pick: {x: -1.528, y: 0.0, yaw: 0.0}, rails_top_steep: {elbow: out}}', 1))
+    with pytest.raises(TargetWriteError, match='still used by settings') as refused:
+        ConfigStore(cell).delete_target('rails_top_steep', ROBOT, type='frame_type2')
+    assert 'cascade' not in str(refused.value)

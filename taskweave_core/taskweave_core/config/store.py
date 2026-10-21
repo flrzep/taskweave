@@ -38,7 +38,7 @@ from jsonschema import Draft202012Validator
 from . import overlay, packs, schemas
 from . import target_store as ts
 from .poses import ObjectInstance, Pose2D, Pose3D, wrap_angle
-from .targets import Target
+from .targets import Target, TargetError
 
 STANCE_PREFIX = 'stance:'
 LOCATION_PREFIX = 'location:'
@@ -46,7 +46,8 @@ VARIANT_SEPARATOR = '/'     # stance:<instance>/<variant>
 # object point keys besides tool poses
 POINT_METADATA = ('approach', 'tool_type', 'grip_width_m', 'approach_m', 'elbow', 'alone')
 TOOL_SUFFIX = '_tool'       # an object point's tool pose key: <tool>_tool
-OLD_POINT_FILES = ('locations.yaml', 'stances.yaml', 'poses.yaml', 'object_points.yaml', 'held_poses.yaml')  # removed in 4
+OLD_POINT_FILES = ('locations.yaml', 'stances.yaml', 'poses.yaml', 'object_points.yaml',
+                   'held_poses.yaml')  # removed in 4
 POINT_FILE_SCHEMAS = {  # files that teaching and the HMI may edit (a file name matches any robot folder)
     'cell/locations.yaml': schemas.POINTS2D, 'stances.yaml': schemas.STANCES, 'poses.yaml': schemas.JOINT_POSES,
     'navigation.yaml': schemas.NAVIGATION, 'profile.yaml': schemas.ROBOT_PROFILE,  # profile: ik.choose only
@@ -762,14 +763,14 @@ class ConfigStore:
             result.update(self.robot_object_points(robot).get(obj, {}).get(point, {}))
         return result
 
-    def missing_instance(self, name: str, unknown: str) -> KeyError:
+    def missing_instance(self, name: str, unknown: str) -> TargetError:
         """The error for an instance that cannot be used: one that is in cell/objects.yaml but taken in the object
         state (gone, or a stack at count 0) says so; any other is ``unknown`` plus the instances that exist."""
         current = self.object_instances()
         if name in self.object_instances(state=False) and (name not in current or current[name].stack_count == 0):
-            return KeyError(f'{name!r} was taken in an earlier step or run (object state: state/objects.yaml); reset '
-                            'the sim (Stop + Play) or run `taskweave state clear` to put it back')
-        return KeyError(f'{unknown}, instances in cell/objects.yaml: {", ".join(sorted(current)) or "none"}')
+            return TargetError(f'{name!r} was taken in an earlier step or run (object state: state/objects.yaml); '
+                               'reset the sim (Stop + Play) or run `taskweave state clear` to put it back')
+        return TargetError(f'{unknown}, instances in cell/objects.yaml: {", ".join(sorted(current)) or "none"}')
 
     def instance_point(self, reference: str, robot: str | None = None,
                        near: Pose2D | None = None) -> tuple[ObjectInstance, dict]:
@@ -868,11 +869,12 @@ class ConfigStore:
         return target_edit.save_target(self, reference, data, robot, instance_override=instance_override,
                                        rename=rename, type=type, note=note)
 
-    def delete_target(self, reference: str, robot: str, *, instance_override: bool = False, type: str | None = None,
-                      cascade: bool = False) -> list[Path]:
-        """Remove a target from the files that define it (an instance's override only with ``instance_override``; ``type``
-        as for save_target). A type target that instance overrides or other robots' settings still refer to is refused,
-        listing them, unless ``cascade``: they are removed too."""
+    def delete_target(self, reference: str, robot: str, *, instance_override: bool = False,
+                      type: str | None = None, cascade: bool = False) -> list[Path]:
+        """Remove a target from the files that define it (an instance's override only with ``instance_override``;
+        ``type`` as for save_target). A type target that instance overrides or other robots' settings still refer to
+        is refused, listing them, unless ``cascade=True`` (for callers: the refusal text does not name it): they are
+        removed too."""
         from . import target_edit
 
         return target_edit.delete_target(self, reference, robot, instance_override=instance_override, type=type,
