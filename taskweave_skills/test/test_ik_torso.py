@@ -309,10 +309,11 @@ def test_when_local_ik_fails_everywhere_the_global_search_at_the_current_height_
     assert all('no IK solution' in r['reason'] for r in choice.rejected)          # every local try is on record
 
 
-def test_the_global_fallback_tries_the_nearest_heights_only_and_can_still_fail():
-    ik = GlobalOnly(works=(0.7,))                       # not among the 3 nearest to 0.45: 0.45, 0.4/0.5, ...
+def test_the_global_fallback_reaches_heights_beyond_the_nearest_ones_and_can_still_fail():
+    ik = GlobalOnly(works=(0.7,))                       # not among the 3 nearest to 0.45: the local solve had no IK there
+    assert ik.solve_with_torso([TOOLS], {}, now(0.45)).height == pytest.approx(0.7)
     with pytest.raises(TorsoError, match='global search'):
-        ik.solve_with_torso([TOOLS], {}, now(0.45))
+        GlobalOnly(works=()).solve_with_torso([TOOLS], {}, now(0.45))
     ik = GlobalOnly(works=(0.5,))
     assert ik.solve_with_torso([TOOLS], {}, now(0.45)).height == pytest.approx(0.5)
     ik = GlobalOnly(works=(0.45,))
@@ -450,3 +451,54 @@ def test_a_refined_best_at_the_edge_of_the_band_steps_one_fine_step_inside():
     assert choice.height == pytest.approx(0.275)                 # one fine step in: 0.25 and 0.3 both work too
     ik = FakeIk(reach=reach, weight=1.0, accept=-1)
     assert ik.solve_with_torso([TOOLS], {}, now(0.5)).height == pytest.approx(0.3)           # refine off: the edge
+
+
+# ---- a narrow band far from the current height needs the global search (F13: set_down held at torso 0.27) -------
+
+class BandIk(GlobalOnly):
+    """Local IK never solves; the global one only inside ``band``; ``hints`` records the seeds the search passes."""
+
+    def __init__(self, band=(0.25, 0.30), **kw):
+        super().__init__(works=(), **kw)
+        self.band, self.hints = band, []
+
+    def solve(self, tools, fixed, should_stop=lambda: False, current=None, allow_flip=True, elbow=None,
+              global_search=True):
+        self.hints.append((fixed['lift'], global_search, getattr(self, 'seed_hint', None)))
+        if not global_search or not self.band[0] - 1e-9 <= fixed['lift'] <= self.band[1] + 1e-9:
+            raise IkError('no IK solution for left: out of reach')
+        self.global_calls.append(fixed['lift'])
+        return FakeIk.solve(self, tools, fixed, should_stop, current, allow_flip, elbow, global_search)
+
+
+def test_a_narrow_band_far_from_the_current_height_is_found_with_the_global_search_and_refined():
+    ik = BandIk(weight=1.0)
+    ik.torso['refine'] = 2
+    choice = ik.solve_with_torso([TOOLS], {}, now(0.6))
+    assert 0.25 - 1e-9 <= choice.height <= 0.3 + 1e-9 and 'global search' in choice.skipped
+    assert 0.3 in ik.global_calls and 0.2 not in ik.global_calls            # 0.2 was tried, and failed, globally
+    assert any(r['height'] == 0.2 and r['reason'].startswith('global search') for r in choice.rejected)
+    assert any(0.25 < h < 0.3 for h in ik.global_calls)                      # refined between the grid heights
+
+
+def test_a_fine_height_is_seeded_with_the_feasible_neighbours_arms():
+    ik = BandIk(weight=1.0)
+    ik.torso['refine'] = 1
+    ik.solve_with_torso([TOOLS], {}, now(0.6))
+    fine = [(h, hint) for h, _, hint in ik.hints if round(h, 4) in (0.25, 0.35)]
+    assert fine and all(hint and 'left_j1' in hint for _, hint in fine)
+    assert all(hint is None for h, _, hint in ik.hints if round(h * 10, 6) == round(h * 10))   # grid heights: no seed
+
+
+def test_beyond_the_nearest_heights_the_global_search_skips_heights_whose_local_solve_worked_but_collided():
+    class Collides(BandIk):
+        def solve(self, tools, fixed, should_stop=lambda: False, current=None, allow_flip=True, elbow=None,
+                  global_search=True):
+            if not global_search and fixed['lift'] < 0.15:          # the local solve works at 0.0 and 0.1 ...
+                self.hints.append((fixed['lift'], False, None))
+                return FakeIk.solve(self, tools, fixed, should_stop, current, allow_flip, elbow, global_search)
+            return super().solve(tools, fixed, should_stop, current, allow_flip, elbow, global_search)
+    ik = Collides(band=(0.25, 0.3), collides=lambda joints: joints['lift'] < 0.15)     # ... and collides there
+    choice = ik.solve_with_torso([TOOLS], {}, now(0.6))
+    assert choice.height <= 0.3 + 1e-9 and ik.global_calls and min(ik.global_calls) >= 0.25 - 1e-9
+    assert 0.0 not in {h for h, g, _ in ik.hints if g} and 0.1 not in {h for h, g, _ in ik.hints if g}

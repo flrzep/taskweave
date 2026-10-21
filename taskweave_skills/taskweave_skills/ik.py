@@ -407,6 +407,10 @@ class IkClient:
             if self.choose is not None and not nearby:
                 local += [(self.groups[tool], start, float(self.choose.get('start_timeout_s', START_TIMEOUT_S)))
                           for start in self._starts(tool)]
+            hinted = {n: v for n, v in (getattr(self, 'seed_hint', None) or {}).items()
+                      if re.fullmatch(self.joint_pattern.format(tool=tool), n)}
+            if hinted:      # the torso search's feasible neighbour: a height between it and a failed one starts there
+                local.insert(0, (self.groups[tool], {**here, **hinted}, self.timeout_s))
             fallback = [(self.fallback_groups[tool], {}, self.fallback_timeout_s)] if global_search and \
                 tool in self.fallback_groups else []
             candidates, response, searched = [], None, False
@@ -457,8 +461,10 @@ class IkClient:
         to the smaller change, then the lower height, so the same input gives the same height. The current height
         comes first and wins at once when it is feasible and its cost is at most ``accept_cost`` (default: always), so
         the common case is one solve per sample; otherwise heights are tried outward from it and the search stops
-        when the torso cost alone passes the best total. If no height solves with local IK, the nearest
-        ``global_heights`` heights are tried with the global search (what the move itself would do). A ``samples``
+        when the torso cost alone passes the best total. If no height solves with local IK, the global search is
+        tried (``_global_pass``): the ``global_heights`` nearest heights, then every other height the local solve
+        found no IK for, nearest first; the first that works starts the band, which is refined with the global
+        search too, each fine height seeded with the feasible neighbour's arms. A ``samples``
         function with a ``verify(height)`` attribute returns why the real path fails at that height, or None.
         Raises TorsoError.
 
@@ -523,44 +529,49 @@ class IkClient:
             if best is None or (round(choice.cost, 9), round(abs(choice.height - now), 9), choice.height) < (
                     round(best.cost, 9), round(abs(best.height - now), 9), best.height):
                 best = choice
-        # a best at the edge of a narrow feasible band (its grid neighbour is out): look between the grid heights
-        span, out = step, {r['height'] for r in rejected if not r['reason'].startswith('not tried')}
-        for _ in range(int(spec.get('refine', REFINE)) if best is not None and not best.skipped else 0):
-            if not any(round(best.height + d, 4) in out for d in (-span, span)):
-                break
-            half = span / 2
-            for height in (round(best.height - half, 6), round(best.height + half, 6)):
-                if height < grid[0] or height > grid[-1] or round(height, 4) in seen:
-                    continue
-                seen.add(round(height, 4))
-                try:
-                    choice = self._torso_height(samples, height, fixed, current, joint, now, weight, should_stop,
-                                                elbow, allow_flip)
-                except TorsoError as error:
-                    rejected.append({'height': round(height, 4), 'reason': str(error)})
-                    out.add(round(height, 4))
-                    continue
-                done[round(height, 4)] = choice
-                if (round(choice.cost, 9), round(abs(choice.height - now), 9), choice.height) < (
-                        round(best.cost, 9), round(abs(best.height - now), 9), best.height):
-                    best = choice
-            span = half
-        if best is not None and not best.skipped and span < step:    # refined: not on the very edge of the band
-            for side in (-1, 1):
-                inner = done.get(round(best.height - side * span, 4))
-                if round(best.height + side * span, 4) in out and inner is not None:
-                    best = inner
+        def refine(best, out, global_search):
+            """``best`` at the edge of a narrow feasible band (its grid neighbour is out): the heights between the grid
+            ones, each solved from ``best``'s arms too (a feasible neighbour's solution seeds the one beside it)."""
+            span = step
+            for _ in range(int(spec.get('refine', REFINE)) if best is not None and not best.skipped else 0):
+                if not any(round(best.height + d, 4) in out for d in (-span, span)):
                     break
-        if best is None:     # local descents are timing dependent: the old way (global search) at the nearest heights
-            for height in heights[:int(spec.get('global_heights', GLOBAL_HEIGHTS))]:
-                try:
-                    best = self._torso_height(samples, height, fixed, current, joint, now, weight, should_stop, elbow,
-                                              allow_flip, global_search=True)
-                except TorsoError as error:
-                    rejected.append({'height': round(height, 4), 'reason': f'global search: {error}'})
-                    continue
+                half = span / 2
+                for height in (round(best.height - half, 6), round(best.height + half, 6)):
+                    if height < grid[0] or height > grid[-1] or round(height, 4) in seen:
+                        continue
+                    seen.add(round(height, 4))
+                    try:
+                        choice = self._torso_height(samples, height, fixed, current, joint, now, weight, should_stop,
+                                                    elbow, allow_flip, global_search=global_search, hint=best.solution)
+                    except TorsoError as error:
+                        rejected.append({'height': round(height, 4), 'reason': str(error)})
+                        out.add(round(height, 4))
+                        continue
+                    done[round(height, 4)] = choice
+                    if (round(choice.cost, 9), round(abs(choice.height - now), 9), choice.height) < (
+                            round(best.cost, 9), round(abs(best.height - now), 9), best.height):
+                        best = choice
+                span = half
+            if best is not None and not best.skipped and span < step:    # refined: not on the very edge of the band
+                for side in (-1, 1):
+                    inner = done.get(round(best.height - side * span, 4))
+                    if round(best.height + side * span, 4) in out and inner is not None:
+                        return inner
+            return best
+
+        out = {r['height'] for r in rejected if not r['reason'].startswith('not tried')}
+        best = refine(best, out, False)
+        if best is None:     # local descents are timing dependent (or start far from the answer): global search
+            best, found = self._global_pass(samples, heights, step, grid, rejected, fixed, current, joint, now, weight,
+                                            should_stop, elbow, allow_flip)
+            if best is not None:
+                done.update(found)
+                seen |= set(found) | {r['height'] for r in rejected}
+                out = {r['height'] for r in rejected if r['reason'].startswith('global search')}
+                best.skipped = ''
+                best = refine(best, out, True)
                 best.skipped = 'no height solved with local IK: global search'
-                break
         rejected.sort(key=lambda item: item['height'])
         if best is None:
             raise TorsoError('no torso height works: ' + '; '.join(f'{r["height"]:g}: {r["reason"]}' for r in rejected),
@@ -568,8 +579,51 @@ class IkClient:
         best.rejected = rejected
         return best
 
+    def _global_pass(self, samples, heights, step, grid, rejected, fixed, current, joint, now, weight, should_stop,
+                     elbow, allow_flip):
+        """No height solved with local IK: (best, {height: choice}) from the global search, heights nearest first. The
+        ``global_heights`` nearest are always tried (the move itself would do the same); beyond them only heights
+        whose local solve found no IK at all (one that solved but collided is not helped by another solution this
+        way, and the search stays short). The first height that works is the band's; its farther grid neighbour is
+        solved too, so the cost chooses, and refinement then looks at the band's edges. (None, {}) if none works."""
+        count = int(self.torso.get('global_heights', GLOBAL_HEIGHTS))
+        if count <= 0:
+            return None, {}
+        no_ik = {r['height'] for r in rejected if 'no IK solution' in r['reason']}
+        found, tried = {}, set()
+
+        def attempt(height):
+            tried.add(round(height, 4))
+            try:
+                found[round(height, 4)] = self._torso_height(samples, height, fixed, current, joint, now, weight,
+                                                             should_stop, elbow, allow_flip, global_search=True)
+            except TorsoError as error:
+                rejected.append({'height': round(height, 4), 'reason': f'global search: {error}'})
+            return round(height, 4) in found
+
+        first = None
+        for index, height in enumerate(heights):
+            if index >= count and round(height, 4) not in no_ik:
+                continue
+            if attempt(height):
+                first = height
+                break
+        if first is None:
+            return None, {}
+        for side in (-1, 1):       # the neighbours of the band's first height not tried yet (the nearer ones failed)
+            height = round(first + side * step, 6)
+            if grid[0] <= height <= grid[-1] and round(height, 4) not in tried:
+                attempt(height)
+        best = None
+        for choice in found.values():
+            if best is None or (round(choice.cost, 9), round(abs(choice.height - now), 9), choice.height) < (
+                    round(best.cost, 9), round(abs(best.height - now), 9), best.height):
+                best = choice
+        best.skipped = 'no height solved with local IK: global search'
+        return best, found
+
     def _torso_height(self, samples, height, fixed, current, joint, now, weight, should_stop, elbow,
-                      allow_flip, global_search=False) -> TorsoChoice:
+                      allow_flip, global_search=False, hint=None) -> TorsoChoice:
         """One candidate of solve_with_torso, or TorsoError saying why it is out. ``global_search``: the IK may fall
         back to the global solver (slow, not repeatable); else a height only that solves is no candidate."""
         with_h = {**fixed, joint: height}
@@ -577,6 +631,7 @@ class IkClient:
         main = None
         for k, tools in enumerate(goals):
             where = f'sample {k}: ' if k else ''
+            self.seed_hint = hint
             try:
                 arm = self.solve(tools, with_h, should_stop, current=current, allow_flip=allow_flip, elbow=elbow,
                                  global_search=global_search)
@@ -585,6 +640,8 @@ class IkClient:
                 raise
             except IkError as error:
                 raise TorsoError(f'{where}{str(error).split(":")[0]}') from error
+            finally:
+                self.seed_hint = None
             if k == 0:
                 main = (arm, {t for t, info in self.last.items() if info.get('flipped')}, self._arm_cost(arm, current))
             # staying at the current height moves no torso and no idle arm, and IK already rejects a solution in

@@ -333,8 +333,8 @@ hands are locked to an object and the wrist angle at the goal decides the height
 `motion: {torso: auto}` too, then both holding hands are solved at one height, set before the move, and the held
 object goes up or down with the torso. A straight line (`mode: linear`) is sampled at its ends and every `line_sample_m` between, and the one height
 that holds for all samples is set before the line. The step result lists `data.torso` (per leg: the chosen `height`
-and every `rejected` height with its reason). If no height solves with local IK (its descents are timing dependent), the nearest `global_heights` (default 3, 0 = off) are
-tried with the global search, as the move itself would. On a straight line each height must also admit the real path
+and every `rejected` height with its reason). If no height solves with local IK (its descents are timing dependent, or start far from the answer), the global search is tried: the nearest `global_heights` (default 3, 0 = off) heights always,
+then every other height whose local solve found no IK, nearest first; the first that works starts the band, its neighbours are solved too, and the band's edges are refined with the global search, each fine height seeded with the feasible neighbour's arms (a narrow band far from the current height, e.g. a held frame set down at 0.25-0.30, is found this way). On a straight line each height must also admit the real path
 (walked on the URDF chains from the arms' joints), not only IK at the samples. Without `ik.torso`, `auto` keeps the skill's `torso_fallback` list
 (the first height that solves) and linear moves keep the lift.
 
