@@ -67,7 +67,8 @@ def test_grasp_only_at_a_reached_point_then_release(hold):
                         'links': ['left_link7', 'right_link7'],     # the legacy keys (the sim's magic grasp reads them)
                         'holds': [{'object': 'crate_1', 'point': 'crate_1/rails', 'hands': ['left', 'right'],
                                    'links': ['left_link7', 'right_link7'],
-                                   'grips': {hand: held['tcp_in_object'][hand].tolist() for hand in ('left', 'right')}}]}
+                                   'grips': {hand: held['tcp_in_object'][hand].tolist()
+                                             for hand in ('left', 'right')}}]}
     assert seen[-1]['holds'][0]['grips']['left'][1][3] == pytest.approx(0.2)    # the TCP in the object frame
     assert state.release(['right']) == 'crate_1' and state.held() is None
     wait_until(lambda: seen[-1] == {}, what='the release to be published')
