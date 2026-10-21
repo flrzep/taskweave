@@ -7,6 +7,10 @@ shows both the same way: each hand as x y z (m) and roll pitch yaw (rad) of its 
 y = closing), plus joints (robot positions), elbow side and straight approach (object positions).
 
 Scopes in addresses: ``robot`` or an object type name.
+
+On a cell pack in the targets layout (cell schema 4) a robot position is a joint or hand target in
+``robots/<robot>/targets.yaml`` (robot.py) and an object position a hand target of the type (points.py); renames and
+deletes go through the store's rename_target / delete_target. The editor's shape stays.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ from taskweave_core.config.limits import joint_limits, mimic_joints, pose_proble
 from taskweave_skills.ik import rpy_matrix, tcp_matrix
 
 from . import held, points, robot
+from . import targets as layout
 
 ROBOT = 'robot'
 
@@ -54,12 +59,18 @@ def overview(store: ConfigStore, robot_name: str, pose_args: set) -> dict:
     pose_used = robot.pose_usage(store, pose_args)
     point_used = points.usage(store, robot_name)
     positions = []
-    for name in store.joint_poses(robot_name):
-        pose = store.named_pose(robot_name, name)
-        positions.append({
-            'scope': ROBOT, 'name': name, 'joints': pose['joints'], 'elbow': pose['elbow'], 'approach_m': None,
-            'hands': {tool: hand_from_target(target) for tool, target in pose['tools'].items()},
-            'used_by': pose_used.get(name, []), 'problems': pose_problems(store, robot_name, name)})
+    if layout.active(store):   # hand targets keep their xyz / rpy as written
+        for name, pose in layout.robot_poses(store, robot_name).items():
+            positions.append({
+                'scope': ROBOT, 'name': name, 'joints': pose['joints'], 'elbow': pose['elbow'], 'approach_m': None,
+                'hands': pose['hands'], 'used_by': pose_used.get(name, []), 'problems': pose['problems']})
+    else:
+        for name in store.joint_poses(robot_name):
+            pose = store.named_pose(robot_name, name)
+            positions.append({
+                'scope': ROBOT, 'name': name, 'joints': pose['joints'], 'elbow': pose['elbow'], 'approach_m': None,
+                'hands': {tool: hand_from_target(target) for tool, target in pose['tools'].items()},
+                'used_by': pose_used.get(name, []), 'problems': pose_problems(store, robot_name, name)})
     types = object_types(store)
     for object_type in types:
         for point in points.object_points(store, object_type, point_used, robot_name):
@@ -81,9 +92,8 @@ def overview(store: ConfigStore, robot_name: str, pose_args: set) -> dict:
         'joint_limits': {joint: [None if math.isinf(v) else v for v in bounds]   # mimic joints left out: not settable
                          for joint, bounds in joint_limits(store, robot_name).items() if joint not in mimics},
         'elbow_sides': schemas.ELBOW_SIDES,
-        'approach_default': float((store.skill_params('move_gripper').get('motion') or {})
-                                  .get('approach_m', 0.0)),
-        'files': {'poses': store.display_path(store.robot_save_path(robot_name, 'poses.yaml')),
+        'approach_default': layout.approach_default(store),
+        'files': {'poses': store.display_path(store.robot_save_path(robot_name, f'{robot.poses_file(store)}.yaml')),
                   'objects': 'objects/<type>.yaml'},
     }
 
@@ -113,6 +123,8 @@ def save(store: ConfigStore, robot_name: str, scope: str, name: str, body: Mappi
         if hands:
             request.update(tools={tool: target_from_hand(hand) for tool, hand in hands.items()},
                            elbow=body.get('elbow') or None)
+            if layout.active(store):   # written as xyz / rpy: the editor's numbers as they are
+                request['hands'] = hands
         try:
             return robot.save_pose(store, robot_name, name, request, pose_args)
         except robot.RobotSettingsError as error:
@@ -128,11 +140,28 @@ def save(store: ConfigStore, robot_name: str, scope: str, name: str, body: Mappi
         if users:
             raise ArmError(f'{scope} {name} is used by {", ".join(users)}; change those missions first '
                            '(the numbers were saved)')
+        if layout.active(store):
+            return _target_change(store, lambda reference: store.rename_target(reference, rename, robot_name),
+                                  scope, name)
         try:
             file = str(store.rename_object_point(scope, name, rename).relative_to(store.root))
         except ValueError as error:
             raise ArmError(str(error)) from error
     return file
+
+
+def _target_change(store: ConfigStore, change, object_type: str, name: str) -> str:
+    """Rename or delete (``change(reference)``) the hand target ``name`` of a type on a targets cell, through a
+    placed object of it; the first file written."""
+    if layout.type_kinds(store, None, object_type).get(name) != 'hand':
+        raise ArmError(f'object {object_type!r} has no point {name!r}')
+    try:
+        paths = change(points.type_reference(store, object_type, name))
+    except points.PointError as error:
+        raise ArmError(str(error)) from error
+    except (ValueError, KeyError) as error:
+        raise ArmError(str(error.args[0]) if isinstance(error, KeyError) and error.args else str(error)) from error
+    return paths[0].relative_to(store.root).as_posix() if paths else ''
 
 
 def delete(store: ConfigStore, robot_name: str, scope: str, name: str, pose_args: set) -> str:
@@ -146,6 +175,8 @@ def delete(store: ConfigStore, robot_name: str, scope: str, name: str, pose_args
     users = points.usage(store, robot_name).get(('object_point', scope, name), [])
     if users:
         raise ArmError(f'{scope} {name} is used by {", ".join(users)}; change those missions first')
+    if layout.active(store):
+        return _target_change(store, lambda reference: store.delete_target(reference, robot_name), scope, name)
     try:
         return str(store.delete_point(f'objects/{scope}.yaml', ['points', name]).relative_to(store.root))
     except ValueError as error:
@@ -166,15 +197,19 @@ def capture_pose(store: ConfigStore, robot_name: str, name: str, body: Mapping, 
     joints) and its joint set; ``body.tools`` limits a hand capture to those hands (the others are kept). A new one
     takes ``body.form`` ('hands' or 'joints')."""
     store.reload()
-    poses = store.joint_poses(robot_name)
-    existing = store.named_pose(robot_name, name) if name in poses else None
+    if layout.active(store):   # read as the Robot tab lists them (a target that cannot be read does not stop it)
+        named = layout.robot_poses(store, robot_name)
+        poses, pose_of = list(named), named.__getitem__
+    else:
+        poses, pose_of = store.joint_poses(robot_name), lambda n: store.named_pose(robot_name, n)
+    existing = pose_of(name) if name in poses else None
     profile_tools = list(store.robot(robot_name).data.get('ik', {}).get('groups', {}))
     if existing is not None:
         hands = bool(existing['tools'])
         keys = list(existing['joints'])
     else:
         hands = body.get('form', 'hands' if profile_tools else 'joints') == 'hands'
-        others = [store.named_pose(robot_name, n) for n in poses]
+        others = [pose_of(n) for n in poses]
         keys = list(dict.fromkeys(j for p in others if bool(p['tools']) == hands for j in p['joints']))
         if not keys and not hands:
             raise ArmError('no joint pose to copy the joint list from: make the first one by hand in poses.yaml')
