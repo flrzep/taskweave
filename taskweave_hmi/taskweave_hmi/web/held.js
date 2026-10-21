@@ -125,7 +125,7 @@ function heldItem(h, isNew = false) {
     const { ok, data: result } = await api('POST', `${url(h.name)}/test`, {});
     test.disabled = changed;
     if (!ok) { message(msg, failText(result, 'not moved'), true); return; }
-    message(msg, `${result.outcome}${result.message ? ': ' + result.message : ''}`, result.outcome !== 'succeeded');
+    skillResult(msg, result);
   });
   save.addEventListener('click', async () => {
     const name = nameInput.value.trim();

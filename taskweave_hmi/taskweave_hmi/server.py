@@ -14,7 +14,7 @@ HTTP API (JSON):
   GET  /api/state[?since=<seq>]    robot, status, plan with per-step outcomes, the latest 50 events; with since: the
                                    events after that seq (each event has a seq; event_seq = the latest, events_from =
                                    the oldest still held, 200 are)
-  GET  /api/events                 server-sent events: status | plan | episode
+  GET  /api/events                 server-sent events: status | plan | episode | speed | manual | pad_mode | notice
   GET  /api/missions               mission list (invalid files are listed with their error)
   GET  /api/missions/<name>        mission as JSON; GET /api/template for a new one
   PUT  /api/missions/<name>        validate and save; 422 with {problems} if invalid, nothing written;
@@ -37,6 +37,12 @@ HTTP API (JSON):
   DELETE the same addresses;  422 with {problems} if refused, nothing written
   GET  /api/robot_pose             current base pose in the cell and relative to every placed object
   POST /api/points/drive {target}  run navigate_to now (no mission running): location name or stance:<object>/<variant>
+  Manual skills (drive, pose and point tests, held poses; one at a time, never while a mission runs) answer when they
+                                   end: {outcome, message, aborted}. While one runs it is in /api/state (manual) and
+                                   the live event manual: {skill, label, since (server epoch s), elapsed_s}, else null
+  POST /api/skill/abort            cancel the running manual skill: {ok, skill}; 409 {ok: false, message} when none
+                                   runs. Never a mission (that is /api/abort). Its own request then answers outcome
+                                   canceled, aborted true
   GET  /api/robot                  joint poses (with the missions using each), navigation clearance, footprint
   GET  /api/robot/joints           current joint positions
   GET  /api/robot/tools            current tool targets {tool: {tcp, approach, closing}} (MoveIt forward kinematics)
@@ -211,6 +217,12 @@ def await_skill(done, work, limit_s: float, served, sleep=time.sleep) -> str:
     return ''
 
 
+def args_text(args: dict) -> str:
+    """Skill args on one line (a manual skill's label when its caller names none): key=value, nested ones as JSON."""
+    return ' '.join(f'{key}={json.dumps(value) if isinstance(value, dict | list) else value}'
+                    for key, value in args.items())
+
+
 def ros_parameter(name: str, value) -> Parameter:
     if isinstance(value, bool):
         return Parameter(name=name, value=ParameterValue(type=ParameterType.PARAMETER_BOOL, bool_value=value))
@@ -269,6 +281,11 @@ class Bridge(Node):
             node: self.create_client(SetParameters, f'{node}/set_parameters', callback_group=self.group)
             for node in [*self.get_parameter('nav_costmaps').value, self.get_parameter('nav_controller').value]}
         self.skill_lock = threading.Lock()  # one manual skill at a time
+        # the running manual skill, for the browser and for Abort (under self.lock): what it is, its goal handle once
+        # the skill server accepted it, and whether Abort was pressed (also before the handle exists)
+        self.manual: dict | None = None
+        self.manual_handle = None
+        self.manual_abort = False
         self.speed = SpeedOverride.for_node(self)  # manual skills wait on work time, like the skills
         # the speed override control: the full message (with test mode and cap) and whether the handler serves it
         self.speed_client = self.create_client(SetSpeedOverride, names.SET_SPEED_OVERRIDE, callback_group=self.group)
@@ -556,12 +573,19 @@ class Bridge(Node):
                 result[tool] = entry
             return result
 
-    def run_skill(self, skill: str, args: dict, timeout_s: float = MANUAL_SKILL_TIMEOUT_S) -> dict:
-        """Run one skill directly (no mission), e.g. move to a joint pose to check it. Blocks until it ends."""
+    def run_skill(self, skill: str, args: dict, timeout_s: float = MANUAL_SKILL_TIMEOUT_S,
+                  label: str | None = None) -> dict:
+        """Run one skill directly (no mission), e.g. move to a joint pose to check it. Blocks until it ends; shown to
+        the browser meanwhile (``label``: what it goes to, default the args) and stopped by ``abort_skill``."""
         self.check_idle()
         if not self.skill_lock.acquire(blocking=False):
             raise Busy('another manual skill is running')
         try:
+            with self.lock:
+                self.manual = {'skill': skill, 'label': label or args_text(args), 'since': time.time()}
+                self.manual_handle, self.manual_abort = None, False
+                manual = self.manual_view()
+            self._broadcast('manual', manual)
             action = self.skill_clients.get(skill)
             if action is None:
                 action = self.skill_clients[skill] = ActionClient(self, RunSkill, names.skill_action(skill),
@@ -570,6 +594,10 @@ class Bridge(Node):
                 raise TimeoutError(f'skill {skill} is not served')
             goal = RunSkill.Goal(step_id='hmi', skill=skill, args_json=json.dumps(args), timeout_s=timeout_s,
                                  instruction=f'{skill} from the HMI')
+            with self.lock:
+                aborted = self.manual_abort
+            if aborted:  # Abort while the skill server was looked for: nothing sent, nothing moved
+                return {'outcome': 'canceled', 'message': 'aborted before it started', 'aborted': True}
             sent = action.send_goal_async(goal)
             deadline = time.monotonic() + CALL_TIMEOUT_S
             while not sent.done() and time.monotonic() < deadline:
@@ -577,6 +605,10 @@ class Bridge(Node):
             if not sent.done() or not sent.result().accepted:
                 raise TimeoutError(f'{skill} did not accept the goal')
             handle = sent.result()
+            with self.lock:
+                self.manual_handle, aborted = handle, self.manual_abort
+            if aborted:  # Abort came while the goal was on its way: cancel it now that there is a handle
+                handle.cancel_goal_async()
             result = handle.get_result_async()
             clock = self.speed.clock(self.now_s())
             problem = await_skill(result.done, lambda: clock(self.now_s()), timeout_s + CALL_TIMEOUT_S,
@@ -588,9 +620,35 @@ class Bridge(Node):
                     time.sleep(0.05)
                 raise TimeoutError(f'{skill} {problem}; cancelled')
             outcome = result.result().result
-            return {'outcome': OUTCOMES[outcome.outcome], 'message': outcome.message}
+            with self.lock:
+                aborted = self.manual_abort
+            return {'outcome': OUTCOMES[outcome.outcome], 'message': outcome.message, 'aborted': aborted}
         finally:
+            with self.lock:
+                self.manual, self.manual_handle, self.manual_abort = None, None, False
+            self._broadcast('manual', None)
             self.skill_lock.release()
+
+    def manual_view(self) -> dict | None:
+        """The running manual skill as the browser shows it (call under self.lock). elapsed_s lets the browser count
+        on from its own clock, whatever the server's clock says."""
+        if self.manual is None:
+            return None
+        return {**self.manual, 'elapsed_s': round(time.time() - self.manual['since'], 1)}
+
+    def abort_skill(self) -> dict | None:
+        """Abort the running manual skill (POST /api/skill/abort): cancel its goal or, before the skill server has
+        accepted it, have run_skill cancel it as soon as it has (or not send it at all). None when no manual skill
+        runs. Missions are not touched: they are the task handler's, with their own abort."""
+        with self.lock:
+            if self.manual is None:
+                return None
+            manual, handle, self.manual_abort = dict(self.manual), self.manual_handle, True
+        if handle is not None:
+            handle.cancel_goal_async()
+        pending = '' if handle is not None else ' (before its goal was accepted)'
+        self.get_logger().info(f'HMI aborted manual skill {manual["skill"]} {manual["label"]}{pending}')
+        return {'ok': True, 'skill': manual['skill']}
 
     def now_s(self) -> float:
         return self.get_clock().now().nanoseconds / 1e9
@@ -655,14 +713,14 @@ class Bridge(Node):
         except KeyError as error:
             raise arm.ArmError(str(error.args[0])) from error
         if tools:
-            return self.run_skill('move_gripper', {'to': {'pose': name}})
-        return self.run_skill('move_joints', {'pose': name})
+            return self.run_skill('move_gripper', {'to': {'pose': name}}, label=name)
+        return self.run_skill('move_joints', {'pose': name}, label=name)
 
     def test_position(self, scope: str, name: str, body: dict) -> dict:
         if scope == arm.ROBOT:
             return self.go_to_pose(name)
         at = body.get('at') or self.nearest_placed(scope)
-        return self.run_skill('move_gripper', {'to': {'point': f'{at}/{name}'}})
+        return self.run_skill('move_gripper', {'to': {'point': f'{at}/{name}'}}, label=f'{at}/{name}')
 
     def point_names(self) -> dict[str, list[str]]:
         """Named points for argument pickers: the store's lists, plus held poses (any object type: the held type is
@@ -727,7 +785,7 @@ class Bridge(Node):
             return {'robot': self.robot, 'status': self.status, 'plan': self.plan, 'outcomes': dict(self.outcomes),
                     'events': events[-50:] if since is None else [e for e in events if e['seq'] > since],
                     'event_seq': self.event_seq, 'events_from': events[0]['seq'] if events else self.event_seq + 1,
-                    'pad_mode': self.pad_mode, 'speed': self.speed_state}
+                    'pad_mode': self.pad_mode, 'speed': self.speed_state, 'manual': self.manual_view()}
 
     # ---- service calls -------------------------------------------------------------
     def call(self, client, request):
@@ -986,7 +1044,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(bridge.reach(self._body()))
             if method == 'POST' and route == ['points', 'drive']:
                 target = str(self._body()['target'])
-                return self._json(bridge.run_skill('navigate_to', {'target': target}, timeout_s=DRIVE_TIMEOUT_S))
+                return self._json(bridge.run_skill('navigate_to', {'target': target}, timeout_s=DRIVE_TIMEOUT_S,
+                                                   label=target))
+            if method == 'POST' and route == ['skill', 'abort']:
+                aborted = bridge.abort_skill()
+                if aborted is None:
+                    return self._json({'ok': False, 'message': 'no manual skill is running'}, HTTPStatus.CONFLICT)
+                return self._json(aborted)
             if method == 'PUT' and route == ['robot', 'joints']:
                 return self._json({'sent': bridge.send_joints(self._body().get('joints') or {})})
             if method == 'GET' and route == ['teach', 'arm']:
@@ -1025,7 +1089,7 @@ class Handler(BaseHTTPRequestHandler):
                                              f'{obj}/{name} -> {file}')
                     return self._json({'file': file})
                 if len(route) == 5 and method == 'POST' and route[4] == 'test':
-                    return self._json(bridge.run_skill(held.SKILL, held.args(name)))
+                    return self._json(bridge.run_skill(held.SKILL, held.args(name), label=f'{obj} {name}'))
             if method == 'POST' and route == ['robot', 'move']:
                 return self._json(bridge.go_to_pose(self._body()['pose']))
             return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)

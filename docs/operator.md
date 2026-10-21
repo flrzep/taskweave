@@ -205,6 +205,11 @@ Every entry shows which missions use it; one that a mission uses cannot be renam
 edits the stored values, **Advanced** a point's elbow side, straight approach and finger opening. **Delete** needs a
 second tap. Saved values are used from the next move or mission start.
 
+While a move started here runs (**Drive here**, **Move here**, **Go here**, a carry pose's **Test**), a bar in the top
+bar shows what it goes to and for how long, on every tab. Its red **Abort** stops it at once with one press, as does
+Escape (unless you are typing in a field); the entry then says `aborted`. It never stops a mission: that is the Run
+tab's Abort.
+
 ### Recording a run
 
 The Record tab records what happens, with or without a mission:
