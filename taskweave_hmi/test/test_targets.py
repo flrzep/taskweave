@@ -242,8 +242,6 @@ def test_a_hand_target_defined_in_the_robot_file_is_edited_there(store):
     assert point['tools']['left'] == hand
 
 
-@pytest.mark.xfail(reason='core: a new key that is no robot setting goes to the type file even when the target is '
-                          "the robot's own (target_edit.split_layers): objects/<type>.yaml gets an entry without moves")
 def test_a_new_key_of_a_hand_target_defined_in_the_robot_file_goes_there(store):
     robot_file = store.root / 'robots' / ROBOT / 'objects' / 'part_box.yaml'
     robot_file.write_text(robot_file.read_text() + '  side_grasp:\n    moves: hand\n'
