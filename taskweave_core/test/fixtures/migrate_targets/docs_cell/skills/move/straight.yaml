@@ -1,0 +1,11 @@
+# skills/drive_straight.yaml. A short straight drive without obstacle avoidance; a fixed base rejects it. It takes the
+# keys of navigate_to (the controller) plus its own below, all optional; the values are the defaults.
+implementations:
+  - name: drive_straight
+    type: script
+    class: taskweave_skills.drive:DriveStraight
+speed: 0.15                     # m/s, capped by the base limit
+max_distance_m: 1.0             # a longer drive is rejected
+to_offset_m: 0.05               # `to`: a target this much off the straight line is still accepted
+to_turn_deg: 5.0                # `to`: and this much of heading difference
+stuck_timeout_s: 5.0

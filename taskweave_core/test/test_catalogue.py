@@ -260,12 +260,10 @@ def test_navigation_and_poses_cross_checks(with_packs):
     nav['driving'] = {**nav.get('driving', {}), 'sideways': True, 'max_forward': 99.0}
     problems = with_packs.validate_file('navigation.yaml', nav, 'robot:galbot_s1')
     assert {p['where'] for p in problems} >= {'/driving/sideways', '/driving/max_forward'}
-    poses = load(S1 / 'poses.yaml')
-    name = next(n for n, p in poses.items() if 'joints' not in p and p)
-    joint = next(iter(poses[name]))
-    poses[name][joint] = 99.0
-    problems = with_packs.validate_file('poses.yaml', poses, 'robot:galbot_s1')
-    assert any(p['where'] == f'/{name}/{joint}' and 'outside' in p['message'] for p in problems)
+    targets = load(S1 / 'targets.yaml')
+    targets['lift_high']['joints']['torso'] = 99.0
+    problems = with_packs.validate_file('targets.yaml', targets, 'robot:galbot_s1')
+    assert any(p['where'].startswith('/lift_high') and 'outside' in p['message'] for p in problems), problems
 
 
 def test_held_poses_object_points_and_skill_overrides(example):

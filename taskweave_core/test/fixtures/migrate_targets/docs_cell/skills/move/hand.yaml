@@ -1,0 +1,33 @@
+# skills/move_gripper.yaml (skill-api-spec 2.2). Replaces go_to_point.yaml and the tool-pose part of move_to_pose.yaml:
+# the old flat keys were renamed (taskweave config migrate-skills): max_joint_speed -> speed.joint_rad_s,
+# max_linear_speed -> speed.joint_linear_m_s, tcp_speed -> speed.tcp_m_s, tcp_turn -> speed.tcp_rad_s,
+# position_tolerance / stall_timeout_s / state_timeout_s -> tolerances.*, lift_joint / lift_values -> torso_fallback,
+# approach_m -> motion.approach_m.
+# The first implementation whose requires fits the robot is served (the same class twice: two arms, then one arm).
+implementations:
+  - name: ik_planned            # IK for the target from where the robot stands, MoveIt-planned path
+    type: script
+    class: taskweave_skills.gripper_motion:MoveGripper
+    requires: {capabilities: [arms.bimanual]}
+  - name: ik_single
+    type: script
+    class: taskweave_skills.gripper_motion:MoveGripper
+    requires: {capabilities: [arms.single]}
+cell_frame: world               # TF frame of the cell (= cell/objects.yaml poses)
+speed:                          # standard speeds; a step's motion.speed (fraction) or speed_abs scales them
+  joint_rad_s: 1.2              # rad/s (used without a motion planner)
+  joint_linear_m_s: 0.25        # m/s of prismatic joints
+  tcp_m_s: 0.05                 # m/s on straight lines
+  tcp_rad_s: 0.3                # rad/s on straight lines
+accel: {joint_rad_s2: 3.0, tcp_m_s2: 0.2}   # a step's motion.accel (fraction) lengthens the shortest move
+# defaults of the step's motion options; a robot pack's skill_overrides.yaml, the point's own approach_m / elbow and
+# the step's motion override them, in that order
+motion: {mode: free, planner: auto, approach_m: 0.10, torso: auto}
+torso_fallback:                 # torso: auto: a target out of reach at this lift is tried at these heights (m), in order
+  joint: body_joint
+  values: [0.0, 0.2, 0.4, 0.6, 0.75]
+tolerances:
+  position: 0.03                # rad or m of a joint at the end of a move
+  settle_s: 0.3
+  stall_timeout_s: 5.0          # sim time
+  state_timeout_s: 5.0          # no joint states this long (wall time) -> fail; rides out sim stalls (UI asset loads)

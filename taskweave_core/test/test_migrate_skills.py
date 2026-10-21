@@ -470,12 +470,15 @@ def test_a_schema_1_cell_is_sent_to_migrate_and_migrate_runs_the_whole_chain(cel
     (cell / 'pack.yaml').unlink()
     lines = []
     assert migrate_skills_only(cell, False, lines.append) == 2 and 'run taskweave config migrate' in lines[0]
+    # the 3 -> 4 step needs a stance it can name
+    (cell / 'missions' / 'block.yaml').write_text(MISSION.replace('stance:{frame}', 'stance:shelf_a'))
     lines = []
-    assert migrate(cell, tmp_path / 'robot_packs', say=lines.append) == 0
-    assert packs.cell_schema(cell) == 3
+    assert migrate(cell, tmp_path / 'robot_packs', say=lines.append) == 0, '\n'.join(lines)
+    assert packs.cell_schema(cell) == packs.CELL_SCHEMA
     assert [line for line in lines if line.startswith('write   pack.yaml')] == [
-        'write   pack.yaml  (schema_version 2)', 'write   pack.yaml  (schema_version 3)']
-    assert not (cell / 'skills' / 'go_to_point.yaml').exists() and steps(cell)[0]['skill'] == 'move_joints'
+        'write   pack.yaml  (schema_version 2)', 'write   pack.yaml  (schema_version 3)',
+        'write   pack.yaml  (schema_version 4)']
+    assert not (cell / 'skills' / 'go_to_point.yaml').exists() and steps(cell)[0]['skill'] == 'move'
 
 
 def test_the_store_refuses_schema_2_and_names_the_command(cell):

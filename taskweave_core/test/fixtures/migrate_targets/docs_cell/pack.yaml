@@ -1,0 +1,4 @@
+# cell pack: everything about this cell; the robots come from robot packs (taskweave config migrate)
+name: example_cell
+version: 1
+schema_version: 4

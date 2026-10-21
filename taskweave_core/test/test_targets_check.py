@@ -312,7 +312,7 @@ def test_the_new_enums_have_values():
 # ---- the schema numbers ---------------------------------------------------------------------------
 def test_the_schema_numbers():
     assert (packs.CELL_SCHEMA, packs.ROBOT_SCHEMA) == (4, 2)
-    assert (packs.CELL_SCHEMA_OLDEST, packs.ROBOT_SCHEMA_OLDEST) == (3, 1)  # until the migration to 4 exists
+    assert (packs.CELL_SCHEMA_OLDEST, packs.ROBOT_SCHEMA_OLDEST) == (3, 1)  # until the switch-over drops the old layout
 
 
 def write_pack(folder: Path, schema: int, name='cell') -> Path:
@@ -375,8 +375,8 @@ def test_robot_pack_files_include_the_targets_file():
     assert packs.CELL_ROBOT_FOLDERS == ('objects',)
 
 
-def test_the_migration_chain_stops_where_it_can_go(tmp_path, capsys):
+def test_the_migration_chain_ends_at_the_current_schema(tmp_path, capsys):
     from taskweave_core.config import migrate
 
     cell = write_pack(tmp_path / 'c', 3)
-    assert migrate.migrate(cell, say=lambda *a: None) == 0 and migrate.LATEST == 3
+    assert migrate.migrate(cell, say=lambda *a: None) == 0 and migrate.LATEST == packs.CELL_SCHEMA == 4

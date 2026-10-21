@@ -13,7 +13,7 @@ import pytest
 import yaml
 
 from taskweave_core import cli
-from taskweave_core.config import ConfigStore, Pose2D, packfile, packs
+from taskweave_core.config import ConfigStore, packfile, packs
 from taskweave_core.config.packfile import PackfileError, export_cell, import_cell, init_cell
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'config'
@@ -45,9 +45,10 @@ def build_cell(cell: Path) -> None:
     store._edit_yaml('objects/crate.yaml', lambda d: d.update({'name': 'crate'}))      # API gap: object type
     (cell / 'missions' / 'once.yaml').write_text(yaml.safe_dump(MISSION))              # API gap: mission
     store.save_object_instance('crate_1', 'crate', 1.0, -2.0, 0.4, 1.5708)
-    store.save_object_point('crate_1/top', {'left': ((0.1, 0.0, 0.2), (0.0, 0.0, 0.0, 1.0))})
-    store.save_base_pose('home', Pose2D(0.5, 0.5, 0.0))
-    store.save_stance('crate_1/front', Pose2D(1.0, -1.2, 1.5708), ROBOT)
+    store.save_target('crate_1/top', {'moves': 'hand', 'left_tool': {'xyz': [0.1, 0.0, 0.2], 'rpy': [0.0, 0.0, 0.0]}},
+                      ROBOT)
+    store.save_target('home', {'moves': 'base', 'x': 0.5, 'y': 0.5, 'yaw': 0.0}, ROBOT)
+    store.save_target('crate_1/front', {'moves': 'base', 'x': 1.0, 'y': -1.2, 'yaw': 1.5708}, ROBOT)
 
 
 def tree(folder: Path) -> dict:
@@ -61,7 +62,7 @@ def test_init_is_valid_and_empty(tmp_path):
     store = ConfigStore(cell)
     assert store.object_instances() == {} and store.mission_names() == [] and store.locations() == {}
     assert yaml.safe_load((cell / 'pack.yaml').read_text()) == {'name': 'my_cell', 'version': 1,
-                                                                 'schema_version': packs.CELL_SCHEMA_OLDEST}
+                                                                 'schema_version': packs.CELL_SCHEMA}
     with pytest.raises(PackfileError, match='not an empty'):
         init_cell(cell, ROBOT)
     with pytest.raises(PackfileError, match='no robot pack'):
@@ -80,9 +81,9 @@ def test_build_export_import_roundtrip(tmp_path):
     (cell / 'state' / 'objects.yaml').write_text('crate_1: {gone: true}\n')
     manifest = export_cell(cell, tmp_path / 'out' / 'a.tar.gz')
     assert manifest['name'] == 'built_cell' and manifest['git_rev'] is None
-    assert manifest['schema_version'] == packs.CELL_SCHEMA_OLDEST and manifest['date'] and manifest['taskweave_version']
+    assert manifest['schema_version'] == packs.CELL_SCHEMA and manifest['date'] and manifest['taskweave_version']
     listed = {f['path'] for f in manifest['files']}
-    assert {'pack.yaml', 'objects/crate.yaml', 'missions/once.yaml', 'robots/demo_bot/stances.yaml'} <= listed
+    assert {'pack.yaml', 'objects/crate.yaml', 'missions/once.yaml', 'robots/demo_bot/objects/crate.yaml'} <= listed
     assert not any('pycache' in f or f.startswith('state') for f in listed)
     report = import_cell(tmp_path / 'out' / 'a.tar.gz', tmp_path / 'b')
     assert report['mode'] == 'new' and report['files'] == len(listed)
@@ -204,7 +205,7 @@ def test_git_target_gets_a_commit(tmp_path):
     check_ok(repo / 'config')
     assert import_cell(tmp_path / 'a.tar.gz', repo / 'config')['commit'] is None   # nothing changed
     # uncommitted pack edits: refused without --force, snapshotted with it
-    (repo / 'config' / 'cell' / 'locations.yaml').write_text('mine: {x: 1, y: 2, yaw: 0}\n')
+    (repo / 'config' / 'cell' / 'targets.yaml').write_text('mine: {moves: base, x: 1, y: 2, yaw: 0}\n')
     with pytest.raises(PackfileError, match='uncommitted'):
         import_cell(tmp_path / 'a.tar.gz', repo / 'config')
     import_cell(tmp_path / 'a.tar.gz', repo / 'config', force=True)

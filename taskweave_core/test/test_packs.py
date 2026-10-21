@@ -7,9 +7,16 @@ from pathlib import Path
 import pytest
 
 from taskweave_core.config import ConfigError, ConfigStore, packs
-from taskweave_core.config.migrate import migrate
+from taskweave_core.config.migrate import migrate as migrate_chain
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'config'
+
+
+def migrate(*args, **kwargs):
+    """The 1 -> 2 and 2 -> 3 migrations these tests are about (3 -> 4 has its own tests)."""
+    return migrate_chain(*args, latest=3, **kwargs)
+
+
 ROBOT = 'demo_bot'
 POSES = '# robot pack poses\nhome: {lift: 0.1}   # pack comment\n'
 

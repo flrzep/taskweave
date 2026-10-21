@@ -1,0 +1,22 @@
+# Each cycle takes a part from the fullest stack (fact next_stack, from the run-time object state), puts it into the
+# bin and starts again. The mission is complete when no stack has parts left.
+goal: Move every part of the stacks into the bin, fullest stack first
+loop: forever
+facts:
+  next_stack: {fullest: part, among: "part_stack_*"}
+defaults: {timeout_s: 120, retries: 0, on_failure: abort}
+steps:
+  - id: pick
+    instruction: Pick the top part of {next_stack}
+    include: pick_part
+    with: {part: "{next_stack}"}
+    on_failure: replan
+  - instruction: Drive to the bin
+    skill: move
+    args: {to: bin_1/place}
+  - instruction: Part onto the seat
+    skill: move
+    args: {to: bin_1/seat, torso: keep}
+  - instruction: Let go
+    skill: grip
+    args: {hands: all, action: open}
