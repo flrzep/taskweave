@@ -4,6 +4,11 @@ used by move_object ``to: {pose: <name>}``. No ROS dependency.
 A held pose moves some joints first (e.g. the torso lift; the object moves with the arms), then the held object's
 origin in straight lines through the waypoints (base frame: x y z in m, roll pitch yaw in rad). It cannot be captured
 by jogging (a held object needs both hands moving together), so it is edited as numbers and tried with Test.
+
+On a cell pack in the targets layout (cell schema 4) a held pose is an object target in the base frame in
+``robots/<robot>/targets.yaml`` (``moves: object``, ``type: <object type>``, ``path``, joints as joint groups), named
+by ``move {to: <name>}``; a target without a type is listed under the object type ``*``. Test runs ``move`` when the
+skill catalog has it.
 """
 
 from __future__ import annotations
@@ -14,12 +19,21 @@ from collections.abc import Mapping
 from taskweave_core.config import ConfigError, ConfigStore
 from taskweave_core.config.limits import joint_limits
 
+from . import targets
+
 SKILL = 'move_object'
+ANY_TYPE = '*'  # a held pose (object target) for whatever the robot holds
 
 
 def args(name: str) -> dict:
     """The move_object args that take held pose ``name``."""
     return {'to': {'pose': name}}
+
+
+def test_request(name: str, move: bool) -> tuple[str, dict]:
+    """The skill and args that move the held object to held pose ``name`` now: ``move {to}`` when the skill catalog
+    has move, else move_object."""
+    return (targets.MOVE, targets.move_args(name)) if move else (SKILL, args(name))
 
 
 def pose_of(step_args) -> str | None:
@@ -35,7 +49,11 @@ class HeldError(ValueError):
 
 def used_names(store: ConfigStore) -> dict[str, list[str]]:
     """Held pose name -> missions using it. A step names only the pose (its object type is whichever the robot holds
-    then), so a name counts for every object type that has a pose of that name."""
+    then), so a name counts for every object type that has a pose of that name. On a targets cell: the plain names
+    the steps name (``move {to}``, and move_object's ``to.pose`` until the switch)."""
+    if targets.active(store):
+        return {name: users for name, users in targets.references(store).items()
+                if targets.SEPARATOR not in name and not name.startswith(targets.STANCE)}
     names: dict[str, list[str]] = {}
     for mission_name in store.mission_names():
         try:
@@ -72,7 +90,8 @@ def save(store: ConfigStore, robot: str, obj: str, name: str, body: Mapping) -> 
     """Save the editor's numbers: ``joints`` {joint: value}, ``path`` [{xyz, rpy}] (at least one), ``rename``."""
     store.reload()
     try:
-        store.object(obj)
+        if not (obj == ANY_TYPE and targets.active(store)):
+            store.object(obj)
     except ConfigError as error:
         raise HeldError(f'no object type {obj!r} (objects/{obj}.yaml)') from error
     path = []
@@ -100,6 +119,8 @@ def save(store: ConfigStore, robot: str, obj: str, name: str, body: Mapping) -> 
         users = used_names(store).get(name, [])
         if users:
             raise HeldError(f'{name} is used by {", ".join(users)}; change those missions first')
+    if targets.active(store):
+        return _save_object_target(store, robot, obj, name, joints, path, rename)
     try:
         file = store.save_held_pose(robot, obj, name, joints, path, rename)
     except ValueError as error:
@@ -112,7 +133,62 @@ def delete(store: ConfigStore, robot: str, obj: str, name: str) -> str:
     users = used_names(store).get(name, [])
     if users:
         raise HeldError(f'{name} is used by {", ".join(users)}; change those missions first')
+    if targets.active(store):
+        _held_entry(store, robot, obj, name, exists=True)
+        try:
+            return store.delete_target(name, robot)[0].relative_to(store.root).as_posix()
+        except (ValueError, KeyError) as error:
+            raise _problem(error) from error
     try:
         return str(store.delete_point(f'robots/{robot}/held_poses.yaml', [obj, name]).relative_to(store.root))
     except ValueError as error:
         raise HeldError(str(error)) from error
+
+
+# ---- the same on a targets cell (cell schema 4) ---------------------------------------------------------------------
+def _problem(error: Exception) -> HeldError:
+    """A store error as the HMI's: TargetError is a KeyError, its message the first argument."""
+    return HeldError(str(error.args[0]) if isinstance(error, KeyError) and error.args else str(error))
+
+
+def _held_entry(store: ConfigStore, robot: str, obj: str, name: str, exists: bool = False) -> dict:
+    """The object target ``name`` of the robot as written ({} if there is none; refused with ``exists``), refused when
+    the name is another kind of target or a held pose for another object type."""
+    from taskweave_core.config import target_store
+
+    kind = targets.plain_kind(store, robot, name)
+    if name in target_store.cell_targets(store) or kind not in (None, 'object'):
+        raise HeldError(f'{name!r} is a target that moves {kind}, not a held pose: give the held pose another name')
+    if kind is None:
+        if exists:
+            raise HeldError(f'no held pose {name!r} in robots/{robot}/targets.yaml')
+        return {}
+    entry = targets.plain_entry(store, robot, name)
+    if entry.get('type', ANY_TYPE) != obj:
+        raise HeldError(f'{name} is the held pose for {entry.get("type", "any")} objects (names are unique per robot)')
+    return entry
+
+
+def _save_object_target(store: ConfigStore, robot: str, obj: str, name: str, joints: dict, path: list[dict],
+                        rename: str | None) -> str:
+    """save() on a targets cell: an object target in the base frame in robots/<robot>/targets.yaml. Keys the editor
+    does not show (reference, a torso ``auto`` / ``keep``) are kept; a single pose stays one while it is one."""
+    entry = _held_entry(store, robot, obj, name)
+    try:
+        groups = targets.group_joints(store, robot, joints, entry.get('joints'))
+    except ValueError as error:
+        raise HeldError(str(error)) from error
+    data = {k: v for k, v in entry.items() if k not in ('xyz', 'rpy', 'path', 'joints', 'type')}
+    data['moves'] = 'object'
+    if obj != ANY_TYPE:
+        data['type'] = obj
+    if len(path) == 1 and 'xyz' in entry:
+        data.update(path[0])
+    else:
+        data['path'] = path
+    if groups:
+        data['joints'] = groups
+    try:
+        return store.save_target(name, data, robot, rename=rename)[0].relative_to(store.root).as_posix()
+    except (ValueError, KeyError) as error:
+        raise _problem(error) from error
