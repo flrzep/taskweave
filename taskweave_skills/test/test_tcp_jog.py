@@ -175,6 +175,17 @@ def test_when_one_hand_cannot_follow_no_hand_moves():
     assert len(node.notices) == 1                                    # said once
 
 
+def test_at_the_edge_of_reach_the_stop_is_said_once_per_push():
+    node = object_node(stuck=('right',))
+    twist = ((0.1, 0, 0), (0, 0, 0))
+    node._object_step(node.holds[0], twist, 0.5)                     # refused
+    node.tools['right']['chain'].stuck = False
+    node._object_step(node.holds[0], twist, 0.5)                     # taken
+    node.tools['right']['chain'].stuck = True
+    node._object_step(node.holds[0], twist, 0.5)                     # refused again, same push
+    assert len(node.sent) == 1 and len(node.notices) == 1
+
+
 def test_a_collision_stops_both_hands():
     node = object_node(valid=False)
     node._object_step(node.holds[0], ((0.1, 0, 0), (0, 0, 0)), 0.5)

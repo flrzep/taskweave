@@ -406,11 +406,12 @@ class TcpJog(Node):
                 hold['grips'][hands[0]])
         else:
             state['target'] = target
-        state['blocked'] = False
+        # 'blocked' stays until the jog stops (the state is dropped then): at the edge of reach steps alternate
+        # between taken and refused, and the operator should get one notice per push, not several a second
         self.command.publish(self.JointState(name=list(joints), position=list(joints.values())))
 
     def _object_blocked(self, state: dict, text: str) -> None:
-        """Nothing moves: say so once (log and operator notice)."""
+        """Nothing moves: say so once per push (log and operator notice)."""
         if not state['blocked']:
             self.get_logger().warning(text)
             self.notice.publish(self.String(data=__import__('json').dumps({'text': text, 'ok': False})))
