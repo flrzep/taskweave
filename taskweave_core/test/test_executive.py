@@ -89,6 +89,16 @@ def test_placeholders_and_world_updates():
     assert d.last[1].args == {'n': 3}
 
 
+def test_a_step_whose_placeholder_hid_its_kind_is_annotated_when_it_starts():
+    ex, d, _, _ = make([step('a', args={'target': '{next}'}), step('b', args={'n': 1})], world={'next': 'x'})
+    ex.annotate = lambda s: ('base', ['base']) if s.args.get('target') == 'x' else ('wrong', [])
+    ex.start()
+    assert (d.last[1].kind, d.last[1].resources) == ('base', ['base'])
+    assert (ex.plan.steps[0].kind, ex.plan.steps[0].resources) == (None, [])    # the plan's step stays as validated
+    finish(ex, d)
+    assert d.last[1].kind is None      # no placeholder: what validation put on the step stays
+
+
 def test_missing_placeholder_applies_on_failure_without_retries():
     ex, d, _, _ = make([step('a', args={'t': '{nope}'}, retries=3, on_failure='skip'), step('b')])
     ex.start()

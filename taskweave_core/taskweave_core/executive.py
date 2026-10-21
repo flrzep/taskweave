@@ -83,11 +83,13 @@ class Executive:
                  clock: Callable[[], float] = time.monotonic,
                  on_status: Callable[[Status], None] = lambda status: None,
                  on_episode: Callable[[dict], None] = lambda event: None,
-                 timeout_grace_s: float = 2.0, speed: Callable[[], float] | None = None):
+                 timeout_grace_s: float = 2.0, speed: Callable[[], float] | None = None,
+                 annotate: Callable[[Step], tuple[str | None, list[str]]] | None = None):
         self.planner, self.dispatcher, self.world, self.validate = planner, dispatcher, world, validate
         self.clock, self.on_status, self.on_episode = clock, on_status, on_episode
         self.timeout_grace_s = timeout_grace_s
         self.speed = speed             # the global override as a fraction: step timeouts run on work time
+        self.annotate = annotate       # (kind, resources) of a step once its placeholders are filled in
         self._work: WorkClock | None = None
         self.status = Status()
         self.plan: Plan | None = None
@@ -213,6 +215,8 @@ class Executive:
             self.status.step = step
             self._handle_failure(Outcome.REJECTED, str(error.args[0]))
             return
+        if self.annotate is not None and resolved.args != step.args:   # a placeholder hid the kind until now
+            resolved.kind, resolved.resources = self.annotate(resolved)
         self._token += 1
         self._running = True
         self.status.step, self.status.step_started = resolved, self.clock()

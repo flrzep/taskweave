@@ -22,7 +22,7 @@ motion skills are one skill, ``move``. Rewritten with ruamel (comments and key o
                                  robot pack (or a folder of them) on its own.
 
 Names that clash once the kind prefix is gone are renamed and printed (``rename``): a stance named like an object
-target of its type gets ``_stance`` (knob -> knob_stance), a held pose named like a plain target gets ``_held``
+target of its type gets ``_stance`` (grip -> grip_stance), a held pose named like a plain target gets ``_held``
 (set_down -> set_down_held), a pose named like a location ``_pose``, a contact named like a point ``_contact``. Steps
 follow. Nothing is written until every file is built; each is written aside and renamed. What cannot be mapped
 cleanly is flagged (printed again at the end); what cannot be mapped at all stops the migration with the file or step
@@ -65,6 +65,7 @@ SKILL_FILES = {
     'move_joints': 'joints',
 }
 MODULE_NAMES = {old: f'move.{new}' for old, new in SKILL_FILES.items()}
+TARGET_KIND = 'target'     # the one point kind of a mission parameter that names a target
 MOVE_YAML = (
     '# the move skill: one skill for every motion; its modules (base, straight, hand, object, posture, joints)\n'
     '# keep their parameters in skills/move/<module>.yaml (taskweave config migrate, schema 4)\n'
@@ -936,23 +937,24 @@ def migrate_missions(plan: Plan, book: Book, say) -> bool:
             done = True
             for flag in result.flags:
                 _flag(plan, say, f'{where}: {flag}')
-        _flag_params(plan, mission, path.stem, say)
+        done = _convert_params(mission, path.stem, say) or done
         if done:
             changed = True
             plan.writes[path] = _dump(mission, handler)
     return changed
 
 
-def _flag_params(plan: Plan, mission: Mapping, name: str, say) -> None:
+def _convert_params(mission: Mapping, name: str, say) -> bool:
+    """The ``point`` kind of a mission parameter (what the mission editor offers names of): every kind of the old
+    layout (base_target, tool_pose, object_point, ...) is a ``target`` now; ``instance`` (a placed object) stays."""
+    changed = False
     for param, info in (mission.get('params') or {}).items():
-        kind = (info or {}).get('point')
-        if kind and kind != 'instance':
-            _flag(
-                plan,
-                say,
-                f'{name}: params {param} has the point kind {kind}, which the new validation replaces by '
-                'target: left as it is',
-            )
+        kind = (info or {}).get('point') if isinstance(info, Mapping) else None
+        if kind and kind not in ('instance', TARGET_KIND):
+            info['point'] = TARGET_KIND
+            say(f'param   {name}: {param} point {kind} -> {TARGET_KIND}')
+            changed = True
+    return changed
 
 
 def migrate_operator(plan: Plan, book: Book, say) -> bool:

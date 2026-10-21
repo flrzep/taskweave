@@ -106,6 +106,10 @@ class Step:
     replan_from: str | None = None
     max_replans: int = DEFAULT_MAX_REPLANS
     origin: dict | None = field(default=None, compare=False, repr=False)  # see _OriginStep; None: not from a mission
+    # filled when the plan is validated (step_info.py): the kind of motion of a move step (base, straight, hand,
+    # object, posture, joints; None for other skills or while a placeholder hides it) and the resources it uses
+    kind: str | None = field(default=None, compare=False)
+    resources: list[str] = field(default_factory=list, compare=False)
 
 
 @dataclass

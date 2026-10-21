@@ -90,7 +90,9 @@ def test_an_unknown_target_is_rejected_without_moving(system):
     assert result.outcome == REJECTED and "unknown target 'mars'" in result.message
     assert sim.x == 0.0 and sim.y == 0.0
     result, _ = go(client, {'to': 'dock_tool'}, REJECTED)
-    assert result.message.startswith('move hand: ') or 'this robot cannot do hand moves' in result.message
+    # the argument check says the robot lacks the tool; a robot with tools but no hand module says it cannot move hands
+    assert ('does not fit robot' in result.message or result.message.startswith('move hand: ')
+            or 'this robot cannot do hand moves' in result.message)
 
 
 def test_a_blocked_path_fails_as_stuck_and_says_which_motion(system):

@@ -1,16 +1,25 @@
 """taskweave command line.
 
-    taskweave check CONFIG_DIR            validate every config file offline (no ROS needed)
+    taskweave check CONFIG_DIR [--missions]
+                                          validate every config file offline (no ROS needed); --missions also
+                                          validates every mission's plan against the skills the cell serves
+                                          (their argument schemas, needs ROS and the skill packages)
     taskweave skills                      list the skill catalog
     taskweave run MISSION [--goal TEXT]   start a mission
     taskweave status [--follow]           show the task status
     taskweave pause | resume | abort
-    taskweave teach location NAME         save the current base pose as a cell location
-    taskweave teach stance OBJ[/VARIANT] [--instance]
-                                          save it as the robot's stance at an object (for the object type,
-                                          or for this instance only)
-    taskweave teach point INSTANCE/POINT [--tool TOOL ...]
-                                          save the tools' current TCP poses as a point on the object type
+    taskweave teach base NAME             save the current base pose as a base target of the cell
+    taskweave teach base INSTANCE/NAME [--instance]
+                                          save it as a stance at an object (for the object type, or for this
+                                          instance only)
+    taskweave teach hand INSTANCE/NAME [--tool TOOL ...] [--instance]
+                                          save the tools' current TCP poses as a hand target on the object
+    taskweave teach hand NAME [--tool TOOL ...]
+                                          the same in the robot's base frame (a robot target)
+    taskweave teach joints NAME [--tool GROUP ...]
+                                          save the current joint values of the groups as a joint target
+                                          (cell schema 4; location, stance and point are the old names of base, base
+                                          and hand, for a cell before it)
     taskweave state show [CELL_DIR]       the run-time object state: what is taken, stack counts, placed objects
     taskweave state clear [CELL_DIR]      forget it (objects back as in cell/objects.yaml); running processes see it
                                           on their next read (the store re-reads by file stamp), no reload needed
@@ -63,7 +72,7 @@ STATE_NAMES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
 def describe_offline(config_dir: str, robot: str) -> int:
     """Robot card from config alone: skills = those with an implementation that fits the robot."""
     from .config import ConfigStore
-    from .embodiment import robot_card
+    from .embodiment import card_points, robot_card
     from .skill_server import load_skill_class
 
     store = ConfigStore(config_dir)
@@ -81,7 +90,7 @@ def describe_offline(config_dir: str, robot: str) -> int:
         skills.append({'name': cls.name, 'description': cls.description, 'args_schema': cls.args_schema,
                        'needs': cls.needs, 'achieves': cls.achieves,
                        'implementation': f'{implementation["type"]}:{implementation["name"]}'})
-    print(robot_card(store.embodiment(robot), skills, store.point_names(robot)))
+    print(robot_card(store.embodiment(robot), skills, card_points(store, robot)))
     return 0
 
 
@@ -94,8 +103,63 @@ def describe(node) -> int:
     return 0
 
 
-def check(config_dir: str) -> int:
-    """Check every file of the cell pack and its robot packs (config/check.py); the exit code is 1 on an error."""
+def offline_catalog(store, robot: str) -> dict[str, dict]:
+    """``{skill: args schema}`` of the skills the cell serves for ``robot``, as the skill servers would offer them
+    (the implementation classes, no node): the robot's hands filled in where a schema has them."""
+    import copy
+
+    from .config.schemas import HAND_RULES, hands_schema
+    from .skill_server import load_skill_class
+
+    hands = list(store.robot(robot).data.get('grippers', {}))
+    catalog = {}
+    for path in sorted((store.root / 'skills').glob('*.yaml')):
+        implementation, _ = store.select_implementation(path.stem, robot)
+        if implementation is None:
+            continue
+        cls = load_skill_class(implementation['class'])
+        if hasattr(cls, 'schema_for'):
+            schema = cls.schema_for(hands)
+        else:
+            schema = copy.deepcopy(cls.args_schema)
+            if 'hands' in schema.get('properties', {}):
+                schema['properties']['hands'] = hands_schema(hands, getattr(cls, 'hand_rules', HAND_RULES))
+        catalog[cls.name] = schema
+    return catalog
+
+
+def check_missions(config_dir: str) -> int:
+    """Validate the plan of every mission against the offline catalog (``validate_plan``); prints a line per mission
+    and per problem, the exit code is 1 when a mission has one. A mission that takes parameters is checked with its
+    placeholders open."""
+    from .config import ConfigError, ConfigStore
+    from .plan import IncludeError, Plan
+    from .validation import validate_plan
+
+    store = ConfigStore(config_dir)
+    default = store.system().get('robot') or next(iter(store.robot_names()), '')
+    catalogs: dict[str, dict] = {}
+    failed = 0
+    for name in store.mission_names():
+        try:
+            mission = store.expanded_mission(name)
+            robot = mission.get('robot') or default
+            if robot not in catalogs:
+                catalogs[robot] = offline_catalog(store, robot)
+            problems = validate_plan(Plan.from_mission(mission, name, robot=robot), catalogs[robot], store)
+        except (ConfigError, IncludeError, ValueError, KeyError) as error:
+            problems = [str(error.args[0]) if isinstance(error, KeyError) and error.args else str(error)]
+        failed += bool(problems)
+        print(f'  {"FAIL" if problems else "ok  "}  plan {name}' + (f': {problems[0]}' if problems else ''))
+        for problem in problems[1:]:
+            print(f'  FAIL  plan {name}: {problem}')
+    print(f'{failed} mission(s) with problems' if failed else 'every mission plan validates')
+    return 1 if failed else 0
+
+
+def check(config_dir: str, missions: bool = False) -> int:
+    """Check every file of the cell pack and its robot packs (config/check.py); the exit code is 1 on an error.
+    ``missions``: then also every mission's plan (``check_missions``)."""
     from .config import ConfigStore
     from .config.check import checked_files
 
@@ -107,8 +171,10 @@ def check(config_dir: str) -> int:
         print(f'  {"FAIL" if failed else "ok  "}  {label}' + (f': {_say(failed[0])}' if failed else ''))
         for problem in failed[1:] + [p for p in problems if p['severity'] != 'error']:
             print(f'  {"FAIL" if problem["severity"] == "error" else "warn"}  {label}: {_say(problem)}')
-    print(f'{errors} file(s) with problems' if errors else 'config ok (skill arguments are checked against a running '
-                                                          'catalog)')
+    print(f'{errors} file(s) with problems' if errors else 'config ok' + (
+        '' if missions else ' (skill arguments are checked against a running catalog, or with --missions)'))
+    if missions:
+        errors += check_missions(config_dir)
     return 1 if errors else 0
 
 
@@ -432,12 +498,14 @@ def trigger(node, command: str) -> int:
     return 0 if response.success else 1
 
 
-def teach(node, kind: str, name: str, tools: list[str] | None = None) -> int:
+def teach(node, kind: str, name: str, tools: list[str] | None = None, instance: bool = False) -> int:
     from taskweave_interfaces.srv import TeachPoint
 
     from . import names
 
     request = TeachPoint.Request(name=name, kind=kind, tools=tools or [])
+    if hasattr(request, 'instance_override'):   # absent in an older interface build
+        request.instance_override = instance
     response = _call(node, TeachPoint, names.TEACH_POINT, request)
     print(('saved ' + response.message + ' -> ' + response.file) if response.success else 'failed: ' + response.message)
     return 0 if response.success else 1
@@ -475,7 +543,10 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog='taskweave', description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
-    sub.add_parser('check').add_argument('config_dir')
+    check_parser = sub.add_parser('check')
+    check_parser.add_argument('config_dir')
+    check_parser.add_argument('--missions', action='store_true',
+                              help='also validate every mission plan against the skills the cell serves')
     sub.add_parser('skills')
     run_parser = sub.add_parser('run')
     run_parser.add_argument('mission')
@@ -484,13 +555,17 @@ def main(argv=None) -> int:
     for command in ('pause', 'resume', 'abort'):
         sub.add_parser(command)
     teach_parser = sub.add_parser('teach')
-    teach_parser.add_argument('kind', choices=['location', 'stance', 'point'])
-    teach_parser.add_argument('name', help='location name, OBJECT_INSTANCE[/VARIANT] for a stance, '
-                                           'OBJECT_INSTANCE/POINT for an object point')
+    teach_parser.add_argument('kind', choices=['base', 'hand', 'joints', 'object', 'location', 'stance', 'point'],
+                              help='base pose, tool poses (hand), joint values; location, stance and point are the '
+                                   'old names of base, base and hand')
+    teach_parser.add_argument('name', help='a target: NAME (a cell, robot or joint target) or INSTANCE/NAME (on a '
+                                           'placed object)')
     teach_parser.add_argument('--instance', action='store_true',
-                              help='stance: store for this object instance only, not for its object type')
+                              help='base or hand of INSTANCE/NAME: store for this object instance only, not for its '
+                                   'object type')
     teach_parser.add_argument('--tool', action='append', dest='tools',
-                              help='point: store only this tool (repeatable; default: every tool)')
+                              help='hand: store only this tool; joints: only this joint group (repeatable; default: '
+                                   'every tool, or the groups the target has)')
     state_parser = sub.add_parser('state', help='run-time object state').add_subparsers(dest='action', required=True)
     for action, text in (('show', 'what is taken, stack counts, placed objects'), ('clear', 'put every object back')):
         state_parser.add_parser(action, help=text).add_argument('cell_dir', nargs='?', default='.')
@@ -588,7 +663,7 @@ def main(argv=None) -> int:
     if options.command == 'state':
         return (state_show if options.action == 'show' else state_clear)(options.cell_dir)
     if options.command == 'check':
-        return check(options.config_dir)
+        return check(options.config_dir, options.missions)
     if options.command == 'skills':
         return _ros(skills)
     if options.command == 'run':
@@ -598,9 +673,8 @@ def main(argv=None) -> int:
             return describe_offline(options.config_dir, options.robot)
         return _ros(describe)
     if options.command == 'teach':
-        kind = {'point': 'object_point', 'stance': 'stance_instance' if options.instance else 'stance'}.get(
-            options.kind, options.kind)
-        return _ros(lambda node: teach(node, kind, options.name, options.tools))
+        kind = {'location': 'base', 'stance': 'base', 'point': 'hand'}.get(options.kind, options.kind)
+        return _ros(lambda node: teach(node, kind, options.name, options.tools, options.instance))
     if options.command == 'status':
         return _ros(lambda node: status(node, options.follow))
     return _ros(lambda node: trigger(node, options.command))

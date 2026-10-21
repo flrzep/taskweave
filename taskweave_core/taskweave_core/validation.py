@@ -4,9 +4,13 @@ Checks: the robot profile and embodiment exist, every skill has an implementatio
 the catalog, every argument object matches the skill's JSON Schema, every point a skill argument refers to exists
 in config (object points also fit the robot's tools), and ``replan_from`` targets exist.
 
-Skills mark point arguments in their schema with ``"x-taskweave-point": "target" | "base_target" | "joint_pose"
-| "tool_pose" | "object_point" | "instance_point" | "instance_contact" | "via_target" | "joint_pose_only"
-| "joint_group" | "held_pose" | "held_object"``, at any depth (nested objects, oneOf variants, list items).
+Skills mark point arguments in their schema with ``"x-taskweave-point": "target" | "joint_group" | "held_object"``,
+at any depth (nested objects, oneOf variants, list items). A ``target`` is a name the store resolves (cell schema 4);
+``x-taskweave-target-kinds`` next to it lists the kinds of target the field takes (base, hand, object, joints). The
+other kinds (``base_target``, ``joint_pose``, ``tool_pose``, ``object_point``, ``instance_point``,
+``instance_contact``, ``via_target``, ``joint_pose_only``, ``held_pose``) are the point kinds of the skills of a cell
+before schema 4 (LEGACY_KINDS); on a cell of schema 4 a skill that still marks one is told to use ``target``.
+A ``move`` step is also checked per kind of motion (step_info.move_problems): an option the kind does not take.
 Values that contain placeholders are only checked once their values are known (at step start): the skip is by path,
 so a placeholder may stand for a scalar, one vec3 component or a whole field. So are points on an object an earlier
 step of the plan puts down (an argument ``place_as: <name>``, e.g. grip): it does not exist yet.
@@ -20,11 +24,16 @@ from jsonschema import Draft202012Validator
 
 from . import placeholders
 from .config import ConfigError, ConfigStore
+from .config.migrate_move import replaced_by_move_message
 from .config.migrate_skills import removed_skill_message
 from .embodiment import check_grasp
 from .plan import Plan
+from .step_info import MOVE_SKILL, move_problems, step_info
 
 POINT_KEYWORD = 'x-taskweave-point'
+KINDS_KEYWORD = 'x-taskweave-target-kinds'
+LEGACY_KINDS = ('base_target', 'joint_pose', 'tool_pose', 'object_point', 'instance_point', 'instance_contact',
+                'via_target', 'joint_pose_only', 'held_pose')    # the point kinds before cell schema 4
 
 
 def validate_plan(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) -> list[str]:
@@ -83,7 +92,9 @@ def _plan_problems(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) 
         def add(message: str, path: list, where: str = where, label: str = '') -> None:
             problems.append((path, message, f'{where}: {label}{message}'))
 
-        removed = removed_skill_message(step.skill, step.args, str(store.root))
+        step.kind, step.resources = step_kind_resources(step, catalog, store, plan.robot)
+        removed = (replaced_by_move_message(step.skill, str(store.root)) if store.targets_format() else None) \
+            or removed_skill_message(step.skill, step.args, str(store.root))
         if removed:   # an old skill name: say how to migrate, whatever the catalog offers
             add(removed, here + ['skill'])
             continue
@@ -101,9 +112,27 @@ def _plan_problems(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) 
         for path, message in validate_args_structured(step.args, catalog[step.skill], store, plan.robot,
                                                       later=put_down):
             add(message, here + path, label=f'{".".join(str(part) for part in path)}: ')
+        if step.skill == MOVE_SKILL and store.targets_format():
+            for path, message in move_problems(step.args, store, plan.robot):
+                add(message, here + path, label=f'{".".join(str(part) for part in path)}: ')
         if isinstance(step.args.get('place_as'), str):
             put_down.add(step.args['place_as'])
     return problems
+
+
+def step_kind_resources(step, catalog: Mapping[str, dict], store: ConfigStore,
+                        robot: str) -> tuple[str | None, list[str]]:
+    """The kind and resources of a step (step_info.py); a step whose references do not resolve keeps the schema's."""
+    try:
+        return step_info(step.skill, step.args, catalog.get(step.skill), store, robot)
+    except (KeyError, ConfigError, ValueError):
+        return None, list((catalog.get(step.skill) or {}).get('x-taskweave-resources') or [])
+
+
+def plan_step_info(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) -> list[dict]:
+    """``{'id', 'kind', 'resources'}`` per step, for the plan graph (what ``validate_plan`` also puts on the steps)."""
+    return [{'id': step.id, 'kind': kind, 'resources': resources} for step in plan.steps
+            for kind, resources in [step_kind_resources(step, catalog, store, plan.robot)]]
 
 
 def _object_of(value) -> str:
@@ -220,15 +249,17 @@ def _branches(schema) -> list[dict]:
 
 
 def _point_checks(value, schema, path: tuple = ()):
-    """(path, kind, value) for every value whose schema has ``x-taskweave-point``, at any depth: object properties,
-    oneOf variants (the variant the value is, if it can be told), list items. Strings with placeholders are left out."""
+    """(path, kind, value, target kinds) for every value whose schema has ``x-taskweave-point``, at any depth: object
+    properties, oneOf variants (the variant the value is, if it can be told), list items. ``target kinds`` is the
+    schema's ``x-taskweave-target-kinds`` (a tuple, empty: any). Strings with placeholders are left out."""
     if isinstance(value, str) and placeholders.names(value):
         return
     branches = _branches(schema)
     if path and not isinstance(value, (Mapping, list)):
-        kind = next((node[POINT_KEYWORD] for node in branches if node.get(POINT_KEYWORD)), None)
-        if kind:
-            yield path, kind, value
+        found = next((node for node in branches if node.get(POINT_KEYWORD)), None)
+        if found:
+            kinds = next((node[KINDS_KEYWORD] for node in branches if node.get(KINDS_KEYWORD)), ())
+            yield path, found[POINT_KEYWORD], value, tuple(kinds)
     if isinstance(value, Mapping):
         skipped = set()   # variants the value is not
         for node in branches:
@@ -276,11 +307,11 @@ def validate_args_structured(args: dict, schema: dict, store: ConfigStore, robot
             continue
         problems.append((base, error.message))
     seen = set()
-    for path, kind, value in _point_checks(args, checked):
+    for path, kind, value, kinds in _point_checks(args, checked):
         if (path, kind) in seen or _object_of(value) in later:
             continue
         seen.add((path, kind))
-        problem = check_point(kind, value, store, robot)
+        problem = check_point(kind, value, store, robot, kinds)
         if problem:
             problems.append((['args', *path], problem))
     return problems
@@ -294,11 +325,20 @@ def validate_args(args: dict, schema: dict, store: ConfigStore, robot: str, late
             validate_args_structured(args, schema, store, robot, later)]
 
 
-def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
-    """Return a problem description if a referenced point does not exist, else None."""
+def check_point(kind: str, value, store: ConfigStore, robot: str, kinds=()) -> str | None:
+    """Return a problem description if a referenced point does not exist, else None. ``kinds``: for a ``target``, the
+    kinds of target the field takes (base, hand, object, joints; empty: any): a target that moves something else is a
+    problem. A hand target is also checked against the robot's tools."""
     try:
-        if kind == 'target':   # any target (schema 4): the kinds a field takes are checked by the skill when it runs
-            store.target(str(value), robot)
+        if kind == 'target':
+            found = store.target(str(value), robot, kinds=tuple(kinds) or None)
+            if found.kind == 'hand':
+                problems = check_grasp({**found.data, **found.data.get('alone', {})}, store.embodiment(robot))
+                if problems:
+                    return f'{value} does not fit robot {robot!r}: ' + '; '.join(problems)
+        elif kind in LEGACY_KINDS and store.targets_format():
+            return (f'point kind {kind!r} is for cells before schema 4: this cell has targets, the skill schema '
+                    'must say "x-taskweave-point": "target"')
         elif kind == 'base_target':
             store.base_target(str(value), robot)
         elif kind == 'joint_pose':

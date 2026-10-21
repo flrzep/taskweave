@@ -126,7 +126,7 @@ ENUM_HINTS = {
                    (('additionalProperties', 'additionalProperties', 'properties', 'joints'), 'joints',
                     'x-taskweave-enum-keys')],
     'object_points': [((), 'objects', 'x-taskweave-enum-keys')],
-    'skill_overrides': [((), 'skills', 'x-taskweave-enum-keys')],
+    'skill_overrides': [((), 'skill_keys', 'x-taskweave-enum-keys')],
     'poses': [(('additionalProperties', 'oneOf', 0), 'joints', 'x-taskweave-enum-keys')],
     # targets (cell schema 4): the groups of a joints part, the type of an object target, the target a held one meets
     'cell_targets': [(('additionalProperties', 'properties', 'joints'), 'joint_groups', 'x-taskweave-enum-keys'),
@@ -353,7 +353,8 @@ def _kinds_of(store, robot: str, type: str) -> dict[str, str]:
 
 def enum_values(store, name: str, robot: str | None = None) -> list[str]:
     """Values of a dynamic enum in this pack: robots, skills, missions, objects (types), instances, locations,
-    stances, object_points, joint_poses, held_poses, hands, joints, tools, and for the targets layout targets (plain
+    skill_keys (skills and their parts: move.hand), stances, object_points, joint_poses, held_poses, hands, joints,
+    tools, and for the targets layout targets (plain
     names), object_targets (names on object types), target_types, base_targets_of (base targets on object types:
     ``handled_from``), joint_groups. Robot-bound ones take ``robot`` (none: the union over the cell's robots)."""
     from .limits import joint_groups, joint_limits
@@ -375,6 +376,8 @@ def enum_values(store, name: str, robot: str | None = None) -> list[str]:
 
     table = {
         'robots': lambda: sorted(store.robot_names()), 'skills': lambda: stems('skills'),
+        'skill_keys': lambda: sorted({*stems('skills'), *(f'{p.parent.name}.{p.stem}'
+                                                           for p in (root / 'skills').glob('*/*.yaml'))}),
         'missions': lambda: stems('missions'), 'objects': lambda: stems('objects'),
         'instances': lambda: sorted(store.object_instances(state=False)),
         'locations': lambda: sorted(store.locations()),

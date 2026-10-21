@@ -295,3 +295,36 @@ def test_slim_does_not_write_outside_the_cell_pack(cell, tmp_path):
     _symlink_or_skip(root / 'robots' / ROBOT / 'navigation.yaml', outside)
     assert slim(root, say=lambda line: None) == 0
     assert outside.read_text() == text
+
+
+# ---- targets.yaml (cell schema 4): merged one level deep, slim handles it like poses.yaml ----
+TARGETS = ('# robot pack targets\nhome: {moves: joints, joints: {lift: 0.1}}\n'
+           'present: {moves: hand, left_tool: {xyz: [0.5, 0.2, 0.4], rpy: [0, 0, 0]}, elbow: out}\n'
+           'carry: {moves: object, path: [{xyz: [0.7, 0, 0.1], rpy: [0, 0, 0]}]}\n')
+
+
+def test_slim_of_a_whole_file_copy_of_the_targets_keeps_the_targets_that_differ(cell):
+    root, pack = cell
+    (pack / 'targets.yaml').write_text(TARGETS)
+    copy = override(root, 'targets.yaml', TARGETS.replace('lift: 0.1', 'lift: 0.3'))
+    before = ConfigStore(root).target('home', ROBOT)
+    lines = []
+    assert slim(root, say=lines.append) == 0
+    assert yaml.safe_load(copy.read_text()) == {'~override': 'keys', 'home': {'moves': 'joints',
+                                                                              'joints': {'lift': 0.3}}}
+    assert any('drops' in line and 'present' in line and 'carry' in line for line in lines)
+    after = ConfigStore(root)
+    assert after.target('home', ROBOT).joints == before.joints == {'lift': 0.3}
+    assert after.target('present', ROBOT).data['elbow'] == 'out'        # the pack's targets still apply
+    assert after.target('carry', ROBOT).kind == 'object'
+    again = []
+    assert slim(root, say=again.append) == 0 and again[-1] == 'nothing to slim'
+
+
+def test_slim_removes_a_copy_of_the_targets_that_says_what_the_pack_says(cell):
+    root, pack = cell
+    (pack / 'targets.yaml').write_text(TARGETS)
+    copy = override(root, 'targets.yaml', TARGETS)
+    assert slim(root, say=lambda line: None) == 0
+    assert not copy.exists()
+    assert ConfigStore(root).target('present', ROBOT).data['elbow'] == 'out'

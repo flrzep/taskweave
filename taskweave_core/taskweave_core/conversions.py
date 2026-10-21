@@ -18,6 +18,8 @@ def step_to_msg(step: Step | None) -> PlanStep:
     msg.step_id, msg.instruction, msg.skill = step.id, step.instruction, step.skill
     msg.args_json = json.dumps(step.args, sort_keys=True)
     msg.timeout_s, msg.retries, msg.on_failure = float(step.timeout_s), int(step.retries), step.on_failure
+    if hasattr(msg, 'resources'):   # taskweave_interfaces of this version (older installs lack the two fields)
+        msg.kind, msg.resources = step.kind or '', list(step.resources)
     return msg
 
 

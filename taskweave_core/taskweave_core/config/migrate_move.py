@@ -26,6 +26,28 @@ RELATIVE_HAND = ('by', 'frame', 'turn_deg', 'tilt_deg', 'at', 'rpy_deg')
 SPLIT_HANDS = ('all', 'auto')
 
 
+MIGRATE_COMMAND = 'taskweave config migrate'
+REPLACED_BY_MOVE = {   # an old motion skill -> how the step reads with move
+    'navigate_to': 'move {to: <base target>}',
+    'drive_straight': 'move {to: <base target>, motion: {mode: straight}} or move {base: {by: [distance, 0]}}',
+    'move_gripper': 'move {to: <hand target>} or move {hand: <hands>, by / at: ...}',
+    'move_object': 'move {to: <object target>} or move {object: held, by / at: ...}',
+    'set_posture': 'move {elbow: <side>}',
+    'move_joints': 'move {to: <joint target>} or move {joints: {<group>: <value>}}',
+    'move_to_pose': 'move {to: <joint or hand target>}',
+    'go_to_point': 'move {to: <hand target>}',
+}
+
+
+def replaced_by_move_message(skill: str, cell: str = '<cell dir>') -> str | None:
+    """The validation message for a step of a schema 4 cell that names one of the motion skills ``move`` replaced
+    (they are not served any more); None for any other skill. It names the migration command."""
+    if skill not in REPLACED_BY_MOVE:
+        return None
+    return (f'the skill {skill} was replaced by move on a cell of schema 4 (targets): write the step as '
+            f'{REPLACED_BY_MOVE[skill]} (`{MIGRATE_COMMAND} {cell}` rewrites the steps of a cell of an older schema)')
+
+
 class Unresolved(RuntimeError):
     """A step the migration cannot map: it stops (nothing is changed) and names the step."""
 

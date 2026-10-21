@@ -766,16 +766,24 @@ def test_operator_actions_become_move_steps(old_cell):
     assert actions[1]['skill'] == 'grip' and '# up' in (old_cell / 'operator.yaml').read_text()
 
 
-def test_params_with_a_removed_point_kind_are_flagged_not_rewritten(old_cell):
+def test_params_with_a_point_kind_of_the_old_layout_become_targets(old_cell):
+    """The mission schema takes ``target`` and the old kinds; every old kind names a target now, ``instance`` stays."""
     add_mission(
         old_cell,
         'm',
         '- {id: s1, instruction: x, skill: move_joints, args: {pose: "{where}"}}\n',
-        'goal: M\nparams:\n  where: {point: joint_pose}\n',
+        'goal: M\nparams:\n  where: {point: joint_pose, description: "a pose"}\n  at: {point: base_target}\n'
+        '  hand: {point: tool_pose}\n  grasp: {point: object_point}\n  part: {point: instance}\n',
     )
-    _, lines = run(old_cell)
-    assert any(line.startswith('FLAG') and 'point kind joint_pose' in line for line in lines)
-    assert data(old_cell / 'missions' / 'm.yaml')['params']['where'] == {'point': 'joint_pose'}
+    code, lines = run(old_cell)
+    assert code == 0 and not any(line.startswith('FLAG') and 'point kind' in line for line in lines)
+    assert any('param' in line and 'where point joint_pose -> target' in line for line in lines)
+    params = data(old_cell / 'missions' / 'm.yaml')['params']
+    assert params['where'] == {'point': 'target', 'description': 'a pose'}      # the rest of the entry stays
+    assert [params[name]['point'] for name in ('at', 'hand', 'grasp', 'part')] == ['target'] * 3 + ['instance']
+    assert ConfigStore(old_cell).validate_file('missions/m.yaml') == []
+    code, lines = run(old_cell)
+    assert code == 0 and 'nothing to do' in lines[-1]
 
 
 # ---- the chain and the stops -----------------------------------------------------------------------------------------

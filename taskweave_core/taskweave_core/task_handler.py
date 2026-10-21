@@ -44,13 +44,13 @@ from . import names
 from .config import ConfigError, ConfigStore
 from .config.reload import Reloader
 from .conversions import plan_to_msg, skill_info_to_dict, status_to_msg
-from .embodiment import robot_card
+from .embodiment import card_points, robot_card
 from .executive import ACTIVE, Executive, Outcome, Status
 from .plan import Plan, Step
 from .planner import MissionFilePlanner
 from .skill_server import spin
 from .speed import MAX_PERCENT, MIN_PERCENT, OverrideState
-from .validation import validate_plan
+from .validation import step_kind_resources, validate_plan
 from .world_state import WorldState
 
 CATALOG_TIMEOUT_S = 2.0
@@ -248,6 +248,11 @@ class TaskHandler(Node):
         schemas = {name: json.loads(info.args_schema_json or '{}') for name, info in self.catalog.items()}
         return problems + validate_plan(plan, schemas, self.config)
 
+    def _annotate(self, step: Step) -> tuple[str | None, list[str]]:
+        """Kind and resources of a step whose placeholders are filled in (validate_plan did the rest of the plan)."""
+        schemas = {name: json.loads(info.args_schema_json or '{}') for name, info in self.catalog.items()}
+        return step_kind_resources(step, schemas, self.config, self.robot)
+
     def _publish_status(self, status: Status | None = None) -> None:
         status = status or (self.executive.status if self.executive else Status())
         self.status_pub.publish(status_to_msg(status, self.get_clock().now().to_msg(), self.now()))
@@ -363,7 +368,7 @@ class TaskHandler(Node):
         self.executive = Executive(planner, self.dispatcher, self.world, validate=self._validate, clock=self.now,
                                    on_status=self._on_status, on_episode=self._on_episode,
                                    timeout_grace_s=self.get_parameter('timeout_grace_s').value,
-                                   speed=lambda: self.speed.percent / 100.0)
+                                   speed=lambda: self.speed.percent / 100.0, annotate=self._annotate)
         self._speed_run(True)
         status = self.executive.start(request.start_step)
         response.accepted = status.state in ACTIVE or status.state.name == 'SUCCEEDED'
@@ -409,7 +414,7 @@ class TaskHandler(Node):
         embodiment = self.config.embodiment(self.robot)
         response.skills = list(self.refresh_catalog().values())
         response.card = robot_card(embodiment, [skill_info_to_dict(s) for s in response.skills],
-                                   self.config.point_names(self.robot))
+                                   card_points(self.config, self.robot))
         response.embodiment_json = json.dumps(embodiment)
         return response
 

@@ -363,3 +363,21 @@ def test_cli_files_schema_and_validate(example, capsys):
     assert problem['where'] == '/yaw_symmetry_deg' and problem['path'] == 'objects/part.yaml'
     assert cli.main(['config', 'validate', 'objects/part.yaml', '--cell', str(example)]) == 1
     assert 'yaw_symmetry_deg' in capsys.readouterr().out
+
+
+def test_skill_overrides_may_name_a_part_of_a_skill(tmp_path):
+    from taskweave_core.config import catalogue
+
+    cell = tmp_path / 'cell'
+    shutil.copytree(Path(__file__).parent / 'fixtures' / 'targets_new', cell)
+    (cell / 'skills' / 'move').mkdir()
+    (cell / 'skills' / 'move.yaml').write_text('implementations: []\n')
+    (cell / 'skills' / 'move' / 'hand.yaml').write_text('implementations: []\n')
+    store = ConfigStore(cell)
+    assert catalogue.enum_values(store, 'skill_keys') == ['move', 'move.hand', 'wait']
+    assert catalogue.enum_values(store, 'skills') == ['move', 'wait']       # the parts are not skills of their own
+    robot = 'bot_two_arm'
+    problems = store.validate_file(f'robots/{robot}/skill_overrides.yaml',
+                                   {'move.hand': {'speed': {'tcp_m_s': 0.1}}, 'move': {}, 'move.nope': {}, 'ghost': {}})
+    assert sorted((p['where'], p['severity']) for p in problems) == [('/ghost', 'warning'), ('/move.nope', 'warning')]
+    assert 'parts of move are move.hand' in next(p['message'] for p in problems if p['where'] == '/move.nope')

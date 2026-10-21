@@ -134,7 +134,7 @@ MISSION = {
         'params': {'type': 'object', 'propertyNames': NAME, 'additionalProperties': {
             'type': 'object', 'additionalProperties': False,
             'properties': {'description': {'type': 'string'},
-                           'point': {'enum': ['base_target', 'joint_pose', 'tool_pose', 'object_point',
+                           'point': {'enum': ['target', 'base_target', 'joint_pose', 'tool_pose', 'object_point',
                                               'instance_point', 'instance_contact', 'instance']}}}},
         # facts each cycle starts from, filled into the steps as {name} (MissionFilePlanner): fullest = the
         # placed object

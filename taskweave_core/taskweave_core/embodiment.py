@@ -118,12 +118,20 @@ def check_grasp(point: Mapping[str, Any], embodiment: Mapping[str, Any]) -> list
     return problems
 
 
+def card_points(store, robot: str) -> dict[str, list[str]]:
+    """The named points of the robot card, by kind: the targets of a cell of schema 4 (``store.target_names``: base,
+    hand, object and joint targets, <instance>/<name> for those on placed objects, the placed objects), else the
+    point kinds of the older layout (``store.point_names``)."""
+    return store.target_names(robot) if store.targets_format() else store.point_names(robot)
+
+
 def robot_card(embodiment: Mapping[str, Any], skills: Iterable[Mapping[str, Any]],
                points: Mapping[str, Iterable[str]] | None = None) -> str:
     """Text description of the robot and the skills it can run, for a planner such as a VLM.
 
     ``skills``: dicts with name, description, args_schema, needs, achieves, implementation.
-    ``points``: optional named points by kind, e.g. {'locations': [...], 'stances': [...], 'object points': [...]}.
+    ``points``: optional named points by kind, e.g. ``card_points(store, robot)``: {'base targets': [...],
+    'hand targets': [...], 'object targets': [...], 'joint targets': [...], 'placed objects': [...]}.
     """
     e = embodiment
     lines = [f'Robot: {e["name"]}', e.get('summary', '').strip(), '',

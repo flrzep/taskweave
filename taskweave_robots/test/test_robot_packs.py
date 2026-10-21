@@ -62,31 +62,23 @@ def catalog(store: ConfigStore, robot: str) -> dict:
     narrowed to the robot's grippers, as the skills' setup does)."""
     import copy
 
-    from taskweave_core.config.schemas import HAND_RULES, hands_schema
-    from taskweave_skills.gripper_motion import Grip, MoveGripper
-    from taskweave_skills.joint_motion import MoveJoints
-    from taskweave_skills.navigate import NavigateTo
+    from taskweave_core.config.schemas import hands_schema
+    from taskweave_skills.gripper_motion import Grip
+    from taskweave_skills.move import Move
 
     hands = list(store.robot(robot).data.get('grippers', {}))
-
-    def narrowed(skill, rules):
-        schema = copy.deepcopy(skill.args_schema)
-        schema['properties']['hands'] = hands_schema(hands, rules)
-        return schema
-
-    return {NavigateTo.name: NavigateTo.args_schema, MoveJoints.name: MoveJoints.args_schema,
-            MoveGripper.name: narrowed(MoveGripper, HAND_RULES), Grip.name: narrowed(Grip, ('auto', 'all'))}
+    grip = copy.deepcopy(Grip.args_schema)
+    grip['properties']['hands'] = hands_schema(hands, ('auto', 'all'))
+    return {Move.name: Move.schema_for(hands), Grip.name: grip}
 
 
 def mission_plan(store: ConfigStore, robot: str, pose: str, tools: bool = False) -> Plan:
-    """Drive, take a named pose (``tools``: one that places tools: move_gripper, else move_joints), open a gripper."""
+    """Drive, take a named target (a joint or a hand target: ``move to`` takes either; ``tools`` says it is a hand
+    target and only documents the call), open a gripper."""
     hands = list(store.robot(robot).data.get('grippers', {}))[:1] or 'all'    # one gripper, else the rule
-    take = ({'skill': 'move_gripper', 'args': {'to': {'pose': pose}}} if tools
-            else {'skill': 'move_joints', 'args': {'pose': pose}})
     mission = {'goal': 'generic', 'robot': robot, 'loop': 'once', 'steps': [
-        {'id': 'drive', 'instruction': 'Drive to the waiting place', 'skill': 'navigate_to',
-         'args': {'target': 'waiting'}},
-        {'id': 'pose', 'instruction': f'Take the {pose} pose', **take},
+        {'id': 'drive', 'instruction': 'Drive to the waiting place', 'skill': 'move', 'args': {'to': 'waiting'}},
+        {'id': 'pose', 'instruction': f'Take the {pose} pose', 'skill': 'move', 'args': {'to': pose}},
         {'id': 'open', 'instruction': 'Open a gripper', 'skill': 'grip', 'args': {'hands': hands, 'action': 'open'}},
     ]}
     (store.root / 'missions' / 'generic.yaml').write_text(yaml.safe_dump(mission, sort_keys=False))
@@ -162,7 +154,7 @@ def test_a_cell_pose_validates_only_when_the_cell_pack_provides_it(cell):
     robot = 'galbot_s1'
     store = ConfigStore(cell)
     problems = validate_plan(mission_plan(store, robot, CELL_POSE, tools=True), catalog(store, robot), store)
-    assert len(problems) == 1 and 'pose' in problems[0] and CELL_POSE in problems[0]
+    assert len(problems) == 1 and 'unknown target' in problems[0] and CELL_POSE in problems[0]
 
     # the cell's own poses file: the pack's poses plus the cell pose (a whole file, so it holds with whole-file
     # overrides as well as with per-key ones)

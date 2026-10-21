@@ -159,8 +159,16 @@ def _cross_object_points(store, c):
 
 
 def _cross_skill_overrides(store, c):
-    skills = catalogue.enum_values(store, 'skills')    # a key may name a part of a skill: move.hand
-    return [([n], f'skill {n!r} does not exist', WARNING) for n in c.data if n.partition('.')[0] not in skills]
+    keys = catalogue.enum_values(store, 'skill_keys')    # a skill or a part of one: move.hand
+    out = []
+    for name in c.data:
+        if name in keys:
+            continue
+        head = name.partition('.')[0]
+        parts = [k for k in keys if k.startswith(head + '.')]
+        hint = f' (the parts of {head} are {", ".join(parts)})' if parts and '.' in name else ''
+        out.append(([name], f'skill {name!r} does not exist{hint}', WARNING))
+    return out
 
 
 def _cross_stances(store, c):
