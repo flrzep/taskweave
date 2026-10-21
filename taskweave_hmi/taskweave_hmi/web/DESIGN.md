@@ -102,7 +102,8 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   white text. `.danger`: red text and border on the card; `.danger.confirm` (the second press) is a solid red fill.
   `.danger.solid`: red fill from the first press, for a stop that needs no second tap (the manual skill's Abort).
   `.small`: `--tap-s` high, 14px. `.ghost`: a text link in brand colour. Hover darkens or tints, active moves down
-  1px, disabled is 45% opacity. `.icon`: a square small button for ↑ ↓ ✕.
+  1px, disabled is 45% opacity. `.icon`: a square small button for ↑ ↓ ⧉ ✕; a step's ✕ asks first, as a solid red
+  "Remove?" (`.icon.confirm`, 3 s).
 - **Inputs and selects**: field surface, strong border, 6px radius, 44px high; brand border on focus; red border and
   tint when invalid. Checkboxes 20px in the brand colour, inside a 44px-high label.
 - **Number fields** (`input.num`, made by `numberField` in app.js): text fields, so a decimal is always shown with a

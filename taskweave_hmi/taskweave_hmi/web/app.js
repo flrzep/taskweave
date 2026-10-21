@@ -530,7 +530,17 @@ function stepCard(step, index, steps) {
   card.querySelector('[data-act="down"]').disabled = index === steps.length - 1;
   card.querySelector('[data-act="up"]').addEventListener('click', () => move(index, -1, 'up'));
   card.querySelector('[data-act="down"]').addEventListener('click', () => move(index, 1, 'down'));
-  card.querySelector('[data-act="remove"]').addEventListener('click', () => editSteps((items) => items.splice(index, 1)));
+  const remove = card.querySelector('[data-act="remove"]');
+  let removeArmed = null;
+  remove.addEventListener('click', () => {
+    if (!removeArmed) {  // two taps, as Delete elsewhere: there is no undo
+      remove.classList.add('confirm'); remove.textContent = 'Remove?'; remove.title = 'Tap again to remove this step';
+      removeArmed = setTimeout(() => { remove.classList.remove('confirm'); remove.textContent = '✕'; remove.title = ''; removeArmed = null; }, 3000);
+      return;
+    }
+    clearTimeout(removeArmed);
+    editSteps((items) => items.splice(index, 1));
+  });
   card.querySelector('[data-act="copy"]').addEventListener('click', () => {  // below it, without its id (ids are unique)
     focusStep(editSteps((items) => {
       const copy = structuredClone(items[index].step);
