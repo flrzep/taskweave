@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Object jog with the pad (F18)
+- A tool that holds an object no longer refuses the pad jog: its twist moves the held object (same axes as the arm
+  jog, rotation about the object's own origin) and every holding hand follows, target = object pose x grip. A
+  two-hand step is atomic: each hand's chain step is solved, one combined `/check_state_validity` covers all arms with
+  the object's `collision` shapes attached inside the request only, and if a hand cannot follow (limit, reach) or the
+  state collides, no hand moves. One JointState carries all arms. Either hand's twist moves the object (freshest wins).
+  The L2 elbow swing keeps working per arm with the object fixed.
+- `/taskweave/holding`: each entry of `holds` gains `grips` ({hand: 4x4 TCP-in-object}); `type` was already there.
+- New latched topic `/taskweave/jog/state` (`names.JOG_STATE`): `{"<tool>": {"object", "hands"}}`, `{}` when no tool
+  jogs an object. `operator_mode` is unchanged.
+- `HoldState.reanchor(name=None)` sets a held object's pose from its first hand's live TCP; move_object, grip open
+  with `place_as`, free-arm motions and the torso follow call it first, so jogging (or any outside arm motion) no
+  longer leaves a stale `object_in_base`.
+
 ### Torso search finds narrow bands far from the current height (F13 batch D)
 - When the local IK pass finds no height, `solve_with_torso` tries the global solver at every height whose local
   solve had no IK (the `global_heights` nearest always, as before), nearest first, then refines the first feasible

@@ -171,6 +171,7 @@ class MoveGripper(_PointMotion):
         legs = self._via(m.get('via') or [], target)
         if isinstance(legs, SkillResult):
             return legs
+        self.hold.reanchor()
         holds = self.hold.held_all()
         refusal = self._holding_refusal(hands={h for leg in [*legs, target] for h in (*leg.hands, *leg.tools)},
                                         joints={n for leg in [*legs, target] for n in leg.joints})
@@ -816,6 +817,7 @@ class Grip(_FingerMotion):
         """The registry after an open: hands let go; ``place_as`` records the object when the last hands let go."""
         message = ''
         if args.get('place_as'):
+            self.hold.reanchor()      # the object is where the hands are now, not where the last move left it
             holds = [h for h in self.hold.held_all() if set(h['hands']) & set(hands)]
             whole = [h for h in holds if set(h['hands']) <= set(hands)]
             if whole:

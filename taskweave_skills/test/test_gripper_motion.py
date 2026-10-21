@@ -535,6 +535,8 @@ def test_close_at_a_point_holds_with_the_hands_that_closed(system):
     assert data['hands'] == ['left'] and data['holding'] == {'left': True}
     assert system.hold.hand_holds == {'left': 'box_1'} and system.sim.position['right_grip'] == 1.0
     payload = settled(system, '"hands": ["left"]')               # legacy keys of the first hold, plus all holds
+    grips = payload['holds'][0].pop('grips')                              # the TCP in the object frame, per hand
+    assert list(grips) == ['left'] and np.array(grips['left']).shape == (4, 4)
     assert payload == {'object': 'box_1', 'point': 'box_1/rim', 'tools': ['left'], 'links': ['left_link7'],
                        'holds': [{'object': 'box_1', 'type': 'box', 'point': 'box_1/rim',
                                   'hands': ['left'], 'links': ['left_link7']}]}

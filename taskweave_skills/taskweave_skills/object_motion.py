@@ -162,6 +162,7 @@ class MoveObject(_HeldMotion):
     def _hold(self, args: dict):
         """The hold to move: the one ``args.object`` names, or the only one (or the one the named hands are in). A
         REJECTED result if there is none, several, or ``hands`` is not exactly the hands of the hold."""
+        self.hold.reanchor()      # the arms may have moved since the stored pose (jogging)
         holds = self.hold.held_all()
         if not holds:
             return SkillResult.rejected('nothing is held: move_gripper to the object, then grip close')

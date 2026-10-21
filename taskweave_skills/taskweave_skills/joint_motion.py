@@ -94,6 +94,7 @@ class MoveJoints(_PoseMotion):
         except _Rejected as error:
             return SkillResult.rejected(str(error))
         self._refresh_ik()
+        self.hold.reanchor()
         holds = self.hold.held_all()
         refusal = self._holding_refusal(joints={n for leg in legs for n in leg})
         if refusal is not None:

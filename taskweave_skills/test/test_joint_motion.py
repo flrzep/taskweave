@@ -64,6 +64,12 @@ class FakeHold:
     def moved(self, pose, name=None):
         self.moved_to = pose
 
+    reanchors = 0
+
+    def reanchor(self, name=None):
+        self.reanchors += 1
+        return True
+
 
 class Rig:
     def __init__(self, monkeypatch, tmp_path, percent=100.0, hold=None):

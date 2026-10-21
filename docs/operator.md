@@ -297,6 +297,12 @@ of it; an object with no hand left is released. While a hand holds:
 - That arm is locked to the object. `move_gripper` for it and `move_joints` on its arm joints (also inside a `via` or a
   whole-body pose) are `REJECTED`, with a message naming the holding hand. Open the hand first (`grip open`) or move the
   object with `move_object`, which keeps every holding hand locked to it.
+- The pad jogs the object, not the arm: a stick on a holding hand's tool moves the held object (the same axes as the
+  arm jog; the object turns about its own origin) and every holding hand follows, keeping its grip. Two hands step
+  together or not at all: if one hand reaches a limit or its reach, or the step would collide, neither moves (the HMI
+  notice says why). The elbow trigger still swings that arm's elbow with the object fixed. Opening the gripper ends the
+  hold and the tool jogs the arm again. The jog state is on `/taskweave/jog/state`; a skill that uses the held object
+  re-reads its pose from the hands first, so a jogged object is where it really is.
 - The free arm can move: `move_gripper`, `move_joints` of its own arm group and `grip` work. Torso and head may move too; the
   hold follows them.
 - The free arm's path is planned without the held object, so the object itself is not avoided.

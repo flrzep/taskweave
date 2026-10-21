@@ -40,6 +40,14 @@ def primitive(shape: dict):
     return solid, rpy_matrix(shape.get('xyz', [0, 0, 0]), shape.get('rpy', [0, 0, 0]))
 
 
+def touch_links(robot_data: dict, hands) -> list[str]:
+    """Links that may touch a held object: the ``hands``' gripper links (profile ``grippers``), else their tool frame
+    link."""
+    grippers, frames = robot_data.get('grippers', {}), robot_data.get('tool_frames', {})
+    return list(dict.fromkeys(link for hand in hands
+                              for link in (grippers.get(hand, {}).get('links') or [frames[hand]['link']])))
+
+
 class HoldCollision:
     _instances: dict = {}
 
@@ -58,9 +66,7 @@ class HoldCollision:
 
     def _links(self, hands) -> list[str]:
         """Links that may touch the object: the hands' gripper links (else the tool frame link)."""
-        grippers, frames = self.robot.data.get('grippers', {}), self.hold.tool_frames
-        return list(dict.fromkeys(link for hand in hands
-                                  for link in (grippers.get(hand, {}).get('links') or [frames[hand]['link']])))
+        return touch_links({**self.robot.data, 'tool_frames': self.hold.tool_frames}, hands)
 
     def attach(self, name: str, shapes: list[dict] | None = None) -> None:
         """Attach the shapes of held object ``name`` (an existing attachment is replaced: the hands changed).

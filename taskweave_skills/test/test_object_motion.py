@@ -54,6 +54,8 @@ def hold_box(system, hands=None):
     """Both hands (or ``hands``) on the rim of crate_1 (a stack: taking one leaves it placed), grippers closed. The
     free move checks the hands with a rigid fake FK (the test robot has no URDF chains)."""
     system.server.skills['move_object']._tcp_fk = fake_fk()
+    system.reanchors = []      # the test's TF is static (the hands never move there): re-anchoring would undo moves
+    system.hold.reanchor = lambda name=None: system.reanchors.append(name) or True
     args = {'to': {'point': 'crate_1/rim'}, **({'hands': hands} if hands else {})}
     assert run(system, 'move_gripper', args).outcome == OK
     assert run(system, 'grip', {'action': 'close'}).outcome == OK
@@ -164,6 +166,13 @@ def test_one_hand_holds_and_only_that_hand_moves(system):
     move(system, {'by': [0.2, 0.0, 0.0]}, hands=['left'], motion={'mode': 'free'})      # no drift check for one hand
     at(system, 'left', 0.7, 0.4)
     move(system, {'by': [0.0, 0.0, 0.0]}, hands='all')       # all: the hands of the hold, not every hand
+
+
+def test_move_object_re_anchors_the_object_on_the_hands_first(system):
+    hold_box(system)
+    before = len(system.reanchors)
+    move(system, {'by': [0.0, 0.0, 0.0]})
+    assert len(system.reanchors) > before    # before it reads the stored object pose
 
 
 def test_a_hands_value_must_be_exactly_the_hands_of_the_hold(system):

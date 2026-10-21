@@ -66,7 +66,9 @@ def test_grasp_only_at_a_reached_point_then_release(hold):
     assert seen[-1] == {'object': 'crate_1', 'point': 'crate_1/rails', 'tools': ['left', 'right'],
                         'links': ['left_link7', 'right_link7'],     # the legacy keys (the sim's magic grasp reads them)
                         'holds': [{'object': 'crate_1', 'point': 'crate_1/rails', 'hands': ['left', 'right'],
-                                   'links': ['left_link7', 'right_link7']}]}
+                                   'links': ['left_link7', 'right_link7'],
+                                   'grips': {hand: held['tcp_in_object'][hand].tolist() for hand in ('left', 'right')}}]}
+    assert seen[-1]['holds'][0]['grips']['left'][1][3] == pytest.approx(0.2)    # the TCP in the object frame
     assert state.release(['right']) == 'crate_1' and state.held() is None
     wait_until(lambda: seen[-1] == {}, what='the release to be published')
     assert seen[-1] == {}
@@ -101,7 +103,8 @@ def test_a_partial_close_is_a_hold_of_the_hands_that_closed(hold):
     wait_until(lambda: seen[-1].get('tools') == ['left'], what='the partial hold to be published')
     assert seen[-1]['tools'] == ['left'] and seen[-1]['links'] == ['left_link7']
     assert seen[-1]['holds'] == [{'object': 'crate_1', 'point': 'crate_1/rails', 'hands': ['left'],
-                                  'links': ['left_link7']}]
+                                  'links': ['left_link7'],
+                                  'grips': {'left': state.held()['tcp_in_object']['left'].tolist()}}]
     # left holds already
     assert state.close_hands(['left', 'right']) == {'crate_1': {'hands': ['right'], 'new': False}}
     assert state.held()['hands'] == ['left', 'right'] and set(state.held()['tcp_in_object']) == {'left', 'right'}
@@ -191,3 +194,26 @@ def test_a_hand_left_at_a_point_of_a_moved_object_does_not_join_the_hold(hold):
     state.moved(moved, 'crate_1')           # the crate went away with the left hand: right is no longer at its point
     assert state.reached_hands(['right']) == {}
     assert state.close_hands(['right']) == {} and state.hand_holds == {'left': 'crate_1'}
+
+
+def test_reanchor_takes_the_object_pose_from_the_live_hand(hold):
+    state, seen = hold
+    obj = np.eye(4)
+    obj[:3, 3] = [0.6, 0.0, 0.0]
+    state.reached_point('crate_1/rails', 'crate_1', ['left', 'right'], obj)
+    assert state.grasp(['left', 'right']) == 'crate_1'
+    assert state.held()['object_in_base'][:3, 3] == pytest.approx([0.6, 0, 0])
+    real = state.tcp_poses
+
+    def shifted(tools):          # the arms were moved by something else: 0.1 m up
+        poses = real(tools)
+        for pose in poses.values():
+            pose[2, 3] += 0.1
+        return poses
+    state.tcp_poses = shifted
+    assert state.reanchor() is True
+    assert state.held()['object_in_base'][:3, 3] == pytest.approx([0.6, 0, 0.1])
+    state.tcp_poses = lambda tools: (_ for _ in ()).throw(LookupError('no tf'))
+    assert state.reanchor('crate_1') is False                         # no transform: the stored pose stays
+    assert state.held()['object_in_base'][:3, 3] == pytest.approx([0.6, 0, 0.1])
+    assert state.reanchor('nothing') is True                          # not held: nothing to do

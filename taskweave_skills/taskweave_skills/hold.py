@@ -19,8 +19,14 @@ is the first hold, ``grasp`` needs every hand of the reached point to close, ``r
 
 The holds are published latched on /taskweave/holding (std_msgs/String, JSON; ``{}`` when nothing is held): the legacy
 keys describe the first hold, ``{"object": instance, "point": "<instance>/<point>", "tools": [...], "links": [flange
-links]}``, plus ``"holds": [{"object", "point", "hands", "links"}, ...]`` for all of them. A simulator can attach the
-object to the first link there (a "magic" grasp) and a TCP jog node can refuse to pull the hands apart.
+links]}``, plus ``"holds": [{"object", "type" (if known), "point", "hands", "links", "grips"}, ...]`` for all of them.
+``grips`` is {hand: 4x4 nested list}: the hand's TCP pose in the object frame, measured at the grip (the TCP is the
+flange link times the profile's tool frame). A simulator can attach the object to the first link there (a "magic"
+grasp); the TCP jog node (tcp_jog) jogs the held object with its hands, using ``hands`` and ``grips``.
+
+``reanchor`` re-reads the pose of a held object from where its first hand is now (TF): the stored ``object_in_base``
+is only as good as the last move_object, and the arms may have moved otherwise (jogging, a pad). The skills that read
+``object_in_base`` call it when they start.
 """
 
 from __future__ import annotations
@@ -258,6 +264,23 @@ class HoldState:
                              if info['instance'] == hold['object'] and h not in hold['hands']]:
                     del self.reached[hand]    # that hand reached the object where it was: it is no longer there
 
+    def reanchor(self, name: str | None = None) -> bool:
+        """Set the pose of held object ``name`` (default: every hold) from the live TCP of its first hand: TCP *
+        inv(grip). True if every pose was updated; a hold whose hand has no transform keeps its stored pose."""
+        with self.lock:
+            todo = [(h['object'], h['hands'][0], h['tcp_in_object'][h['hands'][0]]) for h in self.holds.values()
+                    if h['hands'] and (name is None or h['object'] == name)]
+        ok = True
+        for obj, hand, grip in todo:
+            try:
+                tcp = self.tcp_poses([hand])[hand]
+            except (LookupError, KeyError) as error:
+                self.node.get_logger().warning(f'cannot re-anchor {obj} on {hand}: {error}', throttle_duration_sec=5)
+                ok = False
+                continue
+            self.moved(tcp @ np.linalg.inv(grip), obj)
+        return ok
+
     def _publish(self) -> None:
         with self.lock:
             holds = [self._view(hold) for hold in self.holds.values()]
@@ -268,7 +291,9 @@ class HoldState:
                     'links': [self.tool_frames[t]['link'] for t in first['hands']],
                     'holds': [{'object': h['object'], **({'type': h['type']} if h.get('type') else {}),
                                'point': h['point'], 'hands': h['hands'],
-                               'links': [self.tool_frames[t]['link'] for t in h['hands']]} for h in holds]}
+                               'links': [self.tool_frames[t]['link'] for t in h['hands']],
+                               'grips': {t: np.asarray(h['tcp_in_object'][t], float).tolist()
+                                         for t in h['hands'] if t in h['tcp_in_object']}} for h in holds]}
         first_link = data['links'][0] if data and data['links'] else None
         if self._first_link is not None and first_link is not None and first_link != self._first_link:
             # the sim attaches the object to links[0] and ignores payloads while attached: release it first

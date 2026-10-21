@@ -489,6 +489,7 @@ class _PoseMotion(_JointSkill):
         from .points import target_of
 
         torso = ((self.ik.torso if self.ik is not None else None) or {}).get('joint')
+        self.hold.reanchor()
         holds = self.hold.held_all()
         if torso not in goal or not holds or set(self._hands_moved(set(goal) - {torso})) & set(self.hold.hand_holds):
             return goal, None
