@@ -51,7 +51,9 @@
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }  /* component display rules must not override hidden */
-html, body { max-width: 100%; overflow-x: hidden; }
+/* clip, not hidden: overflow hidden on both makes body a scroll container that never scrolls, and the sticky top bar
+   and Save bar then scrolled away with the page */
+html, body { max-width: 100%; overflow-x: clip; }
 body { margin: 0; background: var(--surface-page); color: var(--text); font: var(--fs-base)/1.5 var(--sans);
        font-variant-numeric: tabular-nums; padding-bottom: env(safe-area-inset-bottom, 0); -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font-family: inherit; }
