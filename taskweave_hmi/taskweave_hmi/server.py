@@ -14,7 +14,9 @@ HTTP API (JSON):
   GET  /api/state[?since=<seq>]    robot, status, plan with per-step outcomes, the latest 50 events; with since: the
                                    events after that seq (each event has a seq; event_seq = the latest, events_from =
                                    the oldest still held, 200 are)
-  GET  /api/events                 server-sent events: status | plan | episode | speed | manual | pad_mode | notice
+  GET  /api/events                 server-sent events: status | plan | episode | speed | manual | pad_mode | notice |
+                                   points (a location, stance, pose, point or carry pose was saved, deleted or taught,
+                                   here or by the pad: GET /api/points again; data null)
   GET  /api/missions               mission list (invalid files are listed with their error)
   GET  /api/missions/<name>        mission as JSON; GET /api/template for a new one
   PUT  /api/missions/<name>        validate and save; 422 with {problems} if invalid, nothing written;
@@ -670,9 +672,15 @@ class Bridge(Node):
             file = self.capture(target['scope'], target['name'], {'at': target.get('at'), 'tools': tools,
                                                                   'form': target.get('form')})
             notice = {'text': f'taught {label} -> {file}', 'ok': True, 'taught': target}
+            self.points_changed()
         except (arm.ArmError, Busy, TimeoutError, KeyError, ConfigError) as error:
             notice = {'text': f'teach {label} failed: {error}', 'ok': False}
         self.notice_pub.publish(String(data=json.dumps(notice)))
+
+    def points_changed(self) -> None:
+        """Tell every browser that the named points changed (a save from any browser or the pad): the mission
+        editor's argument pickers fetch /api/points again."""
+        self._broadcast('points', None)
 
     def capture(self, scope: str, name: str, body: dict) -> str:
         """Save the robot's current arm as an arm position: a robot pose from the joint states and forward
@@ -994,6 +1002,7 @@ class Handler(BaseHTTPRequestHandler):
                     file = points.delete(bridge.config, bridge.robot, kind, address)
                 bridge.get_logger().info(f'HMI {"saved" if method == "PUT" else "deleted"} {kind} '
                                          f'{"/".join(address)} -> {file}')
+                bridge.points_changed()
                 return self._json({'saved' if method == 'PUT' else 'deleted': '/'.join(address), 'file': file})
             if method == 'GET' and route == ['robot_pose']:
                 return self._json(points.relative_poses(bridge.config, bridge.robot_pose()))
@@ -1021,6 +1030,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     file = robot.delete_pose(bridge.config, bridge.robot, name, bridge.pose_args())
                 bridge.get_logger().info(f'HMI {"saved" if method == "PUT" else "deleted"} pose {name} -> {file}')
+                bridge.points_changed()
                 return self._json({'pose': name, 'file': file})
             if method == 'PUT' and route == ['robot', 'ik']:
                 bridge.check_idle()
@@ -1032,6 +1042,7 @@ class Handler(BaseHTTPRequestHandler):
                 object_type, point = unquote(route[1]), unquote(route[3])
                 file = points.save_object_point(bridge.config, object_type, point, self._body(), bridge.robot)
                 bridge.get_logger().info(f'HMI saved object point {object_type}/{point} -> {file}')
+                bridge.points_changed()
                 return self._json({'saved': f'{object_type}/{point}', 'file': file})
             if method == 'PUT' and route == ['robot', 'navigation']:
                 bridge.check_idle()
@@ -1070,10 +1081,12 @@ class Handler(BaseHTTPRequestHandler):
                         file = arm.delete(bridge.config, bridge.robot, scope, name, bridge.pose_args())
                     bridge.get_logger().info(f'HMI {"saved" if method == "PUT" else "deleted"} arm position '
                                              f'{scope}/{name} -> {file}')
+                    bridge.points_changed()
                     return self._json({'file': file})
                 if len(route) == 5 and method == 'POST' and route[4] == 'capture':
                     file = bridge.capture(scope, name, self._body())
                     bridge.get_logger().info(f'HMI captured arm position {scope}/{name} -> {file}')
+                    bridge.points_changed()
                     return self._json({'file': file})
                 if len(route) == 5 and method == 'POST' and route[4] == 'test':
                     return self._json(bridge.test_position(scope, name, self._body()))
@@ -1087,6 +1100,7 @@ class Handler(BaseHTTPRequestHandler):
                         file = held.delete(bridge.config, bridge.robot, obj, name)
                     bridge.get_logger().info(f'HMI {"saved" if method == "PUT" else "deleted"} held pose '
                                              f'{obj}/{name} -> {file}')
+                    bridge.points_changed()
                     return self._json({'file': file})
                 if len(route) == 5 and method == 'POST' and route[4] == 'test':
                     return self._json(bridge.run_skill(held.SKILL, held.args(name), label=f'{obj} {name}'))

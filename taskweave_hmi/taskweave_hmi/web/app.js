@@ -44,7 +44,7 @@ function argsText(args) { return Object.entries(args || {}).map(([k, v]) => `${k
 document.querySelectorAll('.tabs button').forEach((button) => button.addEventListener('click', () => {
   document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-selected', String(b === button)));
   document.querySelectorAll('.view').forEach((view) => show(view, view.id === `view-${button.dataset.view}`));
-  if (button.dataset.view === 'missions' && !state.editing) loadMissions();
+  if (button.dataset.view === 'missions') { if (state.editing) refreshCatalog(); else loadMissions(); }
   pointsVisible = button.dataset.view === 'points';
   robotVisible = button.dataset.view === 'robot';
   if (pointsVisible) { loadPoints(); loadArm(); refreshPose(); }  // teach.js: poses and points
@@ -70,7 +70,8 @@ function connect() {
   source.onerror = () => { $('conn').classList.remove('on'); renderSpeed(); };
   source.onmessage = (event) => {
     const { type, data } = JSON.parse(event.data);
-    if (type === 'state') { state.snapshot = data; renderSpeed(); renderManual(); }
+    if (type === 'state') { state.snapshot = data; renderSpeed(); renderManual(); refreshCatalog(); }  // (re)connected: may have missed points
+    else if (type === 'points') { refreshCatalog(); return; }  // saved or taught anywhere (any browser, the pad)
     else if (!state.snapshot) return;
     else if (type === 'status') state.snapshot.status = data;
     else if (type === 'pad_mode') state.snapshot.pad_mode = data;
@@ -361,6 +362,16 @@ async function loadCatalog() {
   if (skills.ok) state.skills = skills.data;
   if (points.ok) state.points = points.data;
 }
+// The argument pickers' point lists again while a mission is open in the editor: when the Missions tab is shown, when
+// points were saved or taught (the live event points: from any browser or the pad) and after a reconnect. The pickers
+// get the new lists in place; the choices and unsaved edits stay.
+async function refreshCatalog() {
+  if (!state.editing) return;
+  const { ok, data } = await api('GET', '/api/points');
+  if (!ok || !state.editing) return;
+  state.points = data;
+  $('step-editor').querySelectorAll('select[data-arg]').forEach((select) => select._fill?.());
+}
 function fillSelect(select, values, selected) {
   select.replaceChildren(...values.map((v) => el('option', { value: v, text: v === '' ? 'default' : v })));
   select.value = selected ?? '';
@@ -470,12 +481,15 @@ function argField(key, spec, required, value) {
   const kinds = POINT_KINDS[spec['x-taskweave-point']];
   const isPlaceholder = typeof value === 'string' && value.includes('{');
   if ((kinds || spec.enum) && !isPlaceholder) {
-    const options = spec.enum || kinds.flatMap((k) => state.points[k] || []);
     input = el('select');
-    fillSelect(input, ['', ...options.map(String)], value === undefined ? '' : String(value));
-    if (value !== undefined && !options.map(String).includes(String(value))) input.append(el('option', { value: String(value), text: `${value} (unknown)` }));
-    input.value = value === undefined ? '' : String(value);
-    input.options[0].textContent = required ? 'choose…' : 'none';
+    input._fill = (chosen = input.value) => {  // the choices from state.points (again: refreshCatalog), chosen kept
+      const options = (spec.enum || kinds.flatMap((k) => state.points[k] || [])).map(String);
+      fillSelect(input, ['', ...options], chosen);
+      if (chosen !== '' && !options.includes(chosen)) input.append(el('option', { value: chosen, text: `${chosen} (unknown)` }));
+      input.value = chosen;
+      input.options[0].textContent = required ? 'choose…' : 'none';
+    };
+    input._fill(value === undefined ? '' : String(value));
     input._value = () => (input.value === '' ? undefined : (spec.type === 'number' ? Number(input.value) : input.value));
   } else if (spec.type === 'number' || spec.type === 'integer') {
     input = el('input', { type: 'number', step: spec.type === 'integer' ? '1' : 'any' });
