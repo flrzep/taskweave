@@ -136,7 +136,8 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   open into an editor, the pad's target gets a brand inset rule. Mission editor steps (`.edit-step`) have a drag
   handle left of the step number (an `.icon` with six dots in `--text-muted` on a hairline border, `touch-action:
   none`); while dragged the step shrinks to its head and instruction and follows the pointer with a brand border and
-  `--shadow-2`, and a 3px brand line in the gap marks where it lands.
+  `--shadow-2`, and a 3px brand line in the gap marks where it lands. A step that Check or Save names in its problems
+  gets a red border, a 4px red inset rule and a red step number (`.has-problem`) until it is edited.
 - **Chips** (`.chip`): a dot and the word, in the state colour on an 11% tint. Each state sets `--c` (text), `--fill`
   and `--ink` (for the solid badge).
 - **Details and summary**: summaries in brand text, 44px high; nested ones inside a point are muted and monospace.

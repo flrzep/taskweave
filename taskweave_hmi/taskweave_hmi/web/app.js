@@ -529,6 +529,7 @@ function stepCard(step, index, steps) {
   q('skill').addEventListener('change', () => { renderArgs({}); markDirty(); });
   card.addEventListener('input', markDirty);
   card.addEventListener('change', markDirty);
+  ['input', 'change'].forEach((type) => card.addEventListener(type, () => card.classList.remove('has-problem')));
   card.querySelector('[data-act="up"]').disabled = index === 0;
   card.querySelector('[data-act="down"]').disabled = index === steps.length - 1;
   card.querySelector('[data-act="up"]').addEventListener('click', () => move(index, -1, 'up'));
@@ -725,9 +726,17 @@ function readMission() {
   return mission;
 }
 
+// The problems of a Check or a refused Save, above the buttons; the steps they name ("step 's3' (...)", a step of an
+// included mission as "<include step id>_...") are marked red until they are edited.
 function showProblems(problems) {
   show($('problems'), problems.length > 0);
   $('problems').textContent = problems.join('\n');
+  const named = problems.flatMap((p) => [...p.matchAll(/step '([^']+)'/g)].map((m) => m[1]));
+  [...$('step-editor').children].forEach((card, i) => {
+    const step = card._read();
+    const id = step.id || `s${i + 1}`;
+    card.classList.toggle('has-problem', named.some((n) => n === id || (!!step.include && n.startsWith(`${id}_`))));
+  });
 }
 
 $('btn-add-step').addEventListener('click', () => {
