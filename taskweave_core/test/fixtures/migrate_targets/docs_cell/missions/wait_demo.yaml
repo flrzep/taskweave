@@ -1,0 +1,11 @@
+# Runs without hardware: only `wait` steps (docs/install.md).
+goal: Wait twice, to see a mission run
+loop: once
+defaults: {timeout_s: 30, retries: 0, on_failure: abort}
+steps:
+  - instruction: Wait two seconds
+    skill: wait
+    args: {seconds: 2}
+  - instruction: Wait another second
+    skill: wait
+    args: {seconds: 1}

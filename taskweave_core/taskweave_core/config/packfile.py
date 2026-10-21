@@ -32,8 +32,7 @@ SKIP_DIRS = {'.git', '__pycache__', 'state'}
 SKIP_SUFFIXES = ('.pyc', '.swp', '~')
 SKIP_NAMES = {'.DS_Store'}
 LAYOUT_DIRS = ('cell', 'objects', 'missions', 'skills')
-EMPTY_FILES = ('cell/locations.yaml', 'cell/objects.yaml')
-ROBOT_FILES = packs.CELL_ROBOT_FILES
+EMPTY_FILES = ('cell/targets.yaml', 'cell/objects.yaml')
 MAX_BYTES = 1 << 30     # extracted size cap
 
 
@@ -120,8 +119,9 @@ def _taskweave_version() -> str:
 # ---- init -----------------------------------------------------------------------
 def init_cell(cell: str | Path, robot: str, name: str | None = None) -> Path:
     """A minimal valid cell pack in ``cell`` (absent or empty): pack.yaml at the current schema, system.yaml naming the
-    robot, empty cell/locations.yaml and cell/objects.yaml, the robot's empty stances / held poses / object points,
-    and the objects/, missions/, skills/ folders. The robot must be a robot pack taskweave finds (env, installed)."""
+    robot, empty cell/targets.yaml and cell/objects.yaml, and the objects/, missions/, skills/ folders and the robot's
+    robots/<robot>/objects/ (its targets on object types are written there). The robot must be a robot pack taskweave
+    finds (env, installed)."""
     cell = Path(cell).expanduser().resolve()
     if cell.exists() and (not cell.is_dir() or any(cell.iterdir())):
         raise PackfileError(f'{cell} exists and is not an empty folder')
@@ -133,15 +133,13 @@ def init_cell(cell: str | Path, robot: str, name: str | None = None) -> Path:
         raise PackfileError(str(error)) from error
     if not found:
         raise PackfileError(f'no robot pack {robot!r} found (env {packs.ROBOT_PACKS_ENV}, installed taskweave_robots)')
-    # the files below are the old point files: the oldest layout until init writes the targets files (the migration)
-    pack = {'name': _name(name or cell.name), 'version': 1, 'schema_version': packs.CELL_SCHEMA_OLDEST}
+    pack = {'name': _name(name or cell.name), 'version': 1, 'schema_version': packs.CELL_SCHEMA}
     files = {packs.PACK_FILE: '# cell pack: everything about this cell; the robot comes from its robot pack\n'
                               + yaml.safe_dump(pack, sort_keys=False),
-             'system.yaml': yaml.safe_dump({'robot': robot}), **{f: '{}\n' for f in EMPTY_FILES},
-             **{f'robots/{robot}/{f}': '{}\n' for f in ROBOT_FILES}}
+             'system.yaml': yaml.safe_dump({'robot': robot}), **{f: '{}\n' for f in EMPTY_FILES}}
     cell.mkdir(parents=True, exist_ok=True)
-    for folder in LAYOUT_DIRS:
-        (cell / folder).mkdir(exist_ok=True)
+    for folder in (*LAYOUT_DIRS, f'robots/{robot}/objects'):
+        (cell / folder).mkdir(parents=True, exist_ok=True)
     for rel, text in files.items():
         (cell / rel).parent.mkdir(parents=True, exist_ok=True)
         with (cell / rel).open('w', encoding='utf-8', newline='') as stream:    # LF on Windows too

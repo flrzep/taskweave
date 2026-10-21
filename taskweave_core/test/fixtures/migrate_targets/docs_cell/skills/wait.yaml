@@ -1,0 +1,6 @@
+# skills/wait.yaml. Needs no hardware, so it has no requires and no parameters. wait counts node time (sim time when
+# use_sim_time is set), not work time: the speed override does not stretch it (see AGENTS.md, rule 6).
+implementations:
+  - name: wait
+    type: script
+    class: taskweave_skills.basic:Wait

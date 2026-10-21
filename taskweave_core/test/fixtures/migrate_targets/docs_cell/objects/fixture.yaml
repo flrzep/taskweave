@@ -1,0 +1,7 @@
+name: fixture
+targets:
+  handle:                         # a lever the left hand pulls
+    moves: hand
+    tool_type: parallel_gripper
+    left_tool: {xyz: [0.0, 0.0, 0.9], rpy: [0.0, 3.14159265, 0.0]}
+  slot: {moves: object, xyz: [0.0, 0.0, 0.3], rpy: [0.0, 0.0, 0.0], reference: base} # where something put on the fixture sits (move_object to.onto)

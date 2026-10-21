@@ -1,0 +1,22 @@
+# Named targets of the Galbot S1 (joint and base-frame targets). A joint target (moves: joints) sets joint groups
+# directly (torso lift in m, head in rad, arms); a hand target (moves: hand) places each tool: the canonical TCP (grasp
+# centre, between the fingers) in base_link coordinates (x forward, y left, z up; base_link = column base, 0.583 m above
+# the floor), rpy = roll, pitch, yaw of the tool frame (z approach, y closing). The arm joints of a hand target are
+# solved by IK (MoveIt) when it is used. Partial joint targets list some groups only (d-pad lift buttons).
+# home is the only full target (13 Oct: ready and tucked folded into it; it is also the driving pose). Targets for one
+# cell's objects belong to the cell pack (robots/galbot_s1/targets.yaml there).
+# Converted 9 Oct from the joint-space poses (incl. the HMI edits of home and tucked) by forward kinematics.
+home:                           # 15 Oct: joint angles, not tool targets: IK chose elbows up and out (0.66 m, 0.52 m
+                                # to the side) and broke the cycle. Same TCPs as before ([0.8767, +-0.1993, 0.2924],
+                                # approach +x, closing -z; within 0.5 mm), the elbow-lowest solution: elbows 0.47 m
+                                # below the shoulders, wrists nearly straight. Arms mirror: same values both sides.
+                                # 20 Oct (F13): no torso: the torso search picks it per move, and move to a
+                                # base target brings it to profile torso.drive_m (0.494) before driving.
+  moves: joints
+  joints:
+    head: [0.0, 0.0]
+    left_arm: [0.745, -1.865, -0.451, -1.752, -0.001, -0.473, -0.156]
+    right_arm: [0.745, -1.865, -0.451, -1.752, -0.001, -0.473, -0.156]
+lift_high: {moves: joints, joints: {torso: 0.6}}
+lift_low: {moves: joints, joints: {torso: 0.1}}
+lift_carry: {moves: joints, joints: {torso: 0.5}} # home's lift height without moving the arms (allowed while holding)

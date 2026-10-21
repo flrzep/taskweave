@@ -1,0 +1,20 @@
+# skills/set_posture.yaml (skill-api-spec 1.3). New; it is the old move_object elbow argument. The hands stay where
+# they are, the elbows swing toward the given side along the arms' null space.
+implementations:
+  - name: null_space
+    type: script
+    class: taskweave_skills.object_motion:SetPosture
+    requires: {capabilities: [arms.bimanual]}
+  - name: null_space_single
+    type: script
+    class: taskweave_skills.object_motion:SetPosture
+    requires: {capabilities: [arms.single]}
+cell_frame: world
+speed: {joint_rad_s: 1.2}       # rad/s of the swing; a step's motion.speed or speed_abs scales it
+accel: {joint_rad_s2: 3.0}
+elbow_tolerance_deg: 20.0       # a swing that would stop further than this from the side fails before moving
+tolerances:
+  position: 0.03
+  settle_s: 0.3
+  stall_timeout_s: 5.0
+  state_timeout_s: 5.0

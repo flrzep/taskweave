@@ -1,0 +1,4 @@
+# Where this robot stands relative to an object (base pose in the object's frame).
+handled_from: pick
+targets:
+  pick: {moves: base, x: -0.85, y: 0.0, yaw: 0.0}

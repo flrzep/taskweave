@@ -1,6 +1,6 @@
 name: galbot_s1_g1gripper
 version: 0.2.3
-schema_version: 1
+schema_version: 2
 requires:
   taskweave: ">=0.2,<0.3"
 description: "Galbot S1 with Galbot G1 grippers (frame-sim-2): galbot_s1's chassis, torso, arms and head; G1 two-finger grippers on the link7 flanges; MoveIt config (URDF, SRDF, collision meshes) at the vendor joint limits"
