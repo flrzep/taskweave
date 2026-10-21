@@ -17,8 +17,11 @@ A run (and a reference, which is a saved run) is YAML::
 points, speed scale; a duration failure names both path kinds when known.
 
 Comparison: every reference step must come in the same order with outcome SUCCEEDED, its duration within
-±tolerance (relative; per skill, see DEFAULT_SKILL_TOLERANCE) plus an absolute slack, its max error not above
-reference × (1 + tolerance) plus a slack.
+±tolerance (relative; per kind of motion, see DEFAULT_SKILL_TOLERANCE) plus an absolute slack, its max error not above
+reference × (1 + tolerance) plus a slack. Steps are matched by cycle and step id, never by skill, so a reference
+recorded before the ``move`` skill (steps navigate_to, move_gripper, ...) compares against a run of ``move`` steps and
+the other way round: the tolerance key of a step is ``move.<kind>`` from the step's ``data.kind`` (a ``move`` run) or
+from its skill name through SKILL_ALIASES (an old run), so both spellings of a limit mean the same.
 """
 
 from __future__ import annotations
@@ -39,8 +42,13 @@ DEFAULT_HMI = 'http://localhost:8090'
 STATE_EVENTS = 50  # /api/state shows the latest 50 events
 END_MARGIN_S = 300.0  # beyond the mission time limit: sim reset before, recording finish after
 # duration tolerance per skill (relative), over the general one: Nav2 drives vary ~±8 % between identical runs
-DATA_KEYS = ('path', 'mode', 'choice', 'plan_s', 'plan_points')  # per-step data kept in a run (see executive)
-DEFAULT_SKILL_TOLERANCE = {'navigate_to': 0.25}
+DATA_KEYS = ('path', 'mode', 'choice', 'plan_s', 'plan_points', 'kind', 'module')  # per-step data kept in a run
+MOVE_SKILL = 'move'
+# the skills ``move`` replaced -> the kind of motion of a move step that does the same (data.kind of its result)
+SKILL_ALIASES = {'navigate_to': 'base', 'drive_straight': 'straight', 'move_gripper': 'hand', 'move_object': 'object',
+                 'set_posture': 'posture', 'move_joints': 'joints'}
+BASE_DRIVE_TOLERANCE = 0.25
+DEFAULT_SKILL_TOLERANCE = {f'{MOVE_SKILL}.base': BASE_DRIVE_TOLERANCE}   # base drives only; the rest: ``tolerance``
 
 
 class SmokeError(Exception):
@@ -97,18 +105,39 @@ def step_results(events: list[dict], cycles: int | None = None) -> list[dict]:
 
 
 # ---- comparison ---------------------------------------------------------------------------
+def tolerance_key(skill: str, kind: str | None = None) -> str:
+    """The name a duration tolerance is kept under: ``move.<kind>`` for a move step of that kind and for the skill that
+    did that motion before (navigate_to -> move.base), else the skill's own name."""
+    if skill == MOVE_SKILL and kind:
+        return f'{MOVE_SKILL}.{kind}'
+    if skill in SKILL_ALIASES:
+        return f'{MOVE_SKILL}.{SKILL_ALIASES[skill]}'
+    return skill
+
+
+def step_label(step: dict) -> str:
+    """How a step is named in the limits of a report: its skill, ``move.<kind>`` for a move step (``data.kind``)."""
+    skill, kind = step.get('skill') or '', (step.get('data') or {}).get('kind')
+    return f'{skill}.{kind}' if skill == MOVE_SKILL and kind else skill
+
+
 def compare(reference: dict, run: dict, tolerance: float = 0.10, slack_s: float = 1.0, error_slack: float = 0.002,
             allow_extra: bool = False, skill_tolerance: dict | None = None) -> dict:
     """Rows (one per reference step, plus EXTRA run steps) and ``passed``.
 
-    A step's duration tolerance is its skill's: ``skill_tolerance`` (the command line) over the reference's
-    ``limits.tolerance_by_skill`` over ``DEFAULT_SKILL_TOLERANCE``, else ``tolerance``. Errors use ``tolerance``."""
+    A step's duration tolerance is its kind of motion's (see ``tolerance_key``): ``skill_tolerance`` (the command line)
+    over the reference's ``limits.tolerance_by_skill`` over ``DEFAULT_SKILL_TOLERANCE``, else ``tolerance``. A limit
+    may be written with an old skill name (navigate_to) or the new key (move.base); ``move`` alone is every kind of
+    motion without a limit of its own. Errors use ``tolerance``."""
     ref_steps, run_steps = reference.get('steps') or [], run.get('steps') or []
-    overrides = {**DEFAULT_SKILL_TOLERANCE, **((reference.get('limits') or {}).get('tolerance_by_skill') or {}),
-                 **(skill_tolerance or {})}
+    overrides = {tolerance_key(skill): value for skill, value in
+                 {**DEFAULT_SKILL_TOLERANCE,
+                  **((reference.get('limits') or {}).get('tolerance_by_skill') or {}),
+                  **(skill_tolerance or {})}.items()}
 
-    def duration_tolerance(skill: str) -> float:
-        return overrides.get(skill, tolerance)
+    def duration_tolerance(label: str) -> float:
+        key = tolerance_key(*label.partition('.')[::2])    # 'move.base' -> ('move', 'base'); 'navigate_to' -> its alias
+        return overrides.get(key, overrides.get(key.partition('.')[0], tolerance))
 
     rows, at = [], 0
     for ref in ref_steps:
@@ -121,15 +150,15 @@ def compare(reference: dict, run: dict, tolerance: float = 0.10, slack_s: float 
         rows.extend(_row(None, extra, 'PASS' if allow_extra else 'EXTRA', 'not in the reference')
                     for extra in run_steps[at:found])
         now = run_steps[found]
-        rows.append(_judge(ref, now, tolerance, slack_s, error_slack,
-                           duration_tolerance(now.get('skill') or ref.get('skill') or '')))
+        rows.append(_judge(ref, now, tolerance, slack_s, error_slack, duration_tolerance(step_label(now if now.get(
+            'skill') else ref))))
         at = found + 1
     rows.extend(_row(None, extra, 'PASS' if allow_extra else 'EXTRA', 'not in the reference')
                 for extra in run_steps[at:])
     failed = sum(row['result'] != 'PASS' for row in rows)
-    skills = sorted({step.get('skill') or '' for step in ref_steps + run_steps} - {''})
+    labels = sorted({step_label(step) for step in ref_steps + run_steps} - {''})
     return {'passed': failed == 0, 'failed': failed, 'rows': rows,
-            'limits': {'tolerance': tolerance, 'skill_tolerance': {s: duration_tolerance(s) for s in skills},
+            'limits': {'tolerance': tolerance, 'skill_tolerance': {k: duration_tolerance(k) for k in labels},
                        'slack_s': slack_s, 'error_slack': error_slack, 'allow_extra': allow_extra}}
 
 
@@ -325,7 +354,7 @@ def skill_tolerance_arg(text: str) -> tuple[str, float]:
     except ValueError:
         fraction = -1.0
     if not sep or not skill.strip() or fraction < 0:
-        raise argparse.ArgumentTypeError(f'expected SKILL=FRACTION (e.g. navigate_to=0.25), not {text!r}')
+        raise argparse.ArgumentTypeError(f'expected SKILL=FRACTION (e.g. move.base=0.25), not {text!r}')
     return skill.strip(), fraction
 
 
@@ -353,8 +382,9 @@ def add_arguments(parser) -> None:
         p.add_argument('--error-slack', type=float, default=0.002, help='absolute max error slack (0.002)')
         p.add_argument('--allow-extra', action='store_true', help='steps not in the reference do not fail')
         p.add_argument('--skill-tolerance', action='append', default=[], type=skill_tolerance_arg,
-                       metavar='SKILL=FRACTION', help='duration tolerance of one skill, repeatable '
-                       '(navigate_to=0.25 by default; the reference file may set limits.tolerance_by_skill)')
+                       metavar='SKILL=FRACTION', help='duration tolerance of one kind of motion, repeatable '
+                       '(move.base=0.25 by default, navigate_to means the same; the reference file may set '
+                       'limits.tolerance_by_skill)')
         p.add_argument('--report', metavar='FILE', help='report file (default: <reference>.report.yaml)')
 
 

@@ -1,0 +1,292 @@
+mission: frame_cycle
+recorded: '2026-10-21T10:41:49'
+recording: 20261021_103819_smoke_frame_cycle
+outcome: 1 cycle done
+problems: []
+cycles: 1
+reset: true
+steps:
+- cycle: 1
+  step_id: s1_s1
+  skill: move_joints
+  instruction: Arms in the driving pose
+  outcome: SUCCEEDED
+  duration_s: 1.6
+  max_error: 0.003
+  attempts: 1
+  message: at home (max error 0.003)
+  data:
+    path: direct
+    mode: free
+    scale: 1.0
+- cycle: 1
+  step_id: s1_s2
+  skill: navigate_to
+  instruction: Drive to the pick stance at bay_1_stack_2_front
+  outcome: SUCCEEDED
+  duration_s: 12.2
+  max_error: null
+  attempts: 1
+  message: at stance:bay_1_stack_2_front (13 mm, 0.3 deg)
+- cycle: 1
+  step_id: s1_s3
+  skill: grip
+  instruction: Open both grippers
+  outcome: SUCCEEDED
+  duration_s: 0.833
+  max_error: null
+  attempts: 1
+  message: 'left_gripper: open, right_gripper: open'
+- cycle: 1
+  step_id: s1_s4
+  skill: move_gripper
+  instruction: Pre-grasp 15 cm above the rails
+  outcome: SUCCEEDED
+  duration_s: 9.0
+  max_error: 0.005
+  attempts: 1
+  message: at bay_1_stack_2_front/rails_top (-0.15 m) (0.1 m straight) (max error 0.005, torso 0.494)
+  data:
+    path: approach
+    mode: free
+- cycle: 1
+  step_id: s1_s5
+  skill: move_gripper
+  instruction: Onto the rails
+  outcome: SUCCEEDED
+  duration_s: 3.633
+  max_error: 0.004
+  attempts: 1
+  message: at bay_1_stack_2_front/rails_top (0.1 m straight) (max error 0.004, torso 0.494)
+  data:
+    path: approach
+    mode: free
+- cycle: 1
+  step_id: s1_s6
+  skill: grip
+  instruction: Close both grippers on the rails
+  outcome: SUCCEEDED
+  duration_s: 1.8
+  max_error: null
+  attempts: 1
+  message: 'left_gripper: closed, right_gripper: closed; left and right hold bay_1_stack_2_front; took one off bay_1_stack_2_front,
+    3 left'
+- cycle: 1
+  step_id: s1_s7
+  skill: move_object
+  instruction: Lift the frame 30 cm
+  outcome: SUCCEEDED
+  duration_s: 6.433
+  max_error: 0.005
+  attempts: 1
+  message: moved bay_1_stack_2_front by [0.0, 0.0, 0.3] (max error 0.005)
+  data:
+    path: linear
+    mode: linear
+- cycle: 1
+  step_id: s1_s8
+  skill: set_posture
+  instruction: Elbows down, the frame staying (the grasp from above leaves them up)
+  outcome: SUCCEEDED
+  duration_s: 3.8
+  max_error: null
+  attempts: 1
+  message: 'elbows of left and right down: left 135 -> 6 deg off down, right 138 -> 6 deg off down'
+  data:
+    path: swing
+    mode: null_space
+- cycle: 1
+  step_id: s1_s9
+  skill: move_object
+  instruction: Tilt the frame 30 degrees, hook end up
+  outcome: SUCCEEDED
+  duration_s: 2.333
+  max_error: 0.003
+  attempts: 1
+  message: moved bay_1_stack_2_front by [0.0, 0.0, 0.0], tilted 30 deg (max error 0.003)
+  data:
+    path: linear
+    mode: linear
+- cycle: 1
+  step_id: s1_s10
+  skill: drive_straight
+  instruction: Back away from the bin (carry lowers the torso; at the stance the forearms would hit the bin front)
+  outcome: SUCCEEDED
+  duration_s: 3.0
+  max_error: null
+  attempts: 1
+  message: drove -0.50 m (7 mm off)
+- cycle: 1
+  step_id: s1_s11
+  skill: move_object
+  instruction: Into the carry pose
+  outcome: SUCCEEDED
+  duration_s: 6.033
+  max_error: 0.003
+  attempts: 1
+  message: moved bay_1_stack_2_front to carry (max error 0.003)
+  data:
+    path: linear
+    mode: linear
+- cycle: 1
+  step_id: s2_s1
+  skill: navigate_to
+  instruction: Carry it to the drop-off zone, facing the Karakuri
+  outcome: SUCCEEDED
+  duration_s: 19.867
+  max_error: null
+  attempts: 1
+  message: at stance:karakuri_hanger (16 mm, 0.1 deg)
+- cycle: 1
+  step_id: s2_s2
+  skill: move_object
+  instruction: Stand it up, hook end on top
+  outcome: SUCCEEDED
+  duration_s: 12.0
+  max_error: 0.003
+  attempts: 1
+  message: moved bay_1_stack_2_front to stand_up (max error 0.003)
+  data:
+    path: linear
+    mode: linear
+- cycle: 1
+  step_id: s2_s3
+  skill: move_object
+  instruction: Torso down, the frame back up (arms reach up, the wrists bend less at the hook)
+  outcome: SUCCEEDED
+  duration_s: 0.833
+  max_error: 0.003
+  attempts: 1
+  message: moved bay_1_stack_2_front to hang-approach (max error 0.003)
+  data:
+    path: linear
+    mode: linear
+- cycle: 1
+  step_id: s2_s4
+  skill: drive_straight
+  instruction: Move up to the Karakuri, between its end posts
+  outcome: SUCCEEDED
+  duration_s: 3.667
+  max_error: null
+  attempts: 1
+  message: drove +0.67 m (7 mm off)
+- cycle: 1
+  step_id: s2_s5
+  skill: move_object
+  instruction: Hook plate 10 cm above the hook
+  outcome: SUCCEEDED
+  duration_s: 5.467
+  max_error: 0.004
+  attempts: 1
+  message: moved bay_1_stack_2_front hook_plate to karakuri_hanger/hook (-0.1 m) (max error 0.004, torso 0.3)
+  data:
+    path: linear
+    mode: linear
+- cycle: 1
+  step_id: s2_s6
+  skill: move_object
+  instruction: Onto the hook
+  outcome: SUCCEEDED
+  duration_s: 2.333
+  max_error: 0.004
+  attempts: 1
+  message: moved bay_1_stack_2_front hook_plate to karakuri_hanger/hook (max error 0.004)
+  data:
+    path: linear
+    mode: linear
+- cycle: 1
+  step_id: s2_s7
+  skill: grip
+  instruction: Let go
+  outcome: SUCCEEDED
+  duration_s: 1.867
+  max_error: null
+  attempts: 1
+  message: 'left_gripper: open, right_gripper: open; left and right let go of bay_1_stack_2_front (released)'
+- cycle: 1
+  step_id: s2_s8
+  skill: drive_straight
+  instruction: Back off, the hands slide off the rails
+  outcome: SUCCEEDED
+  duration_s: 2.867
+  max_error: null
+  attempts: 1
+  message: drove -0.16 m (7 mm off)
+- cycle: 1
+  step_id: s2_s9
+  skill: move_joints
+  instruction: Arms in the driving pose
+  outcome: SUCCEEDED
+  duration_s: 2.1
+  max_error: 0.002
+  attempts: 1
+  message: at home (max error 0.002)
+  data:
+    path: direct
+    mode: free
+    scale: 1.0
+- cycle: 1
+  step_id: s2_s10
+  skill: move_gripper
+  instruction: Right hand onto the hanger's latch knob
+  outcome: SUCCEEDED
+  duration_s: 4.5
+  max_error: 0.007
+  attempts: 1
+  message: at karakuri_hanger/knob (0.08 m straight) (max error 0.007, torso 0.494)
+  data:
+    path: approach
+    mode: free
+- cycle: 1
+  step_id: s2_s11
+  skill: grip
+  instruction: Grip the knob
+  outcome: SUCCEEDED
+  duration_s: 2.133
+  max_error: null
+  attempts: 1
+  message: 'right_gripper: holding; right hold karakuri_hanger; karakuri_hanger stays (the next karakuri_hanger takes its
+    place)'
+- cycle: 1
+  step_id: s2_s12
+  skill: move_object
+  instruction: Pull the knob, the hanger runs down the rail with the frame
+  outcome: SUCCEEDED
+  duration_s: 2.1
+  max_error: 0.005
+  attempts: 1
+  message: moved karakuri_hanger by [-0.08, 0.0, 0.0] (max error 0.005)
+  data:
+    path: linear
+    mode: linear
+- cycle: 1
+  step_id: s2_s13
+  skill: grip
+  instruction: Let go of the knob
+  outcome: SUCCEEDED
+  duration_s: 1.833
+  max_error: null
+  attempts: 1
+  message: 'right_gripper: open; right let go of karakuri_hanger (released)'
+- cycle: 1
+  step_id: s2_s14
+  skill: move_joints
+  instruction: Arms in the driving pose
+  outcome: SUCCEEDED
+  duration_s: 1.833
+  max_error: 0.002
+  attempts: 1
+  message: at home (max error 0.002)
+  data:
+    path: direct
+    mode: free
+    scale: 1.0
+- cycle: 1
+  step_id: s2_s15
+  skill: drive_straight
+  instruction: Back out to the drop-off zone
+  outcome: SUCCEEDED
+  duration_s: 3.033
+  max_error: null
+  attempts: 1
+  message: drove -0.50 m (8 mm off)
