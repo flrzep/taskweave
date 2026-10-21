@@ -10,12 +10,15 @@ override per key), ``objects/<type>.yaml`` ``targets`` and ``instances`` (the ob
 from __future__ import annotations
 
 import difflib
+import logging
 import re
 
 from . import schemas
 from . import targets as model
 from .poses import ObjectInstance, Pose2D, Pose3D
 from .targets import Target, TargetError
+
+log = logging.getLogger(__name__)
 
 CELL_FILE = 'cell/targets.yaml'
 KIND_LIST = {'base': 'base targets', 'hand': 'hand targets', 'object': 'object targets', 'joints': 'joint targets'}
@@ -294,6 +297,7 @@ def legacy_stance_offsets(store, robot: str) -> dict:
     """``{'objects': {type: {variant: {x, y, yaw}}}, 'instances': {...}}`` from the robot's objects files."""
     objects: dict = {}
     instances: dict = {}
+    placed = store.object_instances(state=False)
     folder = store.root / 'robots' / robot / 'objects'
     for path in sorted(folder.glob('*.yaml')):
         file = robot_object_file(store, robot, path.stem)
@@ -301,10 +305,25 @@ def legacy_stance_offsets(store, robot: str) -> dict:
         if poses:
             objects[path.stem] = poses
         for instance, table in file.get('instances', {}).items():
-            poses = {name: _xyaw(entry) for name, entry in table.items() if 'x' in entry or 'path' in entry}
+            poses = {}
+            for name, entry in table.items():
+                if 'x' in entry or 'y' in entry or 'yaw' in entry or 'path' in entry:
+                    merged = _stance_entry(store, robot, placed.get(instance), name, entry, instance)
+                    if merged is not None:
+                        poses[name] = _xyaw(merged)
             if poses:
                 instances[instance] = poses
     return {**({'objects': objects} if objects else {}), **({'instances': instances} if instances else {})}
+
+
+def _stance_entry(store, robot: str, placed, name: str, entry: dict, instance: str) -> dict | None:
+    """The merged entry of a stance override of ``instance`` (the type's layers first, then the override, per key), None
+    when it is not a complete base target. An instance that is not placed has no type: the entry as it stands."""
+    merged = model.merge_layers(name, entry_layers(store, robot, placed.object, name, instance)) if placed else entry
+    if merged.get('moves', 'base') != 'base':
+        return None
+    steps = merged.get('path') or [merged]
+    return merged if all(k in step for step in steps for k in model.BASE_KEYS) else None
 
 
 def _xyaw(entry: dict) -> dict:
@@ -325,11 +344,35 @@ def _tools_axes(target: Target) -> dict:
 
 
 def _robot_pose_targets(store, robot: str) -> dict[str, Target]:
-    return {
-        name: resolve(store, name, robot)
-        for name, entry in robot_targets(store, robot).items()
-        if entry['moves'] in ('joints', 'hand')
-    }
+    return _readable(store, robot, ('joints', 'hand'))[0]
+
+
+def _readable(store, robot: str, kinds: tuple) -> tuple[dict[str, Target], dict[str, Exception]]:
+    """The robot's targets of these kinds that resolve and whose joints fit the robot, and the ones that do not
+    (``{name: error}``, logged): one bad target does not hide the others."""
+    from .limits import group_values
+
+    good: dict[str, Target] = {}
+    bad: dict[str, Exception] = {}
+    for name, entry in robot_targets(store, robot).items():
+        if entry['moves'] not in kinds:
+            continue
+        try:
+            target = resolve(store, name, robot)
+            group_values(store, robot, target.joints)
+        except (TargetError, model.GroupError) as error:
+            bad[name] = error
+            log.warning('target %r of robot %r is skipped by the old readers: %s', name, robot, error)
+        else:
+            good[name] = target
+    return good, bad
+
+
+def pose_target_problems(store, robot: str) -> dict[str, str]:
+    """``{name: problem}`` of the robot's joint, hand and held-object targets that cannot be read (a problem in the
+    file or joints the robot has no group for); the old pose readers skip these."""
+    bad = {**_readable(store, robot, ('joints', 'hand'))[1], **_readable(store, robot, ('object',))[1]}
+    return {name: str(error) for name, error in bad.items()}
 
 
 def legacy_joint_poses(store, robot: str) -> dict[str, dict]:
@@ -349,7 +392,9 @@ def legacy_joint_poses(store, robot: str) -> dict[str, dict]:
 
 
 def legacy_named_pose(store, robot: str, name: str) -> dict:
-    targets = _robot_pose_targets(store, robot)
+    targets, bad = _readable(store, robot, ('joints', 'hand'))
+    if name in bad:
+        raise bad[name]
     if name not in targets:
         raise KeyError(f'unknown pose {name!r} for robot {robot!r}')
     target = targets[name]
@@ -360,11 +405,7 @@ def legacy_named_pose(store, robot: str, name: str) -> dict:
 
 
 def _held_targets(store, robot: str) -> dict[str, Target]:
-    return {
-        name: resolve(store, name, robot)
-        for name, entry in robot_targets(store, robot).items()
-        if entry['moves'] == 'object'
-    }
+    return _readable(store, robot, ('object',))[0]
 
 
 def legacy_held_poses(store, robot: str) -> dict:
@@ -378,6 +419,9 @@ def legacy_held_poses(store, robot: str) -> dict:
 
 
 def legacy_held_pose(store, robot: str, obj: str, name: str) -> dict:
+    bad = _readable(store, robot, ('object',))[1]
+    if name in bad:
+        raise bad[name]
     target = _held_targets(store, robot).get(name)
     if target is None or target.data.get('type') not in (None, obj):
         known = (
@@ -412,9 +456,9 @@ def legacy_point_names(store, robot: str) -> dict[str, list[str]]:
     cell, mine = cell_targets(store), robot_targets(store, robot)
     placed, contacts, points = [], [], []
     for type in type_names(store):
-        points += [f'{type}.{n}' for n, m in type_target_kinds(store, None, type).items() if m == 'hand']
+        points += [f'{type}.{n}' for n, m in type_target_kinds(store, robot, type).items() if m == 'hand']
     for name, instance in sorted(store.object_instances().items()):
-        for target, moves in type_target_kinds(store, None, instance.object).items():
+        for target, moves in type_target_kinds(store, robot, instance.object).items():
             (placed if moves == 'hand' else contacts if moves == 'object' else []).append(f'{name}{SEPARATOR}{target}')
     poses = sorted(n for n, e in mine.items() if e['moves'] in ('joints', 'hand'))
     stances = []

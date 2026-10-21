@@ -3,6 +3,7 @@
 from .poses import ObjectInstance, Pose2D, Pose3D, wrap_angle
 from .save import SaveConflict, SaveError
 from .store import ConfigError, ConfigStore, RobotProfile
+from .targets import TargetError, TargetWriteError
 
 __all__ = ['ConfigError', 'ConfigStore', 'ObjectInstance', 'Pose2D', 'Pose3D', 'RobotProfile', 'SaveConflict',
-           'SaveError', 'wrap_angle']
+           'SaveError', 'TargetError', 'TargetWriteError', 'wrap_angle']

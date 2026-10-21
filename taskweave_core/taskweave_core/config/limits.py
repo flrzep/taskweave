@@ -146,7 +146,12 @@ def joint_problems(values: dict[str, float], limits: dict[str, tuple[float, floa
 
 def pose_problems(store: ConfigStore, robot: str, name: str) -> list[str]:
     """Problems with a named pose's joints (set directly) for this robot; tool targets are checked by IK."""
-    pose = store.named_pose(robot, name)
+    from .targets import GroupError, TargetError
+
+    try:
+        pose = store.named_pose(robot, name)
+    except (TargetError, GroupError) as error:  # this target cannot be read (an unknown name is a plain KeyError)
+        return [str(error)]
     linear = set(store.robot(robot).data.get('joints', {}).get('linear', []))
     return joint_problems(pose['joints'], joint_limits(store, robot), linear)
 
@@ -163,6 +168,33 @@ def group_values(store: ConfigStore, robot: str, joints: dict, only: list[str] |
     from .targets import group_joint_values
 
     return group_joint_values(joints, joint_groups(store, robot), torso_joint(store, robot), only)
+
+
+def joint_groups_of(store: ConfigStore, robot: str, joints: dict[str, float], keep: dict | None = None,
+                    digits: int = 5) -> dict:
+    """The inverse of ``group_values``: ``{joint: value}`` as the ``joints:`` part of a target. Per group that has a
+    given joint: a number (a group of one joint, or the torso group with only its lift joint given), else a list in the
+    group's joint order with ``None`` (null) for a joint not given. ``keep``: a joints part before, whose ``auto`` /
+    ``keep`` words stay for the groups the values do not set. Raises targets.GroupError for a joint that is in no
+    group of the robot."""
+    from .targets import TORSO, GroupError
+
+    groups, lift = joint_groups(store, robot), torso_joint(store, robot)
+    left, result = dict(joints), {}
+    for group, members in groups.items():
+        hit = [joint for joint in members if joint in left]
+        if not hit:
+            continue
+        if len(members) == 1 or (group == TORSO and hit == [lift]):
+            result[group] = round(float(left.pop(hit[0])), digits)
+        else:
+            result[group] = [round(float(left.pop(joint)), digits) if joint in left else None for joint in members]
+    if left:
+        raise GroupError(f'not in a joint group of the robot profile (joints.groups): {", ".join(sorted(left))}')
+    for group, value in (keep or {}).items():
+        if isinstance(value, str) and group not in result:
+            result[group] = value
+    return result
 
 
 def target_joint_problems(store: ConfigStore, robot: str, joints: dict) -> list[str]:

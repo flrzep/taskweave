@@ -12,7 +12,7 @@ import yaml
 from taskweave_core.config import ConfigError, ConfigStore, Pose2D
 from taskweave_core.config import targets as model
 from taskweave_core.config.limits import group_values, target_joint_problems
-from taskweave_core.config.targets import GroupError, TargetError
+from taskweave_core.config.targets import GroupError, TargetError, TargetWriteError
 
 FIXTURES = Path(__file__).parent / 'fixtures'
 ROBOT = 'bot_two_arm'
@@ -770,7 +770,7 @@ def test_save_target_refuses_an_invalid_target_and_a_name_in_the_other_namespace
     with pytest.raises(ValueError, match='nothing written'):  # the schema of the file
         store.save_target('x', {'moves': 'base', 'x': 'far', 'y': 0, 'yaw': 0}, ROBOT)
     assert 'far' not in (cell / 'cell' / 'targets.yaml').read_text()
-    with pytest.raises(TargetError, match='rename one'):  # waiting is a cell target; the robot's file would clash
+    with pytest.raises(TargetWriteError, match='rename one'):  # waiting is a cell target; the robot's file would clash
         append(cell / 'robots' / ROBOT / 'targets.yaml', 'waiting: {moves: base, x: 0, y: 0, yaw: 0}\n')
         ConfigStore(cell).save_target('waiting', {'moves': 'base', 'x': 0, 'y': 0, 'yaw': 0}, ROBOT)
 
@@ -818,7 +818,7 @@ def test_save_target_saves_a_stance_and_an_instance_override(cell):
     assert fresh.target('bay_2_stack_2_front/pick', ROBOT, Pose2D(9, 1, 0)).pose.x == pytest.approx(9.1, abs=0.01)
     store.save_target('part_box_1/side', {'moves': 'base', 'x': 0.0, 'y': 0.5, 'yaw': 1.5}, ROBOT)
     assert reread(cell).target('part_box_1/side', ROBOT).kind == 'base'
-    with pytest.raises(TargetError, match='cannot be saved as moving hand'):
+    with pytest.raises(TargetWriteError, match='cannot be saved as moving hand'):
         store.save_target(
             'bay_1_stack_1_front/pick', {'moves': 'hand', 'left_tool': {'xyz': [0, 0, 0], 'rpy': [0, 0, 0]}}, ROBOT
         )
@@ -833,7 +833,7 @@ def test_save_target_sets_only_the_robots_setting(cell):
     store.save_target('part_box_1/top_grasp', {'elbow': 'in'}, ROBOT)
     assert reread(cell).target('part_box_1/top_grasp', ROBOT).get('elbow') == 'in'
     assert 'elbow' not in (cell / 'objects' / 'part_box.yaml').read_text()
-    with pytest.raises(TargetError, match='settings for an unknown target'):
+    with pytest.raises(TargetWriteError, match='settings for an unknown target'):
         store.save_target('part_box_1/nothing', {'elbow': 'in'}, ROBOT)
     store.save_target('part_box_1/top_grasp', {}, ROBOT)  # clearing the settings
     assert 'top_grasp' not in (cell / 'robots' / ROBOT / 'objects' / 'part_box.yaml').read_text()
@@ -867,7 +867,7 @@ def test_rename_target_keeps_position_and_comment(cell):
     text = (cell / 'cell' / 'targets.yaml').read_text()
     assert 'point_b: {moves: base, x: 4.0, y: 3.5, yaw: 0.0}       # free floor between waiting zone and bins' in text
     assert text.index('point_b') < text.index('set_down')
-    with pytest.raises(TargetError, match='exists already'):
+    with pytest.raises(TargetWriteError, match='exists already'):
         store.rename_target('point_b', 'waiting', ROBOT)
     with pytest.raises(ValueError, match='invalid point name'):
         store.rename_target('point_b', 'a b', ROBOT)
@@ -889,7 +889,7 @@ def test_rename_a_stance_follows_handled_from_and_a_shared_target_follows_the_ro
     again = reread(cell)
     assert 'rails_top:' not in (cell / 'objects' / 'frame_type2.yaml').read_text()
     assert again.target('bay_1_stack_1_front/rails_a', ROBOT).get('elbow') == 'up'
-    with pytest.raises(TargetError, match='has a target'):
+    with pytest.raises(TargetWriteError, match='has a target'):
         again.rename_target('bay_1_stack_1_front/rails_a', 'rails_top_steep', ROBOT)
     assert again.check_pack() == []
 
@@ -1018,3 +1018,186 @@ def test_a_type_target_without_a_placed_object_is_in_the_objects_own_frame(new):
     assert target_store.resolve_type(new, None, 'frame_type2', 'rails_top').get('elbow') is None
     with pytest.raises(TargetError, match="object 'frame_type2' has no target 'x'"):
         target_store.resolve_type(new, ROBOT, 'frame_type2', 'x')
+
+
+# ---- P6-1b: gaps found by the HMI -------------------------------------------------------------------
+HAND = {'moves': 'hand', 'left_tool': {'xyz': [0.1, 0.2, 0.3], 'rpy': [0, 0, 0]}, 'approach_m': 0.12345678}
+
+
+def crate_cell(cell) -> ConfigStore:
+    """A type nothing is placed for."""
+    edit(cell / 'objects' / 'crate.yaml', 'name: crate\ntargets: {}\n')
+    return ConfigStore(cell)
+
+
+def test_a_type_with_nothing_placed_has_targets_by_type_address(cell):
+    store = crate_cell(cell)
+    written = store.save_target('lid', {**HAND, 'elbow': 'up'}, ROBOT, type='crate')
+    assert written == [cell / 'objects' / 'crate.yaml', cell / 'robots' / ROBOT / 'objects' / 'crate.yaml']
+    fresh = reread(cell)
+    found = fresh.type_target('crate', 'lid', ROBOT)
+    assert found.frame == 'object' and found.instance is None and found.get('elbow') == 'up'
+    assert fresh.type_target('crate', 'lid').get('elbow') is None  # no robot: the type's layer only
+    assert fresh.object_target_names(ROBOT)['crate'] == ['lid']
+    fresh.rename_target('lid', 'cover', ROBOT, type='crate')
+    assert reread(cell).type_target('crate', 'cover', ROBOT).get('elbow') == 'up'
+    reread(cell).delete_target('cover', ROBOT, type='crate')
+    assert reread(cell).object_target_names(ROBOT)['crate'] == []
+    with pytest.raises(TargetError, match='no object type'):
+        store.save_target('lid', HAND, ROBOT, type='nothing')
+    with pytest.raises(TargetWriteError, match='bare target name'):
+        store.save_target('bay_1_stack_1_front/x', HAND, ROBOT, type='crate')
+    with pytest.raises(TargetWriteError, match='instance_override'):
+        store.save_target('lid', HAND, ROBOT, type='crate', instance_override=True)
+
+
+def test_saving_a_hand_target_keeps_each_key_in_its_layer(cell):
+    path = cell / 'robots' / ROBOT / 'objects' / 'frame_type2.yaml'
+    edit(path, path.read_text().replace('rails_top: {elbow: up}', 'rails_top: {elbow: up, approach_m: 0.2}'))
+    store = ConfigStore(cell)
+    assert store.target('bay_1_stack_1_front/rails_top', ROBOT).get('approach_m') == 0.2
+    data = dict(store.target('bay_1_stack_1_front/rails_top', ROBOT).data)
+    data['approach_m'] = 0.15
+    data['grip_m'] = {'left': 0.02}
+    store.save_target('bay_1_stack_1_front/rails_top', data, ROBOT)
+    robot_file = yaml.safe_load(path.read_text())['targets']['rails_top']
+    own = yaml.safe_load((cell / 'objects' / 'frame_type2.yaml').read_text())['targets']['rails_top']
+    assert robot_file == {'elbow': 'up', 'approach_m': 0.15, 'grip_m': {'left': 0.02}}
+    assert own['approach_m'] == 0.1 and 'elbow' not in own and 'grip_m' not in own
+    assert reread(cell).target('bay_1_stack_1_front/rails_top', ROBOT).get('approach_m') == 0.15
+
+
+def test_split_layers_by_part_and_new_keys():
+    from taskweave_core.config.target_edit import split_layers
+
+    own, mine = split_layers(
+        {'moves': 'hand', 'a': 1, 'elbow': 'up', 'grip_m': {'left': 1, 'right': 2}},
+        {'moves': 'hand', 'a': 0, 'grip_m': {'left': 0}},
+        {'grip_m': {'right': 0}},
+    )
+    assert own == {'moves': 'hand', 'a': 1, 'grip_m': {'left': 1}}
+    assert mine == {'elbow': 'up', 'grip_m': {'right': 2}}
+
+
+def test_a_partial_instance_override_merges_with_the_type_for_the_old_stance_offsets(cell):
+    path = cell / 'robots' / ROBOT / 'objects' / 'frame_type2.yaml'
+    edit(path, path.read_text().replace('instances:', 'instances:\n  bay_1_stack_1_front: {pick: {x: -1.6}}'))
+    offsets = ConfigStore(cell).stance_offsets(ROBOT)
+    assert offsets['instances']['bay_1_stack_1_front']['pick'] == {'x': -1.6, 'y': 0.0, 'yaw': 0.0}
+
+
+def test_one_bad_target_does_not_hide_the_other_poses(cell):
+    append(
+        cell / 'robots' / ROBOT / 'targets.yaml',
+        'bad_pose: {moves: joints, joints: {tail: 1.0}}\n'
+        'bad_held: {moves: object, joints: {tail: 1.0}, xyz: [0, 0, 0], rpy: [0, 0, 0]}\n',
+    )
+    store = ConfigStore(cell)
+    assert 'home' in store.joint_poses(ROBOT) and 'bad_pose' not in store.joint_poses(ROBOT)
+    assert 'carry' in store.held_poses(ROBOT).get('frame_type2', {})
+    assert store.named_pose(ROBOT, 'lift_low')['joints']
+    with pytest.raises(GroupError, match='tail'):
+        store.named_pose(ROBOT, 'bad_pose')
+    from taskweave_core.config import target_store as ts
+    from taskweave_core.config.limits import pose_problems
+
+    assert set(ts.pose_target_problems(store, ROBOT)) == {'bad_pose', 'bad_held'}
+    assert 'tail' in pose_problems(store, ROBOT, 'bad_pose')[0]
+
+
+def test_the_generic_point_editors_refuse_old_files_on_the_new_layout(new):
+    with pytest.raises(ValueError, match='save_target'):
+        new.update_point('cell/locations.yaml', ['x'], Pose2D(0, 0, 0))
+    with pytest.raises(ValueError, match='save_target'):
+        new.delete_point(f'robots/{ROBOT}/poses.yaml', ['home'])
+    with pytest.raises(ValueError, match='save_target'):
+        new.delete_point('objects/frame_type2.yaml', ['points', 'x'])
+
+
+def test_write_refusals_are_target_write_errors_and_lookups_stay_key_errors(cell):
+    from taskweave_core.config import TargetWriteError as exported
+
+    assert exported is TargetWriteError and issubclass(TargetWriteError, ValueError)
+    assert not issubclass(TargetWriteError, KeyError)
+    store = ConfigStore(cell)
+    for call in (
+        lambda: store.save_target('x', {'moves': 'joints'}, ROBOT),
+        lambda: store.save_target('1x', {'moves': 'base', 'x': 0, 'y': 0, 'yaw': 0}, ROBOT),
+        lambda: store.save_target('part_box_1/top_grasp', {'moves': 'base', 'x': 0, 'y': 0, 'yaw': 0}, ROBOT),
+        lambda: store.rename_target('point_a', 'waiting', ROBOT),
+        lambda: store.save_target('pick', {'moves': 'base', 'x': 0, 'y': 0, 'yaw': 0}, ROBOT, instance_override=True),
+    ):
+        with pytest.raises(TargetWriteError):
+            call()
+    with pytest.raises(TargetError):
+        store.delete_target('nowhere', ROBOT)
+
+
+def test_renaming_an_instance_only_target_changes_only_that_instance(cell):
+    path = cell / 'robots' / ROBOT / 'objects' / 'frame_type2.yaml'
+    edit(
+        path,
+        path.read_text().replace(
+            'instances:',
+            'instances:\n  bay_1_stack_1_front: {side: {moves: base, x: 0.0, y: 1.0, yaw: 0.0}}\n'
+            '  bay_2_stack_2_front: {side: {moves: base, x: 0.0, y: -1.0, yaw: 0.0}}',
+        ),
+    )
+    store = ConfigStore(cell)
+    store.rename_target('bay_1_stack_1_front/side', 'edge', ROBOT)
+    tables = yaml.safe_load(path.read_text())['instances']
+    assert 'edge' in tables['bay_1_stack_1_front'] and 'side' not in tables['bay_1_stack_1_front']
+    assert 'side' in tables['bay_2_stack_2_front'] and 'edge' not in tables['bay_2_stack_2_front']
+    assert reread(cell).check_pack() == []
+
+
+def test_deleting_a_type_target_with_overrides_is_refused_unless_cascaded(cell):
+    store = ConfigStore(cell)  # pick has overrides in bay_1_stack_1_back and bay_2_stack_2_back, no moves in them
+    with pytest.raises(TargetWriteError, match=r'bay_1_stack_1_back.*cascade=True'):
+        store.delete_target('bay_1_stack_1_front/pick', ROBOT)
+    assert 'pick:' in (cell / 'robots' / ROBOT / 'objects' / 'frame_type2.yaml').read_text()
+    store.delete_target('bay_1_stack_1_front/pick', ROBOT, cascade=True)
+    text = (cell / 'robots' / ROBOT / 'objects' / 'frame_type2.yaml').read_text()
+    assert 'pick' not in yaml.safe_load(text).get('targets', {})
+    assert 'bay_1_stack_1_back' not in text and 'bay_2_stack_2_back' not in text
+
+
+def test_joint_groups_of_is_the_inverse_of_group_values(new):
+    from taskweave_core.config.limits import joint_groups_of
+
+    joints = {'left_arm': [0.1, None, 0.3, None, None, None, None], 'torso': 0.4, 'head': [None, 0.2]}
+    values = group_values(new, ROBOT, joints)
+    assert joint_groups_of(new, ROBOT, values) == joints
+    assert joint_groups_of(new, ROBOT, values, keep={'torso': 'auto', 'right_arm': 'keep'})['right_arm'] == 'keep'
+    with pytest.raises(GroupError, match='not in a joint group'):
+        joint_groups_of(new, ROBOT, {'tail_joint': 1.0})
+
+
+def test_save_target_notes_the_entry_and_rounds_to_four_decimals(cell):
+    import datetime
+
+    store = ConfigStore(cell)
+    store.save_target('bench', {'moves': 'base', 'x': 1.234567, 'y': 2.0, 'yaw': 0.5}, ROBOT)
+    text = (cell / 'cell' / 'targets.yaml').read_text()
+    assert f'bench: {{moves: base, x: 1.2346, y: 2.0, yaw: 0.5}}' in text
+    assert f'# saved {datetime.date.today().isoformat()}' in text
+    store.save_target('waiting', {'moves': 'base', 'x': 2.5, 'y': 0.0, 'yaw': 0.0}, ROBOT)  # keeps its comment
+    assert '# centre of the waiting zone' in (cell / 'cell' / 'targets.yaml').read_text()
+    store.save_target('waiting', {'moves': 'base', 'x': 2.6, 'y': 0.0, 'yaw': 0.0}, ROBOT, note='edited in the HMI')
+    text = (cell / 'cell' / 'targets.yaml').read_text()
+    assert '# edited in the HMI' in text and 'centre of the waiting zone' not in text
+    assert reread(cell).check_pack() == []
+
+
+def test_the_old_name_lists_include_a_hand_target_only_the_robot_has(cell):
+    path = cell / 'robots' / ROBOT / 'objects' / 'frame_type2.yaml'
+    edit(
+        path,
+        path.read_text().replace(
+            '  rails_top: {elbow: up}',
+            '  rails_top: {elbow: up}\n  mine: {moves: hand, left_tool: {xyz: [0, 0, 0], rpy: [0, 0, 0]}}',
+        ),
+    )
+    names = ConfigStore(cell).point_names(ROBOT)
+    assert 'frame_type2.mine' in names['object points'] and 'bay_1_stack_1_front/mine' in names['placed object points']
+    assert 'frame_type2.mine' not in ConfigStore(cell).point_names('bot_plain')['object points']

@@ -39,6 +39,12 @@ class TargetError(KeyError):
         return str(self.args[0]) if self.args else ''
 
 
+class TargetWriteError(ValueError):
+    """A target cannot be written (saved, deleted or renamed): the data does not fit its kind or file, the name is
+    taken or in two places, or other targets depend on it. ValueError (the old writers raised ValueError); a target
+    that cannot be found is a TargetError."""
+
+
 def is_tool_key(key: str) -> bool:
     return key.endswith(TOOL_SUFFIX) and len(key) > len(TOOL_SUFFIX)
 

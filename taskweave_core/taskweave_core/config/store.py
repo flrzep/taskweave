@@ -46,6 +46,7 @@ VARIANT_SEPARATOR = '/'     # stance:<instance>/<variant>
 # object point keys besides tool poses
 POINT_METADATA = ('approach', 'tool_type', 'grip_width_m', 'approach_m', 'elbow', 'alone')
 TOOL_SUFFIX = '_tool'       # an object point's tool pose key: <tool>_tool
+OLD_POINT_FILES = ('locations.yaml', 'stances.yaml', 'poses.yaml', 'object_points.yaml', 'held_poses.yaml')  # removed in 4
 POINT_FILE_SCHEMAS = {  # files that teaching and the HMI may edit (a file name matches any robot folder)
     'cell/locations.yaml': schemas.POINTS2D, 'stances.yaml': schemas.STANCES, 'poses.yaml': schemas.JOINT_POSES,
     'navigation.yaml': schemas.NAVIGATION, 'profile.yaml': schemas.ROBOT_PROFILE,  # profile: ik.choose only
@@ -416,6 +417,11 @@ class ConfigStore:
         """The cell pack is in the targets layout (cell schema 4 and up): the old point readers below are then thin
         readers over ``target()``, and the old writers refuse."""
         return packs.targets_format(self.root)
+
+    def _old_point_file(self, name: str, relative: str, keys: list[str]) -> None:
+        """Refuse a generic point edit (update_point, delete_point) of a file of the old layout on a targets cell."""
+        if self.targets_format() and (PurePosixPath(relative).name in OLD_POINT_FILES or keys[:1] == ['points']):
+            self._old_writer(name)
 
     def _old_writer(self, name: str) -> None:
         if self.targets_format():
@@ -839,27 +845,39 @@ class ConfigStore:
         """``{object type: [target names]}`` of the object-frame targets, with the robot's own when given."""
         return ts.object_target_names(self, robot)
 
+    def type_target(self, type: str, name: str, robot: str | None = None) -> Target:
+        """An object-frame target of an object type with no placed object: the merged type and robot layers (the robot's
+        settings only when ``robot`` is given), the pose in the object's own frame, not resolved to any instance."""
+        return ts.resolve_type(self, robot, type, name)
+
     def save_target(self, reference: str, data: dict, robot: str, *, instance_override: bool = False,
-                    rename: str | None = None) -> list[Path]:
+                    rename: str | None = None, type: str | None = None, note: str | None = None) -> list[Path]:
         """Create or update a target and write it where it belongs, comments kept (target_edit.save_target); returns the
-        files written. ``instance_override``: for ``<instance>/<name>``, write the instance's override."""
+        files written. ``instance_override``: for ``<instance>/<name>``, write the instance's override. ``type``: the
+        target ``reference`` (a bare name) of an object type, for a type nothing is placed for. ``note``: the entry's
+        comment (a new entry gets ``saved <date>``). Refusals are TargetWriteError (a ValueError)."""
         from . import target_edit
 
         return target_edit.save_target(self, reference, data, robot, instance_override=instance_override,
-                                       rename=rename)
+                                       rename=rename, type=type, note=note)
 
-    def delete_target(self, reference: str, robot: str, *, instance_override: bool = False) -> list[Path]:
-        """Remove a target from the files that define it (an instance's override only with ``instance_override``)."""
+    def delete_target(self, reference: str, robot: str, *, instance_override: bool = False, type: str | None = None,
+                      cascade: bool = False) -> list[Path]:
+        """Remove a target from the files that define it (an instance's override only with ``instance_override``; ``type``
+        as for save_target). A type target that instance overrides or other robots' settings still refer to is refused,
+        listing them, unless ``cascade``: they are removed too."""
         from . import target_edit
 
-        return target_edit.delete_target(self, reference, robot, instance_override=instance_override)
+        return target_edit.delete_target(self, reference, robot, instance_override=instance_override, type=type,
+                                         cascade=cascade)
 
-    def rename_target(self, reference: str, new_name: str, robot: str) -> list[Path]:
+    def rename_target(self, reference: str, new_name: str, robot: str, *, type: str | None = None) -> list[Path]:
         """Rename a target in every file that holds it, position and comments kept (a stance's ``handled_from``
-        follows); missions that use the name are not changed."""
+        follows); a name that exists only as one instance's override is renamed in that instance only; missions that
+        use the name are not changed."""
         from . import target_edit
 
-        return target_edit.rename_target(self, reference, new_name, robot)
+        return target_edit.rename_target(self, reference, new_name, robot, type=type)
 
     # ---- teaching -------------------------------------------------------------
     def save_base_pose(self, name: str, pose: Pose2D, kind: str = 'location', robot: str | None = None) -> Path:
@@ -1092,6 +1110,7 @@ class ConfigStore:
         one is appended on one line. The result is checked against the file's schema before anything is written."""
         from ruamel.yaml.comments import CommentedMap
 
+        self._old_point_file('update_point', relative, keys)
         if pose is None and rename is None:
             raise ValueError('nothing to change')
         self._check_name(keys[-1])
@@ -1212,6 +1231,7 @@ class ConfigStore:
 
     def delete_point(self, relative: str, keys: list[str]) -> Path:
         """Remove the point at ``keys``; containers below the top level that become empty are removed too."""
+        self._old_point_file('delete_point', relative, keys)
 
         def edit(document):
             path = [document]
