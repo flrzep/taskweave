@@ -1,5 +1,5 @@
 """The offline paths (``taskweave check --missions``, ``describe``) and the move schema need no ROS node: they run
-in a process where ``rclpy`` cannot be imported (a fresh interpreter, so no module is cached from a test that has it)."""
+in a process where ``rclpy`` cannot be imported (a fresh interpreter: no module is cached from a test that has it)."""
 
 import json
 import os
