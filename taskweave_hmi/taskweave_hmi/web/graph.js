@@ -1,11 +1,16 @@
 'use strict';
-// taskweave HMI, Run tab: the running plan as a graph. Steps top to bottom, coloured by skill; edges for the decision
+// taskweave HMI, Run tab: the running plan as a graph. Steps top to bottom, coloured by what moves (a move step's kind:
+// base and straight drive, hand, object, posture and joints are the arm; other skills by name); edges for the decision
 // rules (retry, replan, skip, abort, loop); the active step lights up. Rules not in the live plan message (mission
 // defaults, replan_from, stop_when) come from the mission file. Uses $, el, api, state from app.js.
 
 const SVG = 'http://www.w3.org/2000/svg';
+// the lane of a step: its kind of motion (step.kind, filled when the plan is validated: the live plan, the preview), else
+// its skill (cell schema 3, and a step whose kind a placeholder hides)
+const MOVE_LANES = { base: 'drive', straight: 'drive', hand: 'arm', object: 'arm', posture: 'arm', joints: 'arm' };
 const SKILL_KINDS = { navigate_to: 'drive', drive_straight: 'drive', move_joints: 'arm', move_gripper: 'arm',
   move_object: 'arm', set_posture: 'arm', grip: 'grip', wait: 'wait' };
+const laneOf = (step) => MOVE_LANES[step.kind] || SKILL_KINDS[step.skill] || 'other';
 const G = { width: 384, nodeX: 70, nodeW: 220, nodeH: 52, gap: 30, top: 44, lane: 34, abortLane: 368 };
 const BREATHE_MS = 2800;  // period of node-breathe for the running step (style.css)
 const missionCache = {};
@@ -19,6 +24,7 @@ function svg(tag, attrs = {}, text) {
 
 function mainArg(step) {
   const a = step.args || {};
+  if (step.skill === 'move' && typeof moveSummary === 'function') return moveSummary(a);  // app.js: "to tray_1/place"
   if (a.target) return String(a.target);
   if (a.pose) return String(a.pose);
   if (a.to && typeof a.to === 'object') {  // move_gripper / move_object: the target variant's main value
@@ -107,19 +113,21 @@ function renderGraph() {
     edge(`M${cx},28 L${cx},${rowY(0) - 2}`, 'ok'));
   plan.steps.forEach((step, i) => {
     const y = rowY(i);
-    const kind = SKILL_KINDS[step.skill] || 'other';
+    const kind = laneOf(step);
     const status = stepState(snap, plan, live, step, i);
     const group = svg('g', { class: `node kind-${kind} state-${status}${pickable ? ' pickable' : ''}`
       + `${pickable && step.id === state.startStep ? ' start-here' : ''}` });
     if (pickable) group.addEventListener('click', () => pickStart(step));  // app.js
-    const title = svg('title', {}, `${i + 1}. ${step.instruction}\n${step.skill} ${JSON.stringify(step.args)}`);
+    const uses = step.resources?.length ? `\nuses ${step.resources.join(', ')}` : '';
+    const title = svg('title', {}, `${i + 1}. ${step.instruction}\n${step.skill}${step.kind ? ` ${step.kind}` : ''} `
+      + `${JSON.stringify(step.args)}${uses}`);
     const nodeBox = svg('rect', { x: G.nodeX, y, width: G.nodeW, height: G.nodeH, rx: 14, class: 'node-box' });
     // the graph is rebuilt on every status update: start the breathing at the phase of a page-wide clock, so it
     // runs on (in and out) instead of restarting with every update
     if (status === 'running') nodeBox.style.animationDelay = `-${(performance.now() % BREATHE_MS) / 1000}s`;
     group.append(title, nodeBox,
       svg('rect', { x: G.nodeX + 9, y: y + 11, width: 5, height: G.nodeH - 22, rx: 2.5, class: 'node-kind' }),
-      svg('text', { x: G.nodeX + 24, y: y + 22, class: 'node-title' }, `${i + 1} · ${step.skill}`),
+      svg('text', { x: G.nodeX + 24, y: y + 22, class: 'node-title' }, `${i + 1} · ${step.skill}${step.kind ? ` ${step.kind}` : ''}`),
       svg('text', { x: G.nodeX + 24, y: y + 39, class: 'node-arg' }, mainArg(step).slice(0, 28)));
     if (status === 'running' || status === 'paused') {
       group.append(svg('text', { x: right - 12, y: y + 22, class: 'node-state', 'text-anchor': 'end' }, status));
@@ -180,7 +188,7 @@ function renderGraph() {
   }
   box.replaceChildren(root, el('div', { class: 'legend' },
     ...Object.entries({ drive: 'drive', arm: 'arm', grip: 'gripper', wait: 'wait', other: 'other' })
-      .filter(([kind]) => kind !== 'other' || plan.steps.some((s) => !SKILL_KINDS[s.skill]))
+      .filter(([kind]) => kind !== 'other' || plan.steps.some((s) => laneOf(s) === 'other'))
       .map(([kind, text]) => el('span', { class: `legend-item kind-${kind}` }, el('i'), text)),
     el('span', { class: 'legend-item' }, el('i', { class: 'swatch-fail' }), 'on failure')));
 }
