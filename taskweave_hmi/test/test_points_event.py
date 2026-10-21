@@ -62,7 +62,7 @@ def test_a_pad_teach_press_announces_the_new_point():
 
     bridge = points_bridge(None)
     bridge.teach_target = {'scope': 'robot', 'name': 'look_down'}
-    bridge.capture = lambda scope, name, body: 'robots/demo_bot/poses.yaml'
+    bridge.capture = lambda scope, name, body: {'file': 'robots/demo_bot/poses.yaml', 'message': ''}
     notices = []
     bridge.notice_pub = SimpleNamespace(publish=notices.append)
     bridge._teach_request(SimpleNamespace(data='{}'))
