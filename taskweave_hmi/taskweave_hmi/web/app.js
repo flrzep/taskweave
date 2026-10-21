@@ -6,7 +6,16 @@ const ON_FAILURE = ['', 'retry', 'replan', 'skip', 'abort'];
 const POINT_KINDS = { base_target: ['locations', 'stances'], joint_pose: ['joint poses'], object_point: ['object points'],
   instance_point: ['placed object points'], instance_contact: ['placed object contacts'], instance: ['placed objects'],
   tool_pose: ['tool poses'], joint_pose_only: ['joint-only poses'], joint_group: ['joint groups'],
-  held_pose: ['held poses'], held_object: ['placed objects'], via_target: ['via targets'] };
+  held_pose: ['held poses'], held_object: ['placed objects'], via_target: ['via targets'],
+  target: ['base targets', 'hand targets', 'object targets', 'joint targets'] };
+// cell schema 4: a target field lists the kinds it takes (x-taskweave-target-kinds), each a group of /api/points
+const TARGET_GROUPS = { base: 'base targets', hand: 'hand targets', object: 'object targets', joints: 'joint targets' };
+// The /api/points lists a point field picks from (none: not a point field)
+function pointLists(spec) {
+  const kinds = spec['x-taskweave-target-kinds'];
+  if (Array.isArray(kinds) && kinds.some((kind) => TARGET_GROUPS[kind])) return kinds.map((kind) => TARGET_GROUPS[kind]).filter(Boolean);
+  return POINT_KINDS[spec['x-taskweave-point']];
+}
 const INCLUDE = 'mission:';  // skill choice that includes another mission's steps
 const state = { snapshot: null, skills: [], points: {}, missions: [], editing: null, dirty: false, previews: {}, startStep: null };
 
@@ -670,7 +679,7 @@ function argKind(spec) {
   const numbers = spec.type === 'array' && ['number', 'integer'].includes(spec.items?.type);
   if (numbers && (spec['x-taskweave-widget'] === 'vec3' || (spec.minItems === spec.maxItems && spec.minItems >= 2 && spec.minItems <= 4))) return 'vec';
   if (variants.length && variants.every((v) => v.properties)) return 'variants';
-  if (spec['x-taskweave-point'] && POINT_KINDS[spec['x-taskweave-point']]) return 'point';
+  if (pointLists(spec)) return 'point';
   if (spec.enum) return 'enum';
   if (spec.type === 'number' || spec.type === 'integer') return 'number';
   if (spec.type === 'boolean') return 'bool';
@@ -783,7 +792,7 @@ function scalarEditor(key, spec, value, required) {
   const fallback = spec.default !== undefined ? 'default' : '';
   let input;
   if ((kind === 'point' || kind === 'enum') && !isPlaceholder(value)) {
-    const kinds = POINT_KINDS[spec['x-taskweave-point']];
+    const kinds = pointLists(spec) || [];
     input = el('select');
     input.dataset.points = '';
     input._fill = (chosen = input.value) => {  // the choices from state.points (again: refreshCatalog), chosen kept

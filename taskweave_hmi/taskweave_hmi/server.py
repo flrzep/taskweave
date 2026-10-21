@@ -32,13 +32,15 @@ HTTP API (JSON):
   POST /api/start {mission[, start_step]}  start a mission (at a step id: the first cycle begins there, robot and
                                    objects as they are); POST /api/pause | /api/resume | /api/abort
   GET  /api/skills                 skill catalog;  GET /api/points  named points for argument pickers (the store's
-                                   lists plus 'held poses' and 'via targets')
+                                   lists plus 'held poses' and 'via targets'; on a cell pack in the targets layout
+                                   also 'base targets', 'hand targets', 'object targets', 'joint targets')
   GET  /api/points/all             locations, stance offsets and placed objects, with the missions using each point
   PUT  /api/points/location/<name>                          {x, y, yaw[, rename]}  create, update or rename
   PUT  /api/points/stance/<objects|instances>/<owner>/<variant>  {x, y, yaw[, rename]}  (offset in the object frame)
   DELETE the same addresses;  422 with {problems} if refused, nothing written
   GET  /api/robot_pose             current base pose in the cell and relative to every placed object
   POST /api/points/drive {target}  run navigate_to now (no mission running): location name or stance:<object>/<variant>
+                                   (when the skill catalog has move: move {to: <name> or <object>/<variant>})
   Manual skills (drive, pose and point tests, held poses; one at a time, never while a mission runs) answer when they
                                    end: {outcome, message, aborted}. While one runs it is in /api/state (manual) and
                                    the live event manual: {skill, label, since (server epoch s), elapsed_s}, else null
@@ -71,7 +73,7 @@ HTTP API (JSON):
                                    move_gripper to <at>/<name>, at the placed object <at>)
   PUT  /api/teach/target {scope, name, at, form} or {}   the position a pad teach press saves into
   PUT  /api/teach/held/<type>/<name> {joints, path, rename}; DELETE the same   held poses (move_object to: {pose})
-  POST /api/teach/held/<type>/<name>/test   move the held object there now (move_object)
+  POST /api/teach/held/<type>/<name>/test   move the held object there now (move_object; move {to} once served)
   GET  /api/recordings              {status, recordings, free_bytes} (404 without recordings_dir; recording.py)
   POST /api/recordings/start {mission, name, cycles, reset, bag, camera, video, quality, max_min};  POST .../stop
   DELETE /api/recordings/<id>;  PUT /api/recordings/<id>/keep {keep}  exempt it from replacement
@@ -123,7 +125,7 @@ from taskweave_interfaces.srv import ListSkills, SetSpeedOverride, StartMission,
 from taskweave_skills.ik import pose_matrix, tool_target
 from taskweave_skills.nav2 import nav2_parameters
 
-from . import arm, held, missions, points, recording, robot, scene
+from . import arm, held, missions, points, recording, robot, scene, targets
 
 WEB = Path(__file__).parent / 'web'
 STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
@@ -240,6 +242,9 @@ class Busy(Exception):
 
 
 class Bridge(Node):
+    skills_client = None   # the task handler's skill list service (set in __init__)
+    served_skills: list[str] | None = None   # the skill names of the catalog's last answer
+
     def __init__(self, **kwargs):
         super().__init__(kwargs.pop('node_name', 'hmi_server'), **kwargs)
         for name, default in (('config_dir', ''), ('robot', ''), ('host', ''), ('port', 8090),
@@ -396,9 +401,10 @@ class Bridge(Node):
         return dict(self.joints)
 
     def _cell_frame(self) -> str:
-        """The cell frame as the teach node takes it: move_gripper's cell_frame, else 'world'."""
+        """The cell frame as the teach node takes it: the hand motion's cell_frame (skills/move/hand.yaml, else
+        move_gripper's), else 'world'."""
         try:
-            return self.config.skill_config('move_gripper').get('cell_frame', 'world')
+            return targets.module_config(self.config, 'move_gripper', 'hand').get('cell_frame', 'world')
         except (ConfigError, KeyError):
             return 'world'
 
@@ -714,8 +720,15 @@ class Bridge(Node):
                                   points.relative_poses(self.config, self.robot_pose())['relative'])
 
     def go_to_pose(self, name: str) -> dict:
-        """Run the skill that takes the robot to named pose ``name``: move_gripper for one with tool targets (IK),
-        else move_joints."""
+        """Run the skill that takes the robot to named pose ``name``: ``move {to}`` when the catalog has move, else
+        move_gripper for one with tool targets (IK), else move_joints."""
+        if self.serves_move():
+            try:
+                self.config.target(name, self.robot, kinds=('joints', 'hand'),
+                                   context='a robot pose is a joint or hand target')
+            except KeyError as error:
+                raise arm.ArmError(str(error.args[0])) from error
+            return self.run_skill(targets.MOVE, targets.move_args(name), label=name)
         try:
             tools = self.config.named_pose(self.robot, name)['tools']
         except KeyError as error:
@@ -728,16 +741,40 @@ class Bridge(Node):
         if scope == arm.ROBOT:
             return self.go_to_pose(name)
         at = body.get('at') or self.nearest_placed(scope)
+        if self.serves_move():
+            return self.run_skill(targets.MOVE, targets.move_args(f'{at}/{name}', hands=body.get('hands'),
+                                                                  offset_m=body.get('offset_m')),
+                                  label=f'{at}/{name}')
         return self.run_skill('move_gripper', {'to': {'point': f'{at}/{name}'}}, label=f'{at}/{name}')
 
     def point_names(self) -> dict[str, list[str]]:
-        """Named points for argument pickers: the store's lists, plus held poses (any object type: the held type is
-        known at run time) and via targets (``pose:<joint pose>`` or a placed object point)."""
-        names = self.config.point_names(self.robot)
-        names['held poses'] = sorted({name for poses in self.config.held_poses(self.robot).values() for name in poses})
-        names['via targets'] = [f'pose:{pose}' for pose in names.get('joint poses', [])] + \
-            list(names.get('placed object points', []))
-        return names
+        """Named points for argument pickers (points.picker_names): the store's lists, held poses, via targets and,
+        on a targets cell, the target groups."""
+        return points.picker_names(self.config, self.robot)
+
+    def serves_move(self) -> bool:
+        """The manual skills run ``move {to}``: the skill catalog has move. Asked live; without an answer the last
+        one counts, without any what the cell pack configures. A bridge without a node (tests) has only the last
+        answer, else runs the old skills."""
+        if self.skills_client is None:
+            return targets.MOVE in (self.served_skills or ())
+        try:
+            names = [skill['name'] for skill in self.catalog()]
+        except TimeoutError:
+            names = self.served_skills
+        return targets.serves_move(names, self.config)
+
+    def drive(self, target: str) -> dict:
+        """Drive to a location or stance now (POST /api/points/drive): ``move {to}`` with the reference as move
+        takes it, else navigate_to with the old reference."""
+        if self.serves_move():
+            reference = targets.target_reference(self.config, self.robot, target)
+            return self.run_skill(targets.MOVE, targets.move_args(reference), timeout_s=DRIVE_TIMEOUT_S, label=target)
+        return self.run_skill('navigate_to', {'target': target}, timeout_s=DRIVE_TIMEOUT_S, label=target)
+
+    def test_held(self, obj: str, name: str) -> dict:
+        skill, args = held.test_request(name, self.serves_move())
+        return self.run_skill(skill, args, label=f'{obj} {name}')
 
     def send_joints(self, values: dict) -> dict:
         """Joint targets straight to the robot (the HMI's joint panel): within the limits, no mission running."""
@@ -808,6 +845,7 @@ class Bridge(Node):
 
     def catalog(self) -> list[dict]:
         response = self.call(self.skills_client, ListSkills.Request())
+        self.served_skills = [s.name for s in response.skills]
         return [{'name': s.name, 'description': s.description, 'args_schema': json.loads(s.args_schema_json or '{}'),
                  'needs': list(s.needs), 'achieves': list(s.achieves), 'implementation': s.implementation}
                 for s in response.skills]
@@ -1054,9 +1092,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'POST' and route == ['robot', 'reach']:
                 return self._json(bridge.reach(self._body()))
             if method == 'POST' and route == ['points', 'drive']:
-                target = str(self._body()['target'])
-                return self._json(bridge.run_skill('navigate_to', {'target': target}, timeout_s=DRIVE_TIMEOUT_S,
-                                                   label=target))
+                return self._json(bridge.drive(str(self._body()['target'])))
             if method == 'POST' and route == ['skill', 'abort']:
                 aborted = bridge.abort_skill()
                 if aborted is None:
@@ -1103,7 +1139,7 @@ class Handler(BaseHTTPRequestHandler):
                     bridge.points_changed()
                     return self._json({'file': file})
                 if len(route) == 5 and method == 'POST' and route[4] == 'test':
-                    return self._json(bridge.run_skill(held.SKILL, held.args(name), label=f'{obj} {name}'))
+                    return self._json(bridge.test_held(obj, name))
             if method == 'POST' and route == ['robot', 'move']:
                 return self._json(bridge.go_to_pose(self._body()['pose']))
             return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
