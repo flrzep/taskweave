@@ -605,8 +605,7 @@ def test_a_removed_implementation_class_names_the_command():
 
 # ---- the templates are the docs examples -----------------------------------------------------------------------------
 def test_the_templates_are_the_docs_examples():
-    docs = Path(__file__).resolve().parents[2] / 'docs' / 'examples' / 'skills'
-    if not docs.is_dir():
-        pytest.skip('no docs next to the code')
+    """The templates are the skill files of the docs example cell of schema 3 (the docs now show schema 4)."""
+    docs = Path(__file__).parent / 'fixtures' / 'migrate_targets' / 'docs_before' / 'skills'
     for name, text in TEMPLATES.items():
         assert yaml.safe_load((docs / f'{name}.yaml').read_text()) == yaml.safe_load(text), name

@@ -55,7 +55,8 @@ def test_files_lists_the_cell_pack_with_kind_schema_reload_and_hash(example):
     # a cell copy of a robot pack file is an override, a cell-specific file is cell
     assert files['robots/duo_bot/profile.yaml']['source'] == 'override'
     assert files['robots/duo_bot/profile.yaml']['robot'] == 'duo_bot'
-    assert files['robots/duo_bot/stances.yaml']['kind'] == 'stances'
+    assert files['robots/duo_bot/targets.yaml']['kind'] == 'robot_targets'
+    assert files['robots/duo_bot/objects/part.yaml']['kind'] == 'robot_objects'
 
 
 def test_a_mission_reloads_at_mission_start(config_dir):
@@ -232,10 +233,10 @@ def test_object_type_checks(example):
     data['name'] = 'other'
     assert [p['where'] for p in store.validate_file('objects/part.yaml', data)] == ['/name']
     data = load(example / 'objects' / 'part.yaml')
-    point = next(iter(data['points']))
-    data['points'][point]['grip_width_m'] = 9.0
+    point = next(iter(data['targets']))
+    data['targets'][point]['grip_width_m'] = 9.0
     problems = store.validate_file('objects/part.yaml', data)
-    assert problems and all(p['severity'] == 'warning' and p['where'] == f'/points/{point}' for p in problems)
+    assert problems and all(p['severity'] == 'warning' and p['where'] == f'/targets/{point}' for p in problems)
     assert any('stroke' in p['message'] for p in problems)
 
 
@@ -305,11 +306,11 @@ def test_check_pack_of_the_example_cell_is_clean(example):
 
 
 def test_check_pack_covers_the_files_the_old_check_skipped(example):
-    poses = example / 'robots' / 'duo_bot' / 'poses.yaml'
-    poses.write_text(poses.read_text() + '\nbroken: {no_joint: not_a_number}\n')
-    (example / 'robots' / 'duo_bot' / 'held_poses.yaml').write_text('ghost: {carry: {bogus: 1}}\n')
+    targets = example / 'robots' / 'duo_bot' / 'targets.yaml'
+    targets.write_text(targets.read_text() + '\nbroken: {moves: joints, joints: {no_group: not_a_number}}\n')
+    (example / 'robots' / 'duo_bot' / 'objects' / 'part.yaml').write_text('targets: {ghost: {bogus: 1}}\n')
     paths = {p['path'] for p in ConfigStore(example).check_pack() if p['severity'] == 'error'}
-    assert {'robots/duo_bot/poses.yaml', 'robots/duo_bot/held_poses.yaml'} <= paths
+    assert {'robots/duo_bot/targets.yaml', 'robots/duo_bot/objects/part.yaml'} <= paths
 
 
 def test_the_check_command_prints_and_returns_the_result(example, capsys):

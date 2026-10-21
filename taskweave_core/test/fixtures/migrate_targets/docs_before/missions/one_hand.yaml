@@ -1,0 +1,28 @@
+goal: Pull the lever of the fixture with the left hand and let go again
+loop: once
+defaults: {timeout_s: 90, retries: 0, on_failure: abort}
+steps:
+  - instruction: Drive to the work position at the fixture
+    skill: navigate_to
+    args: {target: "stance:fixture_1/work"}
+  - instruction: Open the left gripper
+    skill: grip
+    args: {hands: [left], action: open}
+  - instruction: Left hand to the lever, 10 cm short of it
+    skill: move_gripper
+    args: {to: {point: fixture_1/handle, offset_m: 0.1}, hands: [left], motion: {elbow: out}}
+  - instruction: Onto the lever
+    skill: move_gripper
+    args: {to: {point: fixture_1/handle}, hands: [left], motion: {mode: linear}}
+  - instruction: Grip the lever
+    skill: grip
+    args: {hands: [left], action: close}
+  - instruction: Pull 8 cm towards the robot
+    skill: move_object
+    args: {to: {by: [-0.08, 0, 0]}, motion: {speed: 0.3}}
+  - instruction: Let go
+    skill: grip
+    args: {hands: [left], action: open}
+  - instruction: Left hand back to the driving pose
+    skill: move_joints
+    args: {pose: home}

@@ -694,9 +694,11 @@ def test_the_cell_pack_examples_in_docs_load_into_the_skills_parameters():
     from taskweave_skills.gripper_motion import translate_params
     from taskweave_skills.joints import Params
 
-    docs = Path(__file__).resolve().parents[2] / 'docs' / 'examples' / 'skills'
+    # the example cell of schema 3 (the docs show schema 4 now)
+    docs = (Path(__file__).resolve().parents[2] / 'taskweave_core' / 'test' / 'fixtures' / 'migrate_targets'
+            / 'docs_before' / 'skills')
     if not docs.is_dir():
-        pytest.skip('docs/ not next to the packages (the test runner ships the packages only)')
+        pytest.skip('core tests not next to the packages (the test runner ships the packages only)')
     for name in ('move_gripper', 'grip'):
         data = yaml.safe_load((docs / f'{name}.yaml').read_text(encoding='utf-8'))
         Draft202012Validator(schemas.SKILL_PARAMS).validate(data)

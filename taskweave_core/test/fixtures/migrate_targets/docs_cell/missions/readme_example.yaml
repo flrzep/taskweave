@@ -5,7 +5,7 @@ facts:
 defaults: {timeout_s: 120, retries: 1, on_failure: abort}
 steps:
   - id: to_stack
-    instruction: Drive to the stance at {next_stack}
+    instruction: Drive to the pick position at {next_stack}
     skill: move
     args: {to: '{next_stack}/pick'}            # where this robot stands at that stack (robots/<robot>/stances.yaml)
   - instruction: Open both grippers

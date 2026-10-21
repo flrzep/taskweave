@@ -12,11 +12,11 @@ steps:
     with: {part: "{next_stack}"}
     on_failure: replan
   - instruction: Drive to the bin
-    skill: navigate_to
-    args: {target: "stance:bin_1/place"}
+    skill: move
+    args: {to: bin_1/place}
   - instruction: Part onto the seat
-    skill: move_object
-    args: {to: {onto: bin_1/seat, contact: base}}
+    skill: move
+    args: {to: bin_1/seat, torso: keep}
   - instruction: Let go
     skill: grip
     args: {hands: all, action: open}

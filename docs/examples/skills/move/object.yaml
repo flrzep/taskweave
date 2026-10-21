@@ -1,0 +1,25 @@
+# skills/move/object.yaml: the part of `move` that moves a held object (to an object target, or relative to now). The hands
+# that hold it move it, IK from where they are. Same speed, accel and tolerances keys as move/hand.yaml.
+implementations:
+  - name: ik_held               # the hands that hold the object move it, IK from where they are
+    type: script
+    class: taskweave_skills.object_motion:MoveObject
+    requires: {capabilities: [arms.bimanual]}
+  - name: ik_held_single
+    type: script
+    class: taskweave_skills.object_motion:MoveObject
+    requires: {capabilities: [arms.single]}
+cell_frame: world               # TF frame of the cell (to.onto contacts are placed objects of cell/objects.yaml)
+speed:                          # standard speeds; a step's motion.speed (fraction) or speed_abs scales them
+  joint_rad_s: 1.2
+  joint_linear_m_s: 0.25
+  tcp_m_s: 0.05                 # m/s of the hands on straight lines (mode linear)
+  tcp_rad_s: 0.3
+accel: {joint_rad_s2: 3.0, tcp_m_s2: 0.2}
+motion: {mode: linear, planner: auto}   # the step's motion overrides these
+grip_drift_m: 0.02              # mode free with two or more hands: the hands may drift this far apart on the path
+tolerances:
+  position: 0.03
+  settle_s: 0.3
+  stall_timeout_s: 5.0
+  state_timeout_s: 5.0

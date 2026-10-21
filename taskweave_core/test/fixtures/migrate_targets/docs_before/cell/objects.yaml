@@ -1,0 +1,6 @@
+# Placed objects of the example cell (cell frame). Used by docs/missions.md and checked by
+# taskweave_skills/test/test_docs_examples.py.
+part_stack_1: {object: part, frame: cell, x: 2.0, y: 1.0, z: 0.0, yaw: 0.0, stack: {count: 4, pitch: 0.05}}
+part_stack_2: {object: part, frame: cell, x: 2.0, y: -1.0, z: 0.0, yaw: 0.0, stack: {count: 2, pitch: 0.05}}
+bin_1: {object: bin, frame: cell, x: 4.0, y: 0.0, z: 0.0, yaw: 3.1416}
+fixture_1: {object: fixture, frame: cell, x: 0.0, y: 3.0, z: 0.0, yaw: 1.5708}

@@ -5,7 +5,7 @@ params:
 loop: once
 defaults: {timeout_s: 120, retries: 0, on_failure: abort}
 steps:
-  - instruction: Drive to the pick stance at {part}
+  - instruction: Drive to the pick position at {part}
     skill: move
     args: {to: '{part}/pick'}
   - instruction: Open both grippers

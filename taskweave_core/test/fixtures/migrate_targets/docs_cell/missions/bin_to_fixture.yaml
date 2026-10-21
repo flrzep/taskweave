@@ -3,7 +3,7 @@ loop: once
 defaults: {timeout_s: 120, retries: 1, on_failure: abort}
 steps:
   - id: to_bin
-    instruction: Drive to the pick stance at the bin
+    instruction: Drive to the pick position at the bin
     skill: move
     args: {to: bin_1/pick}
   - instruction: Open the left gripper
@@ -29,7 +29,7 @@ steps:
     skill: move
     args: {to: carry, hands: [left], torso: keep}
   - id: to_fixture
-    instruction: Drive to the work stance at the fixture
+    instruction: Drive to the work position at the fixture
     skill: move
     args: {to: fixture_1/work}
   - instruction: Bin onto the fixture slot, 5 cm short of it

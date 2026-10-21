@@ -1,0 +1,7 @@
+name: fixture
+points:
+  handle:                         # a lever the left hand pulls
+    tool_type: parallel_gripper
+    left_tool: {xyz: [0.0, 0.0, 0.9], rpy: [0.0, 3.14159265, 0.0]}
+contacts:
+  slot: {xyz: [0.0, 0.0, 0.3], rpy: [0.0, 0.0, 0.0]}    # where something put on the fixture sits (move_object to.onto)
