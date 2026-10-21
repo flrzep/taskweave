@@ -15,6 +15,11 @@ named held pose of the robot for this kind of object (``pose``), or a contact of
 toward a side along the arms' null space. A held object does not move. It fails before moving when the swing would stop
 further than ``tolerance_deg`` from the side.
 
+In a cell in the targets layout these classes are ``move.object`` and ``move.posture`` (``skills/move/object.yaml``,
+``skills/move/posture.yaml``). ``Move`` resolves the targets and gives them in ``args[RESOLVED]``: ``held`` (a carry
+pose: its ``joints`` and ``path`` of Pose3D, ``args.to.pose`` names it) or ``onto`` (a contact: the placed ``instance``,
+its ``pose`` and the held object's own contact ``mine``; ``args.to.onto`` and ``to.contact`` name them).
+
 Both reuse the helpers of the joint skills (_onto, _swing_plan, the linear and free move paths, joints.py) and
 the motion options of gripper_motion (skill yaml, robot override, step: ``taskweave_core.motion``). The old
 move_object (flat args by / at / pose / to + contact / elbow) is gone: ``taskweave config migrate-skills``
@@ -33,6 +38,7 @@ from taskweave_core.skill import SkillResult
 
 from .gripper_motion import RESOURCES, MoveGripper, Target, hands_arg
 from .joints import _ObjectMotion
+from .parts import RESOLVED, in_move
 
 OBJECT_MODE = 'linear'                    # the mode of move_object whose yaml has no ``motion.mode``
 HOLD_RULES = ('auto', 'all')              # hands words of the held-object skills: the hold's hands, all hands
@@ -133,9 +139,10 @@ class MoveObject(_HeldMotion):
         unfit = self._unfit_for(mode, planner)
         if unfit is not None:
             return unfit
+        resolved = args.get(RESOLVED) or {}
         goal = None
         if 'pose' not in to:
-            goal = self._goal(hold, to)
+            goal = self._goal(hold, to, resolved.get('onto'))
             if isinstance(goal, SkillResult):
                 return goal
         self._refresh_ik()
@@ -144,7 +151,7 @@ class MoveObject(_HeldMotion):
         self._speeds(m)
         try:
             if goal is None:
-                result = self._carry_pose(ctx, hold, to['pose'], m, mode, planner)
+                result = self._carry_pose(ctx, hold, to['pose'], m, mode, planner, resolved.get('held'))
             else:
                 result = self._carry(ctx, hold, goal[0], goal[1], m, mode, planner, ahead_pose=goal[2])
         finally:
@@ -159,13 +166,67 @@ class MoveObject(_HeldMotion):
                                      hands=hold['hands'], mode=mode, path=kind, max_error=float(worst), motion=m,
                                      **torso)
 
+    def dry_run(self, ctx, args):
+        """Resolve the target and solve IK for the held object at it, move nothing: the joint goal the move would
+        send (``Move``'s ``dry_run``). A carry pose is solved at its last waypoint, with its joints; the arms are
+        solved for every hand of the hold. ``data.joint_goal`` has the joints set and the arms' solution."""
+        from .ik import IkError, rpy_matrix
+
+        to = args['to']
+        hold = self._hold(args)
+        if isinstance(hold, SkillResult):
+            return hold
+        m = motion.values(motion.resolve(self.config, self.robot.name, self.name, args))
+        mode, planner = m.get('mode', OBJECT_MODE), m.get('planner', 'auto')
+        unfit = self._unfit_for(mode, planner)
+        if unfit is not None:
+            return unfit
+        resolved = args.get(RESOLVED) or {}
+        joints: dict = {}
+        if 'pose' in to:
+            held = resolved.get('held')
+            if held is None:
+                return SkillResult.rejected(f'a dry run needs the resolved held pose {to["pose"]}')
+            joints, label = dict(held['joints']), f'{hold["object"]} to {to["pose"]}'
+            if not held['path']:
+                return SkillResult.succeeded(f'{label}: joint goal resolved (nothing moved)', dry_run=True,
+                                             hands=hold['hands'], joint_goal=joints, legs=[])
+            moved = rpy_matrix(held['path'][-1].xyz, held['path'][-1].rpy)
+        else:
+            goal = self._goal(hold, to, resolved.get('onto'))
+            if isinstance(goal, SkillResult):
+                return goal
+            moved, label = goal[0], goal[1]
+        tools = {hand: _target_of(moved @ pose) for hand, pose in hold['tcp_in_object'].items()}
+        self._refresh_ik()
+        start = self._start()
+        if start is None:
+            return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)')
+        leg = Target(label, list(tools), tools, joints=joints)
+        if m.get('torso', 'keep') == 'auto' and self._searches(leg):
+            chosen = self._torso_choice(ctx, leg, m, mode, 0.0, label, flip=False)
+            if isinstance(chosen, SkillResult):
+                return chosen
+            goal_joints = {**chosen.fixed, **chosen.solution}
+        else:
+            try:
+                goal_joints = {**joints, **self.ik.solve(tools, joints, lambda: ctx.should_stop, current=start,
+                                                         allow_flip=False, elbow=m.get('elbow'))}
+            except IkError as error:
+                return SkillResult.failed(f'{label}: {error}')
+        return SkillResult.succeeded(f'{label}: IK solved (nothing moved)', dry_run=True, hands=hold['hands'],
+                                     mode=mode, joint_goal=goal_joints,
+                                     legs=[{'label': label, 'joint_goal': goal_joints}])
+
     def _hold(self, args: dict):
         """The hold to move: the one ``args.object`` names, or the only one (or the one the named hands are in). A
         REJECTED result if there is none, several, or ``hands`` is not exactly the hands of the hold."""
         self.hold.reanchor()      # the arms may have moved since the stored pose (jogging)
         holds = self.hold.held_all()
         if not holds:
-            return SkillResult.rejected('nothing is held: move_gripper to the object, then grip close')
+            return SkillResult.rejected('nothing is held: move to a hand target, then grip close'
+                                        if in_move(self) else
+                                        'nothing is held: move_gripper to the object, then grip close')
         rule, name = hands_arg(args.get('hands')), args.get('object')
         named = None if rule in HOLD_RULES else list(rule)
         if name:
@@ -190,16 +251,19 @@ class MoveObject(_HeldMotion):
                                         f'({" and ".join(hold["hands"])})')
         return hold
 
-    def _goal(self, hold: dict, to: dict):
+    def _goal(self, hold: dict, to: dict, onto: dict | None = None):
         """(the held object's pose in the base frame after the move, a label, the pose the move after it goes to
-        (onto with an offset: the contact itself) or None), or a REJECTED / FAILED result."""
+        (onto with an offset: the contact itself) or None), or a REJECTED / FAILED result. ``onto``: what ``Move``
+        resolved of an ``onto`` target (see the module doc)."""
         if 'onto' in to:
-            moved = self._onto(hold, {'to': to['onto'], 'contact': to['contact'], 'offset_m': to.get('offset_m', 0.0)})
+            extra = {RESOLVED: onto} if onto else {}
+            moved = self._onto(hold, {'to': to['onto'], 'contact': to['contact'], 'offset_m': to.get('offset_m', 0.0),
+                                      **extra})
             if isinstance(moved, SkillResult):
                 return moved
             final = None
             if to.get('offset_m'):
-                final = self._onto(hold, {'to': to['onto'], 'contact': to['contact'], 'offset_m': 0.0})
+                final = self._onto(hold, {'to': to['onto'], 'contact': to['contact'], 'offset_m': 0.0, **extra})
                 final = final if isinstance(final, np.ndarray) else None
             return moved, f'{hold["object"]} {to["contact"]} to {to["onto"]}' + \
                 (f' (-{to["offset_m"]:g} m)' if to.get('offset_m') else ''), final
@@ -276,16 +340,17 @@ class MoveObject(_HeldMotion):
             return SkillResult.failed(f'{label}: {error}', torso=[{'leg': label, 'height': None,
                                                                    'rejected': getattr(error, 'rejected', [])}])
 
-    def _carry_pose(self, ctx, hold: dict, name: str, m: dict, mode: str, planner: str):
+    def _carry_pose(self, ctx, hold: dict, name: str, m: dict, mode: str, planner: str, held: dict | None = None):
         """Held pose ``name`` for the held object's type: its joints (the lift, not the arms') first, then the
-        waypoints one after the other, each like any other move of the object."""
+        waypoints one after the other, each like any other move of the object. ``held``: ``{joints, path}`` as
+        ``Move`` resolved the target (else the robot's held pose of that name)."""
         from .ik import rpy_matrix
 
         kind = self.hold.type_of(hold, self.config.object_instances())
         if kind is None:
             return SkillResult.rejected(f'the held {hold["object"]} is not a placed object: its type is unknown')
         try:
-            pose = self.config.held_pose(self.robot.name, kind, name)
+            pose = held if held is not None else self.config.held_pose(self.robot.name, kind, name)
         except KeyError as error:
             return SkillResult.rejected(str(error.args[0]))
         arm = self._arm_joints(pose['joints'])

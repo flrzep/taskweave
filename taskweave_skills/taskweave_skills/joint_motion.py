@@ -9,6 +9,10 @@ come from the ik joints regex when not listed), ``joints.limits`` or the URDF fo
 (skills/move_joints.yaml): ``speed: {joint_rad_s, joint_linear_m_s}`` (standard speeds), ``accel`` (unused: the step's
 fraction stretches ``min_duration_s``), ``motion: {planner, ...}`` defaults, ``tolerances: {position, settle_s,
 stall_timeout_s, state_timeout_s}``; the old flat Params keys work as well.
+
+In a cell in the targets layout this class is ``move.joints`` (``skills/move/joints.yaml``): ``Move`` resolves the
+joint target and gives its joint values, and the waypoints of ``motion.via`` as joint maps, in ``args[RESOLVED]``
+(``goal``, ``via``) with the target's name as ``args.pose``.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from taskweave_core.skill import SkillResult
 
 from .joints import _PoseMotion
 from .motion_plan import Trajectory
+from .parts import RESOLVED
 
 MOTION_KEYS = ('speed', 'speed_abs', 'accel', 'planner', 'tolerance', 'via')   # spec 1.4: always free, no mode
 YAML_SPEEDS = {'joint_rad_s': 'max_joint_speed', 'joint_linear_m_s': 'max_linear_speed'}
@@ -88,8 +93,9 @@ class MoveJoints(_PoseMotion):
     # ---- run ---------------------------------------------------------------------
     def execute(self, ctx, args):
         values = motion.values(motion.resolve(self.config, self.robot.name, self.name, args))
+        resolved = args.get(RESOLVED)
         try:
-            legs, label = self._legs(args, values.get('via') or [])
+            legs, label = self._legs(args, resolved['via'] if resolved else values.get('via') or [])
             self._check(legs)
         except _Rejected as error:
             return SkillResult.rejected(str(error))
@@ -126,6 +132,21 @@ class MoveJoints(_PoseMotion):
         if 'pose' in args:
             data['world_state'] = {'arm_pose': args['pose']}
         return SkillResult.succeeded(f'at {label} (max error {worst:.3f})', **data)
+
+    def dry_run(self, ctx, args):
+        """Resolve the target and check it, move nothing: the joint goal the move would send (``Move``'s
+        ``dry_run``). ``data.joint_goal`` is the end of the move (``only`` applied), ``data.legs`` the goals on the way
+        (``motion.via`` first)."""
+        values = motion.values(motion.resolve(self.config, self.robot.name, self.name, args))
+        resolved = args.get(RESOLVED)
+        try:
+            legs, label = self._legs(args, resolved['via'] if resolved else values.get('via') or [])
+            self._check(legs)
+        except _Rejected as error:
+            return SkillResult.rejected(str(error))
+        return SkillResult.succeeded(f'{label}: joint goal resolved (nothing moved)', dry_run=True,
+                                     hands=self._hands(legs), joint_goal=dict(legs[-1]),
+                                     legs=[{'label': label, 'joint_goal': dict(leg)} for leg in legs])
 
     def _planned(self) -> tuple[float, int]:
         """The planner's (time, trajectory points) so far; a step reports the difference."""
@@ -176,8 +197,12 @@ class MoveJoints(_PoseMotion):
         """The joint goals to move to in order (``via`` waypoints, then the target), ``only`` applied, and a label."""
         if ('pose' in args) == ('joints' in args):
             raise _Rejected('give exactly one of: pose, joints')
-        goal, label = self._joint_target(args['pose']) if 'pose' in args else (
-            {n: float(v) for n, v in args['joints'].items()}, 'joints')
+        resolved = args.get(RESOLVED)
+        if resolved:    # Move resolved the target
+            goal, label = dict(resolved['goal']), args.get('pose', 'joints')
+        else:
+            goal, label = self._joint_target(args['pose']) if 'pose' in args else (
+                {n: float(v) for n, v in args['joints'].items()}, 'joints')
         goals = [self._joint_target(item.removeprefix('pose:'))[0] if isinstance(item, str)
                  else {n: float(v) for n, v in item.items()} for item in via]
         only = args.get('only')

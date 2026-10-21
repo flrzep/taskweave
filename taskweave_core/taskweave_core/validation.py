@@ -4,9 +4,9 @@ Checks: the robot profile and embodiment exist, every skill has an implementatio
 the catalog, every argument object matches the skill's JSON Schema, every point a skill argument refers to exists
 in config (object points also fit the robot's tools), and ``replan_from`` targets exist.
 
-Skills mark point arguments in their schema with ``"x-taskweave-point": "base_target" | "joint_pose" | "tool_pose"
-| "object_point" | "instance_point" | "instance_contact" | "via_target" | "joint_pose_only" | "joint_group"
-| "held_pose" | "held_object"``, at any depth (nested objects, oneOf variants, list items).
+Skills mark point arguments in their schema with ``"x-taskweave-point": "target" | "base_target" | "joint_pose"
+| "tool_pose" | "object_point" | "instance_point" | "instance_contact" | "via_target" | "joint_pose_only"
+| "joint_group" | "held_pose" | "held_object"``, at any depth (nested objects, oneOf variants, list items).
 Values that contain placeholders are only checked once their values are known (at step start): the skip is by path,
 so a placeholder may stand for a scalar, one vec3 component or a whole field. So are points on an object an earlier
 step of the plan puts down (an argument ``place_as: <name>``, e.g. grip): it does not exist yet.
@@ -297,7 +297,9 @@ def validate_args(args: dict, schema: dict, store: ConfigStore, robot: str, late
 def check_point(kind: str, value, store: ConfigStore, robot: str) -> str | None:
     """Return a problem description if a referenced point does not exist, else None."""
     try:
-        if kind == 'base_target':
+        if kind == 'target':   # any target (schema 4): the kinds a field takes are checked by the skill when it runs
+            store.target(str(value), robot)
+        elif kind == 'base_target':
             store.base_target(str(value), robot)
         elif kind == 'joint_pose':
             from .config.limits import pose_problems

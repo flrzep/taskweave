@@ -25,6 +25,7 @@ from taskweave_core.config import wrap_angle
 from taskweave_core.skill import SkillResult
 
 from .navigate import MIN_DT_S, NavigateTo
+from .parts import RESOLVED, in_move
 
 
 class DriveStraight(NavigateTo):
@@ -61,7 +62,7 @@ class DriveStraight(NavigateTo):
         if self.base['type'] == 'fixed':
             return SkillResult.rejected('robot base is fixed')
         if 'to' in args:
-            moves = self._towards(args['to'])
+            moves = self._towards(args['to'], args.get(RESOLVED))
             if isinstance(moves, SkillResult):
                 return moves
             forward, sideways = moves
@@ -71,7 +72,8 @@ class DriveStraight(NavigateTo):
             return SkillResult.rejected(f'a {self.base["type"]} base cannot move sideways')
         if math.hypot(forward, sideways) > self.max_distance:
             return SkillResult.rejected(f'{math.hypot(forward, sideways):.2f} m is more than max_distance_m '
-                                        f'{self.max_distance:g}: use navigate_to')
+                                        f'{self.max_distance:g}: use ' + ('motion.mode nav' if in_move(self)
+                                                                         else 'navigate_to'))
         start = self._current()
         if start is None:
             return SkillResult.failed(f'no odometry on {self.base["odom"]}')
@@ -112,10 +114,11 @@ class DriveStraight(NavigateTo):
             elif work - best_time > self.p.stuck_timeout_s:
                 self.stop()
                 return SkillResult.failed(f'no progress for {self.p.stuck_timeout_s:g} s, {remaining:.2f} m to go')
-            limit = speed * clock.o if clock.o < 1.0 else speed
+            override = min(clock.o * self._fraction, 1.0)
+            limit = speed * override if override < 1.0 else speed
             vx = max(-limit, min(limit, self.p.k_linear * ex))
             vy = max(-limit, min(limit, self.p.k_linear * ey)) if sideways else 0.0
-            step = self.p.linear_accel * dt
+            step = self.p.linear_accel * self._accel_fraction * dt
             vx = max(previous[0] - step, min(previous[0] + step, vx))
             vy = max(previous[1] - step, min(previous[1] + step, vy))
             previous = (vx, vy)
@@ -123,15 +126,15 @@ class DriveStraight(NavigateTo):
             ctx.feedback(1.0 - min(remaining / total, 1.0), f'{remaining:.2f} m to go')
             time.sleep(1.0 / self.p.rate_hz)
 
-    def _towards(self, reference: str):
+    def _towards(self, reference: str, resolved: dict | None = None):
         """(forward, sideways) to the base target ``reference`` in the robot's frame, or a SkillResult if it does not
-        lie
-        straight ahead or behind with the same heading (sideways only for a holonomic base)."""
+        lie straight ahead or behind with the same heading (sideways only for a holonomic base). ``resolved``: what
+        ``Move`` made of the reference (its pose in the cell frame)."""
         pose = self._current()
         if pose is None:
             return SkillResult.failed(f'no odometry on {self.base["odom"]}')
         try:
-            target = self.config.base_target(reference, self.robot.name, pose)
+            target = resolved['pose'] if resolved else self.config.base_target(reference, self.robot.name, pose)
         except KeyError as error:
             return SkillResult.rejected(str(error.args[0]))
         dx, dy = target.x - pose.x, target.y - pose.y
@@ -141,10 +144,13 @@ class DriveStraight(NavigateTo):
         if turn > self.to_turn:
             return SkillResult.rejected(f'{reference} faces {math.degrees(turn):.0f} deg away from the robot\'s '
                                         'heading: '
-                                        'drive_straight keeps the heading (navigate_to there first)')
+                                        + ('motion.mode straight keeps the heading (move there with motion.mode nav '
+                                           'first)' if in_move(self) else
+                                           'drive_straight keeps the heading (navigate_to there first)'))
         if self.base['type'] != 'holonomic':
             if abs(sideways) > self.to_offset:
-                return SkillResult.rejected(f'{reference} is {sideways:+.2f} m to the side of the straight line: '
-                                            'navigate_to a spot in line with it first')
+                return SkillResult.rejected(f'{reference} is {sideways:+.2f} m to the side of the straight line: ' + (
+                    'move (motion.mode nav) to a spot in line with it first' if in_move(self)
+                    else 'navigate_to a spot in line with it first'))
             sideways = 0.0
         return forward, sideways

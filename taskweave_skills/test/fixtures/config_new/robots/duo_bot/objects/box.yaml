@@ -1,0 +1,2 @@
+targets:
+  rim: {grip_m: {left: 0.04}}      # the left finger stays 40 mm open at the rim; the right closes fully

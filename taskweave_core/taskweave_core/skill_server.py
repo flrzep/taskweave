@@ -14,6 +14,14 @@ goal: the parameters of skills/<name>.yaml and base.limits of the profile. A cha
 embodiment part bound at start (topics, joint interface, IK, planning, hands) or a skill's ``startup_params`` is
 reported as needs_restart. While a goal is active the answer is ``busy``.
 
+Which skills are served depends on the cell pack. A cell in the targets layout (schema 4) is launched with ``wait``,
+``move`` and ``grip``: the motion skills of the old layout (navigate_to, drive_straight, move_gripper, move_object,
+set_posture, move_joints) are what ``move`` does, so asking for any of them serves ``move`` (once). An older cell
+serves the names it is asked for, and ``move`` is not served there (it needs targets): ``served_names``.
+
+A skill with parts (``move``) keeps the parts' configuration in ``skills/<skill>/<part>.yaml``; a change to one
+reloads the skill (``skill_of``).
+
 Run: ros2 run taskweave_core skill_server --ros-args -p config_dir:=... -p robot:=... -p skills:="['...']"
 """
 
@@ -43,6 +51,35 @@ from .executive import Outcome
 from .skill import Skill, SkillContext, SkillResult
 from .speed import SpeedOverride
 from .validation import validate_args
+
+OLD_MOTION_SKILLS = ('navigate_to', 'drive_straight', 'move_gripper', 'move_object', 'set_posture', 'move_joints')
+TARGET_SKILLS = ('wait', 'move', 'grip')   # what the launch of a cell in the targets layout asks for
+
+
+def served_names(requested: list[str], targets: bool) -> tuple[list[str], list[str]]:
+    """(the skills to serve, notes on what was left out or folded) for the names asked for (the ``skills``
+    parameter) and a cell pack in the targets layout (``targets``) or not. In the targets layout the motion skills of
+    the old layout are folded into ``move`` (the launch lists ``wait,move,grip``); other skills are served as asked.
+    Before the targets layout ``move`` cannot be served, and the old skills are. Order of the request is kept."""
+    notes: list[str] = []
+    served: list[str] = []
+    for name in requested:
+        if targets and name in OLD_MOTION_SKILLS:
+            notes.append(f'{name}: replaced by move in the targets layout (cell schema 4), serving move')
+            name = 'move'
+        elif not targets and name == 'move':
+            notes.append('move: needs a cell pack in the targets layout (cell schema 4): run taskweave config migrate; '
+                         'not served')
+            continue
+        if name not in served:
+            served.append(name)
+    return served, notes
+
+
+def skill_of(path: str) -> str:
+    """The skill a skill config file belongs to: ``skills/<skill>.yaml``, or ``skills/<skill>/<part>.yaml``."""
+    file = Path(path)
+    return file.parent.name if file.parent.name != 'skills' else file.stem
 
 
 def load_skill_class(path: str) -> type[Skill]:
@@ -75,7 +112,11 @@ class SkillServer(Node):
         implementations: dict[str, dict] = {}
         if skills is None:
             skills = []
-            for skill_name in (n for n in self.get_parameter('skills').value if n):
+            requested, notes = served_names([n for n in self.get_parameter('skills').value if n],
+                                            self.config.targets_format())
+            for note in notes:
+                self.get_logger().info(note)
+            for skill_name in requested:
                 implementation, reasons = self.config.select_implementation(skill_name, robot_name)
                 for reason in reasons:
                     self.get_logger().info(f'{skill_name}: not using {reason}')
@@ -136,8 +177,8 @@ class SkillServer(Node):
     def _concerns(self, entry: dict) -> bool:
         """Skill yamls of the skills served here, the profile and embodiment, and the live files (the store reads
         those per use)."""
-        if entry['kind'] == 'skill':
-            return Path(entry['path']).stem in self.skills
+        if entry['kind'] in ('skill', 'skill_part'):
+            return skill_of(entry['path']) in self.skills
         return entry['kind'] in ('profile', 'embodiment') or 'live' in entry['reload']
 
     def _apply(self, entries: list[dict]) -> list[tuple[str, str]]:
@@ -157,7 +198,7 @@ class SkillServer(Node):
         if embodiment and self.config.embodiment(name) != self._embodiment:
             refused.append((embodiment['path'], 'the skill implementations were chosen from it when the skill '
                                                 'servers started'))
-        changed = {Path(e['path']).stem: e['path'] for e in entries if e['kind'] == 'skill'}
+        changed = {skill_of(e['path']): e['path'] for e in entries if e['kind'] in ('skill', 'skill_part')}
         plan = {}
         for skill in self.skills.values():
             if skill.name not in changed and robot is self.robot:
@@ -249,7 +290,7 @@ class SkillServer(Node):
             problems = [str(error)]
         if problems:
             return SkillResult.rejected('; '.join(problems))
-        timeout = goal.timeout_s if goal.timeout_s > 0 else skill.default_timeout_s
+        timeout = goal.timeout_s if goal.timeout_s > 0 else _default_timeout(skill, args)
 
         def publish(progress: float, status: str) -> None:
             handle.publish_feedback(RunSkill.Feedback(progress=float(progress), status=status))
@@ -268,6 +309,13 @@ class SkillServer(Node):
         for key, value in ctx.work.stats().items():   # a skill may add keys of its own (nav2_override)
             speed.setdefault(key, value)
         return result
+
+
+def _default_timeout(skill: Skill, args: dict) -> float:
+    try:
+        return float(skill.default_timeout(args))
+    except Exception:  # noqa: BLE001 - a timeout guess must not fail the step: the skill's own check follows
+        return float(skill.default_timeout_s)
 
 
 def _limits_of(base: dict) -> dict:

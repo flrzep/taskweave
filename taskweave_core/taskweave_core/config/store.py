@@ -57,6 +57,12 @@ POINT_FILE_SCHEMAS = {  # files that teaching and the HMI may edit (a file name 
 }
 
 
+def skill_file(skill: str) -> str:
+    """The file of a skill's configuration, relative to the cell pack: ``skills/<skill>.yaml``; a part of a skill
+    (``<skill>.<part>``) has its file in the skill's folder, ``skills/<skill>/<part>.yaml``."""
+    return 'skills/' + skill.replace('.', '/') + '.yaml'
+
+
 class ConfigError(Exception):
     """A config file is missing, unreadable or invalid. The message names the file and the key."""
 
@@ -374,7 +380,7 @@ class ConfigStore:
 
     def skill_config(self, skill: str) -> dict:
         """The whole skills/<skill>.yaml (implementations and shared parameters); {} if absent."""
-        return dict(self._load(f'skills/{skill}.yaml', schemas.SKILL_PARAMS, required=False, default={}))
+        return dict(self._load(skill_file(skill), schemas.SKILL_PARAMS, required=False, default={}))
 
     def skill_params(self, skill: str, implementation: dict | None = None) -> dict:
         """Parameters for a skill: shared keys of skills/<skill>.yaml, overridden by the implementation's params."""
@@ -399,7 +405,7 @@ class ConfigStore:
 
         implementations = self.skill_config(skill).get('implementations', [])
         if not implementations:
-            return None, [f'no implementations configured in skills/{skill}.yaml']
+            return None, [f'no implementations configured in {skill_file(skill)}']
         embodiment = self.embodiment(robot)
         reasons = []
         for implementation in implementations:
@@ -830,6 +836,12 @@ class ConfigStore:
         ``kinds``: the ``moves`` the caller can use (one or several); a target of another kind is refused with
         ``context`` as the reason. Raises TargetError (a KeyError): one line, naming the file to look at."""
         return ts.resolve(self, reference, robot, near, kinds, context)
+
+    def type_target(self, type: str, name: str, robot: str | None = None) -> Target:
+        """A target of an object type with no placed object, in the object's own frame: the type's targets, with the
+        robot's settings on top when ``robot`` is given (the contact a held object brings to a target). TargetError
+        (a KeyError) if there is none."""
+        return ts.resolve_type(self, robot, type, name)
 
     def targets(self, robot: str) -> dict[str, Target]:
         """Every resolvable target by reference: the cell's and the robot's, and ``<instance>/<name>`` for the targets

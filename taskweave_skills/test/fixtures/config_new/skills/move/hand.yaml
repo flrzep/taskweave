@@ -1,0 +1,19 @@
+implementations:
+  - name: ik_planned
+    type: script
+    class: taskweave_skills.gripper_motion:MoveGripper
+    requires: {capabilities: [arms.bimanual]}
+  - name: ik_single
+    type: script
+    class: taskweave_skills.gripper_motion:MoveGripper
+    requires: {capabilities: [arms.single]}
+cell_frame: world
+speed:
+  joint_rad_s: 2.0
+  joint_linear_m_s: 0.4
+  tcp_m_s: 0.5
+  tcp_rad_s: 1.0
+accel: {joint_rad_s2: 3.0, tcp_m_s2: 0.2}
+motion: {mode: free, planner: auto, approach_m: 0.15, torso: auto}
+torso_fallback: {joint: lift, values: [0.0, 0.2]}
+tolerances: {position: 0.03, settle_s: 0.3, stall_timeout_s: 1.0, state_timeout_s: 3.0}

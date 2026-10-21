@@ -1,0 +1,7 @@
+home: {moves: joints, joints: {left_arm: [0.0, 0.0], torso: 0.0}}
+ready: {moves: joints, joints: {left_arm: [1.0, -0.5], torso: 0.2}}
+far: {moves: joints, joints: {left_arm: [1.8, null]}}
+beyond_limit: {moves: joints, joints: {left_arm: [2.5, null]}}      # the test simulator stops j1 at 2.0
+mid: {moves: joints, joints: {left_arm: [0.5, 0.5]}}
+arm_only: {moves: joints, joints: {left_arm: [0.8, -0.4]}}
+lift_only: {moves: joints, joints: {torso: 0.3}}

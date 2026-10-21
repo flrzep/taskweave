@@ -1,0 +1,11 @@
+# a differential base with a lift and a two-joint head (no arms): the torso goes to drive_m before the base drives
+name: lift_bot
+base: {type: differential, cmd_vel: /lb/cmd_vel, odom: /lb/odom, frame: base_link, limits: {linear: 0.8, angular: 1.5}}
+joints:
+  command: /lb/joint_command
+  state: /lb/joint_states
+  linear: [lift]
+  groups:
+    torso: [lift]
+    head: [head1, head2]
+torso: {joint: lift, drive_m: 0.3}

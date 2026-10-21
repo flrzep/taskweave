@@ -134,5 +134,10 @@ class Skill:
     def execute(self, ctx: SkillContext, args: dict) -> SkillResult:
         raise NotImplementedError
 
+    def default_timeout(self, args: dict) -> float:
+        """The timeout (s) of a step that gives none: ``default_timeout_s``, or, for a skill whose kinds of motion take
+        different times, the one of what ``args`` asks for. The skill server calls it for every goal."""
+        return self.default_timeout_s
+
     def stop(self) -> None:
         """Bring the hardware this skill commands to a safe stop. Called after cancel, timeout and errors."""

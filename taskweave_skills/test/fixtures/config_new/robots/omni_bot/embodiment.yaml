@@ -1,0 +1,4 @@
+name: omni_bot
+summary: Holonomic test base.
+capabilities: [base.holonomic]
+base: {footprint: [0.5, 0.5], max_speed: {linear: 0.8, angular: 1.5}}

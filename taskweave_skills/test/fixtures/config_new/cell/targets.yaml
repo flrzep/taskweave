@@ -1,0 +1,15 @@
+start: {moves: base, x: 0.0, y: 0.0, yaw: 0.0}
+dock: {moves: base, x: 1.0, y: 0.5, yaw: 1.5708}
+behind_wall: {moves: base, x: 3.0, y: 0.0, yaw: 0.0}
+dock_tool:                      # a hand target in the cell frame: format only, move rejects it
+  moves: hand
+  left_tool: {xyz: [1.0, 0.0, 0.5], rpy: [0.0, 0.0, 0.0]}
+dock_object: {moves: object, xyz: [1.0, 0.0, 0.5], rpy: [0.0, 0.0, 0.0]}
+dock_lifted: {moves: base, x: 1.0, y: 0.5, yaw: 1.5708, joints: {torso: 0.4, head: [0.2, null]}}
+dock_head: {moves: base, x: 1.0, y: 0.5, yaw: 1.5708, joints: {head: [0.2, null]}}
+dock_keep: {moves: base, x: 1.0, y: 0.5, yaw: 1.5708, joints: {torso: keep}}
+dock_path:                       # two waypoints: successive goals
+  moves: base
+  path:
+    - {x: 0.5, y: 0.0, yaw: 0.0}
+    - {x: 1.0, y: 0.5, yaw: 1.5708}

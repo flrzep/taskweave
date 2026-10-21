@@ -1,0 +1,4 @@
+# Placed objects of the test cell (cell frame = world = the robot's base_link in the tests)
+box_1: {object: box, frame: cell, x: 0.6, y: 0.0, z: 0.0, yaw: 0.0}
+pile_1: {object: box, frame: cell, x: 0.6, y: 0.0, z: 0.0, yaw: 0.0, stack: {count: 3, pitch: 0.05}}
+crate_1: {object: box, frame: cell, x: 0.6, y: 0.0, z: 0.0, yaw: 0.0, stack: {count: 2, pitch: 0.0}}   # taking one leaves it placed
