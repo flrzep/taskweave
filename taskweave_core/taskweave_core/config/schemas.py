@@ -258,6 +258,8 @@ ROBOT_PROFILE = {
                         'line_sample_m': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.3},
                         # no height solves with local IK: the nearest this many are tried with the global search
                         'global_heights': {'type': 'integer', 'minimum': 0, 'default': 3},
+                        # the best height at the edge of a feasible band: this many halvings of the grid step around it
+                        'refine': {'type': 'integer', 'minimum': 0, 'default': 2},
                     },
                     'additionalProperties': False,
                 },

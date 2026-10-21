@@ -150,7 +150,7 @@ class MoveObject(_HeldMotion):
         finally:
             self.p, self.tcp_speed, self.tcp_turn, self.plan_scale = saved
         if isinstance(result, SkillResult):
-            return result
+            return self._with_torso(result)
         label, worst, kind = result
         torso = {'torso': self.torso_reports} if self.torso_reports else {}
         height = f', torso {self.torso_reports[-1]["height"]:g}' if self.torso_reports else ''
@@ -250,6 +250,31 @@ class MoveObject(_HeldMotion):
         self.hold.moved(moved, hold['object'])
         return label, worst, kind
 
+    def _torso_choice_path(self, ctx, hold: dict, waypoints: list, m: dict, mode: str, label: str):
+        """One torso height for every waypoint of a held pose's path (4x4 object poses, base frame): each waypoint is
+        solved for all hands (the last one is the main sample), and in mode linear the legs are walked one after the
+        other as the moves will (a leg that collides or runs out of reach at a height rejects it). A TorsoChoice or a
+        FAILED result with the rejected heights."""
+        from .cartesian import tcp_targets
+        from .ik import IkError, Samples
+
+        current = self._start()
+        if current is None:
+            return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)')
+        legs = [{hand: wp @ grip for hand, grip in hold['tcp_in_object'].items()} for wp in waypoints]
+        tools = [{hand: _target_of(goal) for hand, goal in leg.items()} for leg in legs]
+        samples = Samples([tools[-1], *tools[:-1]])
+        if mode == 'linear':
+            goals = [tcp_targets(t) for t in tools]
+            samples.verify = lambda height: self._walk_lines(goals, current, height)[0]
+        ctx.feedback(0.0, 'choosing the torso height')
+        try:
+            return self.ik.solve_with_torso(samples, {}, current, lambda: ctx.should_stop, elbow=m.get('elbow'),
+                                            allow_flip=False)
+        except (LookupError, IkError) as error:
+            return SkillResult.failed(f'{label}: {error}', torso=[{'leg': label, 'height': None,
+                                                                   'rejected': getattr(error, 'rejected', [])}])
+
     def _carry_pose(self, ctx, hold: dict, name: str, m: dict, mode: str, planner: str):
         """Held pose ``name`` for the held object's type: its joints (the lift, not the arms') first, then the
         waypoints one after the other, each like any other move of the object."""
@@ -270,6 +295,19 @@ class MoveObject(_HeldMotion):
         hand = hold['hands'][0]
         if self.ik is not None and self.ik.torso and self.ik.torso['joint'] in pose['joints']:
             m = {**m, 'torso': 'keep'}       # the pose sets the torso: the waypoints keep it
+        elif m.get('torso', 'keep') == 'auto' and pose['path'] and self._searches(
+                Target(label, list(hold['hands']), {h: {} for h in hold['hands']})):
+            # one height for the whole path: every waypoint reachable, every leg a real line, then the legs keep it
+            chosen = self._torso_choice_path(ctx, hold, [rpy_matrix(w.xyz, w.rpy) for w in pose['path']], m, mode,
+                                             label)
+            if isinstance(chosen, SkillResult):
+                return chosen
+            self.torso_reports.append({'leg': label, **chosen.report()})
+            result = self._set_torso(ctx, chosen, label, planner)
+            failed = self._follow_holds([hold], label)
+            if result is not None or failed is not None:
+                return result or failed
+            m = {**m, 'torso': 'keep'}
         if pose['joints']:
             others = [h for h in self.hold.held_all() if h['object'] != hold['object']]
             result, worst = self._go(ctx, pose['joints'], f'{label} (joints)', planner=planner)

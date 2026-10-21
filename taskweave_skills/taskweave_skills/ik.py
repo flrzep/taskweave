@@ -251,6 +251,7 @@ WEIGHTS = IK_WEIGHTS                                                       # ik.
 LIMIT_MARGIN_DEG = default(ROBOT_PROFILE, 'ik', 'choose', 'limit_margin_deg')   # ik.choose.limit_margin_deg default
 START_TIMEOUT_S = default(ROBOT_PROFILE, 'ik', 'choose', 'start_timeout_s')     # ik.choose.start_timeout_s default
 TORSO_WEIGHT = default(ROBOT_PROFILE, 'ik', 'torso', 'weights', 'torso')           # ik.torso.weights.torso default
+REFINE = default(ROBOT_PROFILE, 'ik', 'torso', 'refine')                            # ik.torso.refine default
 GLOBAL_HEIGHTS = default(ROBOT_PROFILE, 'ik', 'torso', 'global_heights')           # ik.torso.global_heights default
 WRIST_WEIGHT = default(ROBOT_PROFILE, 'ik', 'torso', 'weights', 'wrist')           # ik.torso.weights.wrist default
 LINE_SAMPLE_M = default(ROBOT_PROFILE, 'ik', 'torso', 'line_sample_m')             # ik.torso.line_sample_m default
@@ -461,6 +462,9 @@ class IkClient:
         function with a ``verify(height)`` attribute returns why the real path fails at that height, or None.
         Raises TorsoError.
 
+        When the best height has a grid neighbour that is out (the edge of a narrow feasible band), up to
+        ``refine`` (default 2) halvings of the grid step are tried around it.
+
         Heights within half a grid step of the current one are the current one (0.494 and 0.5 are the same height).
         Above ``accept_cost`` the search goes outward in each direction only while the cost keeps falling (or the
         first height is feasible): a direction whose next height costs more than the last, or is out after one
@@ -485,6 +489,8 @@ class IkClient:
                          key=lambda h: (round(abs(h - now), 9), h))
         accept = spec.get('accept_cost')
         best, rejected = None, []
+        seen = set()                  # heights tried (rounded)
+        done = {}                     # height (rounded) -> its choice, for those that worked
         last, closed = {}, set()      # per direction (-1 below, +1 above): the last feasible cost; directions given up
         for index, height in enumerate(heights):
             way = (height > now) - (height < now)
@@ -495,6 +501,7 @@ class IkClient:
                 rejected += [{'height': round(h, 4), 'reason': 'not tried: moves the torso more than the best'}
                              for h in heights[index:]]
                 break
+            seen.add(round(height, 4))
             try:
                 choice = self._torso_height(samples, height, fixed, current, joint, now, weight, should_stop, elbow,
                                             allow_flip)
@@ -503,6 +510,7 @@ class IkClient:
                 if last.get(way) is not None:
                     closed.add(way)
                 continue
+            done[round(height, 4)] = choice
             if height == now and (accept is None or choice.cost <= float(accept)):   # staying put is good enough
                 choice.skipped = 'the current height is feasible and cheap enough'
                 return choice
@@ -515,6 +523,34 @@ class IkClient:
             if best is None or (round(choice.cost, 9), round(abs(choice.height - now), 9), choice.height) < (
                     round(best.cost, 9), round(abs(best.height - now), 9), best.height):
                 best = choice
+        # a best at the edge of a narrow feasible band (its grid neighbour is out): look between the grid heights
+        span, out = step, {r['height'] for r in rejected if not r['reason'].startswith('not tried')}
+        for _ in range(int(spec.get('refine', REFINE)) if best is not None and not best.skipped else 0):
+            if not any(round(best.height + d, 4) in out for d in (-span, span)):
+                break
+            half = span / 2
+            for height in (round(best.height - half, 6), round(best.height + half, 6)):
+                if height < grid[0] or height > grid[-1] or round(height, 4) in seen:
+                    continue
+                seen.add(round(height, 4))
+                try:
+                    choice = self._torso_height(samples, height, fixed, current, joint, now, weight, should_stop,
+                                                elbow, allow_flip)
+                except TorsoError as error:
+                    rejected.append({'height': round(height, 4), 'reason': str(error)})
+                    out.add(round(height, 4))
+                    continue
+                done[round(height, 4)] = choice
+                if (round(choice.cost, 9), round(abs(choice.height - now), 9), choice.height) < (
+                        round(best.cost, 9), round(abs(best.height - now), 9), best.height):
+                    best = choice
+            span = half
+        if best is not None and not best.skipped and span < step:    # refined: not on the very edge of the band
+            for side in (-1, 1):
+                inner = done.get(round(best.height - side * span, 4))
+                if round(best.height + side * span, 4) in out and inner is not None:
+                    best = inner
+                    break
         if best is None:     # local descents are timing dependent: the old way (global search) at the nearest heights
             for height in heights[:int(spec.get('global_heights', GLOBAL_HEIGHTS))]:
                 try:

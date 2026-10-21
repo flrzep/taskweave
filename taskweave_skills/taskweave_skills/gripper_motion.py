@@ -30,6 +30,7 @@ import numpy as np
 from taskweave_core import motion
 from taskweave_core.config import Pose2D
 from taskweave_core.config.schemas import HAND_RULES, VEC3, hands_schema, motion_schema
+from taskweave_core.executive import Outcome
 from taskweave_core.gripper import joint_for_opening, opening_for_joint, opening_table
 from taskweave_core.skill import SkillResult
 
@@ -185,7 +186,7 @@ class MoveGripper(_PointMotion):
             for leg in [*legs, target]:
                 result, worst, label, kind = self._leg(ctx, leg, m, mode, planner, leg is target)
                 if result is not None:
-                    return result
+                    return self._with_torso(result)
         finally:
             self.p, self.tcp_speed, self.tcp_turn, self.plan_scale = saved
             # a lift may have moved the held objects' base frame, however the motion ended (failed, interrupted)
@@ -236,6 +237,12 @@ class MoveGripper(_PointMotion):
         result, worst = self._reach(ctx, joints, leg.tools, label, fallback_joints=lifts, elbow=elbow,
                                     planner=planner)
         return result, worst, label, self.path_kind
+
+    def _with_torso(self, result: SkillResult) -> SkillResult:
+        """A failed move still says which torso heights it chose and rejected (data.torso)."""
+        if self.torso_reports and 'torso' not in result.data and result.outcome is not Outcome.SUCCEEDED:
+            result.data['torso'] = self.torso_reports
+        return result
 
     def _searches(self, leg: Target) -> bool:
         """Does the torso height of this leg come from the profile's ik.torso search? Not when the leg's own joints
@@ -304,22 +311,58 @@ class MoveGripper(_PointMotion):
         def verify(height: float) -> str | None:
             """Why the straight line itself (walked on the URDF chains from the arms' joints, the torso set to
             ``height``) fails, or None: per-sample IK can pass where the continuous path runs out of reach."""
-            import re
-
-            from .cartesian import PathError, linear_path
-
-            moved = self.ik.tcps_at(goals, {**current, joint: height})
-            if len(moved) < len(goals):
-                return None
-            arm = {n: v for n, v in current.items() if any(re.fullmatch(self.ik.joint_pattern.format(tool=t), n)
-                                                           for t in goals)}
-            try:
-                linear_path(self.ik, moved, goals, arm, self.tcp_speed, self.tcp_turn, state={**current, joint: height})
-            except PathError as error:
-                return str(error)
-            return None
+            return self._walk_lines([goals], current, height)[0]
         at.verify = verify
         return at
+
+    def _state_at(self, hands, current: dict, height: float):
+        """(joints, problem) once the torso is at ``height``: the arms keep their joints, except hands that hold an
+        object: it goes with the torso and their arms are solved again there (joints._widen)."""
+        from .ik import IkError
+        from .points import target_of
+
+        joint = self.ik.torso['joint']
+        state = {**current, joint: height}
+        held = [h for h in hands if h in self.hold.hand_holds]
+        if not held or abs(height - current[joint]) <= self.p.position_tolerance:
+            return state, None
+        column = self.ik.joint_motion(joint, current, height)
+        if column is None:
+            return state, None
+        poses = self.hold.tcp_poses(held)
+        try:
+            arms = self.ik.solve({h: target_of(column @ poses[h]) for h in held}, {joint: height}, current=current,
+                                 allow_flip=False, nearby=True)
+        except IkError as error:
+            return None, f'{" and ".join(held)} cannot follow the torso to {height:g}: {str(error).split(":")[0]}'
+        return {**state, **arms}, None
+
+    def _walk_lines(self, legs: list, current: dict, height: float):
+        """Walk the straight lines to each of ``legs`` ([{tool: 4x4 TCP goal}], one after the other) on the URDF chains
+        with the torso at ``height``, as the moves would: (None or why the first failing leg fails, the joints at the
+        end). Every step is collision checked with the torso at ``height``."""
+        import re
+
+        from .cartesian import PathError, linear_path, matching_flip
+
+        joint = self.ik.torso['joint']
+        state, problem = self._state_at(list(legs[0]), current, height)
+        if state is None:
+            return problem, None
+        patterns = [re.compile(self.ik.joint_pattern.format(tool=t)) for t in legs[0]]
+        for k, goals in enumerate(legs):
+            starts = self.ik.tcps_at(goals, state)
+            if len(starts) < len(goals):
+                return None, state
+            aim = matching_flip(goals, starts, self.robot.data.get('tool_frames', {}))
+            moving = {n: v for n, v in state.items() if any(p.fullmatch(n) for p in patterns)}
+            try:
+                path = linear_path(self.ik, starts, aim, {**moving, joint: height}, self.tcp_speed, self.tcp_turn,
+                                   state=state)
+            except PathError as error:
+                return (f'leg {k + 1}: ' if len(legs) > 1 else '') + str(error), state
+            state = {**state, **dict(zip(path.names, path.points[-1], strict=True))}
+        return None, state
 
     def _ahead_check(self, tools: dict, current: dict):
         """A function (height, arm) -> why the straight line from the hands where ``arm`` (their solution at that
@@ -340,7 +383,8 @@ class MoveGripper(_PointMotion):
             moving = {n: state[n] for n in arm if any(
                 re.fullmatch(self.ik.joint_pattern.format(tool=t), n) for t in goals)}
             try:
-                linear_path(self.ik, starts, aim, moving, self.tcp_speed, self.tcp_turn, state=state)
+                linear_path(self.ik, starts, aim, {**moving, joint: height}, self.tcp_speed, self.tcp_turn,
+                            state=state)
             except PathError as error:
                 return str(error)
             return None

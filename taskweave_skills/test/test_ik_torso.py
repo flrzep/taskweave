@@ -20,7 +20,8 @@ class FakeIk(IkClient):
 
     def __init__(self, reach=lambda tool, target, h: 0.0, collides=lambda joints: False, weight=1.0, grid=GRID,
                  accept=None):
-        self.torso = {'joint': 'lift', 'candidates': grid, 'weights': {'torso': weight}, 'accept_cost': accept}
+        self.torso = {'joint': 'lift', 'candidates': grid, 'weights': {'torso': weight}, 'accept_cost': accept,
+                      'refine': 0}      # the grid only; refinement has its own test
         self.choose, self.last, self.validity = None, {}, object()
         self.groups, self.joint_pattern = {'left': 'left_arm', 'right': 'right_arm'}, '{tool}_j[12]'
         self.reach, self.collides, self.solved, self.checked = reach, collides, [], []
@@ -396,3 +397,56 @@ def test_with_no_height_serving_the_next_line_the_move_is_chosen_alone_as_before
     leg = Target('x', ['left'], TOOLS)
     choice = MoveGripper._torso_choice(skill, ctx, leg, {}, 'free', 0.0, 'x', ahead=TOOLS)
     assert choice.height == pytest.approx(0.5) and 'next move ignored' in choice.skipped
+
+
+# ---- narrow bands, several legs, failures with data ------------------------------------------------------------
+
+def test_a_best_height_at_the_edge_of_a_narrow_band_is_refined_between_the_grid_heights():
+    class Arm(FakeIk):
+        def _arm_cost(self, arm, current):
+            return abs(arm['left_j1'] - 0.35) * 2          # cheapest at 0.35, which no grid height is
+    ik = Arm(reach=lambda tool, target, h: h if 0.27 <= h <= 0.36 else None, weight=0.1, accept=-1)
+    ik.torso['refine'] = 2
+    choice = ik.solve_with_torso([TOOLS], {}, now(0.6))
+    assert choice.height == pytest.approx(0.325)               # 0.35 is cheapest, the band ends at 0.36: step in
+    assert any(r['height'] == 0.25 for r in choice.rejected)
+    ik = Arm(reach=lambda tool, target, h: h if 0.27 <= h <= 0.36 else None, weight=0.1, accept=-1)
+    assert ik.solve_with_torso([TOOLS], {}, now(0.6)).height == pytest.approx(0.3)
+
+
+def test_a_path_of_several_legs_is_walked_leg_by_leg_at_every_height():
+    import numpy as np
+
+    from taskweave_skills.object_motion import MoveObject
+    ik = FakeIk(accept=-1)
+    walked = []
+
+    def walk(goals, current, height):
+        walked.append((len(goals), height))
+        return ('leg 2: collision' if height < 0.25 else None), None
+    skill = SimpleNamespace(ik=ik, _start=lambda: now(0.1), joints=SimpleNamespace(state_topic='t'), _walk_lines=walk)
+    ctx = SimpleNamespace(feedback=lambda *args: None, should_stop=False)
+    hold = {'tcp_in_object': {'left': np.eye(4), 'right': np.eye(4)}}
+    waypoints = [np.eye(4), np.eye(4)]
+    choice = MoveObject._torso_choice_path(skill, ctx, hold, waypoints, {}, 'linear', 'set_down')
+    assert choice.height >= 0.25 and all(count == 2 for count, _ in walked)          # both legs in every walk
+    assert any(r['reason'] == 'line: leg 2: collision' for r in choice.rejected)
+
+
+def test_a_failed_move_carries_the_torso_report():
+    from taskweave_core.skill import SkillResult
+    from taskweave_skills.gripper_motion import MoveGripper
+    skill = SimpleNamespace(torso_reports=[{'leg': 'x', 'height': 0.3, 'rejected': []}])
+    failed = MoveGripper._with_torso(skill, SkillResult.failed('in collision'))
+    assert failed.data['torso'][0]['height'] == 0.3
+    assert 'torso' not in MoveGripper._with_torso(skill, SkillResult.succeeded('ok')).data
+
+
+def test_a_refined_best_at_the_edge_of_the_band_steps_one_fine_step_inside():
+    reach = lambda tool, target, h: 0.0 if 0.225 - 1e-9 <= h <= 0.3 + 1e-9 else None     # noqa: E731
+    ik = FakeIk(reach=reach, weight=1.0, accept=-1)
+    ik.torso['refine'] = 2
+    choice = ik.solve_with_torso([TOOLS], {}, now(0.5))         # the grid's 0.3 is the band's upper edge
+    assert choice.height == pytest.approx(0.275)                 # one fine step in: 0.25 and 0.3 both work too
+    ik = FakeIk(reach=reach, weight=1.0, accept=-1)
+    assert ik.solve_with_torso([TOOLS], {}, now(0.5)).height == pytest.approx(0.3)           # refine off: the edge
