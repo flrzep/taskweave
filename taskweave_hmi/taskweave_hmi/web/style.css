@@ -30,6 +30,8 @@
   /* touch targets: --tap for main buttons, --tap-s for small and icon buttons (44 on touch screens) */
   --tap: 48px; --tap-s: 36px; --tap-min: 44px;
   --content: 760px;
+  /* a number field's ▲ ▼ (an image cannot take currentColor: the --text-muted value, per theme) */
+  --spin-arrows: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='16' viewBox='0 0 10 16'%3E%3Cpath d='M5 1 9.5 6.5h-9zM5 15 .5 9.5h9z' fill='%23545a70'/%3E%3C/svg%3E");
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -42,6 +44,7 @@
     --kind-drive: #7a8cff; --kind-arm: #b57bff; --kind-grip: #ff9a4d; --kind-wait: #8a8ea8; --kind-other: #2dd4bf;
     --viewer-bg: #080a12; --viewer-line: #252a3e;
     --shadow-1: none; --shadow-2: 0 2px 12px rgb(0 0 0 / 45%);
+    --spin-arrows: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='16' viewBox='0 0 10 16'%3E%3Cpath d='M5 1 9.5 6.5h-9zM5 15 .5 9.5h9z' fill='%23a3a8bf'/%3E%3C/svg%3E");
   }
 }
 @media (pointer: coarse), (max-width: 600px) { :root { --tap-s: 44px; } }
@@ -206,6 +209,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--brand-text); }
 input:disabled, select:disabled, textarea:disabled { opacity: .55; }
 input[type="checkbox"] { width: 20px; height: 20px; min-height: 0; margin: 0; flex: none; accent-color: var(--brand); }
 textarea { resize: vertical; }
+/* number fields: text fields that always show a dot (app.js numberField). On a laptop they show ▲ ▼ arrows at the
+   right end on hover and focus, which step the value like a spinner; touch screens have none (as with type=number) */
+@media (pointer: fine) {
+  input.num:not([data-spin="off"]) { padding-right: calc(var(--sp-3) + 14px); background-repeat: no-repeat; background-position: right 8px center; }
+  input.num:not([data-spin="off"], :disabled):is(:hover, :focus) { background-image: var(--spin-arrows); }
+}
+input.num:invalid { border-color: var(--bad); background-color: color-mix(in srgb, var(--bad) 8%, var(--surface-field)); }
 .field { display: grid; gap: var(--sp-1); min-width: 0; align-content: start; }
 .field label { font-size: var(--fs-s); color: var(--text-muted); }
 .field label.check, .point-edit label.check { display: flex; gap: var(--sp-2); align-items: center; min-height: var(--tap-min);
@@ -289,7 +299,7 @@ li.empty { list-style: none; padding: 6px 2px; }
 .point-head .used { color: var(--brand-text); font-size: var(--fs-s); }
 .point-head .bad { color: var(--bad); font-size: var(--fs-s); }
 .point-edit { display: grid; gap: var(--sp-2); padding: 0 var(--sp-3) var(--sp-3); }
-.point-edit input:invalid { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, var(--surface-field)); }
+.point-edit input:invalid { border-color: var(--bad); background-color: color-mix(in srgb, var(--bad) 8%, var(--surface-field)); }
 .point details { border-top: 1px solid var(--border); padding-top: var(--sp-1); }
 .point details summary { font: var(--fs-sm) var(--mono); color: var(--text-muted); }
 .placed li { font: var(--fs-sm)/1.5 var(--mono); border-bottom: 1px solid var(--border); padding: var(--sp-1) 0; overflow-wrap: anywhere; }

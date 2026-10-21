@@ -24,9 +24,89 @@ function el(tag, attrs = {}, ...children) {
   for (const [key, value] of Object.entries(attrs)) {
     if (key === 'class') node.className = value; else if (key === 'text') node.textContent = value; else node.setAttribute(key, value);
   }
+  if (tag === 'input' && node.type === 'number') numberField(node);  // shown with a dot in every browser locale
   children.flat().forEach((child) => node.append(child));
   return node;
 }
+
+// ---------- number fields ----------
+// Every number field is a text field: Chrome and Edge show <input type="number"> with the browser's decimal separator
+// (a comma in a German browser), whatever the page's lang. el() turns type 'number' inputs into one, the page's own
+// are turned at load (below), the step editor's in stepCard. They show a dot; a comma typed or pasted becomes a dot as
+// it is typed, letters are dropped. ↑ / ↓ step the value by the step attribute (1 for 'any' or none) from where it is,
+// within min and max, and so do the arrows at the field's right end on a laptop (held down, they repeat); 'change'
+// follows when the key or button is let go. Readers keep Number(input.value). Not a number, or outside min / max:
+// :invalid (red), never dropped. data-spin="off": no arrows (a field with its own − / + buttons).
+const NUMBER_PATTERN = '[\\-+]?(\\d+\\.?\\d*|\\.\\d+)([eE][\\-+]?\\d+)?';
+const SPIN_W = 24;  // px at the field's right end that are the arrows
+const decimalsOf = (text) => (String(text).split('.')[1] || '').replace(/e.*$/i, '').length;
+function numberField(input) {
+  input.type = 'text';
+  input.classList.add('num');
+  input.pattern = NUMBER_PATTERN;
+  if (!input.inputMode) input.inputMode = 'decimal';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  const tidy = (text) => text.replace(/,/g, '.').replace(/[^0-9.eE+-]/g, '');
+  const checkRange = () => {
+    const value = Number(input.value);
+    const min = input.getAttribute('min'), max = input.getAttribute('max');
+    const out = input.value.trim() !== '' && Number.isFinite(value)
+      && ((min !== null && value < Number(min)) || (max !== null && value > Number(max)));
+    input.setCustomValidity(out ? `${min ?? '–∞'} to ${max ?? '∞'}` : '');
+  };
+  input.addEventListener('input', () => {
+    const clean = tidy(input.value);
+    if (clean !== input.value) {
+      const at = tidy(input.value.slice(0, input.selectionStart ?? input.value.length)).length;
+      input.value = clean;
+      input.setSelectionRange(at, at);
+    }
+    checkRange();
+  });
+  input._check = checkRange;
+  let stepped = false;
+  input.addEventListener('keydown', (e) => {
+    if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || e.altKey || e.ctrlKey || e.metaKey) return;
+    e.preventDefault();
+    stepNumber(input, e.key === 'ArrowUp' ? 1 : -1);
+    stepped = true;
+  });
+  input.addEventListener('keyup', (e) => {
+    if (stepped && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { stepped = false; input.dispatchEvent(new Event('change', { bubbles: true })); }
+  });
+  if (input.dataset.spin === 'off') return;
+  // the arrows (a laptop's mouse): the upper or lower half of the field's right end
+  const onArrows = (e) => e.pointerType === 'mouse' && e.offsetX > input.clientWidth - SPIN_W;
+  let repeat = null;
+  const stop = () => {
+    if (!repeat) return;
+    clearTimeout(repeat); clearInterval(repeat); repeat = null;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  input.addEventListener('pointermove', (e) => { input.style.cursor = onArrows(e) ? 'default' : ''; });
+  input.addEventListener('pointerdown', (e) => {
+    if (!onArrows(e) || e.button !== 0 || input.disabled || input.readOnly) return;
+    e.preventDefault();
+    input.focus();
+    const direction = e.offsetY < input.clientHeight / 2 ? 1 : -1;
+    stepNumber(input, direction);
+    repeat = setTimeout(() => { repeat = setInterval(() => stepNumber(input, direction), 60); }, 400);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel', 'blur'].forEach((type) => input.addEventListener(type, stop));
+}
+function stepNumber(input, direction) {
+  const step = Number(input.getAttribute('step')) || 1;  // 'any' or none: 1
+  const min = input.getAttribute('min'), max = input.getAttribute('max');
+  const now = Number(input.value);
+  const base = input.value.trim() !== '' && Number.isFinite(now) ? now : 0;
+  let next = +(base + direction * step).toFixed(Math.min(10, Math.max(decimalsOf(step), decimalsOf(input.value))));
+  if (min !== null) next = Math.max(next, Number(min));
+  if (max !== null) next = Math.min(next, Number(max));
+  input.value = String(next);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+document.querySelectorAll('input[type="number"]').forEach(numberField);  // the page's own (the step editor's: stepCard)
 function show(node, visible) { node.hidden = !visible; }
 function message(node, text, bad = false) {  // bad: true (red), 'warn' (amber) or false
   const warn = bad === 'warn';
@@ -414,6 +494,7 @@ function readSteps() { return [...$('step-editor').children].map((card) => card.
 
 function stepCard(step, index, steps) {
   const card = $('step-template').content.firstElementChild.cloneNode(true);
+  card.querySelectorAll('input[type="number"]').forEach(numberField);
   const q = (key) => card.querySelector(`[data-k="${key}"]`);
   card.querySelector('.step-no').textContent = `Step ${index + 1}`;
   q('instruction').value = step.instruction || '';

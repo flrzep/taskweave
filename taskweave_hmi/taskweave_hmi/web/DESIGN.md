@@ -54,6 +54,7 @@ headline are large text and clear 3:1 by a wide margin.
 | `--kind-*` | drive, arm, grip, wait, other | lighter in dark | skill colours in the plan graph, categorical only |
 | `--viewer-bg` | `#161a2a` | `#080a12` | 3D view background, dark in both themes |
 | `--viewer-line`, `--viewer-ink`, `--viewer-tools` | | | 3D view border, text and toolbar backing |
+| `--spin-arrows` | ▲ ▼ in `#545a70` | in `#a3a8bf` | a number field's arrows (an SVG image: `--text-muted`'s value) |
 
 Tints are mixed from the state colour with `color-mix()`: chips 11%, messages 9%, the status card 5%.
 
@@ -104,6 +105,10 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   1px, disabled is 45% opacity. `.icon`: a square small button for ↑ ↓ ✕.
 - **Inputs and selects**: field surface, strong border, 6px radius, 44px high; brand border on focus; red border and
   tint when invalid. Checkboxes 20px in the brand colour, inside a 44px-high label.
+- **Number fields** (`input.num`, made by `numberField` in app.js): text fields, so a decimal is always shown with a
+  dot (a browser's `type="number"` follows its own locale, a comma in German); a typed comma becomes a dot. On a
+  laptop (`pointer: fine`) ▲ ▼ arrows in `--text-muted` (the `--spin-arrows` image, one per theme) appear at the right
+  end on hover and focus and step the value; touch screens get none, as with `type="number"`.
 - **Segmented control** (`.segmented`): a field-coloured track; the chosen option (`aria-pressed` or
   `aria-selected`) is raised on the card surface in brand text with a strong ring. `.choice` and `.teach-panes`
   wrap and share the width.
