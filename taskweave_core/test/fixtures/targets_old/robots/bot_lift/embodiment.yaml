@@ -1,4 +1,4 @@
-name: a2d
+name: bot_lift
 summary: Test robot with a torso lift, a head and two arms with parallel grippers.
 capabilities: [base.differential, arms.bimanual, gripper.parallel, torso.lift, head.pan_tilt]
 base: {footprint: [0.6, 0.45], max_speed: {linear: 1.0, angular: 1.5}}

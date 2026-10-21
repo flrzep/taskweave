@@ -1,5 +1,5 @@
 # test robot with a torso lift, a head and two 7-joint arms (names as in a real two-armed robot, nothing else)
-name: galbot_s1
+name: bot_two_arm
 base: {type: differential, cmd_vel: /cmd_vel, odom: /odom, frame: base_link, limits: {linear: 1.0, angular: 1.5}}
 joints:
   command: /joint_command

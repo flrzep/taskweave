@@ -1,12 +1,22 @@
-name: galbot_g1
+# a torso of two joints (lift and pitch): the lift is the one a plain number sets
+name: bot_lift
 base: {type: differential, cmd_vel: /cmd_vel, odom: /odom, frame: base_link}
 joints:
   command: /joint_command
   state: /joint_states
+  limits:
+    lift_joint: [0.0, 0.5]
+    pitch_joint: [-0.3, 0.8]
+    left_arm_joint1: [-3.2, 3.2]
+    left_arm_joint2: [-3.2, 3.2]
+    right_arm_joint1: [-3.2, 3.2]
+    right_arm_joint2: [-3.2, 3.2]
+  linear: [lift_joint]
   groups:
-    torso: [leg_joint1, leg_joint2, leg_joint3, leg_joint4, leg_joint5]
+    torso: [lift_joint, pitch_joint]
     left_arm: [left_arm_joint1, left_arm_joint2]
     right_arm: [right_arm_joint1, right_arm_joint2]
 grippers:
   left: {action: /left_gripper/command, open: 0.0, closed: 1.0}
   right: {action: /right_gripper/command, open: 0.0, closed: 1.0}
+torso: {joint: lift_joint}

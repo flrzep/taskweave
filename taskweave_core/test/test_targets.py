@@ -15,7 +15,7 @@ from taskweave_core.config.limits import group_values, target_joint_problems
 from taskweave_core.config.targets import GroupError, TargetError
 
 FIXTURES = Path(__file__).parent / 'fixtures'
-ROBOT = 'galbot_s1'
+ROBOT = 'bot_two_arm'
 NEAR = [None, Pose2D(7.0, 1.0, 0.0), Pose2D(9.0, 1.0, 3.1416), Pose2D(5.0, 3.0, 0.0)]
 RENAMED = {('karakuri_hanger', 'knob'): 'knob_stance', ('frame_type2', 'set_down'): 'set_down_held'}
 
@@ -78,14 +78,14 @@ def test_a_stance_is_composed_with_the_object_pose(new):
     pick = new.target('bay_1_stack_1_front/pick', ROBOT)
     assert (pick.kind, pick.frame, pick.type) == ('base', 'object', 'frame_type2')
     assert pick.pose == Pose2D(5.0, 1.0, 0.0, 'cell')  # object at (6, 1), offset x -1
-    assert pick.files == ('robots/galbot_s1/objects/frame_type2.yaml',)
+    assert pick.files == ('robots/bot_two_arm/objects/frame_type2.yaml',)
     assert new.target('karakuri_hanger/staging', ROBOT).pose.yaw == pytest.approx(-math.pi / 2, abs=1e-3)
 
 
 def test_back_row_instances_override_the_whole_pose(new):
     assert new.target('bay_1_stack_1_back/pick', ROBOT).pose == Pose2D(6.0 - 1.528, 2.5 + 1.0, 0.0, 'cell')
     assert new.target('bay_2_stack_2_back/pick', ROBOT).pose == Pose2D(8.0 - 1.528, 2.5, 0.0, 'cell')
-    assert new.target('bay_1_stack_1_back/pick', ROBOT).files == ('robots/galbot_s1/objects/frame_type2.yaml',)
+    assert new.target('bay_1_stack_1_back/pick', ROBOT).files == ('robots/bot_two_arm/objects/frame_type2.yaml',)
 
 
 def test_a_hand_target_keeps_its_poses_and_settings(new):
@@ -94,8 +94,8 @@ def test_a_hand_target_keeps_its_poses_and_settings(new):
     assert rails.tools['left_tool'].xyz == (-0.0563, 0.2513, 0.0714)
     assert rails.tools['right_tool'].frame == 'frame_type2' and rails.tool_poses.keys() == {'left', 'right'}
     assert rails.get('approach_m') == 0.1 and rails.get('elbow') == 'up'  # the robot's setting, merged in
-    assert rails.files == ('objects/frame_type2.yaml', 'robots/galbot_s1/objects/frame_type2.yaml')
-    other = new.target('bay_1_stack_1_front/rails_top', 'galbot_g1')  # another robot: no elbow of ours
+    assert rails.files == ('objects/frame_type2.yaml', 'robots/bot_two_arm/objects/frame_type2.yaml')
+    other = new.target('bay_1_stack_1_front/rails_top', 'bot_plain')  # another robot: no elbow of ours
     assert other.get('elbow') is None
 
 
@@ -230,11 +230,11 @@ def test_poses_resolve_to_the_numbers_of_the_old_store(old, new):
 
 def test_partial_group_values_leave_joints_alone(old):
     new = ConfigStore(FIXTURES / 'targets_new')
-    assert group_values(new, 'a2d', new.target('lift_high', 'a2d').joints) == {'lift_joint': 0.4}
+    assert group_values(new, 'bot_lift', new.target('lift_high', 'bot_lift').joints) == {'lift_joint': 0.4}
     assert (
-        group_values(new, 'a2d', new.target('lift_high', 'a2d').joints) == old.named_pose('a2d', 'lift_high')['joints']
+        group_values(new, 'bot_lift', new.target('lift_high', 'bot_lift').joints) == old.named_pose('bot_lift', 'lift_high')['joints']
     )
-    assert group_values(new, 'a2d', new.target('ready', 'a2d').joints) == old.named_pose('a2d', 'ready')['joints']
+    assert group_values(new, 'bot_lift', new.target('ready', 'bot_lift').joints) == old.named_pose('bot_lift', 'ready')['joints']
 
 
 # ---- the deprecated readers over the targets ------------------------------------------------------
@@ -357,7 +357,7 @@ def test_error_ambiguous_plain_name(cell):
     with pytest.raises(TargetError) as error:
         ConfigStore(cell).target('set_down', ROBOT)
     assert str(error.value) == (
-        "target 'set_down' is in cell/targets.yaml and robots/galbot_s1/targets.yaml: rename one"
+        "target 'set_down' is in cell/targets.yaml and robots/bot_two_arm/targets.yaml: rename one"
     )
 
 
@@ -406,12 +406,12 @@ def test_error_missing_name_on_a_type(new):
 
 def test_error_the_robot_has_none(new):
     with pytest.raises(TargetError) as error:
-        new.target('karakuri_hanger/staging', 'galbot_g1')
+        new.target('karakuri_hanger/staging', 'bot_plain')
     assert str(error.value) == (
-        "robot 'galbot_g1' has no 'staging' target for karakuri_hanger objects "
-        '(robots/galbot_g1/objects/karakuri_hanger.yaml)'
+        "robot 'bot_plain' has no 'staging' target for karakuri_hanger objects "
+        '(robots/bot_plain/objects/karakuri_hanger.yaml)'
     )
-    assert new.target('bay_1_stack_1_front/pick', 'galbot_g1').pose == Pose2D(5.15, 1.0, 0.0, 'cell')
+    assert new.target('bay_1_stack_1_front/pick', 'bot_plain').pose == Pose2D(5.15, 1.0, 0.0, 'cell')
 
 
 def test_error_kind_mismatch(new):
@@ -491,7 +491,7 @@ def test_moves_must_agree_between_layers(cell):
     with pytest.raises(
         TargetError,
         match=r"target 'rails_top' moves hand in objects/frame_type2.yaml but base in "
-        r'robots/galbot_s1/objects/frame_type2.yaml: they must agree',
+        r'robots/bot_two_arm/objects/frame_type2.yaml: they must agree',
     ):
         ConfigStore(cell).target('bay_1_stack_1_front/rails_top', ROBOT)
 
@@ -573,7 +573,7 @@ def test_the_merge_is_later_wins_in_the_order_of_the_four_layers(cell):
     assert store.target('bay_1_stack_1_front/rails_top', ROBOT).data['approach_m'] == 0.3  # layer 3 over 1
     assert store.target('bay_1_stack_1_front/rails_top', ROBOT).files == (
         'objects/frame_type2.yaml',
-        'robots/galbot_s1/objects/frame_type2.yaml',
+        'robots/bot_two_arm/objects/frame_type2.yaml',
     )
     assert store.target('bay_2_stack_2_front/rails_top', ROBOT).data['elbow'] == 'up'  # layers 1 and 2
     assert store.target('bay_2_stack_2_front/rails_top', ROBOT).data['approach_m'] == 0.1
@@ -634,7 +634,7 @@ def test_group_values_errors_name_the_group(joints, torso, message):
 
 
 def test_a_robot_without_a_head_group_rejects_head_values(new):
-    assert target_joint_problems(new, 'galbot_g1', {'head': [0.0, 0.0]})[0].startswith(
+    assert target_joint_problems(new, 'bot_plain', {'head': [0.0, 0.0]})[0].startswith(
         "joint group 'head': this robot has no such group"
     )
     assert target_joint_problems(new, ROBOT, {'head': [0.0, 0.0], 'torso': 0.5}) == []
@@ -791,7 +791,7 @@ def test_save_target_on_an_object_type_splits_robot_and_object_parts(cell):
     assert 'elbow' not in object_file['targets']['rails_wide']
     found = reread(cell).target('bay_2_stack_2_front/rails_wide', ROBOT)
     assert found.get('elbow') == 'up' and found.get('approach_m') == 0.12 and found.tools['left_tool'].xyz[1] == 0.3
-    assert reread(cell).target('bay_2_stack_2_front/rails_wide', 'galbot_g1').get('elbow') is None
+    assert reread(cell).target('bay_2_stack_2_front/rails_wide', 'bot_plain').get('elbow') is None
     assert reread(cell).check_pack() == []
     assert '# first guess' not in (cell / 'objects' / 'frame_type2.yaml').read_text()
     assert '# rails_top tilted 40 deg steeper' in (cell / 'objects' / 'frame_type2.yaml').read_text()
@@ -875,7 +875,7 @@ def test_rename_a_stance_follows_handled_from_and_a_shared_target_follows_the_ro
     robot_text = (cell / 'robots' / ROBOT / 'objects' / 'frame_type2.yaml').read_text()
     assert 'handled_from: aisle' in robot_text and 'aisle:' in robot_text and '  pick:' not in robot_text
     assert 'bay_1_stack_1_back: {aisle:' in robot_text  # the instance overrides follow
-    assert 'pick' in (cell / 'robots' / 'galbot_g1' / 'objects' / 'frame_type2.yaml').read_text()
+    assert 'pick' in (cell / 'robots' / 'bot_plain' / 'objects' / 'frame_type2.yaml').read_text()
     fresh = reread(cell)
     assert fresh.target('bay_1_stack_1_front/aisle', ROBOT).pose == Pose2D(5.0, 1.0, 0.0, 'cell')
     assert fresh.target('bay_2_stack_2_front/aisle', ROBOT, Pose2D(7.0, 1.0, 0.0)).instance.pose.yaw == pytest.approx(

@@ -8,7 +8,7 @@ import pytest
 from taskweave_core.config import ConfigError, ConfigStore, catalogue, packs
 
 FIXTURES = Path(__file__).parent / 'fixtures'
-ROBOT = 'galbot_s1'
+ROBOT = 'bot_two_arm'
 CELL = 'cell/targets.yaml'
 ROBOT_TARGETS = f'robots/{ROBOT}/targets.yaml'
 ROBOT_FRAME = f'robots/{ROBOT}/objects/frame_type2.yaml'
@@ -72,14 +72,14 @@ def test_the_command_line_check_passes_on_the_new_format_cell(capsys):
 # ---- the cross rules ------------------------------------------------------------------------------
 def test_a_name_in_the_cell_and_the_robots_targets_is_an_error_in_both_files(cell):
     append(cell / ROBOT_TARGETS, 'set_down: {moves: base, x: 0.0, y: 0.0, yaw: 0.0}\n')
-    expected = "target 'set_down' is in cell/targets.yaml and robots/galbot_s1/targets.yaml: rename one"
+    expected = "target 'set_down' is in cell/targets.yaml and robots/bot_two_arm/targets.yaml: rename one"
     assert expected in errors(cell, CELL) and expected in errors(cell, ROBOT_TARGETS)
 
 
 def test_a_base_and_a_hand_target_of_one_name_on_a_type_is_an_error(cell):
     replace(cell / ROBOT_FRAME, '  rails_top: {elbow: up}', '  rails_top: {moves: base, x: 0.0, y: 0.0, yaw: 0.0}')
     wanted = (
-        "target 'rails_top' moves hand in objects/frame_type2.yaml but base in robots/galbot_s1/objects/"
+        "target 'rails_top' moves hand in objects/frame_type2.yaml but base in robots/bot_two_arm/objects/"
         'frame_type2.yaml: they must agree'
     )
     assert any(wanted in m for m in errors(cell, ROBOT_FRAME)) and any(wanted in m for m in errors(cell, OBJECT_FRAME))
@@ -160,13 +160,13 @@ def test_auto_is_for_the_torso_with_a_pose_to_search_for(cell):
 
 
 def test_auto_without_any_torso_search_or_lift_is_an_error(cell):
-    path = cell / 'robots' / 'galbot_g1' / 'targets.yaml'
+    path = cell / 'robots' / 'bot_plain' / 'targets.yaml'
     path.write_text('pose: {moves: hand, left_tool: {xyz: [0, 0, 0], rpy: [0, 0, 0]}, joints: {torso: auto}}\n')
-    assert any('no torso search or lift' in m for m in errors(cell, 'robots/galbot_g1/targets.yaml'))
+    assert any('no torso search or lift' in m for m in errors(cell, 'robots/bot_plain/targets.yaml'))
     path.write_text('pose: {moves: hand, left_tool: {xyz: [0, 0, 0], rpy: [0, 0, 0]}, joints: {torso: keep}}\n')
-    assert errors(cell, 'robots/galbot_g1/targets.yaml') == []
+    assert errors(cell, 'robots/bot_plain/targets.yaml') == []
     path.write_text('pose: {moves: hand, left_tool: {xyz: [0, 0, 0], rpy: [0, 0, 0]}, joints: {torso: auto}}\n')
-    assert errors(cell, 'robots/galbot_s1/targets.yaml') == []  # a lift joint: the fallback heights
+    assert errors(cell, 'robots/bot_two_arm/targets.yaml') == []  # a lift joint: the fallback heights
 
 
 def test_a_target_has_the_keys_of_its_kind(cell):
@@ -242,7 +242,7 @@ def test_tools_and_gripper_settings_are_checked_against_the_robot(cell):
         'grip_m: {left: 0.06, right: 0.06}',
         'grip_m: {left: 0.06, middle: 0.06}',
     )
-    assert any("robot has no tool 'middle'" in m for m in warnings(cell, 'robots/galbot_s1/objects/part_box.yaml'))
+    assert any("robot has no tool 'middle'" in m for m in warnings(cell, 'robots/bot_two_arm/objects/part_box.yaml'))
     replace(cell / 'objects' / 'part_box.yaml', 'grip_width_m: 0.06', 'grip_width_m: 0.3')
     assert any('exceeds the' in m and 'stroke' in m for m in warnings(cell, 'objects/part_box.yaml'))
     replace(cell / 'objects' / 'part_box.yaml', 'tool_type: parallel_gripper', 'tool_type: suction')
@@ -258,9 +258,9 @@ def test_a_robot_objects_file_of_an_unknown_type_is_a_warning(cell):
 def test_the_catalogue_knows_the_four_target_files():
     assert catalogue.kind_of('cell/targets.yaml').kind == 'cell_targets'
     assert catalogue.kind_of('objects/frame_type2.yaml').kind == 'object_type'
-    assert catalogue.kind_of('robots/galbot_s1/objects/frame_type2.yaml').kind == 'robot_objects'
-    assert catalogue.kind_of('robots/galbot_s1/targets.yaml').kind == 'robot_targets'
-    assert catalogue.kind_of('targets.yaml', 'robot:galbot_s1').kind == 'robot_targets'
+    assert catalogue.kind_of('robots/bot_two_arm/objects/frame_type2.yaml').kind == 'robot_objects'
+    assert catalogue.kind_of('robots/bot_two_arm/targets.yaml').kind == 'robot_targets'
+    assert catalogue.kind_of('targets.yaml', 'robot:bot_two_arm').kind == 'robot_targets'
     assert catalogue.kind_of('cell/locations.yaml').kind == 'locations'  # the old kinds stay for the old layout
     kinds = {k['kind'] for k in ConfigStore(FIXTURES / 'targets_new').file_kinds()}
     assert {'cell_targets', 'robot_objects', 'robot_targets', 'object_type', 'locations', 'stances'} <= kinds
