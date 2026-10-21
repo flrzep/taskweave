@@ -857,11 +857,6 @@ class ConfigStore:
         """``{object type: [target names]}`` of the object-frame targets, with the robot's own when given."""
         return ts.object_target_names(self, robot)
 
-    def type_target(self, type: str, name: str, robot: str | None = None) -> Target:
-        """An object-frame target of an object type with no placed object: the merged type and robot layers (the robot's
-        settings only when ``robot`` is given), the pose in the object's own frame, not resolved to any instance."""
-        return ts.resolve_type(self, robot, type, name)
-
     def save_target(self, reference: str, data: dict, robot: str, *, instance_override: bool = False,
                     rename: str | None = None, type: str | None = None, note: str | None = None) -> list[Path]:
         """Create or update a target and write it where it belongs, comments kept (target_edit.save_target); returns the
