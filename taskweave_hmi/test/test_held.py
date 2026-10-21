@@ -35,7 +35,8 @@ def store(tmp_path):
 def test_held_poses_are_listed_with_their_missions(store):
     poses = held.overview(store, ROBOT)
     assert poses == [{'object_type': 'box', 'name': 'carry', 'joints': {'lift': 0.5},
-                      'path': [{'xyz': [0.8, 0.0, 0.1], 'rpy': [0.0, 0.0, 0.0]}], 'used_by': ['carry_box']}]
+                      'path': [{'xyz': [0.8, 0.0, 0.1], 'rpy': [0.0, 0.0, 0.0]}], 'used_by': ['carry_box'],
+                      'problems': []}]
     assert arm.overview(store, ROBOT, set())['held'] == poses
 
 

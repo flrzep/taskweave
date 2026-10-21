@@ -69,12 +69,43 @@ def used_names(store: ConfigStore) -> dict[str, list[str]]:
 
 
 def overview(store: ConfigStore, robot: str) -> list[dict]:
-    """Every held pose of the robot, with the missions using it."""
+    """Every held pose of the robot, with the missions using it and ``problems`` (empty for a readable one). On a
+    targets cell an object target the store cannot read (``target_store.pose_target_problems``: a problem in the
+    file, joints the robot has no group for) is listed too, with its problem and the waypoints as written, so it can
+    be fixed here."""
     used = used_names(store)
-    return [{'object_type': obj, 'name': name, 'joints': dict(entry.get('joints') or {}),
-             'path': [{'xyz': list(p['xyz']), 'rpy': list(p['rpy'])} for p in entry.get('path') or []],
-             'used_by': used.get(name, [])}
-            for obj, entries in store.held_poses(robot).items() for name, entry in entries.items()]
+    result = [{'object_type': obj, 'name': name, 'joints': dict(entry.get('joints') or {}),
+               'path': [{'xyz': list(p['xyz']), 'rpy': list(p['rpy'])} for p in entry.get('path') or []],
+               'used_by': used.get(name, []), 'problems': []}
+              for obj, entries in store.held_poses(robot).items() for name, entry in entries.items()]
+    if targets.active(store):
+        result += _unreadable(store, robot, used, {item['name'] for item in result})
+    return result
+
+
+def _waypoints(entry: Mapping) -> list[dict]:
+    """The waypoints of an object target as written, those with three numbers each for xyz and rpy."""
+    steps = entry.get('path') if isinstance(entry.get('path'), list) else [entry]
+
+    def three(values) -> bool:
+        return (isinstance(values, list) and len(values) == 3
+                and all(isinstance(v, int | float) and not isinstance(v, bool) for v in values))
+
+    return [{'xyz': list(step['xyz']), 'rpy': list(step.get('rpy', [0.0, 0.0, 0.0]))} for step in steps
+            if isinstance(step, Mapping) and three(step.get('xyz')) and three(step.get('rpy', [0.0, 0.0, 0.0]))]
+
+
+def _unreadable(store: ConfigStore, robot: str, used: Mapping, listed: set[str]) -> list[dict]:
+    from taskweave_core.config import target_store
+
+    bad = target_store.pose_target_problems(store, robot)
+    result = []
+    for name, entry in target_store.robot_targets(store, robot).items():
+        if name in listed or name not in bad or entry.get('moves') != 'object':
+            continue
+        result.append({'object_type': entry.get('type') or ANY_TYPE, 'name': name, 'joints': {},
+                       'path': _waypoints(entry), 'used_by': used.get(name, []), 'problems': [bad[name]]})
+    return result
 
 
 def _numbers(values, label: str) -> list[float]:

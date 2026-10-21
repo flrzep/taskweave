@@ -22,16 +22,20 @@ HTTP API (JSON):
   PUT  /api/missions/<name>        validate and save; 422 with {problems} if invalid, nothing written;
                                    ?rename_from=<old> saves mission <old> as <name> (old file removed)
   DELETE /api/missions/<name>      remove the mission file (a running mission keeps its plan)
-  POST /api/missions/<name>/validate
+  POST /api/missions/<name>/validate  {problems, places}; places (also in a 422 of PUT): per problem of a step
+                                   {problem, step, path, include}: the step of the mission's own steps and the path in
+                                   it (['args', 'to'], ['skill']), so the editor marks the step and the field
   GET  /api/missions/<name>/plan   the plan a start would run now (includes expanded, facts filled): step ids to
-                                   start at
+                                   start at; each step with kind (a move step's kind of motion, '') and resources,
+                                   as the live plan's steps
   GET  /api/speed                  the global speed override {percent, test_mode, test_percent, cap_percent, presets,
                                    min, max, available}; also in /api/state (speed) and as the live event speed
   POST /api/speed {percent, test_mode, test_percent}  set it through the task handler (each key optional; also while
                                    a mission runs): {ok, message, percent}, 422 when refused (e.g. out of range)
   POST /api/start {mission[, start_step]}  start a mission (at a step id: the first cycle begins there, robot and
                                    objects as they are); POST /api/pause | /api/resume | /api/abort
-  GET  /api/skills                 skill catalog;  GET /api/points  named points for argument pickers (the store's
+  GET  /api/skills                 skill catalog (move: x-taskweave-move, the options per kind of motion)
+  GET  /api/points                 named points for argument pickers (the store's
                                    lists plus 'held poses' and 'via targets'; on a cell pack in the targets layout
                                    also 'base targets', 'hand targets', 'object targets', 'joint targets')
   GET  /api/points/all             locations, stance offsets and placed objects, with the missions using each point
@@ -69,12 +73,15 @@ HTTP API (JSON):
   PUT  /api/robot/joints {joints: {name: value}}  send joint targets now (no mission running; within the limits)
   GET  /api/teach/arm               arm positions: robot poses and object points as one list (arm.py)
   PUT  /api/teach/arm/<robot|type>/<name>      {hands, joints, elbow, approach_m[, rename]};  DELETE the same
-  POST /api/teach/arm/<robot|type>/<name>/capture {at, tools, form}  save the robot's current arm there (also creates)
+  POST /api/teach/arm/<robot|type>/<name>/capture {at, tools, form[, instance_override]}  save the robot's current arm
+                                   there (also creates): {file, message} (the teach node's answer for a point)
   POST /api/teach/arm/<robot|type>/<name>/test {at}  move there now (a robot pose as /api/robot/move; an object point:
                                    move_gripper to <at>/<name>, at the placed object <at>)
   PUT  /api/teach/target {scope, name, at, form} or {}   the position a pad teach press saves into
   PUT  /api/teach/held/<type>/<name> {joints, path, rename}; DELETE the same   held poses (move_object to: {pose})
   POST /api/teach/held/<type>/<name>/test   move the held object there now (move_object; move {to} once served)
+  POST /api/teach/held/<type>/<name>/capture   teach it from the held object (targets layout: the teach node's object
+                                   kind; 422 with its answer while it cannot be taught yet)
   GET  /api/recordings              {status, recordings, free_bytes} (404 without recordings_dir; recording.py)
   POST /api/recordings/start {mission, name, cycles, reset, bag, camera, video, quality, max_min};  POST .../stop
   DELETE /api/recordings/<id>;  PUT /api/recordings/<id>/keep {keep}  exempt it from replacement
@@ -115,7 +122,6 @@ from std_srvs.srv import Trigger
 
 from taskweave_core import names, tf_util
 from taskweave_core.config import ConfigError, ConfigStore, Pose2D, TargetError
-from taskweave_core.planner import MissionFilePlanner
 from taskweave_core.speed import MAX_PERCENT, MIN_PERCENT, PRESETS, SpeedOverride
 from taskweave_core.teach import MAX_POSE_AGE_S, yaw_from_quaternion
 from taskweave_interfaces.action import RunSkill
@@ -154,22 +160,22 @@ CHUNK = 1 << 20
 
 
 def step_dict(step) -> dict:
+    """A PlanStep message as the HMI's plan JSON; ``kind`` (a move step's kind of motion, '' for none) and
+    ``resources`` are filled when the task handler validated the plan (a message without them: '' and [])."""
     return {'id': step.step_id, 'instruction': step.instruction, 'skill': step.skill,
             'args': json.loads(step.args_json or '{}'), 'timeout_s': step.timeout_s, 'retries': step.retries,
-            'on_failure': step.on_failure}
+            'on_failure': step.on_failure, 'kind': getattr(step, 'kind', '') or '',
+            'resources': list(getattr(step, 'resources', None) or [])}
 
 
-def preview_plan(config: ConfigStore, mission: str, robot: str) -> dict:
-    """The plan a start of ``mission`` would run now, shaped like the live plan (``plan_id`` ``<mission>-preview``);
-    no steps when there is nothing to do (e.g. every stack is empty)."""
-    plan = MissionFilePlanner(config, mission, None, robot).make_plan({}, 1)
-    if plan is None:
-        return {'plan_id': f'{mission}-preview', 'goal': '', 'robot': robot, 'loop': '', 'steps': [],
-                'message': 'nothing to do now'}
-    return {'plan_id': f'{mission}-preview', 'goal': plan.goal, 'robot': plan.robot, 'loop': plan.loop,
-            'steps': [{'id': step.id, 'instruction': step.instruction, 'skill': step.skill, 'args': step.args,
-                       'timeout_s': step.timeout_s, 'retries': step.retries, 'on_failure': step.on_failure}
-                      for step in plan.steps]}
+def preview_plan(config: ConfigStore, mission: str, robot: str, catalog: dict | None = None) -> dict:
+    """The plan a start of ``mission`` would run now (missions.preview_plan), with kind and resources per step."""
+    return missions.preview_plan(config, mission, robot, catalog)
+
+
+def teach_fields() -> set[str]:
+    """The request fields of the teach service as built (TeachPoint before cell schema 4 has no instance_override)."""
+    return set(TeachPoint.Request.get_fields_and_field_types())
 
 
 def status_dict(msg: TaskStatus) -> dict:
@@ -667,6 +673,19 @@ class Bridge(Node):
             self.teach_target = target or None
         self.teach_target_pub.publish(String(data=json.dumps(target) if target else ''))
 
+    def teach(self, kind: str, name: str, tools=(), instance_override: bool = False):
+        """Ask the teach node to save the robot's current pose as target ``name`` of ``kind`` (base, hand, joints,
+        object): the request of the cell's layout (targets.teach_request). Refused: an ArmError with the node's
+        message (``hand 'tray_1/H05': ...``)."""
+        try:
+            fields = targets.teach_request(self.config, teach_fields(), kind, name, tools, instance_override)
+        except ValueError as error:
+            raise arm.ArmError(str(error)) from error
+        response = self.call(self.teach_client, TeachPoint.Request(**fields))
+        if not response.success:
+            raise arm.ArmError(response.message)
+        return response
+
     def _teach_request(self, msg: String) -> None:
         """A pad teach press (operator_joy): save the robot's arm into the position open in the HMI."""
         with self.lock:
@@ -676,9 +695,10 @@ class Bridge(Node):
         tools = json.loads(msg.data or '{}').get('tools') or []
         label = f'{target["scope"]} {target["name"]}'
         try:
-            file = self.capture(target['scope'], target['name'], {'at': target.get('at'), 'tools': tools,
-                                                                  'form': target.get('form')})
-            notice = {'text': f'taught {label} -> {file}', 'ok': True, 'taught': target}
+            result = self.capture(target['scope'], target['name'], {'at': target.get('at'), 'tools': tools,
+                                                                    'form': target.get('form')})
+            notice = {'text': f'taught {result["message"] or label} -> {result["file"]}', 'ok': True,
+                      'taught': target}
             self.points_changed()
         except (arm.ArmError, Busy, TimeoutError, KeyError, ConfigError) as error:
             notice = {'text': f'teach {label} failed: {error}', 'ok': False}
@@ -689,32 +709,48 @@ class Bridge(Node):
         editor's argument pickers fetch /api/points again."""
         self._broadcast('points', None)
 
-    def capture(self, scope: str, name: str, body: dict) -> str:
+    def capture(self, scope: str, name: str, body: dict) -> dict:
         """Save the robot's current arm as an arm position: a robot pose from the joint states and forward
-        kinematics, an object point through the teach node at placed object ``at`` (default: the nearest)."""
+        kinematics, an object point (a hand target of the type) through the teach node at placed object ``at``
+        (default: the nearest; ``instance_override``: for that instance only). ``{file, message}``: the file written
+        and the teach node's answer ('' for a robot pose)."""
         self.check_idle()
         if scope == arm.ROBOT:
             try:
-                targets = self.tool_targets()
+                tool_targets = self.tool_targets()
             except TimeoutError:
-                targets = None
-            return arm.capture_pose(self.config, self.robot, name, body, self.joint_positions(), targets,
-                                    self.pose_args())
+                tool_targets = None
+            return {'file': arm.capture_pose(self.config, self.robot, name, body, self.joint_positions(),
+                                             tool_targets, self.pose_args()), 'message': ''}
         at = body.get('at') or self.nearest_placed(scope)
         instance = self.config.object_instances().get(at)
         if instance is None or instance.object != scope:
             raise arm.ArmError(f'{at} is not a placed {scope}')
-        response = self.call(self.teach_client, TeachPoint.Request(name=f'{at}/{name}', kind='object_point',
-                                                                   tools=list(body.get('tools') or [])))
-        if not response.success:
-            raise arm.ArmError(response.message)
+        response = self.teach('hand', f'{at}/{name}', list(body.get('tools') or []),
+                              bool(body.get('instance_override')))
         grip = arm.closed_grips(self.config, self.robot, list(body.get('tools') or []), self.joint_positions())
         if grip:  # grippers closed on the part when taught: they close that far at this point
             points.save_object_point(self.config, scope, name, {'grip_m': grip}, self.robot)
+        return {'file': self.relative(response.file), 'message': response.message}
+
+    def capture_held(self, name: str) -> dict:
+        """Teach a held pose (an object target in the base frame) from where the held object is now: the teach
+        node's ``object`` kind, which answers that it cannot be taught yet (the HMI shows its message)."""
+        self.check_idle()
+        if not targets.active(self.config):
+            raise held.HeldError('a held pose cannot be captured: type in its numbers and try it with Test')
         try:
-            return str(Path(response.file).relative_to(self.config.root))
+            response = self.teach('object', name)
+        except arm.ArmError as error:
+            raise held.HeldError(str(error)) from error
+        return {'file': self.relative(response.file), 'message': response.message}
+
+    def relative(self, file: str) -> str:
+        """A file the teach node wrote, relative to the config folder when it is in it."""
+        try:
+            return Path(file).relative_to(self.config.root).as_posix()
         except ValueError:
-            return response.file
+            return file
 
     def nearest_placed(self, object_type: str) -> str:
         return arm.nearest_placed(self.config, object_type,
@@ -1003,10 +1039,14 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({'deleted': name})
             if method == 'GET' and len(route) == 3 and route[0] == 'missions' and route[2] == 'plan':
                 bridge.config.reload()
-                return self._json(preview_plan(bridge.config, missions.check_name(route[1]), bridge.robot))
+                try:
+                    catalog = bridge.schemas()   # the other skills' resources; a move step's kind needs none
+                except TimeoutError:
+                    catalog = {}
+                return self._json(preview_plan(bridge.config, missions.check_name(route[1]), bridge.robot, catalog))
             if method == 'POST' and len(route) == 3 and route[0] == 'missions' and route[2] == 'validate':
-                problems = missions.validate(self._body(), bridge.config, bridge.schemas(), bridge.robot)
-                return self._json({'problems': problems})
+                problems, places = missions.check(self._body(), bridge.config, bridge.schemas(), bridge.robot)
+                return self._json({'problems': problems, 'places': places})
             if method == 'GET' and route == ['speed']:
                 return self._json(bridge.speed_state)  # replaced on change, never changed in place
             if method == 'POST' and route == ['speed']:
@@ -1027,7 +1067,7 @@ class Handler(BaseHTTPRequestHandler):
                 response = bridge.call(bridge.triggers[route[0]], Trigger.Request())
                 return self._json({'success': response.success, 'state': response.message})
             if method == 'GET' and route == ['skills']:
-                return self._json(bridge.catalog())
+                return self._json(targets.annotate_catalog(bridge.catalog()))
             if method == 'GET' and route == ['points']:
                 return self._json(bridge.point_names())
             if method == 'GET' and route == ['points', 'all']:
@@ -1121,10 +1161,10 @@ class Handler(BaseHTTPRequestHandler):
                     bridge.points_changed()
                     return self._json({'file': file})
                 if len(route) == 5 and method == 'POST' and route[4] == 'capture':
-                    file = bridge.capture(scope, name, self._body())
-                    bridge.get_logger().info(f'HMI captured arm position {scope}/{name} -> {file}')
+                    result = bridge.capture(scope, name, self._body())
+                    bridge.get_logger().info(f'HMI captured arm position {scope}/{name} -> {result["file"]}')
                     bridge.points_changed()
-                    return self._json({'file': file})
+                    return self._json(result)
                 if len(route) == 5 and method == 'POST' and route[4] == 'test':
                     return self._json(bridge.test_position(scope, name, self._body()))
             if len(route) >= 4 and route[:2] == ['teach', 'held']:
@@ -1141,11 +1181,15 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({'file': file})
                 if len(route) == 5 and method == 'POST' and route[4] == 'test':
                     return self._json(bridge.test_held(obj, name))
+                if len(route) == 5 and method == 'POST' and route[4] == 'capture':
+                    result = bridge.capture_held(name)
+                    bridge.points_changed()
+                    return self._json(result)
             if method == 'POST' and route == ['robot', 'move']:
                 return self._json(bridge.go_to_pose(self._body()['pose']))
             return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
         except missions.MissionError as error:
-            return self._json({'problems': error.problems}, HTTPStatus.UNPROCESSABLE_ENTITY)
+            return self._json({'problems': error.problems, 'places': error.places}, HTTPStatus.UNPROCESSABLE_ENTITY)
         except (points.PointError, robot.RobotSettingsError, arm.ArmError, held.HeldError,
                 recording.RecordingError) as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)

@@ -19,7 +19,7 @@ from collections.abc import Iterable, Iterator, Mapping
 
 from taskweave_core.config import ConfigError, ConfigStore, TargetWriteError
 from taskweave_core.config import target_store as ts
-from taskweave_core.config.targets import TOOL_SUFFIX, rpy_from_axes
+from taskweave_core.config.targets import MOTION_MODES, MOTION_OPTIONS, MOVE_OPTIONS, TOOL_SUFFIX, rpy_from_axes
 
 MOVE = 'move'
 KIND_GROUPS = {'base': 'base targets', 'hand': 'hand targets', 'object': 'object targets', 'joints': 'joint targets'}
@@ -233,6 +233,67 @@ def module_config(store: ConfigStore, old_skill: str, part: str) -> dict:
     if (store.root / 'skills' / MOVE / f'{part}.yaml').is_file():
         return store.skill_config(f'{MOVE}/{part}')
     return store.skill_config(old_skill)
+
+
+# ---- teach requests -----------------------------------------------------------------------------------------------
+TEACH_KINDS = ('base', 'hand', 'joints', 'object')
+OLD_TEACH_KINDS = {'hand': 'object_point'}    # cell schema 3: the kind the teach node took (base: location, stance)
+
+
+def teach_request(store: ConfigStore, fields: Iterable[str], kind: str, name: str, tools: Iterable[str] = (),
+                  instance_override: bool = False) -> dict:
+    """The TeachPoint request fields that save the robot's current pose as ``name`` of ``kind`` (base, hand, joints,
+    object). Cell schema 4: the target reference and the kind, ``instance_override`` for an ``<instance>/<name>``.
+    Before schema 4 the old kinds (hand: object_point; base: location, stance, stance_instance), and no
+    instance_override. ``fields``: the request's fields as built (an older service has no instance_override; it
+    cannot teach a targets cell). A request that cannot be made is a ValueError with the reason."""
+    if kind not in TEACH_KINDS:
+        raise ValueError(f'unknown teach kind {kind!r} (it is one of {", ".join(TEACH_KINDS)})')
+    request = {'name': name, 'kind': kind, 'tools': [str(tool) for tool in tools]}
+    if active(store):
+        if 'instance_override' not in set(fields):
+            raise ValueError('the teach service is older than this cell pack (schema 4, targets): rebuild '
+                             'taskweave_interfaces and restart the teach node')
+        return {**request, 'instance_override': bool(instance_override)}
+    if kind == 'base':
+        request['kind'] = 'location' if SEPARATOR not in name else ('stance_instance' if instance_override
+                                                                    else 'stance')
+    elif kind in OLD_TEACH_KINDS:
+        request['kind'] = OLD_TEACH_KINDS[kind]
+    else:
+        raise ValueError(f'{kind} {name!r}: this cell is in the layout before schema 4 (taskweave config migrate): '
+                         f'{kind} targets need the targets layout')
+    return request
+
+
+# ---- the move skill in the catalog ---------------------------------------------------------------------------------
+FORM_KINDS = {'to': None, 'hand': ['hand'], 'object': ['object'], 'base': ['straight'], 'elbow': ['elbow'],
+              'joints': ['joints']}    # a form's selector -> the kinds whose options apply (to: the target's kind)
+RELATIVE_KEYS = {'hand': ['by', 'at', 'rpy_deg', 'frame', 'turn_deg', 'tilt_deg'],
+                 'object': ['by', 'at', 'turn_deg', 'tilt_deg']}   # as taskweave_skills.move RELATIVE_KEYS
+NOT_RELATIVE = ['offset_m', 'reference']   # options of a target only (step_info.move_problems: not on a relative move)
+HIDDEN_ARGS = {'dry_run': 'never saved in a mission (a manual try-out of the move)',
+               'look_at': 'reserved, not implemented yet'}
+
+
+def annotate_catalog(catalog: list[dict]) -> list[dict]:
+    """The skill catalog for the mission editor: the ``move`` skill's args schema gets ``x-taskweave-move``, what the
+    editor needs to show a step's form: per form selector the kinds whose options apply (``forms``, None: the
+    target's kind), the options and motion keys each kind takes (core's MOVE_OPTIONS, MOTION_OPTIONS,
+    MOTION_MODES; base, straight, hand, object, elbow, joints), the relative keys per form, the options a relative
+    move does not take and the arguments the editor hides. Other skills and a catalog without move are unchanged."""
+    result = []
+    for skill in catalog:
+        schema = skill.get('args_schema') or {}
+        if skill.get('name') == MOVE and schema.get('oneOf'):
+            schema = {**schema, 'x-taskweave-move': {
+                'forms': FORM_KINDS, 'options': {k: list(v) for k, v in MOVE_OPTIONS.items()},
+                'motion': {k: list(v) for k, v in MOTION_OPTIONS.items()},
+                'modes': {k: list(v) for k, v in MOTION_MODES.items()}, 'relative': RELATIVE_KEYS,
+                'not_relative': NOT_RELATIVE, 'hidden': HIDDEN_ARGS}}
+            skill = {**skill, 'args_schema': schema}
+        result.append(skill)
+    return result
 
 
 def approach_default(store: ConfigStore) -> float:

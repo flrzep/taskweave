@@ -459,8 +459,10 @@ def test_the_lists_read_merged_targets_and_name_a_bad_one_instead_of_failing(sto
     assert list(by_name)[-1] == 'bad' and by_name['bad']['joints'] == {}         # file order, listed with its problem
     positions = {p['name']: p for p in arm.overview(again, ROBOT, set())['positions'] if p['scope'] == 'robot'}
     assert 'has 2 joints' in positions['bad']['problems'][0]
-    held_names = {p['name'] for p in held.overview(again, ROBOT)}                # the store's reader skips it
-    assert 'carry' in held_names and 'bad_held' not in held_names
+    listed = {p['name']: p for p in held.overview(again, ROBOT)}     # the store's reader skips it: listed with it
+    assert listed['carry']['problems'] == [] and 'has 2 joints' in listed['bad_held']['problems'][0]
+    assert listed['bad_held']['path'] == [{'xyz': [1.0, 0.0, 0.3], 'rpy': [0.0, 0.0, 0.0]}]
+    assert listed['bad_held']['object_type'] == held.ANY_TYPE
     with pytest.raises(ValueError, match='has 2 joints'):                        # asked for by name: the error
         again.named_pose(ROBOT, 'bad')
 

@@ -82,6 +82,7 @@ def overview(store: ConfigStore, robot_name: str, pose_args: set) -> dict:
     mimics = mimic_joints(store, robot_name)
     return {
         'robot': robot_name,
+        'targets_layout': layout.active(store),   # cell schema 4: points are hand targets, held poses object targets
         'positions': positions,
         'held': held.overview(store, robot_name),   # held poses (move_object pose:), edited as numbers
         'grip_range_m': grip_ranges(store, robot_name),   # finger openings each gripper can be set to (grip_m)
