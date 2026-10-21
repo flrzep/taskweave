@@ -1,0 +1,6 @@
+frame_type2:
+  rails_top: {elbow: up}
+karakuri_hanger:
+  knob: {elbow: out}
+part_box:
+  top_grasp: {grip_m: {left: 0.06, right: 0.06}}

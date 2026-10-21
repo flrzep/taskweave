@@ -1,0 +1,4 @@
+handled_from: pick
+targets:
+  pick: {moves: base, x: -0.8, y: 0.0, yaw: 0.0}    # 0.06 m wide box on the floor, robot faces it
+  top_grasp: {grip_m: {left: 0.06, right: 0.06}}    # closes on the 6 cm box

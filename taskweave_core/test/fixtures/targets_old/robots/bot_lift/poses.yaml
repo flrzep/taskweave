@@ -1,0 +1,2 @@
+lift_high: {lift_joint: 0.4}
+ready: {lift_joint: 0.2, pitch_joint: 0.1, left_arm_joint1: 0.5, left_arm_joint2: -0.5, right_arm_joint1: 0.5}

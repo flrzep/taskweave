@@ -1,0 +1,4 @@
+# the old twin of ../targets_new: the same cell in the old point files (cell schema 3)
+name: targets_cell
+version: 1
+schema_version: 3

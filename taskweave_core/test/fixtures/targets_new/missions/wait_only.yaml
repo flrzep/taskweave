@@ -1,0 +1,6 @@
+goal: Wait one second
+steps:
+  - id: wait
+    instruction: Wait one second
+    skill: wait
+    args: {seconds: 1.0}

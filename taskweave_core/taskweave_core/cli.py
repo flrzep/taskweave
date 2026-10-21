@@ -140,7 +140,7 @@ def _config_target(path: str, cell: str | None, pack: str):
     message on stderr if it cannot be told."""
     from pathlib import Path
 
-    from .config.packs import CELL_SCHEMA, cell_schema
+    from .config.packs import CELL_SCHEMA, CELL_SCHEMA_OLDEST, cell_schema
 
     target = Path(path).expanduser().resolve()
     if target.is_file():
@@ -148,7 +148,7 @@ def _config_target(path: str, cell: str | None, pack: str):
         if folder is None:
             print(f'{path} is in no pack (no pack.yaml above it)', file=sys.stderr)
             return None
-        if cell_schema(folder) == CELL_SCHEMA:
+        if CELL_SCHEMA_OLDEST <= cell_schema(folder) <= CELL_SCHEMA:
             return str(folder), target.relative_to(folder).as_posix(), 'cell'
         if cell:
             return cell, target.relative_to(folder).as_posix(), f'robot:{folder.name}'

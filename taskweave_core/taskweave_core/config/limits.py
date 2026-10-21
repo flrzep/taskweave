@@ -149,3 +149,30 @@ def pose_problems(store: ConfigStore, robot: str, name: str) -> list[str]:
     pose = store.named_pose(robot, name)
     linear = set(store.robot(robot).data.get('joints', {}).get('linear', []))
     return joint_problems(pose['joints'], joint_limits(store, robot), linear)
+
+
+def torso_joint(store: ConfigStore, robot: str) -> str | None:
+    """The robot's lift joint (profile ``torso.joint``), the one a plain number for the ``torso`` group sets."""
+    return (store.robot(robot).data.get('torso') or {}).get('joint')
+
+
+def group_values(store: ConfigStore, robot: str, joints: dict, only: list[str] | None = None) -> dict[str, float]:
+    """The joint values of a target's ``joints:`` part for this robot: ``{joint: value}`` (targets.group_joint_values:
+    a number, or a list in the group's order with ``null`` for a joint left alone; ``auto`` and ``keep`` set none).
+    Raises targets.GroupError (a ValueError) naming the group that does not fit."""
+    from .targets import group_joint_values
+
+    return group_joint_values(joints, joint_groups(store, robot), torso_joint(store, robot), only)
+
+
+def target_joint_problems(store: ConfigStore, robot: str, joints: dict) -> list[str]:
+    """Problems with the joints part of a target for this robot: a group it does not have, a list of the wrong
+    length, a value outside the joint's range."""
+    from .targets import GroupError
+
+    try:
+        values = group_values(store, robot, joints)
+    except GroupError as error:
+        return [str(error)]
+    linear = set(store.robot(robot).data.get('joints', {}).get('linear', []))
+    return joint_problems(values, joint_limits(store, robot), linear)

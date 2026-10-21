@@ -1,0 +1,6 @@
+handled_from: staging
+targets:
+  staging: {moves: base, x: 1.765, y: 0.0, yaw: 3.1416}     # in the drop-off zone: the frame is stood up here
+  hang: {moves: base, x: 1.1, y: 0.0, yaw: 3.1416}          # between the end posts
+  knob_stance: {moves: base, x: 1.26, y: 0.0, yaw: 3.1416}  # was `knob`; `knob` is the hand target
+  knob: {elbow: out}                                        # the robot's setting on the type's knob

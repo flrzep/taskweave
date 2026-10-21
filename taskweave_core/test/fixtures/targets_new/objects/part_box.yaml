@@ -1,0 +1,10 @@
+name: part_box
+targets:
+  top_grasp:                     # one hand from above, TCP 3 cm below the top
+    moves: hand
+    tool_type: parallel_gripper
+    grip_width_m: 0.06
+    approach_m: 0.1
+    alone:
+      left_tool: {xyz: [0.0, 0.0, 0.07], rpy: [0.0, 3.1416, -1.5708]}
+      right_tool: {xyz: [0.0, 0.0, 0.07], rpy: [0.0, 3.1416, -1.5708]}

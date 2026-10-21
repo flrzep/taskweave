@@ -114,7 +114,7 @@ def test_schema_version_is_checked(tmp_path):
                                           'migrate-skills'):
         ConfigStore(tmp_path / 'cell')
     shutil.copytree(tmp_path / 'cell', tmp_path / 'newer')   # (a pack.yaml is read again only when its mtime changes)
-    (tmp_path / 'newer' / 'pack.yaml').write_text('name: cell\nversion: 1\nschema_version: 4\n')
+    (tmp_path / 'newer' / 'pack.yaml').write_text('name: cell\nversion: 1\nschema_version: 5\n')
     with pytest.raises(ConfigError, match='update taskweave'):
         ConfigStore(tmp_path / 'newer')
 

@@ -1,0 +1,2 @@
+lift_high: {moves: joints, joints: {torso: [0.4, null]}}     # two torso joints, null leaves the pitch
+ready: {moves: joints, joints: {torso: [0.2, 0.1], left_arm: [0.5, -0.5], right_arm: [0.5, null]}}

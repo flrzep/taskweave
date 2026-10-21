@@ -183,7 +183,7 @@ def split_robot_packs(cell: Path, robot_packs: Path | None, dry_run: bool, say) 
                     if not (pack / packs.PACK_FILE).is_file():
                         pack.mkdir(parents=True, exist_ok=True)
                         (pack / packs.PACK_FILE).write_text(yaml.safe_dump(
-                            {'name': robot, 'version': ROBOT_PACK_VERSION, 'schema_version': packs.ROBOT_SCHEMA,
+                            {'name': robot, 'version': ROBOT_PACK_VERSION, 'schema_version': packs.ROBOT_SCHEMA_OLDEST,
                              'description': f'{robot} robot files, moved out of cell pack {cell.name} by taskweave '
                                             'config migrate'}, sort_keys=False, width=1000), encoding='utf-8')
                     shutil.move(str(here), str(pack / name))
@@ -226,6 +226,7 @@ def skill_model(cell: Path, robot_packs: Path | None, dry_run: bool, say) -> lis
 
 # from schema_version -> function(cell, robot_packs, dry_run, say) -> units it could not remove (pack.yaml waits)
 MIGRATIONS = {1: split_robot_packs, 2: skill_model}
+LATEST = max(MIGRATIONS) + 1    # the schema the chain ends at (packs.CELL_SCHEMA once the targets step 3 -> 4 exists)
 
 
 def migrate(cell: str | Path, robot_packs: str | Path | None = None, name: str | None = None, dry_run: bool = False,
@@ -239,11 +240,11 @@ def migrate(cell: str | Path, robot_packs: str | Path | None = None, name: str |
     if version > packs.CELL_SCHEMA:
         say(f'{cell}: cell pack schema {version} is newer than this taskweave ({packs.CELL_SCHEMA}): update taskweave')
         return 2
-    if version == packs.CELL_SCHEMA:
+    if version >= LATEST:
         say(f'{cell}: cell pack schema {version}, nothing to do')
         return 0
     dry = ' (dry run: nothing is changed)' if dry_run else ''
-    say(f'{cell}: cell pack schema {version} -> {packs.CELL_SCHEMA}{dry}')
+    say(f'{cell}: cell pack schema {version} -> {LATEST}{dry}')
     pack = cell / packs.PACK_FILE
     blocked = pack.is_symlink() or (not os.access(pack, os.W_OK) if pack.exists() else not os.access(cell, os.W_OK))
     if blocked:     # pack.yaml is written last: without it a run would leave a half-migrated cell
@@ -251,7 +252,7 @@ def migrate(cell: str | Path, robot_packs: str | Path | None = None, name: str |
             f'{pack} and run taskweave config migrate again.')
         if not dry_run:
             return 1
-    for step in range(version, packs.CELL_SCHEMA):
+    for step in range(version, LATEST):
         try:
             stuck = MIGRATIONS[step](cell, Path(robot_packs) if robot_packs else None, dry_run, say)
         except RuntimeError as error:   # a file cannot be written: the migration checked before it touched anything

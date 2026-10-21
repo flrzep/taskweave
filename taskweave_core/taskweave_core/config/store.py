@@ -11,8 +11,11 @@ pack files, keyed (only the keys the cell changes, laid over the pack's file) or
     robots/<model>/embodiment.yaml required per robot (robot pack): what the robot is and can do
     robots/<model>/stances.yaml    optional (cell), robot-specific base poses relative to objects (per type, instance)
     robots/<model>/poses.yaml      optional (robot pack), named joint-space poses (used by move_to_pose)
+    robots/<model>/targets.yaml    optional (robot pack, cell schema 4), base-frame and joint targets
+    robots/<model>/objects/<type>.yaml optional (cell, schema 4), this robot's targets on an object type
     robots/<model>/skill_overrides.yaml optional (robot pack), per skill: this robot's motion options and speeds
     cell/locations.yaml            optional, named base poses in the cell frame
+    cell/targets.yaml              optional (cell schema 4), targets in the cell frame
     cell/objects.yaml              optional, placed object instances: object type and pose in the cell frame
     objects/<name>.yaml            optional per object, taught tool poses
     skills/<skill>.yaml            per served skill: implementations and parameters
@@ -33,7 +36,9 @@ import yaml
 from jsonschema import Draft202012Validator
 
 from . import overlay, packs, schemas
+from . import target_store as ts
 from .poses import ObjectInstance, Pose2D, Pose3D, wrap_angle
+from .targets import Target
 
 STANCE_PREFIX = 'stance:'
 LOCATION_PREFIX = 'location:'
@@ -47,6 +52,7 @@ POINT_FILE_SCHEMAS = {  # files that teaching and the HMI may edit (a file name 
     'cell/objects.yaml': schemas.OBJECT_INSTANCES,  # where an object was put down (gripper place_as)
     'object_points.yaml': schemas.ROBOT_OBJECT_POINTS,  # a robot's settings for object points (elbow side)
     'held_poses.yaml': schemas.HELD_POSES,  # where a robot holds an object of a type (move_object pose)
+    'cell/targets.yaml': schemas.CELL_TARGETS, 'targets.yaml': schemas.ROBOT_TARGETS,   # targets (cell schema 4)
 }
 
 
@@ -221,7 +227,7 @@ class ConfigStore:
         installed share, overwritten by every build) gets a cell pack override, which holds only the keys the cell
         changes (keyed_override)."""
         cell = self.root / 'robots' / robot / file
-        if file in packs.CELL_ROBOT_FILES or cell.exists():
+        if file in packs.CELL_ROBOT_FILES or file.split('/')[0] in packs.CELL_ROBOT_FOLDERS or cell.exists():
             return cell
         robot_packs = self.robot_packs(robot)
         found = [p for p in robot_packs if (p.path / file).exists()]
@@ -406,7 +412,19 @@ class ConfigStore:
         return self._load('operator.yaml', schemas.OPERATOR, required=False, default={})
 
     # ---- points ------------------------------------------------------------
+    def targets_format(self) -> bool:
+        """The cell pack is in the targets layout (cell schema 4 and up): the old point readers below are then thin
+        readers over ``target()``, and the old writers refuse."""
+        return packs.targets_format(self.root)
+
+    def _old_writer(self, name: str) -> None:
+        if self.targets_format():
+            raise ValueError(f'{name} writes the old point files, this cell pack is in the targets layout: use '
+                             'save_target / delete_target / rename_target')
+
     def locations(self) -> dict[str, Pose2D]:
+        if self.targets_format():
+            return ts.legacy_locations(self)
         data = self._load('cell/locations.yaml', schemas.POINTS2D, required=False, default={})
         return {name: Pose2D.from_dict(pose) for name, pose in data.items()}
 
@@ -495,11 +513,15 @@ class ConfigStore:
 
     def stance_offsets(self, robot: str) -> dict:
         """robots/<robot>/stances.yaml as stored: ``{'objects': {type: {variant: pose}}, 'instances': {...}}``."""
+        if self.targets_format():
+            return ts.legacy_stance_offsets(self, robot)
         return self._load(f'robots/{robot}/stances.yaml', schemas.STANCES, required=False, default={})
 
     def stance_variants(self, robot: str, instance: ObjectInstance) -> dict[str, Pose2D]:
         """The robot's stance offsets for one object instance, in the object's frame, by variant name: the object
         type's variants, overridden by the instance's own. The first one is the default."""
+        if self.targets_format():
+            return ts.legacy_stance_variants(self, robot, instance)
         data = self.stance_offsets(robot)
         variants = dict(data.get('objects', {}).get(instance.object, {}))
         variants.update(data.get('instances', {}).get(instance.name, {}))
@@ -514,7 +536,10 @@ class ConfigStore:
         of the robot: the instance as placed."""
         step = None if near is None else self._load(f'objects/{instance.object}.yaml', schemas.OBJECT, required=False,
                                                     default={}).get('yaw_symmetry_deg')
-        offset = next(iter(self.stance_variants(robot, instance).values()), None) if step else None
+        if step and self.targets_format():
+            offset = ts.handled_offset(self, robot, instance)
+        else:
+            offset = next(iter(self.stance_variants(robot, instance).values()), None) if step else None
         if offset is None:
             return instance
         turns = [replace(instance, pose=Pose2D(instance.pose.x, instance.pose.y,
@@ -568,12 +593,16 @@ class ConfigStore:
 
     def joint_poses(self, robot: str) -> dict[str, dict]:
         """robots/<robot>/poses.yaml as stored: name -> joint map or tool pose (robot-specific by nature)."""
+        if self.targets_format():
+            return ts.legacy_joint_poses(self, robot)
         return self._load(f'robots/{robot}/poses.yaml', schemas.JOINT_POSES, required=False, default={})
 
     def named_pose(self, robot: str, name: str) -> dict:
         """A named pose as ``{'joints': {joint: value}, 'tools': {tool: {tcp, approach, closing}}, 'elbow': side}``.
         Joints are set directly; tool targets (TCP in the base frame) are solved by IK when the pose is used, with the
         pose's elbow side if it has one (None: the profile's). A joint-space pose has no tools."""
+        if self.targets_format():
+            return ts.legacy_named_pose(self, robot, name)
         poses = self.joint_poses(robot)
         if name not in poses:
             raise KeyError(f'unknown pose {name!r} for robot {robot!r}')
@@ -599,6 +628,8 @@ class ConfigStore:
 
     def point_names(self, robot: str) -> dict[str, list[str]]:
         """Names a plan can refer to, by kind (for planners and the robot card)."""
+        if self.targets_format():
+            return ts.legacy_point_names(self, robot)
         from .limits import joint_groups
         objects = []
         for path in sorted((self.root / 'objects').glob('*.yaml')):
@@ -630,6 +661,8 @@ class ConfigStore:
 
     def held_pose(self, robot: str, obj: str, name: str) -> dict:
         """robots/<robot>/held_poses.yaml <obj>.<name>: ``{'joints': {...}, 'path': [Pose3D, ...]}``."""
+        if self.targets_format():
+            return ts.legacy_held_pose(self, robot, obj, name)
         poses = self._load(f'robots/{robot}/held_poses.yaml', schemas.HELD_POSES, required=False, default={})
         if name not in poses.get(obj, {}):
             known = ', '.join(sorted(poses.get(obj, {}))) or 'none'
@@ -641,6 +674,8 @@ class ConfigStore:
 
     def held_poses(self, robot: str) -> dict:
         """robots/<robot>/held_poses.yaml as written: {object type: {name: {joints, path: [{xyz, rpy}]}}}."""
+        if self.targets_format():
+            return ts.legacy_held_poses(self, robot)
         return self._load(f'robots/{robot}/held_poses.yaml', schemas.HELD_POSES, required=False, default={})
 
     def save_held_pose(self, robot: str, obj: str, name: str, joints: dict, path: list[dict],
@@ -649,6 +684,7 @@ class ConfigStore:
         object's origin in the base frame, [{xyz, rpy}]); ``rename`` renames it in place. Comments are kept."""
         from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
+        self._old_writer('save_held_pose')
         self._check_name(name)
         if rename:
             self._check_name(rename)
@@ -681,6 +717,8 @@ class ConfigStore:
 
     def robot_object_points(self, robot: str) -> dict:
         """robots/<robot>/object_points.yaml: the robot's settings per object point ({object: {point: {elbow}}})."""
+        if self.targets_format():
+            return ts.legacy_robot_object_points(self, robot)
         return self._load(f'robots/{robot}/object_points.yaml', schemas.ROBOT_OBJECT_POINTS, required=False, default={})
 
     def skill_overrides(self, robot: str) -> dict:
@@ -694,6 +732,12 @@ class ConfigStore:
         ``{'left_tool': Pose3D, ..., 'approach': {...} | None, 'tool_type': str | None, 'grip_width_m': float | None}``
         With ``robot``, that robot's settings for the point (object_points.yaml, e.g. ``elbow``) come on top.
         """
+        if self.targets_format():
+            found = ts.resolve_type(self, robot, obj, point) if point in ts.type_target_kinds(self, robot, obj) \
+                else None
+            if found is None or found.kind != 'hand':
+                raise KeyError(f'object {obj!r} has no point {point!r}')
+            return found.to_point()
         points = self.object(obj).get('points', {})
         if point not in points:
             raise KeyError(f'object {obj!r} has no point {point!r}')
@@ -722,6 +766,11 @@ class ConfigStore:
         the instance as that robot handles it (handling_instance)."""
         name, _, point = reference.partition(VARIANT_SEPARATOR)
         instances = self.object_instances()
+        if self.targets_format() and name in instances and point:
+            found = ts.resolve(self, reference, robot, near)
+            if found.kind != 'hand':
+                raise KeyError(f'object {found.type!r} has no point {point!r}')
+            return found.instance, found.to_point()
         if name not in instances or not point:
             raise self.missing_instance(name, f'unknown object point {reference!r}: expected <instance>/<point>')
         if instances[name].stack_count == 0:
@@ -731,6 +780,14 @@ class ConfigStore:
 
     def object_contact(self, obj: str, contact: str) -> Pose3D:
         """A contact frame of an object type (objects/<object>.yaml contacts), relative to the object."""
+        if self.targets_format():
+            found = ts.resolve_type(self, None, obj, contact) if contact in ts.type_target_kinds(self, None, obj) \
+                else None
+            if found is None or found.kind != 'object':
+                known = sorted(n for n, m in ts.type_target_kinds(self, None, obj).items() if m == 'object')
+                raise KeyError(f'object {obj!r} has no contact {contact!r}'
+                               + (f' (it has {", ".join(known)})' if known else ''))
+            return found.pose
         contacts = self.object(obj).get('contacts', {})
         if contact not in contacts:
             raise KeyError(f'object {obj!r} has no contact {contact!r}'
@@ -743,6 +800,8 @@ class ConfigStore:
         instances = self.object_instances()
         if name not in instances or not contact:
             raise self.missing_instance(name, f'unknown object contact {reference!r}: expected <instance>/<contact>')
+        if self.targets_format():
+            return instances[name], self.object_contact(instances[name].object, contact)
         return instances[name], self.object_contact(instances[name].object, contact)
 
     def base_target(self, reference: str, robot: str, near: Pose2D | None = None) -> Pose2D:
@@ -756,6 +815,52 @@ class ConfigStore:
             raise KeyError(f'unknown location {name!r}')
         return locations[name]
 
+    # ---- targets (cell schema 4; targets.py, target_store.py, target_edit.py) ------------------------------------
+    def target(self, reference: str, robot: str, near: Pose2D | None = None, *, kinds=None,
+               context: str = '') -> Target:
+        """Resolve a reference to a Target: ``<name>`` (a cell, base-frame or joint target) or ``<instance>/<name>`` (an
+        object-frame target of a placed object: the per-key merge of the type's and the robot's layers, a stack
+        as its top item, a turned object as the robot handles it from ``near``, its base pose in the cell).
+        ``kinds``: the ``moves`` the caller can use (one or several); a target of another kind is refused with
+        ``context`` as the reason. Raises TargetError (a KeyError): one line, naming the file to look at."""
+        return ts.resolve(self, reference, robot, near, kinds, context)
+
+    def targets(self, robot: str) -> dict[str, Target]:
+        """Every resolvable target by reference: the cell's and the robot's, and ``<instance>/<name>`` for the targets
+        of each placed object's type."""
+        return ts.all_targets(self, robot)
+
+    def target_names(self, robot: str) -> dict[str, list[str]]:
+        """The names a plan can use by kind: ``{'base targets', 'hand targets', 'object targets', 'joint targets',
+        'placed objects'}``, object-frame ones as ``<instance>/<name>`` for the placed instances."""
+        return ts.target_names(self, robot)
+
+    def object_target_names(self, robot: str | None = None) -> dict[str, list[str]]:
+        """``{object type: [target names]}`` of the object-frame targets, with the robot's own when given."""
+        return ts.object_target_names(self, robot)
+
+    def save_target(self, reference: str, data: dict, robot: str, *, instance_override: bool = False,
+                    rename: str | None = None) -> list[Path]:
+        """Create or update a target and write it where it belongs, comments kept (target_edit.save_target); returns the
+        files written. ``instance_override``: for ``<instance>/<name>``, write the instance's override."""
+        from . import target_edit
+
+        return target_edit.save_target(self, reference, data, robot, instance_override=instance_override,
+                                       rename=rename)
+
+    def delete_target(self, reference: str, robot: str, *, instance_override: bool = False) -> list[Path]:
+        """Remove a target from the files that define it (an instance's override only with ``instance_override``)."""
+        from . import target_edit
+
+        return target_edit.delete_target(self, reference, robot, instance_override=instance_override)
+
+    def rename_target(self, reference: str, new_name: str, robot: str) -> list[Path]:
+        """Rename a target in every file that holds it, position and comments kept (a stance's ``handled_from``
+        follows); missions that use the name are not changed."""
+        from . import target_edit
+
+        return target_edit.rename_target(self, reference, new_name, robot)
+
     # ---- teaching -------------------------------------------------------------
     def save_base_pose(self, name: str, pose: Pose2D, kind: str = 'location', robot: str | None = None) -> Path:
         """Write a taught base pose. Returns the file written; existing comments and ordering are kept.
@@ -764,6 +869,7 @@ class ConfigStore:
         pose is stored relative to that object, for its object type (all instances of the type follow).
         ``stance_instance``: the same, as an override for this instance only.
         """
+        self._old_writer('save_base_pose')
         if kind in ('stance', 'stance_instance'):
             if not robot:
                 raise ValueError('a stance needs a robot')
@@ -774,6 +880,7 @@ class ConfigStore:
 
     def save_stance(self, reference: str, pose: Pose2D, robot: str, per_instance: bool = False) -> tuple[Path, Pose2D]:
         """Store ``pose`` (cell frame) as the robot's stance at ``<instance>[/<variant>]``; returns file and offset."""
+        self._old_writer('save_stance')
         name, _, variant = reference.partition(VARIANT_SEPARATOR)
         instances = self.object_instances()
         if name not in instances:
@@ -811,6 +918,7 @@ class ConfigStore:
         ``{tool: Pose3D}``."""
         from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
+        self._old_writer('save_object_point')
         name, _, point = reference.partition(VARIANT_SEPARATOR)
         instances = self.object_instances()
         if name not in instances or not point:
@@ -846,6 +954,7 @@ class ConfigStore:
         """Set or clear (None) an object point's ``approach_m`` (objects/<obj>.yaml), ``elbow`` and ``grip_m`` (the
         robot's: robots/<robot>/object_points.yaml; without ``robot`` the elbow goes to the object file, as before);
         tool poses are kept. ``grip_m``: {tool: finger opening in m or None (that tool closes fully)}, merged."""
+        self._old_writer('save_object_point_settings')
         unknown = set(settings) - {'approach_m', 'elbow', 'grip_m'}
         if unknown:
             raise ValueError(f'unknown point settings: {", ".join(sorted(unknown))}')
@@ -908,6 +1017,8 @@ class ConfigStore:
         CAD coordinates, as taught; the point and its other tools and settings are kept)."""
         from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
+        self._old_writer('save_object_point_poses')
+
         def flow(values) -> CommentedSeq:
             seq = CommentedSeq(round(float(v), 4) + 0.0 for v in values)
             seq.fa.set_flow_style()
@@ -928,6 +1039,7 @@ class ConfigStore:
 
     def rename_object_point(self, obj: str, point: str, rename: str) -> Path:
         """Rename an object point in place (position, settings and comment kept)."""
+        self._old_writer('rename_object_point')
         self._check_name(rename)
         relative = f'objects/{obj}.yaml'
 
@@ -1034,6 +1146,7 @@ class ConfigStore:
         ``note`` replaces the entry's end-of-line comment (e.g. an outdated IK error)."""
         from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
+        self._old_writer('set_named_pose')
         relative = f'robots/{robot}/poses.yaml'
         if joints is None and tools is None and rename is None:
             raise ValueError('nothing to change')
@@ -1124,8 +1237,11 @@ class ConfigStore:
         override (keyed_override)."""
         from ruamel.yaml.comments import CommentedMap
 
+        parts = PurePosixPath(relative).parts
         schema = (POINT_FILE_SCHEMAS.get(relative) or POINT_FILE_SCHEMAS.get(Path(relative).name)
-                  or (schemas.OBJECT if Path(relative).parent == Path('objects') else None))
+                  or (schemas.OBJECT if Path(relative).parent == Path('objects') else None)
+                  or (schemas.ROBOT_OBJECT_FILE if len(parts) == 4 and parts[0] == 'robots' and parts[2] == 'objects'
+                      else None))
         if schema is None:
             raise ValueError(f'{relative} is not a point file')
         robot_file = self._robot_relative(relative)
