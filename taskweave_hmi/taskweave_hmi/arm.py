@@ -141,8 +141,9 @@ def save(store: ConfigStore, robot_name: str, scope: str, name: str, body: Mappi
             raise ArmError(f'{scope} {name} is used by {", ".join(users)}; change those missions first '
                            '(the numbers were saved)')
         if layout.active(store):
-            return _target_change(store, lambda reference: store.rename_target(reference, rename, robot_name),
-                                  scope, name)
+            return _target_change(
+                store, robot_name, lambda target: store.rename_target(target, rename, robot_name, type=scope), scope,
+                name)
         try:
             file = str(store.rename_object_point(scope, name, rename).relative_to(store.root))
         except ValueError as error:
@@ -150,17 +151,15 @@ def save(store: ConfigStore, robot_name: str, scope: str, name: str, body: Mappi
     return file
 
 
-def _target_change(store: ConfigStore, change, object_type: str, name: str) -> str:
-    """Rename or delete (``change(reference)``) the hand target ``name`` of a type on a targets cell, through a
-    placed object of it; the first file written."""
-    if layout.type_kinds(store, None, object_type).get(name) != 'hand':
+def _target_change(store: ConfigStore, robot_name: str, change, object_type: str, name: str) -> str:
+    """Rename or delete (``change(name)``, the store's call with ``type=object_type``: nothing needs to be placed)
+    the hand target ``name`` of a type on a targets cell; the first file written."""
+    if layout.type_kinds(store, robot_name, object_type).get(name) != 'hand':
         raise ArmError(f'object {object_type!r} has no point {name!r}')
     try:
-        paths = change(points.type_reference(store, object_type, name))
-    except points.PointError as error:
+        paths = change(name)
+    except layout.REFUSED as error:
         raise ArmError(str(error)) from error
-    except (ValueError, KeyError) as error:
-        raise ArmError(str(error.args[0]) if isinstance(error, KeyError) and error.args else str(error)) from error
     return paths[0].relative_to(store.root).as_posix() if paths else ''
 
 
@@ -176,7 +175,8 @@ def delete(store: ConfigStore, robot_name: str, scope: str, name: str, pose_args
     if users:
         raise ArmError(f'{scope} {name} is used by {", ".join(users)}; change those missions first')
     if layout.active(store):
-        return _target_change(store, lambda reference: store.delete_target(reference, robot_name), scope, name)
+        return _target_change(store, robot_name, lambda target: store.delete_target(target, robot_name, type=scope),
+                              scope, name)
     try:
         return str(store.delete_point(f'objects/{scope}.yaml', ['points', name]).relative_to(store.root))
     except ValueError as error:

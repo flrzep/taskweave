@@ -2,9 +2,13 @@
 
 The HMI's API stays as it was (locations, stances, object points, robot poses, held poses); on a schema 4 cell the
 modules points, arm, robot and held read and write targets through the store (``save_target``, ``delete_target``,
-``rename_target``) instead of the old point files. This module holds what they share: which target an old point is,
-the entries as written (so a save keeps the keys the HMI does not edit), the robot poses as listed, the missions
-that name a target, and the manual skill requests (``move {to}`` when the skill catalog has ``move``).
+``rename_target``; a type's own targets with ``type=``, so nothing needs to be placed) instead of the old point
+files. This module holds what they share: which target an old point is, the entries as written (so a save keeps the
+keys the HMI does not edit), the robot poses as the HMI lists them, the missions that name a target, and the manual
+skill requests (``move {to}`` when the skill catalog has ``move``).
+
+A write the store refuses is a TargetWriteError (``REFUSED``): the modules answer it as their own error (422). A
+target that is not there is a TargetError (a KeyError): the modules let it through and the server answers 404.
 
 On a schema 3 cell none of this is used: the modules keep their old calls.
 """
@@ -13,7 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
 
-from taskweave_core.config import ConfigError, ConfigStore
+from taskweave_core.config import ConfigError, ConfigStore, TargetWriteError
 from taskweave_core.config import target_store as ts
 from taskweave_core.config.targets import TOOL_SUFFIX, rpy_from_axes
 
@@ -23,6 +27,9 @@ OLD_PREFIXES = ('location:', 'pose:')          # a reference of the old skills: 
 STANCE = 'stance:'                             # stance:<instance>[/<variant>]
 SEPARATOR = '/'
 ROUND = 4
+# a write the store refuses: TargetWriteError, and the plain ValueError of the file's schema check after the edit
+# (ConfigStore._edit_yaml -> store._check, not a TargetWriteError yet)
+REFUSED = (TargetWriteError, ValueError)
 
 
 def active(store: ConfigStore) -> bool:
@@ -47,12 +54,6 @@ def plain_entry(store: ConfigStore, robot: str, name: str) -> dict:
         if name in table:
             return {k: v for k, v in table[name].items() if k != 'frame'}
     return {}
-
-
-def placed_instance(store: ConfigStore, object_type: str) -> str | None:
-    """A placed object of ``object_type`` (the first by name): save_target addresses a type's targets through one."""
-    return next((name for name, instance in sorted(store.object_instances().items())
-                 if instance.object == object_type), None)
 
 
 def type_kinds(store: ConfigStore, robot: str | None, object_type: str, instance: str | None = None) -> dict:
