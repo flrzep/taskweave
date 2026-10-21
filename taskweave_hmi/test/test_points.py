@@ -64,6 +64,15 @@ def test_new_points_are_created_once_and_checked(store):
         points.save(store, ROBOT, 'stance', ['everywhere', 'shelf', 'front'], {'x': 0, 'y': 0, 'yaw': 0})
 
 
+def test_a_saved_point_is_in_the_picker_lists_at_once(store):
+    before = store.point_names(ROBOT)  # read (and cached) before the save, as the server does
+    assert 'spot' not in before['locations'] and 'stance:crate_1' not in before['stances']
+    points.save(store, ROBOT, 'location', ['spot'], {'x': 0.6899, 'y': 0, 'yaw': -1.5708, 'create': True})
+    points.save(store, ROBOT, 'stance', ['objects', 'crate', 'load'], {'x': -0.5, 'y': 0, 'yaw': 0, 'create': True})
+    after = store.point_names(ROBOT)  # no reload: the cache follows the files
+    assert 'spot' in after['locations'] and 'stance:crate_1' in after['stances']  # its first stance
+
+
 def test_robot_pose_relative_to_objects_nearest_first(store):
     data = points.relative_poses(store, Pose2D(3.0, 0.25, 1.5708))
     assert data['relative'][0]['instance'] == 'shelf_a'

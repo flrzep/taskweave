@@ -24,9 +24,89 @@ function el(tag, attrs = {}, ...children) {
   for (const [key, value] of Object.entries(attrs)) {
     if (key === 'class') node.className = value; else if (key === 'text') node.textContent = value; else node.setAttribute(key, value);
   }
+  if (tag === 'input' && node.type === 'number') numberField(node);  // shown with a dot in every browser locale
   children.flat().forEach((child) => node.append(child));
   return node;
 }
+
+// ---------- number fields ----------
+// Every number field is a text field: Chrome and Edge show <input type="number"> with the browser's decimal separator
+// (a comma in a German browser), whatever the page's lang. el() turns type 'number' inputs into one, the page's own
+// are turned at load (below), the step editor's in stepCard. They show a dot; a comma typed or pasted becomes a dot as
+// it is typed, letters are dropped. ↑ / ↓ step the value by the step attribute (1 for 'any' or none; with Shift ten
+// steps) from where it is, within min and max, and so do the arrows at the field's right end on a laptop (held down,
+// they repeat; Shift-click: ten steps); 'change' follows when the key or button is let go. Readers keep Number(input.value). Not a number, or outside min / max:
+// :invalid (red), never dropped. data-spin="off": no arrows (a field with its own − / + buttons).
+const NUMBER_PATTERN = '[\\-+]?(\\d+\\.?\\d*|\\.\\d+)([eE][\\-+]?\\d+)?';
+const SPIN_W = 24;  // px at the field's right end that are the arrows
+const decimalsOf = (text) => (String(text).split('.')[1] || '').replace(/e.*$/i, '').length;
+function numberField(input) {
+  input.type = 'text';
+  input.classList.add('num');
+  input.pattern = NUMBER_PATTERN;
+  if (!input.inputMode) input.inputMode = 'decimal';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  const tidy = (text) => text.replace(/,/g, '.').replace(/[^0-9.eE+-]/g, '');
+  const checkRange = () => {
+    const value = Number(input.value);
+    const min = input.getAttribute('min'), max = input.getAttribute('max');
+    const out = input.value.trim() !== '' && Number.isFinite(value)
+      && ((min !== null && value < Number(min)) || (max !== null && value > Number(max)));
+    input.setCustomValidity(out ? `${min ?? '–∞'} to ${max ?? '∞'}` : '');
+  };
+  input.addEventListener('input', () => {
+    const clean = tidy(input.value);
+    if (clean !== input.value) {
+      const at = tidy(input.value.slice(0, input.selectionStart ?? input.value.length)).length;
+      input.value = clean;
+      input.setSelectionRange(at, at);
+    }
+    checkRange();
+  });
+  input._check = checkRange;
+  let stepped = false;
+  input.addEventListener('keydown', (e) => {
+    if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || e.altKey || e.ctrlKey || e.metaKey) return;
+    e.preventDefault();
+    stepNumber(input, (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1));
+    stepped = true;
+  });
+  input.addEventListener('keyup', (e) => {
+    if (stepped && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { stepped = false; input.dispatchEvent(new Event('change', { bubbles: true })); }
+  });
+  if (input.dataset.spin === 'off') return;
+  // the arrows (a laptop's mouse): the upper or lower half of the field's right end
+  const onArrows = (e) => e.pointerType === 'mouse' && e.offsetX > input.clientWidth - SPIN_W;
+  let repeat = null;
+  const stop = () => {
+    if (!repeat) return;
+    clearTimeout(repeat); clearInterval(repeat); repeat = null;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  input.addEventListener('pointermove', (e) => { input.style.cursor = onArrows(e) ? 'default' : ''; });
+  input.addEventListener('pointerdown', (e) => {
+    if (!onArrows(e) || e.button !== 0 || input.disabled || input.readOnly) return;
+    e.preventDefault();
+    input.focus();
+    const direction = (e.offsetY < input.clientHeight / 2 ? 1 : -1) * (e.shiftKey ? 10 : 1);
+    stepNumber(input, direction);
+    repeat = setTimeout(() => { repeat = setInterval(() => stepNumber(input, direction), 60); }, 400);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel', 'blur'].forEach((type) => input.addEventListener(type, stop));
+}
+function stepNumber(input, direction) {  // direction: steps, signed
+  const step = Number(input.getAttribute('step')) || 1;  // 'any' or none: 1
+  const min = input.getAttribute('min'), max = input.getAttribute('max');
+  const now = Number(input.value);
+  const base = input.value.trim() !== '' && Number.isFinite(now) ? now : 0;
+  let next = +(base + direction * step).toFixed(Math.min(10, Math.max(decimalsOf(step), decimalsOf(input.value))));
+  if (min !== null) next = Math.max(next, Number(min));
+  if (max !== null) next = Math.min(next, Number(max));
+  input.value = String(next);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+document.querySelectorAll('input[type="number"]').forEach(numberField);  // the page's own (the step editor's: stepCard)
 function show(node, visible) { node.hidden = !visible; }
 function message(node, text, bad = false) {  // bad: true (red), 'warn' (amber) or false
   const warn = bad === 'warn';
@@ -44,7 +124,7 @@ function argsText(args) { return Object.entries(args || {}).map(([k, v]) => `${k
 document.querySelectorAll('.tabs button').forEach((button) => button.addEventListener('click', () => {
   document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-selected', String(b === button)));
   document.querySelectorAll('.view').forEach((view) => show(view, view.id === `view-${button.dataset.view}`));
-  if (button.dataset.view === 'missions' && !state.editing) loadMissions();
+  if (button.dataset.view === 'missions') { if (state.editing) refreshCatalog(); else loadMissions(); }
   pointsVisible = button.dataset.view === 'points';
   robotVisible = button.dataset.view === 'robot';
   if (pointsVisible) { loadPoints(); loadArm(); refreshPose(); }  // teach.js: poses and points
@@ -70,7 +150,8 @@ function connect() {
   source.onerror = () => { $('conn').classList.remove('on'); renderSpeed(); };
   source.onmessage = (event) => {
     const { type, data } = JSON.parse(event.data);
-    if (type === 'state') { state.snapshot = data; renderSpeed(); renderManual(); }
+    if (type === 'state') { state.snapshot = data; renderSpeed(); renderManual(); refreshCatalog(); }  // (re)connected: may have missed points
+    else if (type === 'points') { refreshCatalog(); return; }  // saved or taught anywhere (any browser, the pad)
     else if (!state.snapshot) return;
     else if (type === 'status') state.snapshot.status = data;
     else if (type === 'pad_mode') state.snapshot.pad_mode = data;
@@ -361,11 +442,24 @@ async function loadCatalog() {
   if (skills.ok) state.skills = skills.data;
   if (points.ok) state.points = points.data;
 }
+// The argument pickers' point lists again while a mission is open in the editor: when the Missions tab is shown, when
+// points were saved or taught (the live event points: from any browser or the pad) and after a reconnect. The pickers
+// get the new lists in place; the choices and unsaved edits stay.
+async function refreshCatalog() {
+  if (!state.editing) return;
+  const { ok, data } = await api('GET', '/api/points');
+  if (!ok || !state.editing) return;
+  state.points = data;
+  $('step-editor').querySelectorAll('select[data-arg]').forEach((select) => select._fill?.());
+}
 function fillSelect(select, values, selected) {
   select.replaceChildren(...values.map((v) => el('option', { value: v, text: v === '' ? 'default' : v })));
   select.value = selected ?? '';
 }
 function markDirty() { state.dirty = true; show($('editor-dirty'), true); }
+// Leaving or reloading the page with unsaved mission edits asks first (the browser's own question). Switching tabs keeps
+// them: the editor stays open.
+window.addEventListener('beforeunload', (e) => { if (state.editing && state.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
 async function openEditor(name) {
   await loadCatalog();
@@ -403,6 +497,7 @@ function readSteps() { return [...$('step-editor').children].map((card) => card.
 
 function stepCard(step, index, steps) {
   const card = $('step-template').content.firstElementChild.cloneNode(true);
+  card.querySelectorAll('input[type="number"]').forEach(numberField);
   const q = (key) => card.querySelector(`[data-k="${key}"]`);
   card.querySelector('.step-no').textContent = `Step ${index + 1}`;
   q('instruction').value = step.instruction || '';
@@ -434,9 +529,36 @@ function stepCard(step, index, steps) {
   q('skill').addEventListener('change', () => { renderArgs({}); markDirty(); });
   card.addEventListener('input', markDirty);
   card.addEventListener('change', markDirty);
-  card.querySelector('[data-act="up"]').addEventListener('click', () => move(index, -1));
-  card.querySelector('[data-act="down"]').addEventListener('click', () => move(index, 1));
-  card.querySelector('[data-act="remove"]').addEventListener('click', () => { const s = readSteps(); s.splice(index, 1); renderSteps(s); markDirty(); });
+  ['input', 'change'].forEach((type) => card.addEventListener(type, () => card.classList.remove('has-problem')));
+  card.querySelector('[data-act="up"]').disabled = index === 0;
+  card.querySelector('[data-act="down"]').disabled = index === steps.length - 1;
+  card.querySelector('[data-act="up"]').addEventListener('click', () => move(index, -1, 'up'));
+  card.querySelector('[data-act="down"]').addEventListener('click', () => move(index, 1, 'down'));
+  const remove = card.querySelector('[data-act="remove"]');
+  let removeArmed = null;
+  remove.addEventListener('click', () => {
+    if (!removeArmed) {  // two taps, as Delete elsewhere: there is no undo
+      remove.classList.add('confirm'); remove.textContent = 'Remove?'; remove.title = 'Tap again to remove this step';
+      removeArmed = setTimeout(() => { remove.classList.remove('confirm'); remove.textContent = '✕'; remove.title = ''; removeArmed = null; }, 3000);
+      return;
+    }
+    clearTimeout(removeArmed);
+    editSteps((items) => items.splice(index, 1));
+  });
+  card.querySelector('[data-act="copy"]').addEventListener('click', () => {  // below it, without its id (ids are unique)
+    focusStep(editSteps((items) => {
+      const copy = structuredClone(items[index].step);
+      delete copy.id;
+      items.splice(index + 1, 0, { step: copy, open: items[index].open, was: null });
+    })[index + 1]);
+  });
+  const handle = card.querySelector('[data-act="drag"]');
+  handle.addEventListener('pointerdown', (e) => dragStep(card, e));
+  handle.addEventListener('keydown', (e) => {
+    if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+    e.preventDefault();
+    move(index, e.key === 'ArrowUp' ? -1 : 1, 'drag');
+  });
   card._read = () => {
     const including = q('skill').value.startsWith(INCLUDE);
     const out = including ? { instruction: q('instruction').value.trim(), include: q('skill').value.slice(INCLUDE.length), with: {} }
@@ -461,12 +583,15 @@ function argField(key, spec, required, value) {
   const kinds = POINT_KINDS[spec['x-taskweave-point']];
   const isPlaceholder = typeof value === 'string' && value.includes('{');
   if ((kinds || spec.enum) && !isPlaceholder) {
-    const options = spec.enum || kinds.flatMap((k) => state.points[k] || []);
     input = el('select');
-    fillSelect(input, ['', ...options.map(String)], value === undefined ? '' : String(value));
-    if (value !== undefined && !options.map(String).includes(String(value))) input.append(el('option', { value: String(value), text: `${value} (unknown)` }));
-    input.value = value === undefined ? '' : String(value);
-    input.options[0].textContent = required ? 'choose…' : 'none';
+    input._fill = (chosen = input.value) => {  // the choices from state.points (again: refreshCatalog), chosen kept
+      const options = (spec.enum || kinds.flatMap((k) => state.points[k] || [])).map(String);
+      fillSelect(input, ['', ...options], chosen);
+      if (chosen !== '' && !options.includes(chosen)) input.append(el('option', { value: chosen, text: `${chosen} (unknown)` }));
+      input.value = chosen;
+      input.options[0].textContent = required ? 'choose…' : 'none';
+    };
+    input._fill(value === undefined ? '' : String(value));
     input._value = () => (input.value === '' ? undefined : (spec.type === 'number' ? Number(input.value) : input.value));
   } else if (spec.type === 'number' || spec.type === 'integer') {
     input = el('input', { type: 'number', step: spec.type === 'integer' ? '1' : 'any' });
@@ -486,13 +611,102 @@ function argField(key, spec, required, value) {
   return el('div', { class: 'field' }, label, input);
 }
 
-function move(index, delta) {
-  const steps = readSteps();
-  const target = index + delta;
-  if (target < 0 || target >= steps.length) return;
-  [steps[index], steps[target]] = [steps[target], steps[index]];
-  renderSteps(steps);
+// Change the step list and draw it again: change gets [{step, open}] (the steps as edited now, rules folded out or
+// not) to reorder, remove or insert. A step without an id of its own is s<position>, so a moved step's id changes:
+// replan_from follows the step it named; one that named a removed step falls back to the step itself (and says so).
+// Returns the new step cards.
+function editSteps(change) {
+  const items = [...$('step-editor').children].map((card, i) => {
+    const step = card._read();
+    return { step, open: card.querySelector('.rules').open, was: step.id || `s${i + 1}` };
+  });
+  const before = new Set(items.map((item) => item.was));
+  change(items);
+  const now = new Map();
+  items.forEach((item, i) => { if (item.was) now.set(item.was, item.step.id || `s${i + 1}`); });
+  const lost = [];
+  items.forEach((item, i) => {
+    const target = item.step.replan_from;
+    if (!target || !before.has(target)) return;  // not a step of this list (already wrong): Check reports it
+    if (now.has(target)) item.step.replan_from = now.get(target);
+    else { delete item.step.replan_from; lost.push(i + 1); }
+  });
+  renderSteps(items.map((item) => item.step));
+  const cards = [...$('step-editor').children];
+  cards.forEach((card, i) => { card.querySelector('.rules').open = items[i].open; });
+  message($('save-msg'), lost.length ? `Step ${lost.join(', ')} replanned from the removed step: now from itself.` : '', 'warn');
   markDirty();
+  return cards;
+}
+
+// A new or duplicated step: its top just below the sticky top bar, its instruction focused to type.
+function focusStep(card) {
+  window.scrollBy(0, card.getBoundingClientRect().top - document.querySelector('.top').offsetHeight - 8);
+  card.querySelector('[data-k="instruction"]').focus({ preventScroll: true });
+}
+
+// One place up or down (the arrow buttons, Alt + arrow on the handle); the focus stays on the control used.
+function move(index, delta, control) {
+  const target = index + delta;
+  if (target < 0 || target >= $('step-editor').children.length) return;
+  const card = editSteps((items) => items.splice(target, 0, ...items.splice(index, 1)))[target];
+  const button = card.querySelector(`[data-act="${control}"]`);
+  (button.disabled ? card.querySelector('[data-act="drag"]') : button).focus();
+}
+
+// Drag a step by its handle (mouse, pen or touch: pointer events; the handle has touch-action none, so a touch drags
+// instead of scrolling). The step follows the pointer, a line marks where it lands, and near the top bar or the
+// bottom of the window the page scrolls. Escape or a lost pointer puts it back.
+const DRAG_EDGE = 72;  // px from the top bar or the window's bottom where the page scrolls while dragging
+function dragStep(card, e) {
+  const list = $('step-editor');
+  const cards = [...list.children];
+  if (e.button !== 0 || cards.length < 2) return;
+  e.preventDefault();
+  const handle = e.currentTarget;
+  handle.setPointerCapture(e.pointerId);
+  const from = cards.indexOf(card);
+  const start = { y: e.clientY, scroll: window.scrollY };
+  let y = e.clientY, to = from, frame = 0, done = false;
+  list.classList.add('dragging'); card.classList.add('dragging');
+  const mark = () => {
+    card.style.transform = `translateY(${y - start.y + window.scrollY - start.scroll}px)`;
+    let slot = cards.length;  // it lands before cards[slot]: the first other step whose middle is below the pointer
+    for (let i = 0; i < cards.length; i += 1) {
+      const box = cards[i].getBoundingClientRect();
+      if (i !== from && y < box.top + box.height / 2) { slot = i; break; }
+    }
+    to = slot > from ? slot - 1 : slot;
+    cards.forEach((c) => c.classList.remove('drop-before', 'drop-after'));
+    if (to !== from) cards[Math.min(slot, cards.length - 1)].classList.add(slot < cards.length ? 'drop-before' : 'drop-after');
+  };
+  const scroll = () => {
+    const top = document.querySelector('.top').getBoundingClientRect().bottom + DRAG_EDGE;
+    const bottom = window.innerHeight - $('editor').querySelector('.sticky-actions').offsetHeight - DRAG_EDGE;
+    const speed = y < top ? -Math.min(top - y, DRAG_EDGE) : y > bottom ? Math.min(y - bottom, DRAG_EDGE) : 0;
+    if (speed) { window.scrollBy(0, speed / 4); mark(); }
+    frame = requestAnimationFrame(scroll);
+  };
+  const onMove = (ev) => { y = ev.clientY; mark(); };
+  const onKey = (ev) => { if (ev.key === 'Escape') end(false); };  // not stopped: Escape still aborts a manual skill
+  function end(drop) {
+    if (done) return;
+    done = true;
+    cancelAnimationFrame(frame);
+    handle.removeEventListener('pointermove', onMove);
+    document.removeEventListener('keydown', onKey);
+    list.classList.remove('dragging'); card.classList.remove('dragging'); card.style.transform = '';
+    cards.forEach((c) => c.classList.remove('drop-before', 'drop-after'));
+    if (drop && to !== from) {
+      editSteps((items) => items.splice(to, 0, ...items.splice(from, 1)))[to].querySelector('[data-act="drag"]').focus({ preventScroll: true });
+    }
+  }
+  handle.addEventListener('pointermove', onMove);
+  handle.addEventListener('pointerup', () => end(true), { once: true });
+  handle.addEventListener('pointercancel', () => end(false), { once: true });
+  handle.addEventListener('lostpointercapture', () => end(false), { once: true });
+  document.addEventListener('keydown', onKey);
+  frame = requestAnimationFrame(scroll);
 }
 
 function readMission() {
@@ -512,16 +726,23 @@ function readMission() {
   return mission;
 }
 
+// The problems of a Check or a refused Save, above the buttons; the steps they name ("step 's3' (...)", a step of an
+// included mission as "<include step id>_...") are marked red until they are edited.
 function showProblems(problems) {
   show($('problems'), problems.length > 0);
   $('problems').textContent = problems.join('\n');
+  const named = problems.flatMap((p) => [...p.matchAll(/step '([^']+)'/g)].map((m) => m[1]));
+  [...$('step-editor').children].forEach((card, i) => {
+    const step = card._read();
+    const id = step.id || `s${i + 1}`;
+    card.classList.toggle('has-problem', named.some((n) => n === id || (!!step.include && n.startsWith(`${id}_`))));
+  });
 }
 
 $('btn-add-step').addEventListener('click', () => {
-  const steps = readSteps();
-  steps.push({ instruction: '', skill: state.skills[0]?.name || 'wait', args: {} });
-  renderSteps(steps);
-  markDirty();
+  const cards = editSteps((items) => items.push({ step: { instruction: '', skill: state.skills[0]?.name || 'wait', args: {} },
+    open: false, was: null }));
+  focusStep(cards[cards.length - 1]);
 });
 $('btn-validate').addEventListener('click', async () => {
   const name = $('m-name').value.trim() || 'new';
@@ -585,6 +806,10 @@ let pointsVisible = false;
 let robotVisible = false;
 let pointsBusy = '';
 const DEG = 180 / Math.PI;
+// arrow steps (↑ / ↓ and the field's arrows; Shift: 10 times): positions 1 mm, angles 1° (the fields show degrees).
+// Stored values keep their own precision (e.g. 0.6899 m): a step starts from the value, it does not round it.
+const STEP_M = '0.001';
+const STEP_DEG = '1';
 const fmt = (p) => `x ${p.x.toFixed(3)}  y ${p.y.toFixed(3)}  yaw ${(p.yaw * DEG).toFixed(1)}°`;
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 
@@ -705,9 +930,9 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
     return [el('div', { class: 'field' }, el('label', { text: label }), field), field];
   };
   const [nameField, nameInput] = input(nameLabel, name);
-  const [xField, xInput] = input('x (m)', String(pose.x), { type: 'number', step: 'any', inputmode: 'decimal' });
-  const [yField, yInput] = input('y (m)', String(pose.y), { type: 'number', step: 'any', inputmode: 'decimal' });
-  const [yawField, yawInput] = input('yaw (°)', String(+(pose.yaw * DEG).toFixed(2)), { type: 'number', step: 'any', inputmode: 'decimal' });
+  const [xField, xInput] = input('x (m)', String(pose.x), { type: 'number', step: STEP_M, inputmode: 'decimal' });
+  const [yField, yInput] = input('y (m)', String(pose.y), { type: 'number', step: STEP_M, inputmode: 'decimal' });
+  const [yawField, yawInput] = input('yaw (°)', String(+(pose.yaw * DEG).toFixed(2)), { type: 'number', step: STEP_DEG, inputmode: 'decimal' });
   const msg = el('div', { class: 'msg', hidden: '' });
   const robotButton = el('button', { class: 'btn small', text: 'Set from robot' });
   const driveButton = el('button', { class: 'btn small', text: 'Drive here', 'data-edit': '' });

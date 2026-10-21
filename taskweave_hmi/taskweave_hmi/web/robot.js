@@ -203,7 +203,8 @@ function buildJoints(names, values) {
       const range = {};  // a bound may be missing (null: unbounded)
       if (lower !== null) range.min = liveShow(joint, lower);
       if (upper !== null) range.max = liveShow(joint, upper);
-      const input = el('input', { type: 'number', step: liveLinear(joint) ? '0.01' : '1', inputmode: 'decimal', 'aria-label': `${joint} target`, ...range });
+      const input = el('input', { type: 'number', step: liveLinear(joint) ? '0.01' : '1', inputmode: 'decimal', 'aria-label': `${joint} target`,
+        'data-spin': 'off', ...range });  // − / + beside it
       input.value = liveShow(joint, values[joint]);
       const now = el('span', { class: 'mono' });
       const bar = el('span', { class: 'limit-bar', title: `${range.min ?? '–∞'} to ${range.max ?? '∞'} ${liveUnit(joint)}` });
