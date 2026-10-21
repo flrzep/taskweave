@@ -277,6 +277,7 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
 /* reorder by drag: the handle takes the pointer (no page scroll on touch), the step follows it lifted, a brand line in
    the gap marks where it lands */
 .edit-step { position: relative; }
+.edit-step .step-head { flex-wrap: wrap; gap: var(--sp-1); }  /* the buttons go below the number on a narrow phone */
 .edit-step .handle { cursor: grab; touch-action: none; color: var(--text-muted); border-color: var(--border); background: none; }
 .edit-step .handle svg { fill: currentColor; }
 .edit-steps.dragging { user-select: none; -webkit-user-select: none; }

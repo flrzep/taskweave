@@ -531,6 +531,13 @@ function stepCard(step, index, steps) {
   card.querySelector('[data-act="up"]').addEventListener('click', () => move(index, -1, 'up'));
   card.querySelector('[data-act="down"]').addEventListener('click', () => move(index, 1, 'down'));
   card.querySelector('[data-act="remove"]').addEventListener('click', () => editSteps((items) => items.splice(index, 1)));
+  card.querySelector('[data-act="copy"]').addEventListener('click', () => {  // below it, without its id (ids are unique)
+    focusStep(editSteps((items) => {
+      const copy = structuredClone(items[index].step);
+      delete copy.id;
+      items.splice(index + 1, 0, { step: copy, open: items[index].open, was: null });
+    })[index + 1]);
+  });
   const handle = card.querySelector('[data-act="drag"]');
   handle.addEventListener('pointerdown', (e) => dragStep(card, e));
   handle.addEventListener('keydown', (e) => {
@@ -616,6 +623,12 @@ function editSteps(change) {
   message($('save-msg'), lost.length ? `Step ${lost.join(', ')} replanned from the removed step: now from itself.` : '', 'warn');
   markDirty();
   return cards;
+}
+
+// A new or duplicated step: its top just below the sticky top bar, its instruction focused to type.
+function focusStep(card) {
+  window.scrollBy(0, card.getBoundingClientRect().top - document.querySelector('.top').offsetHeight - 8);
+  card.querySelector('[data-k="instruction"]').focus({ preventScroll: true });
 }
 
 // One place up or down (the arrow buttons, Alt + arrow on the handle); the focus stays on the control used.
@@ -705,10 +718,9 @@ function showProblems(problems) {
 }
 
 $('btn-add-step').addEventListener('click', () => {
-  const steps = readSteps();
-  steps.push({ instruction: '', skill: state.skills[0]?.name || 'wait', args: {} });
-  renderSteps(steps);
-  markDirty();
+  const cards = editSteps((items) => items.push({ step: { instruction: '', skill: state.skills[0]?.name || 'wait', args: {} },
+    open: false, was: null }));
+  focusStep(cards[cards.length - 1]);
 });
 $('btn-validate').addEventListener('click', async () => {
   const name = $('m-name').value.trim() || 'new';
