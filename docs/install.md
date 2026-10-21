@@ -100,9 +100,10 @@ taskweave status                 # [running] ... step 1/2, then [succeeded] once
 The node log of the launch prints one `ERROR ... not served` for any skill whose `skills/<name>.yaml` the cell does
 not have or whose `requires` the robot cannot satisfy; with `skills:=wait` there is none.
 
-Skills that move something (`move_joints`, `navigate_to`, ...) need the controllers, joint states, TF and (for
-navigation) a map and a clock of the robot or its simulator. Add them to `skills:=` once those exist, with their
-`skills/<name>.yaml` in the cell (templates in `docs/examples/skills/`). Nav2 and MoveIt start with
+The skill that moves the robot (`move`) needs the controllers, joint states, TF and (for
+navigation) a map and a clock of the robot or its simulator. Add `move` and `grip` to `skills:=` once those exist (`skills:=wait,move,grip`), with their
+`skills/<name>.yaml` in the cell (`skills/move.yaml` and `skills/move/<part>.yaml` for `move`; templates in
+`docs/examples/skills/`). Nav2 and MoveIt start with
 `nav2:=true map:=/path/map.yaml` and `moveit:=true` (all arguments: header of
 `taskweave_bringup/launch/taskweave_bringup.launch.py`). Stop the launch with Ctrl-C.
 
@@ -112,7 +113,7 @@ navigation) a map and a clock of the robot or its simulator. Add them to `skills
   copying `docs/examples/cell` and edit; the layout and every file format are in
   [configuration.md](configuration.md). Pass it as `config_dir:=/path/to/cell`, and validate it first:
   `taskweave check /path/to/cell`.
-- **Robot pack:** a folder `<robot>/` with `pack.yaml`, `profile.yaml`, `embodiment.yaml`, poses and MoveIt files (see
+- **Robot pack:** a folder `<robot>/` with `pack.yaml`, `profile.yaml`, `embodiment.yaml`, `targets.yaml` and MoveIt files (see
   AGENTS.md, "Add a robot pack"). The bundled packs (`galbot_s1`, `galbot_g1`, `a2d`; internal use only) are installed
   to `share/taskweave_robots/`. Your own packs live in a folder of their own; list it in `TASKWEAVE_ROBOT_PACKS`
   (a path, or several separated by `:`) before launching or checking:
@@ -140,9 +141,13 @@ rejects unknown keys of a newer one), so upgrade the pack when you move to a new
 ```bash
 taskweave config migrate /path/to/cell --dry-run     # shows what would change, writes nothing
 taskweave config migrate /path/to/cell               # does it; safe to run again
-taskweave config migrate-skills /path/to/cell        # only for packs older than schema 3 (new skill model)
-taskweave check /path/to/cell
+taskweave config migrate-skills /path/to/cell        # only the 2 -> 3 step (new skill model), packs older than schema 3
+taskweave check /path/to/cell --missions
 ```
+
+From 0.3, schema 4: locations, stances, object points, poses and held poses are targets, and the six motion skills are
+the skill `move`: [migration_targets.md](migration_targets.md). Update taskweave and restart the stack **before**
+migrating a live cell: a running 0.2 rejects the new keys.
 
 Keep the pack in git so that you can review the diff. `taskweave config slim` turns whole-file overrides of robot
 pack files into per-key overrides. See [pack_switchover.md](pack_switchover.md) for moving from a plain config
@@ -175,10 +180,11 @@ versions it works with, a [PEP 440](https://peps.python.org/pep-0440/#version-sp
 ```yaml
 version: 1.4.0
 requires:
-  taskweave: ">=0.2,<0.3"
+  taskweave: ">=0.3,<0.4"
 ```
 
 `taskweave check` and every load refuse a pack that does not admit the installed taskweave, with a message naming the
 pack, its version, the requirement and the taskweave version. Without `requires` the pack loads with any taskweave. A
-malformed specifier is an error as well. The bundled robot packs and the example cell require the minor range of the
-release they ship with.
+malformed specifier is an error as well. The bundled robot packs require the minor range of the release they ship with.
+(`taskweave config migrate` does not write `requires` into a cell pack's `pack.yaml`; add it by hand if you want the
+check.)

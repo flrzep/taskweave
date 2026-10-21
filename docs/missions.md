@@ -2,8 +2,9 @@
 
 A mission is one YAML file in the cell pack, `missions/<name>.yaml`: a goal and an ordered list of steps. Each step calls
 a skill ([skills.md](skills.md)) or includes another mission. The task handler validates the whole mission before
-anything moves, then runs the steps and applies the decision rules you wrote. Everything a mission names (stances,
-points, poses, locations) comes from the cell pack and the robot pack ([configuration.md](configuration.md)).
+anything moves, then runs the steps and applies the decision rules you wrote. Everything a mission names (targets:
+places the robot goes to, see [targets.md](targets.md)) comes from the cell pack and the robot pack
+([configuration.md](configuration.md)).
 
 ## Anatomy of a mission file
 
@@ -19,8 +20,8 @@ defaults: {timeout_s: 120, retries: 1, on_failure: abort, max_replans: 1}
 steps:
   - id: pick                                         # optional, s1, s2, ... if missing
     instruction: Pick the top part of {next_stack}   # required, natural language
-    skill: navigate_to                               # a skill, or include: <mission> (never both)
-    args: {target: "stance:{next_stack}"}
+    skill: move                                      # a skill, or include: <mission> (never both)
+    args: {to: "{next_stack}/pick"}
     timeout_s: 60                                    # per-step decision rules, else the defaults
     retries: 2
     on_failure: replan
@@ -59,16 +60,16 @@ object, not the one that grasps it.
 ### Speed override and test mode
 
 The global speed override (README, "Speed override and test mode") scales every skill and, by 1/override, the step
-timeouts. One exception: the Nav2 phase of `navigate_to` never drives slower than its param `min_override` (default 0.3,
-set it in `skills/navigate_to.yaml`), because Nav2's controller cannot do the fine final approach into a stance at 10 %.
-So test mode at 10 % = arm motion 10 %, Nav2 drives 30 %. The direct controller after the handover, `drive_straight`,
-arms, torso and grippers follow the real override. The step result shows the Nav2 value as `data.speed.nav2_override`.
+timeouts. One exception: the Nav2 phase of a `move` to a base target never drives slower than its param `min_override`
+(default 0.3, set it in `skills/move/base.yaml`), because Nav2's controller cannot do the fine final approach into a
+stance at 10 %. So test mode at 10 % = arm motion 10 %, Nav2 drives 30 %. The direct controller after the handover, a
+straight drive (`motion.mode: straight`), arms, torso and grippers follow the real override. The step result shows the Nav2 value as `data.speed.nav2_override`.
 
 ## Params, facts and placeholders
 
 A `{name}` in a string of a step (`instruction` or any argument, at any depth) is a **placeholder**. It is filled from
 the **world state** when the step starts; a string that is exactly one placeholder keeps the value's type
-(`"{lane}"` can become the number `2`), inside a longer string it is formatted in (`"stance:{stack}"`). Arguments with
+(`"{lane}"` can become the number `2`), inside a longer string it is formatted in (`"{stack}/pick"`). Arguments with
 placeholders are validated when the step starts, not before the mission starts. A placeholder without a value fails
 the step with `world state has no value for placeholder {name}`.
 
@@ -77,8 +78,8 @@ the step with `world state has no value for placeholder {name}`.
   (the run-time object state; ties go to the first name). A fact that finds nothing means the mission is complete: a
   `loop: forever` mission ends once every matching stack is empty.
 - **`params`** make a mission a reusable block. `params: {part: {point: instance, description: ...}}` declares the
-  parameter; the optional `point` kind (`base_target`, `joint_pose`, `tool_pose`, `object_point`, `instance_point`,
-  `instance_contact`, `instance`) lets the HMI editor offer matching names. The steps use `{part}`.
+  parameter; the optional `point` kind (`instance`: a placed object, `target`: a target) lets the HMI editor offer
+  matching names. The steps use `{part}`.
 - **`include` / `with`**: `{instruction, include: pick_part, with: {part: "{next_stack}"}}` replaces the step by the
   steps of `missions/pick_part.yaml`, with `{part}` filled from `with` (a literal name or a placeholder of the including
   mission). Placeholders that are not parameters stay world-state placeholders. The include step's `timeout_s`,
@@ -88,57 +89,100 @@ the step with `world state has no value for placeholder {name}`.
 
 ## Targets
 
-Skill arguments name things in the config. A wrong name is reported before the mission starts.
+Skill arguments name targets in the config: places the robot goes to. A wrong name is reported before the mission starts.
+The format of the files is in [targets.md](targets.md); here is how a mission names them.
 
-| Target | Form | Used by | Defined in |
-|---|---|---|---|
-| Location | `staging` or `location:staging` | `navigate_to`, `drive_straight` `to` | `cell/locations.yaml` |
-| Stance | `stance:<instance>` or `stance:<instance>/<variant>` | `navigate_to`, `drive_straight` `to` | `robots/<robot>/stances.yaml`, relative to the placed object `<instance>` of `cell/objects.yaml` |
-| Point on a placed object | `<instance>/<point>`, e.g. `part_stack_1/grasp` | `move_gripper` `to.point` | `objects/<type>.yaml` `points:` (taught with `taskweave teach point`) |
-| Contact | `<instance>/<contact>`, e.g. `bin_1/seat` | `move_object` `to.onto` (plus `contact`, the held object's own contact) | `objects/<type>.yaml` `contacts:` |
-| Held pose | `carry` | `move_object` `to.pose` | `robots/<robot>/held_poses.yaml`, per object type |
-| Tool pose | `present_both` | `move_gripper` `to.pose` | `robots/<robot>/poses.yaml` (entries with `tools:`) |
-| Joint pose | `home` | `move_joints` `pose`, `motion.via` | `robots/<robot>/poses.yaml` (joint values) |
-| Joint group | `left_arm`, `torso` | `move_joints` `only` | profile `joints.groups` |
+| Reference | Names | Example in the example cell |
+|---|---|---|
+| `<name>` | a target of the cell (`cell/targets.yaml`), a base-frame target of the robot or a joint target (`robots/<robot>/targets.yaml`) | `staging`, `present_both`, `carry`, `home_pose` |
+| `<instance>/<name>` | a target on a placed object of `cell/objects.yaml`: a stance, a hand point, a contact | `part_stack_1/pick`, `part_stack_1/grasp`, `bin_1/seat` |
 
-- A **stance** is where the robot stands to work on an object, stored relative to the object type (or one instance), so
-  moving the object moves the stance. The first variant is the default. `stance:fixture_1/work` is the robot's `work`
-  variant for the `fixture` type. Missing for this robot: the step is rejected, the mission itself does not change.
-- A **point** carries one tool pose per hand (`left_tool`, `right_tool`), canonical TCP poses relative to the object, so
-  they hold on any robot that can reach them. `approach_m` is the straight last part of the way, `alone:` gives
-  one-hand poses, `grip_width_m` is checked against the robot's tools. Arriving at a point with no offset makes closing
-  the grippers there a **grasp**: the object is then held by those hands, until `grip` opens them.
-- A **contact** is a frame where one object meets another (a part's `base` on a bin's `seat`). `move_object` puts the held
-  object's `contact` onto the placed one's, `offset_m` short of it against its engage direction (z). Use the offset
-  step first, then the same step without offset.
-- **Placing without a contact.** `to.onto` needs a contact on the placed object (`contacts:` in its `objects/<type>.yaml`).
-  If it has none, either put the object where you can name the spot: `move_object {to: {at: [x, y, z]}}` (robot frame: where the
-  object origin goes, orientation kept) or `{to: {pose: <held pose>}}` (a named held pose of the robot for this type of
-  object), or add a contact to the object type (a `{xyz, rpy}` frame, z = the direction the object moves to engage) and
-  use `to.onto` as in [Example 4](#example-4-pick-up-a-bin-and-put-it-on-the-fixture).
+What a target moves comes from the target itself (`moves`), and the same step form goes to all of them:
+
+| The target moves | Example | `move` does |
+|---|---|---|
+| the base | `{to: part_stack_1/pick}` | drives there (Nav2 where the robot has it, else direct), `motion: {mode: straight}` in a straight line |
+| a hand (or both) | `{to: part_stack_1/grasp, offset_m: 0.1}` | moves the tools to the pose, `offset_m` short of it |
+| a held object | `{to: bin_1/seat}` or `{to: carry}` | moves the held object, the holding hands locked to it |
+| joints | `{to: home_pose}` | moves the joint groups of the target |
+
+- A **stance** is where the base stands to work on an object, stored relative to the object type (or one instance), so
+  moving the object moves the stance. `fixture_1/work` is the robot's `work` stance for the `fixture` type. Missing for this
+  robot: the step is rejected, the mission itself does not change. There is no default stance: a step names it.
+- A **hand target** carries one tool pose per hand (`left_tool`, `right_tool`), canonical TCP poses relative to the object,
+  so they hold on any robot that can reach them. `approach_m` is the straight last part of the way, `alone:` gives
+  one-hand poses, `grip_width_m` is checked against the robot's tools. Arriving at a hand target on an object with no
+  offset makes closing the grippers there a **grasp**: the object is then held by those hands, until `grip` opens them.
+- A **contact** is an object target on an object: a frame where one object meets another (a part's `base` on a bin's
+  `seat`). `move {to: bin_1/seat}` puts the held object's reference (the part's `base`, named in the target's `reference`)
+  onto it, `offset_m` short of it against its engage direction (z). Use the offset step first, then the same step
+  without offset.
+- **Placing without a contact.** A `to` that is an object target needs a contact on the placed object (a target with
+  `moves: object` in its `objects/<type>.yaml`). If it has none, put the object where you can name the spot:
+  `move {object: held, at: [x, y, z]}` (robot frame: where the object origin goes, orientation kept) or `{to: <carry
+  pose>}` (a named object target in the robot's base frame, for this type of object), or add a contact to the object
+  type and use it as in [Example 4](#example-4-pick-up-a-bin-and-put-it-on-the-fixture).
 - Where an object is put down, `grip open` with `place_as: <name>` records it as a placed object of that name, whose
-  points exist from then on (validation knows a point of a `place_as` object only after that step).
+  targets exist from then on (validation knows a target of a `place_as` object only after that step).
+
+## The `move` skill
+
+`move` is the one skill that moves the robot. A step takes one of six forms:
+
+| Form | Required | Meaning |
+|---|---|---|
+| target | `to` | go to a target; its kind says what moves |
+| hand relative | `hand` + `by` or `at` | move hands relative to now, or to a pose in the base frame |
+| object relative | `object` + `by` or `at` | move the held object (`held`, or a placed object's name) relative to now |
+| base straight | `base: {by: [forward, left]}` | drive straight, metres |
+| elbow | `elbow` | swing the elbows to a side, the hands stay |
+| joints | `joints` | joint group values, as in a target |
+
+Which options apply depends on the kind of motion. A step with an option that does not apply is rejected before it runs
+(`move base: option hands does not apply`). `taskweave check --missions` finds it offline.
+
+| Option | base | straight | hand | object | elbow | joints |
+|---|---|---|---|---|---|---|
+| `hands` | - | - | yes | `auto`, `all` | yes | - |
+| `offset_m` | - | - | yes | yes | - | - |
+| `reference` | - | - | - | yes | - | - |
+| `only` (groups of a joint target) | - | - | - | - | - | yes |
+| `torso` | `keep`, a value | `keep`, a value | `auto`, `keep`, a value | `auto`, `keep`, a value | `keep` | - |
+| `motion.mode` | `nav` | `straight` | `free`, `linear` | `linear`, `free` | - | - |
+
+Argument tables: [skills.md](skills.md). The old skills `navigate_to`, `drive_straight`, `move_gripper`, `move_object`,
+`set_posture` and `move_joints` are gone from cells of schema 4; the migration rewrites their steps
+([migration_targets.md](migration_targets.md)).
 
 ## Motion options
 
-The arm skills (`move_gripper`, `move_object`, `move_joints`, `set_posture`) take an optional `motion` object; `grip`
-takes `speed`, `accel` and `tolerance`. The tables are in [skills.md](skills.md). The common ones:
+`move` takes an optional `motion` object; `grip` takes `speed`, `accel` and `tolerance`. The tables are in
+[skills.md](skills.md). The common ones:
 
 | Option | Effect |
 |---|---|
-| `mode` | `free`: joint space, planned around obstacles, the last `approach_m` straight. `linear`: the TCPs on straight lines (`move_object` default). |
-| `speed` | Fraction (0 to 1] of the skill's standard speed. The global override applies on top. `speed_abs` gives absolute speeds instead. |
+| `mode` | `free`: joint space, planned around obstacles, the last `approach_m` straight. `linear`: the TCPs on straight lines (default for a held object). For the base: `nav` (default) or `straight`. |
+| `speed` | Fraction (0 to 1] of the standard speed. The global override applies on top. `speed_abs` gives absolute speeds instead. |
 | `accel` | Fraction of the standard acceleration. |
 | `elbow` | Side the elbows keep or reach: `down`, `up`, `out`, `in`, `back`, `forward` (robot frame). |
 | `planner` | `auto`: straight joint move if free, else an elbow swing, else the planner. `direct`: straight move only. `planned`: always the planner. |
 | `approach_m` | Length of the straight approach in `free` mode; `0` plans all the way. |
-| `torso` | `keep` or `auto`: choose the torso height (robot profile `ik.torso`: least motion, reachable and collision free; else the first reachable of the `torso_fallback` heights). |
-| `via` | Waypoints to pass (`move_joints`: joint pose names or `{joint: value}` maps). |
+| `via` | Waypoints to pass: hand targets (hand move) or joint targets (joints move), by name. |
 | `tolerance` | End accuracy. |
 
-Defaults are layered, later wins: the skill yaml (`skills/<skill>.yaml`, `motion:`, `speed:`, `accel:`), the robot pack's
-`skill_overrides.yaml`, the target's own data (a point's `approach_m` and `elbow`), then the step's `motion`. Put a
-number in a mission only when this step differs from the usual; put the usual in config.
+The torso is not in `motion` but a step option of its own, `torso: auto | keep | <value>`:
+
+- `auto` chooses the torso height (robot profile `ik.torso`: least motion, reachable and collision free; else the first
+  reachable of the `torso_fallback` heights). It is the default for hand targets and relative hand moves.
+- `keep` leaves the torso where it is. It is the right choice for a move of a held object, which is why the migration
+  writes it there.
+- A number (or a list for several joints) sets it. The order of precedence is the step's `torso`, then the target's own
+  `joints.torso`, then the default of the kind.
+- For a base move, `torso` is the height before driving (default: the profile's `torso.drive_m`).
+
+Defaults are layered, later wins: the skill yaml (`skills/move/<part>.yaml`, `motion:`, `speed:`, `accel:`), the robot
+pack's `skill_overrides.yaml`, the target's own data (a hand target's `approach_m` and `elbow`), then the step's
+`motion`. Put a number in a mission only when this step differs from the usual; put the usual in config.
 
 ## Hands
 
@@ -147,32 +191,38 @@ rule word.
 
 | Rule | Meaning |
 |---|---|
-| `auto` | The hands the target defines (a point with `left_tool` and `right_tool` uses both); for a held object, the hands that hold it. Default of `move_gripper` and `move_object`. |
-| `any_one` | One hand: for `move_gripper` the free hand that can take the target (see below); for `grip` the one hand at an object point. |
+| `auto` | The hands the target defines (a hand target with `left_tool` and `right_tool` uses both); for a held object, the hands that hold it. Default of `move`. |
+| `any_one` | One hand: for `move` to a hand target the free hand that can take the target (see below); for `grip` the one hand at an object target. |
 | `all` | Every hand. |
 
-`grip` and `move_gripper` take all three; `move_object` and `set_posture` take `auto` (the holding hands) and `all`.
+`grip` and `move` to a hand target take all three; a `move` of a held object and the elbow form take `auto` (the holding
+hands) and `all`. `hands` is for the `to` form; the relative forms name their hands with `hand`.
 
-`move_gripper` with `any_one` chooses one hand, in this order:
+`move` to a hand target with `any_one` chooses one hand, in this order:
 
 1. Only free hands count: a hand that holds an object is never chosen.
-2. Only hands the target can apply to: for a point, a hand with an `alone:` pose or a pose in the pair; for a named pose,
-   a hand the pose places; for `by` and `at`, every hand.
+2. Only hands the target can apply to: for an object target, a hand with an `alone:` pose or a pose in the pair; for a
+   robot target in the base frame, a hand the target places.
 3. Hands whose IK has a solution (the robot's `ik.choose` settings, no motion) come before those without.
 4. Of those, the hand with the least joint motion from where the arm is now.
 5. A tie goes to the first hand in the robot profile (`grippers` order), so the choice is repeatable.
 
 The chosen hand is in the message and in the result data (`data.hands`, plus `data.choice` with every candidate's
 motion or reason). If no hand can take the target the step is rejected with one reason per hand. `grip` with `any_one`
-takes the hand that is at an object point (closing, `opening`), or for `open` the one hand that holds something; with
-none or with both hands there it is rejected as ambiguous. `auto` on a point that only one free hand has a pose for (a
+takes the hand that is at an object target (closing, `opening`), or for `open` the one hand that holds something; with
+none or with both hands there it is rejected as ambiguous. `auto` on a target that only one free hand has a pose for (a
 single `right_tool`) means that hand.
 
-A one-hand step on a two-hand point uses the point's `alone:` poses. Closing hands at a point makes them hold the object,
-also one hand of a two-hand point; opening takes them out of the hold, and an object with no hands left is released.
-`move_object` keeps every holding hand locked to the object; `set_posture` defaults to the holding hands, else all.
+A one-hand step on a two-hand target uses the target's `alone:` poses. Closing hands at a hand target makes them hold the
+object, also one hand of a two-hand target; opening takes them out of the hold, and an object with no hands left is
+released. A `move` of a held object keeps every holding hand locked to it; the elbow form defaults to the holding hands,
+else all.
 
-**The free arm moves while the other hand holds.** A hand that holds an object stays with it: `move_gripper` for that hand and `move_joints` on its arm joints (also as part of a whole-body pose or a `via`) are REJECTED, naming the holding hand. The other hand may `move_gripper`, `move_joints` its own arm group and `grip`; torso and head moves are allowed, and every hold follows them. The motion planner does not know the held object: the free arm's path is checked against the robot and the planning scene only, so the object itself is not avoided (objects have no collision shape in the config yet, `mesh` is the simulator's visual asset).
+**The free arm moves while the other hand holds.** A hand that holds an object stays with it: a hand move for that hand
+and a joint move on its arm joints (also as part of a whole-body target or a `via`) are REJECTED, naming the holding hand.
+The other hand may move, move its own arm group and `grip`; torso and head moves are allowed, and every hold follows them.
+The motion planner does not know the held object: the free arm's path is checked against the robot and the planning scene
+only, so the object itself is not avoided unless its type has a `collision` shape.
 
 ## The example cell
 
@@ -181,20 +231,22 @@ stands, and `taskweave_skills/test/test_docs_examples.py` validates every exampl
 
 | File | Holds |
 |---|---|
-| `pack.yaml` | name, version, `schema_version: 3` |
-| `cell/locations.yaml`, `cell/objects.yaml` | `home`, `staging`; placed objects: `part_stack_1`, `part_stack_2` (stacks of `part`), `bin_1`, `fixture_1` |
-| `objects/part.yaml` | point `grasp` (both hands, and `alone` for one), contact `base` |
-| `objects/bin.yaml` | point `grasp` (left hand), contacts `seat` (where a part sits) and `base` |
-| `objects/fixture.yaml` | point `handle` (a lever), contact `slot` (where something put on the fixture sits) |
-| `robots/duo_bot/` | the robot: `profile.yaml`, `embodiment.yaml`, `poses.yaml` (`home`, `present_both`), `stances.yaml`, `held_poses.yaml` (`carry` for `part` and `bin`), `object_points.yaml` |
+| `pack.yaml` | name, version, `schema_version: 4` |
+| `cell/targets.yaml`, `cell/objects.yaml` | base targets `home`, `staging`; placed objects: `part_stack_1`, `part_stack_2` (stacks of `part`), `bin_1`, `fixture_1` |
+| `objects/part.yaml` | hand target `grasp` (both hands, and `alone` for one), object target `base` |
+| `objects/bin.yaml` | hand target `grasp` (left hand), object targets `seat` (where a part sits) and `base` |
+| `objects/fixture.yaml` | hand target `handle` (a lever), object target `slot` (where something put on the fixture sits) |
+| `robots/duo_bot/` | the robot: `profile.yaml`, `embodiment.yaml`, `targets.yaml` (`home_pose`, `present_left`, `present_both`, `carry`), `objects/<type>.yaml` (its stances `pick`, `place`, `work`, and settings) |
+| `skills/move.yaml`, `skills/move/*.yaml`, `skills/grip.yaml`, `skills/wait.yaml` | in `docs/examples/skills`: the skill files a cell pack starts from |
 
 The robot is `duo_bot`, a neutral test robot (fixed base, a lift, two 2-joint arms, two parallel grippers, IK by a fake
-MoveIt). Its files here are a copy of `taskweave_skills/test/fixtures/config/robots/duo_bot` (the test fixture the
-skill tests run on), with joint groups added for `move_joints only`. It is not a shipped robot pack on purpose: the
+MoveIt). Its files here are a copy of `taskweave_skills/test/fixtures/config_new/robots/duo_bot` (the test fixture the
+skill tests run on), with joint groups added for the joints part of targets. It is not a shipped robot pack on purpose: the
 tool poses, stances and carry poses are made up to fit the example objects and mean nothing for a real robot, and a pack in
 `taskweave_robots` would suggest they do. To try the missions on a shipped pack (`galbot_s1`, ...), keep the cell files
-and give the cell that robot's stances and held poses (`robots/<robot>/stances.yaml`, `held_poses.yaml`, taught on the
-robot) as in [configuration.md](configuration.md).
+and give the cell that robot's stances (`robots/<robot>/objects/<type>.yaml`, taught on the robot) as in
+[configuration.md](configuration.md). The example cell is the migrated form of the schema 3 example (the migration's
+golden test, [migration_targets.md](migration_targets.md)).
 
 ## Example 1: drive, pick and place with two hands
 
@@ -207,88 +259,89 @@ defaults: {timeout_s: 120, retries: 1, on_failure: abort}
 steps:
   - id: tuck
     instruction: Arms in the driving pose
-    skill: move_joints
-    args: {pose: home}
+    skill: move
+    args: {to: home_pose}
   - id: to_part
-    instruction: Drive to the pick stance at the part stack
-    skill: navigate_to
-    args: {target: "stance:part_stack_1"}
+    instruction: Drive to the pick position at the part stack
+    skill: move
+    args: {to: part_stack_1/pick}
   - instruction: Open both grippers
     skill: grip
     args: {hands: all, action: open}
   - instruction: Pre-grasp 10 cm above the part
-    skill: move_gripper
-    args: {to: {point: part_stack_1/grasp, offset_m: 0.1}}
+    skill: move
+    args: {to: part_stack_1/grasp, offset_m: 0.1}
     retries: 2
     on_failure: replan
     replan_from: to_part
   - instruction: Onto the part
-    skill: move_gripper
-    args: {to: {point: part_stack_1/grasp}, motion: {mode: linear, speed: 0.5}}
+    skill: move
+    args: {to: part_stack_1/grasp, motion: {mode: linear, speed: 0.5}}
   - instruction: Close both grippers on the part
     skill: grip
     args: {hands: all, action: close}
   - instruction: Lift the part 20 cm
-    skill: move_object
-    args: {to: {by: [0, 0, 0.2]}}
+    skill: move
+    args: {object: held, by: [0, 0, 0.2], torso: keep}
   - instruction: Into the carry pose
-    skill: move_object
-    args: {to: {pose: carry}}
+    skill: move
+    args: {to: carry, torso: keep}
   - id: to_bin
     instruction: Drive to the bin
-    skill: navigate_to
-    args: {target: "stance:bin_1/place"}
+    skill: move
+    args: {to: bin_1/place}
   - instruction: Part onto the seat, 5 cm short of it
-    skill: move_object
-    args: {to: {onto: bin_1/seat, contact: base, offset_m: 0.05}}
+    skill: move
+    args: {to: bin_1/seat, offset_m: 0.05, torso: keep}
   - instruction: Down onto the seat
-    skill: move_object
-    args: {to: {onto: bin_1/seat, contact: base}}
+    skill: move
+    args: {to: bin_1/seat, torso: keep}
   - instruction: Let go
     skill: grip
     args: {hands: all, action: open}
   - instruction: Arms in the driving pose
-    skill: move_joints
-    args: {pose: home}
+    skill: move
+    args: {to: home_pose}
 ```
 
 Notes: the pre-grasp step retries twice and then replans from `to_part`, so the robot drives to the stance again.
-`motion: {mode: linear, speed: 0.5}` makes the last move a straight line at half speed. `carry` is a held pose of the
-robot. The bin step goes in two moves: 5 cm short of the seat, then onto it.
+`motion: {mode: linear, speed: 0.5}` makes the last move a straight line at half speed. `carry` is an object target in
+the robot's base frame, `home_pose` a joint target. `torso: keep` leaves the torso alone while the part is held. The bin
+step goes in two moves: 5 cm short of the seat, then onto it.
 
 ## Example 2: one hand
 
-Hand selection with `hands: [left]` on a point that has a single tool pose, and `motion.elbow` for the arm shape.
+Hand selection with `hands: [left]` on a hand target that has a single tool pose, and `motion.elbow` for the arm shape.
 
 ```yaml
 goal: Pull the lever of the fixture with the left hand and let go again
 loop: once
 defaults: {timeout_s: 90, retries: 0, on_failure: abort}
 steps:
-  - instruction: Drive to the work stance at the fixture
-    skill: navigate_to
-    args: {target: "stance:fixture_1/work"}
+  - instruction: Drive to the work position at the fixture
+    skill: move
+    args: {to: fixture_1/work}
   - instruction: Open the left gripper
     skill: grip
     args: {hands: [left], action: open}
   - instruction: Left hand to the lever, 10 cm short of it
-    skill: move_gripper
-    args: {to: {point: fixture_1/handle, offset_m: 0.1}, hands: [left], motion: {elbow: out}}
+    skill: move
+    args: {to: fixture_1/handle, offset_m: 0.1, hands: [left], motion: {elbow: out}}
   - instruction: Onto the lever
-    skill: move_gripper
-    args: {to: {point: fixture_1/handle}, hands: [left], motion: {mode: linear}}
+    skill: move
+    args: {to: fixture_1/handle, hands: [left], motion: {mode: linear}}
   - instruction: Grip the lever
     skill: grip
     args: {hands: [left], action: close}
   - instruction: Pull 8 cm towards the robot
-    skill: move_object
-    args: {to: {by: [-0.08, 0, 0]}, motion: {speed: 0.3}}
+    skill: move
+    args: {object: held, by: [-0.08, 0, 0], motion: {speed: 0.3}, torso: keep}
   - instruction: Let go
     skill: grip
     args: {hands: [left], action: open}
   - instruction: Left hand back to the driving pose
-    skill: move_joints
-    args: {pose: home}
+    skill: move
+    args: {to: home_pose}
 ```
 
 ## Example 3: a block included by another mission
@@ -303,24 +356,24 @@ params:
 loop: once
 defaults: {timeout_s: 120, retries: 0, on_failure: abort}
 steps:
-  - instruction: Drive to the pick stance at {part}
-    skill: navigate_to
-    args: {target: "stance:{part}"}
+  - instruction: Drive to the pick position at {part}
+    skill: move
+    args: {to: '{part}/pick'}
   - instruction: Open both grippers
     skill: grip
     args: {hands: all, action: open}
   - instruction: Pre-grasp above {part}
-    skill: move_gripper
-    args: {to: {point: "{part}/grasp", offset_m: 0.1}}
+    skill: move
+    args: {to: "{part}/grasp", offset_m: 0.1}
   - instruction: Onto the part
-    skill: move_gripper
-    args: {to: {point: "{part}/grasp"}}
+    skill: move
+    args: {to: "{part}/grasp"}
   - instruction: Close both grippers
     skill: grip
     args: {hands: all, action: close}
   - instruction: Into the carry pose
-    skill: move_object
-    args: {to: {pose: carry}}
+    skill: move
+    args: {to: carry, torso: keep}
 ```
 
 ```yaml
@@ -338,11 +391,11 @@ steps:
     with: {part: "{next_stack}"}
     on_failure: replan
   - instruction: Drive to the bin
-    skill: navigate_to
-    args: {target: "stance:bin_1/place"}
+    skill: move
+    args: {to: bin_1/place}
   - instruction: Part onto the seat
-    skill: move_object
-    args: {to: {onto: bin_1/seat, contact: base}}
+    skill: move
+    args: {to: bin_1/seat, torso: keep}
   - instruction: Let go
     skill: grip
     args: {hands: all, action: open}
@@ -353,8 +406,8 @@ The planner works out `next_stack` at the start of each cycle, the include step 
 
 ## Example 4: pick up a bin and put it on the fixture
 
-One hand, from a point on the bin to a contact on the fixture: the left hand takes the bin by its `grasp` point, carries
-it, and puts its `base` contact onto the fixture's `slot`.
+One hand, from a hand target on the bin to a contact on the fixture: the left hand takes the bin by its `grasp` point,
+carries it, and puts its `base` onto the fixture's `slot`.
 
 ```yaml
 goal: Take the bin with the left hand, put it onto the fixture, arm back to the driving pose
@@ -362,65 +415,67 @@ loop: once
 defaults: {timeout_s: 120, retries: 1, on_failure: abort}
 steps:
   - id: to_bin
-    instruction: Drive to the pick stance at the bin
-    skill: navigate_to
-    args: {target: "stance:bin_1/pick"}
+    instruction: Drive to the pick position at the bin
+    skill: move
+    args: {to: bin_1/pick}
   - instruction: Open the left gripper
     skill: grip
     args: {hands: [left], action: open}
   - id: pregrasp
     instruction: Left hand 10 cm short of the bin's grasp point
-    skill: move_gripper
-    args: {to: {point: bin_1/grasp, offset_m: 0.1}, hands: [left]}
+    skill: move
+    args: {to: bin_1/grasp, offset_m: 0.1, hands: [left]}
     retries: 2
     on_failure: replan
     replan_from: to_bin
   - instruction: Left hand straight onto the grasp point, at half speed
-    skill: move_gripper
-    args: {to: {point: bin_1/grasp}, hands: [left], motion: {mode: linear, speed: 0.5}}
+    skill: move
+    args: {to: bin_1/grasp, hands: [left], motion: {mode: linear, speed: 0.5}}
   - instruction: Close the left gripper on the bin
     skill: grip
     args: {hands: [left], action: close}
   - instruction: Lift the bin 20 cm
-    skill: move_object
-    args: {to: {by: [0, 0, 0.2]}, hands: [left]}
+    skill: move
+    args: {object: held, by: [0, 0, 0.2], hands: [left], torso: keep}
   - instruction: Bin into the carry pose
-    skill: move_object
-    args: {to: {pose: carry}, hands: [left]}
+    skill: move
+    args: {to: carry, hands: [left], torso: keep}
   - id: to_fixture
-    instruction: Drive to the work stance at the fixture
-    skill: navigate_to
-    args: {target: "stance:fixture_1/work"}
+    instruction: Drive to the work position at the fixture
+    skill: move
+    args: {to: fixture_1/work}
   - instruction: Bin onto the fixture slot, 5 cm short of it
-    skill: move_object
-    args: {to: {onto: fixture_1/slot, contact: base, offset_m: 0.05}, hands: [left]}
+    skill: move
+    args: {to: fixture_1/slot, offset_m: 0.05, hands: [left], torso: keep}
   - instruction: Bin down onto the fixture slot
-    skill: move_object
-    args: {to: {onto: fixture_1/slot, contact: base}, hands: [left]}
+    skill: move
+    args: {to: fixture_1/slot, hands: [left], torso: keep}
   - instruction: Let go of the bin with the left hand
     skill: grip
     args: {hands: [left], action: open}
   - id: tuck
     instruction: Arms back in the driving pose
-    skill: move_joints
-    args: {pose: home}
+    skill: move
+    args: {to: home_pose}
 ```
 
-Notes: no `to.onto` without the `slot` contact on `objects/fixture.yaml`; `contact: base` is the bin's own contact, the
-one that goes onto the slot. `hands: [left]` on `move_object` makes it explicit that only the left hand holds.
+Notes: there is no step onto the fixture without the `slot` target on `objects/fixture.yaml`; its `reference: base` names
+the bin's own contact, the one that goes onto the slot. `hands: [left]` on a move of the held object makes it explicit
+that only the left hand holds.
 
 ## Validate a mission
 
 1. `taskweave check <cell>` (offline, no ROS graph) checks what needs no skill catalog: every file of the cell pack and of
    its robots (`robots/<robot>`, cell first, then the robot packs) loads against its schema, the profile and the
    embodiment agree (base type, tools; warnings for an IK arm without elbow description and for keys under `arms` that
-   nothing reads), each `skills/<name>.yaml` loads and its classes import, and every mission expands (includes,
-   parameters) into a plan. It does **not** check skill arguments or any name a step uses: a misspelt point, contact,
-   stance, held pose or joint pose, a wrong `hands` value or a missing argument passes. Those need the skills'
-   argument schemas, so they are checked by 2 (live catalog) or 3 (the same offline, in a test).
+   nothing reads), each `skills/<name>.yaml` loads and its classes import, every target name is unique in its place,
+   and every mission expands (includes, parameters) into a plan. It does **not** check skill arguments or any name a
+   step uses: a misspelt target, a wrong `hands` value or a missing argument passes. `taskweave check <cell> --missions`
+   also validates every mission's plan against the skills the cell serves (needs ROS and the skill packages); the live
+   catalog (2) and a test (3) do the same.
 2. The HMI mission editor checks the arguments against the live skill catalog, as the task handler does before a start:
-   skill exists and has an implementation for the robot, arguments fit the schema, points, stances, contacts and poses
-   exist (a problem names the step and the argument). Starting an invalid mission is refused with the reasons.
+   skill exists and has an implementation for the robot, arguments fit the schema, targets exist and fit the form of the
+   step (a problem names the step and the argument). Starting an invalid mission is refused with the reasons.
 3. In a test, run the same check offline: build the catalog from the skill classes' `args_schema`, then
    `validate_plan(Plan.from_mission(store.expanded_mission(name), name, robot=robot), catalog, store)`; see
    `taskweave_skills/test/test_docs_examples.py`, which does it for every example above.
@@ -430,19 +485,23 @@ one that goes onto the slot. `hands: [left]` on `move_object` makes it explicit 
 
 | Message (shortened) | Cause and fix |
 |---|---|
-| `the skill move_to_pose was removed, use move_joints ...` (also `go_to_point`, `gripper`) | The mission is from before the skill rework. `taskweave config migrate-skills <cell> [--dry-run]` rewrites missions, `operator.yaml` and `skills/`. |
-| `move_object takes its target as to now ...` | Old `move_object` arguments (`by`, `pose`, `elbow` ...). Same migration: `to: {by: ...}`, the elbow argument became the skill `set_posture`. |
-| `cell pack schema 2, this taskweave needs 3: run taskweave config migrate-skills <cell>` | Pack from an older layout: `taskweave config migrate <cell>` runs every step up to the current schema (1 to 2: robot packs, 2 to 3: skills); `migrate-skills` is the last step alone. |
-| `no skill server offers it; available: ...` | The skill is not served: list it in the launch `skills:` argument and give it a `skills/<name>.yaml`. |
-| `no implementation fits robot ... (...)` | The `requires` of every implementation in `skills/<name>.yaml` fail against the robot's embodiment; the reasons follow. Add an implementation or fix the capabilities. |
-| `args.to.point: <x> names no placed object: use <instance>/<point>` | `move_gripper` takes `<instance>/<point>` (an entry of `cell/objects.yaml`), not `<object>.<point>`. |
-| `unknown stance ...: no object X in cell/objects.yaml` / `... robot R has no stance for T objects` | The instance is not in `cell/objects.yaml`, or `robots/<robot>/stances.yaml` has no stance for its type: teach one (`taskweave teach stance <instance>`). |
-| `unknown placed object ...` | `object:` of `move_object` (or a point's instance) is not in `cell/objects.yaml`. |
-| `pose X places no tools (joint values only): use move_joints` / `pose X places tools: use move_gripper to.pose` | Joint poses go to `move_joints`, tool poses to `move_gripper`. |
-| `robot ... has no held pose ...` | Add it to `robots/<robot>/held_poses.yaml` for the object type. |
-| `robot ... has no joint group ...` | `move_joints only:` takes groups of the profile's `joints.groups`. |
+| `the skill navigate_to was replaced by move on a cell of schema 4 (targets): write the step as move {...}` (also `drive_straight`, `move_gripper`, `move_object`, `set_posture`, `move_joints`) | The mission is from before schema 4. `taskweave config migrate <cell> [--dry-run]` rewrites missions, `operator.yaml` and `skills/` ([migration_targets.md](migration_targets.md)). |
+| `'stance:part_stack_1/pick': the stance: prefix was removed in schema 4: run taskweave config migrate` | An old reference (`stance:`, `location:`, `pose:`, `<object>.<point>`). Write `<instance>/<name>` or `<name>`. |
+| `cell pack schema 3, this taskweave needs 4: run taskweave config migrate <cell>` | Pack from an older layout: `taskweave config migrate <cell>` runs every step up to the current schema. |
+| `unknown target 'wating'; did you mean waiting? ...` | Misspelt or missing target. The message counts the cell and robot targets; object targets need `<instance>/<name>`. |
+| `unknown target 'grasp': it is a target of part objects and needs an instance: <instance>/grasp ...` | A target of an object type written without the object. |
+| `unknown target 'bin_9/pick': no object 'bin_9' in cell/objects.yaml, instances: ...` | The instance is not in `cell/objects.yaml` (or it was removed from the run-time state). |
+| `object 'part' has no target 'grap' (it has: ...)` / `robot 'R' has no 'pick' target for T objects (robots/R/objects/T.yaml)` | The type has no such target, or this robot has no stance for it: teach one (`taskweave teach base <instance>/pick`). |
+| `target 'set_down' is in cell/targets.yaml and robots/R/targets.yaml: rename one` | A plain name has two meanings. Rename one of them. |
+| `'waiting' moves the base: ...` / `move base: option hands does not apply` | The option or the form does not fit the kind of target (the table in [The `move` skill](#the-move-skill)). |
+| `move hand: left holds frame_1: move the object (...), or open the gripper first` | A hand target for a hand that holds something. Move the held object, or `grip open`. |
+| `'carry' is a base-frame object target for frame_type2: a held frame_type2 is needed, nothing is held` | A carry pose for an object that is not held. `grip close` on it first. |
+| `move: look_at is not implemented yet: set head through joints` | `look_at` is reserved. Use `joints: {head: [...]}`. |
+| `no skill server offers it; available: ...` | The skill is not served: list it in the launch `skills:` argument (`wait,move,grip`) and give it a `skills/<name>.yaml`. |
+| `no implementation fits robot ... (...)` / `this robot cannot do <kind>: ...` | The `requires` of every implementation in `skills/<name>.yaml` (for `move`: of the part's `skills/move/<part>.yaml`) fail against the robot's embodiment; the reasons follow. |
+| `robot ... has no joint group ...` | A joints part or `only:` names a group the profile's `joints.groups` lacks. |
 | `step id ... is used more than once` / `replan_from ... is not a step of this plan` | Ids must be unique; `replan_from` names a step of the expanded plan (an include's inner steps are `<id>_<inner id>`). |
 | `world state has no value for placeholder {name}` | The placeholder is not a parameter of the block, a fact or a world-state key; check the spelling and the `with:`. |
 | An error naming a file and a key when a mission loads | The config schemas reject unknown keys and wrong types and name the file and the key; a newly added key needs the taskweave version that knows it. |
-| `nothing is held: move_gripper to the object, then grip close` (REJECTED at run time) | `move_object` needs a hold: go to the point with `move_gripper` (no offset), then `grip close`. |
+| `nothing is held: move to a hand target, then grip close` (REJECTED at run time) | A move of the held object needs a hold: go to the hand target with `move` (no offset), then `grip close`. |
 | `has no parameter ...` / missing parameters of an `include` | `with:` must give exactly the block's `params`. |

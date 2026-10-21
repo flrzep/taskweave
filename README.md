@@ -3,7 +3,7 @@
 Config-driven task planning and execution for ROS 2 robots.
 
 A **planner** turns a goal into steps, a **task handler** runs them and decides what happens when one fails, and
-**skills** do the work behind a single ROS 2 action. Every location, grasp point, speed and decision rule comes from
+**skills** do the work behind a single ROS 2 action. Every target (a place the robot goes to), speed and decision rule comes from
 YAML. Robot hardware is described in one profile, so the same mission runs on a different robot. Install and first run: [docs/install.md](docs/install.md). Running missions: [docs/operator.md](docs/operator.md). Release notes: `CHANGELOG.md`.
 
 Skills can be scripts today and learned policies (VLA, RL) tomorrow; the planner can be a mission file today and a
@@ -73,55 +73,59 @@ facts:
 defaults: {timeout_s: 120, retries: 1, on_failure: abort}
 steps:
   - id: to_stack
-    instruction: Drive to the stance at {next_stack}
-    skill: navigate_to
-    args: {target: "stance:{next_stack}"}      # where this robot stands at that stack (robots/<robot>/stances.yaml)
+    instruction: Drive to the pick position at {next_stack}
+    skill: move
+    args: {to: '{next_stack}/pick'}            # where this robot stands at that stack (robots/<robot>/objects/part.yaml)
   - instruction: Open both grippers
     skill: grip
     args: {hands: all, action: open}
   - instruction: Pre-grasp 10 cm above the part
-    skill: move_gripper
-    args: {to: {point: "{next_stack}/grasp", offset_m: 0.1}}
+    skill: move
+    args: {to: "{next_stack}/grasp", offset_m: 0.1}
     retries: 2
     on_failure: replan              # ask the planner again ...
     replan_from: to_stack           # ... starting at the drive
   - instruction: Onto the part
-    skill: move_gripper
-    args: {to: {point: "{next_stack}/grasp"}}
+    skill: move
+    args: {to: "{next_stack}/grasp"}
   - instruction: Close both grippers on the part
     skill: grip
     args: {hands: all, action: close}
   - instruction: Lift it 20 cm
-    skill: move_object
-    args: {to: {by: [0, 0, 0.2]}}
+    skill: move
+    args: {object: held, by: [0, 0, 0.2], torso: keep}
   - instruction: Drive to the bin
-    skill: navigate_to
-    args: {target: "stance:bin_1/place"}
+    skill: move
+    args: {to: bin_1/place}
   - instruction: Part onto the seat of the bin
-    skill: move_object
-    args: {to: {onto: bin_1/seat, contact: base}}
+    skill: move
+    args: {to: bin_1/seat, torso: keep}
   - instruction: Let go
     skill: grip
     args: {hands: all, action: open}
 ```
 
 `{next_stack}` is a **fact**, worked out when each cycle is planned (here the stack with most parts left); other
-`{placeholders}` come from the world state or from the parameters of an included mission. `stance:...` is where this
-robot stands at an object, `<instance>/<point>` a grasp point taught on a placed object, `contact` the frame where the
-held part meets the bin. Nothing in the file names a robot: the same mission runs on any robot that has stances for the
-parts and a bin. More in [docs/missions.md](docs/missions.md) (all keys, targets, hands, motion options, three complete
-examples, common errors) and [docs/skills.md](docs/skills.md) (every skill and its arguments).
+`{placeholders}` come from the world state or from the parameters of an included mission. `to` always names a
+**target**: `<instance>/pick` is where this robot stands at an object, `<instance>/grasp` a grasp point taught on a placed
+object, `bin_1/seat` the frame where the held part meets the bin. What moves (the base, the hands, the held object, joints)
+comes from the target, so one skill, `move`, does all of it. Nothing in the file names a robot: the same mission runs on
+any robot that has stances for the parts and a bin. More in [docs/missions.md](docs/missions.md) (all keys, hands, motion
+options, complete examples, common errors), [docs/targets.md](docs/targets.md) (the target format) and
+[docs/skills.md](docs/skills.md) (every skill and its arguments).
 
 ## Packs
 
-- A **cell pack** is the config directory of one work cell: `pack.yaml`, `cell/` (layout, locations, placed objects),
-  `objects/`, `missions/`, `skills/`, and per robot `robots/<model>/` with its stances, held poses and object points.
+- A **cell pack** is the config directory of one work cell: `pack.yaml`, `cell/` (layout, targets, placed objects),
+  `objects/` (with the targets on each object type), `missions/`, `skills/`, and per robot `robots/<model>/objects/` with
+  its stances and settings on the cell's objects.
 - A **robot pack** holds one robot model and nothing about a cell: `profile.yaml` (how the hardware is reached),
-  `embodiment.yaml` (what it can do), poses, navigation, MoveIt files. `taskweave_robots` ships the bundled ones and
+  `embodiment.yaml` (what it can do), `targets.yaml` (home, carry poses), navigation, MoveIt files. `taskweave_robots` ships the bundled ones and
   installs them to `share/taskweave_robots/`. The bundled `galbot_s1`, `galbot_g1` and `a2d` packs are vendor-derived and
   internal use only: see each pack's `LICENSE-NOTE.md`.
 - A cell file overrides the robot pack's file key by key (`~override: keys`), so one robot model serves many cells.
-  Layout, search order and migration: [docs/configuration.md](docs/configuration.md).
+  Layout and search order: [docs/configuration.md](docs/configuration.md); the target format:
+  [docs/targets.md](docs/targets.md); from an older pack: [docs/migration_targets.md](docs/migration_targets.md).
 
 ## Repository layout
 
@@ -129,17 +133,19 @@ examples, common errors) and [docs/skills.md](docs/skills.md) (every skill and i
 |---|---|
 | [`taskweave_interfaces/`](taskweave_interfaces) | ROS 2 interfaces: `RunSkill` action, `Plan`, `PlanStep`, `TaskStatus`, `SkillInfo`, `SpeedOverride`, `ListSkills`, `StartMission`, `SetSpeedOverride`, `DescribeRobot`, `TeachPoint` |
 | [`taskweave_core/`](taskweave_core) | Config loader, schemas and migrations, planners, task handler, skill server base class, speed override, smoke test, CLI |
-| [`taskweave_skills/`](taskweave_skills) | Generic, robot-agnostic skills: `wait`, `navigate_to`, `drive_straight`, `move_joints`, `move_gripper`, `move_object`, `set_posture`, `grip` |
+| [`taskweave_skills/`](taskweave_skills) | Generic, robot-agnostic skills: `wait`, `move` (base, hands, held object, elbows, joints), `grip` |
 | [`taskweave_hmi/`](taskweave_hmi) | Web HMI: live mission status and control, validated mission editor, teaching, recording |
 | [`taskweave_bringup/`](taskweave_bringup) | Launch files: taskweave + HMI + Nav2 + MoveIt of any robot pack (`taskweave_bringup.launch.py`, `taskweave_nav2.launch.py`, `taskweave_moveit.launch.py`) |
-| [`taskweave_robots/`](taskweave_robots) | Robot packs (profile, embodiment, poses, MoveIt files), one folder per model |
+| [`taskweave_robots/`](taskweave_robots) | Robot packs (profile, embodiment, targets, MoveIt files), one folder per model |
 | [`docs/install.md`](docs/install.md) | Install from a clean Ubuntu 24.04 + ROS 2 Jazzy machine, run the example cell, use your own packs, upgrade a cell pack |
 | [`docs/operator.md`](docs/operator.md) | Operator guide: running missions, speed and test mode, hands, reload vs restart, checks, troubleshooting |
-| [`docs/missions.md`](docs/missions.md) | Writing missions: file anatomy, targets, hands, motion options, examples, common errors |
+| [`docs/missions.md`](docs/missions.md) | Writing missions: file anatomy, targets, the `move` skill, hands, motion options, examples, common errors |
+| [`docs/targets.md`](docs/targets.md) | The target format: kinds, frames, joints part, paths, object layers and instance overrides, references, errors |
 | [`docs/skills.md`](docs/skills.md) | Skill reference (generated from the skill classes: `python3 tools/gen_skills_doc.py`) |
 | [`docs/configuration.md`](docs/configuration.md) | Config tree and file formats |
 | [`docs/architecture.md`](docs/architecture.md) | Layers, interfaces, decision rules, design rules |
-| [`docs/pack_switchover.md`](docs/pack_switchover.md) | Moving a deployment from one config directory to cell pack + robot packs |
+| [`docs/migration_targets.md`](docs/migration_targets.md) | Migrating a cell pack to targets and `move` (schema 3 to 4): what it does, what it prints, rollback |
+| [`docs/pack_switchover.md`](docs/pack_switchover.md) | Moving a deployment from one config directory to cell pack + robot packs (the 1 to 2 record) |
 | [`AGENTS.md`](AGENTS.md) | Guide for developers and AI agents: build, tests, rules, how to add a skill, robot pack or cell pack |
 
 Application-specific parts (a cell's layout, its objects and missions, cell-specific skills) live in the application's
@@ -149,14 +155,14 @@ cell pack and are passed to taskweave as a config directory.
 
 taskweave runs a full pick-and-place cell in simulation. Working today:
 
-- Config: cell packs and robot packs with per-key overrides, schema validation, capability vocabulary, `config
-  migrate` / `migrate-skills` / `slim` / `files`, `taskweave check`.
+- Config: cell packs and robot packs with per-key overrides, schema validation, capability vocabulary, targets in one
+  format, `config migrate` / `migrate-skills` / `slim` / `files`, `taskweave check`.
 - Mission-file planner, executive (retry / replan / skip / abort), include blocks with parameters and facts, task
   handler with plan validation before anything moves, pause / resume / abort.
-- Skills: `wait`, `navigate_to` (direct and Nav2), `drive_straight`, `move_joints`, `move_gripper`, `grip`,
-  `move_object`, `set_posture`, with IK, MoveIt planning, elbow control and hold tracking.
+- Skills: `wait`, `move` (base with direct and Nav2 driving, straight drives, hands, held objects, elbows, joints) and
+  `grip`, with IK, MoveIt planning, elbow control and hold tracking.
 - Global speed override with test mode; the smoke test against a reference run.
-- Teaching (locations, stances, object points, from the CLI, the pad or the HMI); web HMI with live status, mission
+- Teaching (base, hand and joint targets, from the CLI, the pad or the HMI); web HMI with live status, mission
   editor with validation, record tab; `describe_robot` for planners.
 
 Planned: automatic arm selection (the planner or IK picks the arm and the torso height instead of the mission naming
@@ -167,7 +173,7 @@ interfaces and config schemas may still change between minor versions; schema ch
 
 ```bash
 ros2 launch taskweave_core taskweave.launch.py config_dir:=/path/to/cell robot:=<robot> \
-    skills:=wait,navigate_to,drive_straight,move_joints,grip,move_gripper,move_object,set_posture
+    skills:=wait,move,grip
 ros2 run taskweave_hmi hmi_server --ros-args -p config_dir:=/path/to/cell -p robot:=<robot> -p host:=<address>
 ```
 
@@ -195,9 +201,10 @@ taskweave skills                         # the skill catalog of the running syst
 taskweave run restock                    # start a mission
 taskweave status --follow
 taskweave pause | resume | abort
-taskweave teach location staging         # save the current base pose
-taskweave teach stance part_stack_1      # save it as the stance at an object (add --instance for one instance)
-taskweave teach point part_stack_1/grasp # save the tools' TCPs on an object
+taskweave teach base staging             # save the current base pose as a target of the cell
+taskweave teach base part_stack_1/pick   # save it as the stance at an object (add --instance for one instance)
+taskweave teach hand part_stack_1/grasp  # save the tools' TCPs on an object
+taskweave teach joints home              # save the current joint values of the groups as a joint target
 ```
 
 ### Speed override and test mode
@@ -214,10 +221,11 @@ ros2 service call /taskweave/task_handler/set_speed_override taskweave_interface
 ros2 param set /task_handler speed_override_percent 50.0              # same path as the service
 ```
 
-Test mode at 10 % means arm motion at 10 % while Nav2 drives at 30 %: the Nav2 implementation of `navigate_to` floors
-the override for the Nav2 phase at its param `min_override` (default 0.3, `skills/navigate_to.yaml`; MPPI cannot do the
-fine final approach into a stance at 10 %). Arms, torso, grippers, `drive_straight` and the direct controller after the
-handover follow the real override. The step result reports the value as `data.speed.nav2_override` (percent).
+Test mode at 10 % means arm motion at 10 % while Nav2 drives at 30 %: the Nav2 implementation of the base part of
+`move` floors the override for the Nav2 phase at its param `min_override` (default 0.3, `skills/move/base.yaml`; MPPI
+cannot do the fine final approach into a stance at 10 %). Arms, torso, grippers, straight drives and the direct
+controller after the handover follow the real override. The step result reports the value as `data.speed.nav2_override`
+(percent).
 
 `percent: 0` leaves the value unchanged. Handler parameters `speed_test_percent` (default 10) and `speed_cap_percent`
 (default 50) set the test mode values. A base driven by Nav2 needs the `speed_gate` node between the planner and the
@@ -226,12 +234,13 @@ base (`ros2 run taskweave_core speed_gate`).
 ### Cell pack maintenance
 
 ```bash
-taskweave config migrate /path/to/cell [--robot-packs DIR] [--dry-run]  # any older layout -> the current schema (1 -> 2 -> 3)
+taskweave config migrate /path/to/cell [--robot-packs DIR] [--dry-run]  # any older layout -> the current schema (1 -> 2 -> 3 -> 4)
+                                                                        # 3 -> 4: targets and the skill move (docs/migration_targets.md)
 taskweave config migrate-skills /path/to/cell [--dry-run]               # only 2 -> 3: move_to_pose, go_to_point, gripper
-                                                                        # become move_joints, move_gripper, grip, ...
+                                                                        # became move_joints, move_gripper, grip, ... (since 4: move)
 taskweave config slim /path/to/cell [--dry-run]                         # whole-file robot overrides -> per-key overrides
 taskweave config files /path/to/cell [<robot>]                          # where each robot file comes from
-taskweave check /path/to/cell                                           # validate the result
+taskweave check /path/to/cell [--missions]                              # validate the result (and every mission's plan)
 ```
 
 ### Mission smoke test
@@ -250,8 +259,10 @@ taskweave smoke compare config/tests/restock.reference.yaml run.yaml   # offline
 A step passes when it runs in the reference's order with outcome `SUCCEEDED`, its duration is within `--tolerance`
 (default ±10 %) plus `--slack` seconds (1.0) of the reference, and its max error is at most reference × (1 +
 tolerance) + `--error-slack` (0.002). Missing steps fail, and so do steps that are not in the reference unless
-`--allow-extra`. Duration tolerance is per skill: `navigate_to` gets 25 % (Nav2 drives vary more than arm moves),
-overridable with `--skill-tolerance SKILL=FRACTION` or `limits: {tolerance_by_skill: {...}}` in the reference. The
+`--allow-extra`. Duration tolerance is per kind of motion: a base drive (`move.base`) gets 25 % (Nav2 drives vary more than arm moves),
+overridable with `--skill-tolerance move.base=FRACTION` or `limits: {tolerance_by_skill: {...}}` in the reference. A
+reference recorded before `move` names the old skills (`navigate_to`, `move_gripper`, ...): they count as the kind of
+`move` that replaced them, so an old reference still compares. The
 command prints a table (step, instruction, ref s, now s, Δ%, error, result), writes a report (`<name>.report.yaml`
 next to the reference, or `--report FILE`) and exits 0 (passed), 1 (failed) or 2 (could not run: HMI unreachable,
 recording rejected). Without `--reference` it passes when every step succeeded.

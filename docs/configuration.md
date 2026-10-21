@@ -5,23 +5,24 @@ schema shipped with `taskweave_core` when it is loaded; errors name the file, th
 
 ```
 config/                  cell pack: everything about one cell
-  pack.yaml              name, version, schema_version (3); without it: run `taskweave config migrate config/` (schema 2: `taskweave config
-                         migrate-skills config/`, the old skills move_to_pose, go_to_point, gripper and the old
-                         move_object become move_joints, move_gripper, grip, move_object and set_posture)
+  pack.yaml              name, version, schema_version (4); an older pack: run `taskweave config migrate config/`
+                         (migration_targets.md: from schema 3, the six motion skills and the point files became
+                         `move` and targets)
   system.yaml            optional robot_packs: [paths relative to the cell pack]
   cell/
     layout.yaml          fixtures and zones of the work cell (application-specific content)
-    locations.yaml       named poses in the cell frame
+    targets.yaml         targets in the cell frame: named base poses (home, staging)
     objects.yaml         placed object instances: object type and pose in the cell frame
   objects/
-    <object>.yaml        object frame, mesh reference, taught tool poses (grasp, place, hang ...)
+    <object>.yaml        object frame, mesh reference, targets on the object: hand points (grasp ...), contacts
   robots/
     <model>/             the robot's cell-specific files, and per-key overrides of its robot pack's files
-      stances.yaml       where this robot stands relative to an object (per object type, per instance)
-      held_poses.yaml    where this robot holds an object of a type (move_object pose)
-      object_points.yaml this robot's settings per object point (elbow side, grip opening)
+      objects/<type>.yaml  this robot's targets on an object type: stances, its settings (elbow side, grip
+                         opening) on the type's targets, instances: overrides for single objects, handled_from
+      targets.yaml       optional in the cell: overrides of the robot pack's base-frame and joint targets
   skills/
     <skill>.yaml         implementations of one skill (first match is served) and its parameters
+    move/<part>.yaml     the six parts of the skill move: base, straight, hand, object, posture, joints
   missions/
     <mission>.yaml       goal, robot, loop mode, defaults, steps
 ```
@@ -34,9 +35,8 @@ taskweave config export CELL_DIR cell.tar.gz                # one file
 taskweave config import cell.tar.gz CELL_DIR [--force]      # check, then replace
 ```
 
-`init` writes `pack.yaml` (current schema), `system.yaml` (`robot`), empty `cell/locations.yaml` and
-`cell/objects.yaml`, the robot's empty `stances.yaml`, `held_poses.yaml`, `object_points.yaml`, and the folders
-`objects/`, `missions/`, `skills/`. The robot must be a robot pack taskweave finds (`TASKWEAVE_ROBOT_PACKS`, installed).
+`init` writes `pack.yaml` (current schema), `system.yaml` (`robot`), empty `cell/targets.yaml` and
+`cell/objects.yaml`, and the folders `objects/`, `missions/`, `skills/` and `robots/<robot>/objects/`. The robot must be a robot pack taskweave finds (`TASKWEAVE_ROBOT_PACKS`, installed).
 
 `export` packs the pack's files (no caches, `.git`, `state/`; if the folder is in a git repo, only files git does not
 ignore; symlinks are skipped and listed) with a `manifest.yaml`: `name`, `schema_version`, `git_rev` (null without a
@@ -60,10 +60,10 @@ installed to `share/taskweave_robots/<model>/`):
 
 ```
 <model>/
-  pack.yaml              name (= the model), version, schema_version (1), description, optional requires: {taskweave: ">=0.2,<0.3"} (install.md, "Pack versions")
+  pack.yaml              name (= the model), version, schema_version (2), description, optional requires: {taskweave: ">=0.3,<0.4"} (install.md, "Pack versions")
   profile.yaml           how the hardware is reached: roles -> topics, joints, frames, controllers
   embodiment.yaml        what the robot is and can do: capabilities, tools, reach, cameras, action spaces
-  poses.yaml             named poses (home, carry); robot-specific by nature
+  targets.yaml           targets of the robot itself: base-frame tool poses, carry poses, joint poses (home, lift_high)
   navigation.yaml        room kept around the robot while driving
   moveit/                URDF, SRDF, kinematics, joint limits, collision meshes
   sim.yaml, pose_targets.yaml   simulator and pose-solver inputs of the application
@@ -77,11 +77,11 @@ the cell pack for cell-specific files and files the cell pack already has, else 
 from; the installed share is read-only (a rebuild overwrites it), so an edit of one of its files creates a cell
 override. `taskweave config files config/` lists each robot file's source.
 
-A cell override of a robot pack file (`profile`, `embodiment`, `navigation`, `sim`, `poses`, `pose_targets`) holds only
+A cell override of a robot pack file (`profile`, `embodiment`, `navigation`, `sim`, `targets`, `pose_targets`) holds only
 what the cell changes. It starts with `~override: keys` and is laid over the pack's file when loaded (the merged result
 is what is validated), so later pack updates to other keys still reach the cell:
 
-- mappings merge key by key; lists and scalars replace; in `poses.yaml` a pose is replaced whole
+- mappings merge key by key; lists and scalars replace; in `targets.yaml` a target is replaced whole
 - `key: ~delete` removes that key of the pack's file (the only way to delete a pack key; only explicit edits write it)
 - a file without `~override: keys` is a whole-file override (made before per-key overrides) and still replaces the pack's
   file; the next HMI/teach save turns it into a keyed one, `taskweave config slim config/ [--dry-run]` does it for all.
@@ -92,8 +92,8 @@ is what is validated), so later pack updates to other keys still reach the cell:
   whose robot pack file no pack has; `config migrate` and `slim` leave entries that resolve (symlinks) into a robot pack
   location or outside the cell pack alone
 
-Frames: poses are `{frame, xyz: [x, y, z], rpy: [r, p, y]}` (metres, radians) or `{frame, x, y, yaw}` for planar base
-poses. `frame` is `cell` or a named object or fixture frame.
+Frames: poses are `xyz: [x, y, z]`, `rpy: [r, p, y]` (metres, radians) or `x`, `y`, `yaw` for planar base poses. The frame
+of a target comes from the file it is in: [targets.md](targets.md).
 
 ## Catalogue, schemas and checks (for editors)
 
@@ -112,10 +112,11 @@ all on `ConfigStore`, offline; nothing in this list writes, the next section doe
   Names that depend on the pack (skills, robots, objects, joints, ...) are not baked in: `x-taskweave-enum: <name>` on a
   value, `x-taskweave-enum-keys: <name>` on an object whose keys they are; `enum_values(name, robot=None)` returns them.
 - `validate_file(path, data_or_text=None, pack='cell')` returns problems `{path, pack, where, line, col, message,
-  severity}`: `where` is a JSON pointer (`/points/top_grasp/grip_width_m`), `line`/`col` are set when text is given,
+  severity}`: `where` is a JSON pointer (`/targets/top_grasp/grip_width_m`), `line`/`col` are set when text is given,
   `severity` is `error` or `warning`. It checks the schema, then the cross-file checks of the kind against the rest of the
-  pack on disk: profile vs embodiment, `joints.limits`, navigation vs the base, pose and held pose joints vs limits,
-  grip width vs tool stroke, point, stance, object type and skill names, mission ids, `replan_from` and includes.
+  pack on disk: profile vs embodiment, `joints.limits`, navigation vs the base, joint values of targets vs limits and
+  groups, grip width vs tool stroke, target names (one meaning per place), object type and skill names, mission ids,
+  `replan_from` and includes.
   A cell copy of a robot pack file that is a keyed override is checked as laid over the pack's file.
 - `check_pack()` is that for every file (what `taskweave check` prints); `dry_run_pack(path, data_or_text, pack)` is the
   same with the new content in place on a throwaway copy, so "check before save" shows what else breaks.
@@ -203,11 +204,11 @@ with the same entries (`node, status, message, reloaded, needs_restart`).
 
 | What changed | Effect |
 |---|---|
-| `skills/<name>.yaml`: parameter defaults, speeds, tolerances, implementation `params` | reloaded by the skill server that serves it: the next goal uses them |
+| `skills/<name>.yaml` (for `move`: `skills/move/<part>.yaml`): parameter defaults, speeds, tolerances, implementation `params` | reloaded by the skill server that serves it: the next goal uses them |
 | `skills/<name>.yaml`: implementation `name` or `class`; a parameter a skill made a connection from (`startup_params`, e.g. the topics and action of the Nav2 skill) | needs restart of the skill servers |
 | profile `base.limits` | reloaded by the skill servers |
 | the rest of the profile (topics, joint interface, IK, planning, hands); the embodiment | needs restart: bound when the skill servers start, the implementations are chosen from it |
-| missions, locations, objects, stances, poses, skill overrides and the other `live` / `mission_start` files | reloaded (the store reads them per use or at mission start) |
+| missions, targets (every file of the four), objects, skill overrides and the other `live` / `mission_start` files | reloaded (the store reads them per use or at mission start) |
 | `operator.yaml`, `system.yaml`, pack files, navigation, `moveit/`, `nav2_params.yaml` | needs restart: reported by the task handler (read at launch) |
 | speed defaults (`speed_test_percent`, `speed_cap_percent`) | node parameters: restart; the override itself is live through `set_speed_override` |
 
@@ -230,11 +231,11 @@ defaults:
 steps:
   - id: drive_to_stack        # optional; s1, s2, ... if missing
     instruction: Drive to the fullest stack
-    skill: navigate_to
-    args: {target: "stance:{fullest_stack}"}
+    skill: move
+    args: {to: "{fullest_stack}/pick"}
   - instruction: Both hands onto the part
-    skill: move_gripper
-    args: {to: {point: "{fullest_stack}/grasp"}}
+    skill: move
+    args: {to: "{fullest_stack}/grasp"}
     retries: 2
     on_failure: replan
     replan_from: drive_to_stack   # on replan, continue from this step with fresh retries
@@ -266,19 +267,12 @@ cycle while it changes the objects: `{fullest: <object type>, among: <glob of in
 with the most items left (run-time object state; ties go to the first name). When a fact finds nothing, the mission is
 complete, which ends a `loop: forever` mission once every matching stack is empty.
 
-Point references: `stance:<instance>[/<variant>]` (where this robot stands at a placed object), `location:<name>`
-or a bare name (cell location),
-`<object>.<point>` (a point of an object type) or `<instance>/<point>` (that point on one placed object). A skill
-declares which arguments are points in its argument schema with `"x-taskweave-point"`: `base_target`, `object_point`
-(either form), `instance_point` (only `<instance>/<point>`, e.g. move_gripper `to.point`), `instance_contact`
-(`<instance>/<contact>`, e.g. move_object `to.onto`), `joint_pose` / `joint_pose_only` / `tool_pose` (poses of
-`poses.yaml`), `joint_group`, `held_pose`, `held_object` and `via_target`, so missing points are reported before
-anything moves (`taskweave_core.validation.check_point`).
-
-Contacts (`contacts:` in `objects/<object>.yaml`, `{xyz, rpy}` relative to the object) are frames where one object
-meets another: a hook plate on a frame, the hook it hangs on. Their z axis is the direction the held object moves to
-engage (down onto a hook). `move_object {to: <instance>/<contact>, contact: <held object's contact>, offset_m}` puts the
-held object's contact onto the placed one's, `offset_m` short of it against that direction.
+Target references: `<name>` (a target of the cell, a base-frame target or a joint target of the robot) or
+`<instance>/<name>` (a target of a placed object: a stance, a hand point, a contact). A skill declares which arguments
+are targets in its argument schema with `"x-taskweave-point": "target"`, and `x-taskweave-target-kinds` for the kinds the
+argument takes (`base`, `hand`, `object`, `joints`); the other point kinds are `joint_group` and `held_object`. Missing
+targets are reported before anything moves (`taskweave_core.validation.check_point`). The format, the merge of the layers
+and the errors: [targets.md](targets.md).
 
 ## Simulator data
 
@@ -320,7 +314,7 @@ motion_tuning:                # optional, every key defaults (schemas.MOTION_TUN
 
 Skills ask for roles (`base`, `joints`, `grippers.left`, `tool_frames.left`, `ik`); only this file knows the hardware names.
 
-`ik.torso: {joint, candidates, weights: {torso, wrist}, wrist_joints, accept_cost, line_sample_m}` is optional. With it `motion: {torso: auto}` searches the
+`ik.torso: {joint, candidates, weights: {torso, wrist}, wrist_joints, accept_cost, line_sample_m}` is optional. With it `torso: auto` (a `move` option, also in a target's `joints`) searches the
 torso height: the current height is tried first and wins at once when it is feasible and its arm cost is at most
 `accept_cost` (default: any), so the usual case costs one IK solve and check per sample. Otherwise the candidates are
 tried outward from it (local IK only, no global search) until the torso cost alone passes the best total. Each is tried
@@ -329,8 +323,8 @@ cost wins: the `ik.choose` arm cost plus `weights.torso` per metre of torso trav
 wrist bend (default 0 = off); ties go to the smaller move, then the lower height. The bend is the mean distance from
 mid-range of `wrist_joints` (names with `{tool}`, e.g. `['{tool}_joint6']`) over the hands of the first sample; a joint
 without limits counts from 0. It is reported as `wrist_bend` (rad). A weight needs `wrist_joints`. Use it where both
-hands are locked to an object and the wrist angle at the goal decides the height: `move_object` takes
-`motion: {torso: auto}` too, then both holding hands are solved at one height, set before the move, and the held
+hands are locked to an object and the wrist angle at the goal decides the height: `move` of a held object takes
+`torso: auto` too, then both holding hands are solved at one height, set before the move, and the held
 object goes up or down with the torso. A straight line (`mode: linear`) is sampled at its ends and every `line_sample_m` between, and the one height
 that holds for all samples is set before the line. The step result lists `data.torso` (per leg: the chosen `height`
 and every `rejected` height with its reason). If no height solves with local IK (its descents are timing dependent, or start far from the answer), the global search is tried: the nearest `global_heights` (default 3, 0 = off) heights always,
@@ -339,15 +333,15 @@ then every other height whose local solve found no IK, nearest first; the first 
 (the first height that solves) and linear moves keep the lift.
 
 `torso: {joint, drive_m, tolerance_m}` is optional and separate from `ik.torso` (it is the height for driving, not a
-search). With `drive_m`, `navigate_to` and `drive_straight` (and the Nav2 `navigate_to`) first move the torso `joint`
-to it, as a `move_joints` step (planner, speed override), when it is further off than `tolerance_m` (default 0.02),
-and only then drive. A hand that holds something keeps the torso where it is (the object would go with it and the
+search). With `drive_m`, `move` to a base target (nav, straight, Nav2) first moves the torso `joint`
+to it, as a joints move (planner, speed override), when it is further off than `tolerance_m` (default 0.02),
+and only then drives. A target's own `joints: {torso: ...}` replaces `drive_m` for that target, and `torso: keep` on the step skips it. A hand that holds something keeps the torso where it is (the object would go with it and the
 carry height was chosen on purpose): the drive goes on and the result says `skipped`. The result lists
 `data.torso_drive` (`from_m`, `to_m`, `moved`, `skipped`). Without `drive_m` the torso is never touched. Skill servers
 read the key at start (restart after adding `torso`); the value itself is read at every drive.
 
 `arms.<tool>.elbow` names the links at an IK arm's shoulder, elbow and wrist centres: the elbow side (`ik.choose.elbow`,
-a point's `elbow`), straight lines and elbow swings use it. An arm without it has no elbow control (an elbow side is
+a target's `elbow`), straight lines and elbow swings use it. An arm without it has no elbow control (an elbow side is
 ignored with a warning, an elbow swing fails with a message). Only `elbow` and `swivel` are read under `arms.<tool>`;
 the schema does not reject other keys (an old profile may carry `group` or `tool_frame`), they are ignored, and
 `taskweave check` warns about each so that a typo does not stay silent. `arms.<tool>.swivel` names the joint the pad's elbow
@@ -421,14 +415,19 @@ The skill server is started with skill *names*. It serves the first implementati
 robot's embodiment and logs why the others don't. A mission that uses a skill without a fitting implementation is
 rejected with those reasons before anything moves.
 
-## Locations
+## Targets
+
+A target is a place the robot goes to: a base pose, a stance at an object, a hand point, a carry pose, a joint pose, a
+contact. One format covers them, one skill (`move`) goes to them, and one reference names them. The format, the four
+files they live in and the errors are in [targets.md](targets.md); this section shows where they sit in the pack.
 
 ```yaml
-waiting: {frame: cell, x: 2.0, y: 0.0, yaw: 0.0}
-dropoff: {frame: cell, x: 0.75, y: 0.0, yaw: 3.1416}
+# cell/targets.yaml: targets in the cell frame
+home: {moves: base, x: 0.0, y: 0.0, yaw: 0.0}
+staging: {moves: base, x: 1.0, y: 0.5, yaw: 1.5708}
 ```
 
-Written by hand or by the teach tool (`taskweave teach location <name>`), which stores the current base pose.
+Written by hand, in the HMI, or by the teach tool (`taskweave teach base <name>`), which stores the current base pose.
 
 ## Object instances and stances
 
@@ -439,37 +438,43 @@ placed objects, and each robot stores its stances *relative to the object*:
 # cell/objects.yaml (robot-independent; from config now, from perception later)
 bay_2_stack_2: {object: frame_type2, frame: cell, x: 9.425, y: 1.10, z: 0.10, yaw: 1.5708}
 
-# robots/<model>/stances.yaml (base pose in the object's frame: x, y, yaw)
-objects:                      # per object type: every instance of the type uses these
-  frame_type2:
-    pick:  {x: -0.85, y: 0.0, yaw: 0.0}     # first variant = default
-    place: {x: -0.70, y: 0.0, yaw: 0.0}
-instances:                    # optional overrides for single instances
+# robots/<model>/objects/frame_type2.yaml (base pose in the object's frame: x, y, yaw)
+handled_from: pick            # the stance that decides which way round a symmetric object is handled
+targets:                      # per object type: every instance of the type uses these
+  pick:  {moves: base, x: -0.85, y: 0.0, yaw: 0.0}
+  place: {moves: base, x: -0.70, y: 0.0, yaw: 0.0}
+instances:                    # optional overrides for single instances, per key
   bay_3_stack_3:
     pick:  {x: -0.85, y: 0.10, yaw: 0.0}
 ```
 
-`stance:bay_2_stack_2` is the object's pose composed with the robot's default offset (`pick` above);
-`stance:bay_2_stack_2/place` names a variant. Moving an object moves its stances; a second robot only needs its own
-offsets. `taskweave teach stance bay_2_stack_2[/variant]` stores the current base pose as the offset for the object
-type (all instances follow); add `--instance` to store it for that instance only. Tool poses on objects (below) use the
-same object frames, so base, approach and grasp all follow one object pose.
+`bay_2_stack_2/pick` is the object's pose composed with the robot's `pick` offset; `bay_2_stack_2/place` is the other
+stance. Moving an object moves its stances; a second robot only needs its own offsets. `taskweave teach base
+bay_2_stack_2/pick` stores the current base pose as the offset for the object type (all instances follow); add
+`--instance` to store it for that instance only. Hand targets on objects (below) use the same object frames, so base,
+approach and grasp all follow one object pose.
 
 ## Objects
 
 ```yaml
 name: frame_type2
 mesh: assets/frame_type2.usd
-points:
+targets:
   side_rails:                 # taught with the teach tool
+    moves: hand
     tool_type: parallel_gripper
     grip_width_m: 0.03        # checked against the tool's stroke
-    left_tool:  {frame: frame_type2, xyz: [-0.18,  0.235, 0.065], rpy: [0, 1.5708, 0]}
-    right_tool: {frame: frame_type2, xyz: [-0.18, -0.235, 0.065], rpy: [0, 1.5708, 0]}
+    left_tool:  {xyz: [-0.18,  0.235, 0.065], rpy: [0, 1.5708, 0]}
+    right_tool: {xyz: [-0.18, -0.235, 0.065], rpy: [0, 1.5708, 0]}
     approach_m: 0.10          # the last 10 cm of the way in are a straight line (else the skill's motion.approach_m)
-contacts:                     # frames where this object meets another (move_object to.onto)
-  base: {xyz: [0, 0, 0], rpy: [0, 0, 0]}
+  base:                       # a frame where this object meets another (a move of a held object onto it)
+    moves: object
+    xyz: [0, 0, 0]
+    rpy: [0, 0, 0]
 ```
+
+Hand targets are `moves: hand`, contacts `moves: object`; both are in the object's frame. The robot's own settings on them
+(elbow side, grip opening) and the stances are in `robots/<model>/objects/<type>.yaml`.
 
 An object type may carry a `sim:` object (free-form, e.g. `sim: {box: [0.06, 0.06, 0.1], on_hold: pull_release}`): it is for the
 simulator integration (what to draw, what a hold does), taskweave skills never read it.
@@ -486,19 +491,19 @@ default the hand's tool frame link). Profile `planning.scene_service` (default `
 `planning.scene_timeout_s` (default 2.0) set the service and how long a call may take. If the service is missing or
 refuses, `grip` logs a warning and carries on. An object type without `collision` sends nothing.
 
-Tool poses are canonical-TCP poses relative to the object, so they hold for any robot that can reach them.
+The tool poses of a hand target are canonical-TCP poses relative to the object, so they hold for any robot that can reach them.
 `<role>_tool` names the robot tool (`left_tool` is `tools.left`). Validation checks tool type and grip width against
 the robot's tools.
 
-To teach a point, jog the tools onto a placed object with the pad. Then press the `joy.teach` button in
-`operator.yaml`, or run `taskweave teach point bay_2_stack_1/side_rails [--tool left]`. That stores each tool's
+To teach a hand target, jog the tools onto a placed object with the pad. Then press the `joy.teach` button in
+`operator.yaml`, or run `taskweave teach hand bay_2_stack_1/side_rails [--tool left]`. That stores each tool's
 current TCP (profile `tool_frames`, read from TF in the cell frame) relative to the instance's top item, for the
-object type. It keeps the point's other tools and metadata.
+object type. It keeps the target's other tools and metadata.
 
 ## Skill parameters
 
 ```yaml
-# skills/navigate_to.yaml
+# skills/move/base.yaml: the base part of the skill move
 max_linear: 0.6
 max_angular: 1.0
 position_tolerance: 0.03
@@ -506,13 +511,15 @@ yaw_tolerance: 0.05
 stuck_timeout_s: 5.0
 ```
 
-The arm skills (`move_joints`, `move_gripper`, `move_object`, `set_posture`, `grip`) use one layout: standard speeds in
-`speed`, option defaults in `motion`, accuracy and timeouts in `tolerances` (shipped files: `docs/examples/skills/`;
-older flat keys are renamed by `taskweave config migrate-skills`). `move_joints` moves the torso, head and arm
-joints to a named joint pose or to given values. Joint groups for its `only` option come from the profile's `joints.groups`.
+The skill `move` hands each step to one of six parts (base, straight, hand, object, posture, joints). Each part is
+configured in its own file, `skills/move/<part>.yaml` (shipped files: `docs/examples/skills/move/`), and `skills/move.yaml`
+names the skill itself. The arm parts and `grip` use one layout: standard speeds in `speed`, option defaults in `motion`,
+accuracy and timeouts in `tolerances`. A robot's `skill_overrides.yaml` is keyed by part (`move.hand`, `move.base`, ...)
+and by skill (`grip`). The `joints` part moves the torso, head and arm joints to a joint target or to given group
+values; the group names come from the profile's `joints.groups`.
 
 ```yaml
-# skills/move_joints.yaml
+# skills/move/joints.yaml
 implementations:
   - {name: joint_targets, type: script, class: "taskweave_skills.joint_motion:MoveJoints"}
 speed: {joint_rad_s: 1.2, joint_linear_m_s: 0.25}   # standard speeds, scaled by a step's motion.speed
@@ -529,17 +536,18 @@ joints: {command: /joint_command, state: /joint_states, linear: [body_joint],
 
 `joints.limits` is optional: joint -> `[lower, upper]` (rad, m for a prismatic joint). It is laid over the limits of the
 robot's URDF (`moveit/robot.urdf` of the pack), so it is the only source for a robot without a URDF and the place to narrow
-a joint. `move_joints` checks values against it before anything moves, IK and the straight-line code keep clear of it
-(`ik.choose.limit_margin_deg`), and plan validation checks named poses against it. A robot with limits from neither
-source is not checked. `joints.groups` names the
-groups for `move_joints only`; `<tool>_arm` groups it does not list come from the `ik.joints` regex and the URDF.
+a joint. A joint move checks values against it before anything moves, IK and the straight-line code keep clear of it
+(`ik.choose.limit_margin_deg`), and plan validation checks the joint values of targets against it. A robot with limits
+from neither source is not checked. `joints.groups` names the groups for targets, `move {joints: ...}` and `only`; every
+joint a target sets must be in a group, and `<tool>_arm` groups the profile does not list come from the `ik.joints` regex
+and the URDF. `torso` is a reserved group name (the lift), `head` the head, `<hand>_arm` each arm.
 
 ```yaml
 # mission steps
-- {id: lift, skill: move_joints, args: {pose: lift_high}}                        # a named joint pose
-- {id: look, skill: move_joints, args: {joints: {head_joint1: 0.3, head_joint2: -0.2}}}
-- {id: raise, skill: move_joints, args: {pose: home, only: [torso]}}             # the torso part of the pose only
-- {id: tuck, skill: move_joints, args: {pose: tucked, motion: {speed: 0.5, via: [home]}}}   # half speed, via home
+- {id: lift, skill: move, args: {to: lift_high}}                                 # a joint target
+- {id: look, skill: move, args: {joints: {head: [0.3, -0.2]}}}                   # joint group values
+- {id: raise, skill: move, args: {to: home_pose, only: [torso]}}                 # the torso part of the target only
+- {id: tuck, skill: move, args: {to: home_pose, motion: {speed: 0.5, via: [lift_high]}}}   # half speed, via a joint target
 ```
 Joint values are checked against the robot's limits (URDF, profile `joints.limits`) before anything moves. While an
 object is held, moves of arm joints are refused; torso and head moves are fine.

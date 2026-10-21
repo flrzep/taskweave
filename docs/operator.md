@@ -12,8 +12,8 @@ names. One real cell for comparison: the Galbot S1 frame cell, a two-arm robot w
 
 | Term | What it is |
 |---|---|
-| **Cell pack** | The folder of one work cell: where things stand (`cell/`), the kinds of objects (`objects/`), the missions (`missions/`), skill settings (`skills/`) and, per robot, its stances, held poses and object points (`robots/<robot>/`). It describes the cell, not the robot. |
-| **Robot pack** | One robot model: how its hardware is reached, what it can do, its named poses, its MoveIt and Nav2 files. One robot pack serves many cells. |
+| **Cell pack** | The folder of one work cell: where things stand (`cell/`), the kinds of objects (`objects/`), the missions (`missions/`), skill settings (`skills/`) and, per robot, its targets on the objects of the cell (`robots/<robot>/objects/`). It describes the cell, not the robot. |
+| **Robot pack** | One robot model: how its hardware is reached, what it can do, its own targets (home, carry poses), its MoveIt and Nav2 files. One robot pack serves many cells. |
 | **Mission** | A list of steps in `missions/<name>.yaml` that reaches a goal, for example "move the parts from the stacks into the bin". It runs once or loops until the work is done (`loop`, `max_cycles`, `stop_when`). |
 | **Step** | One line of the mission: a sentence (`instruction`), one skill with its arguments, and rules for what to do if it goes wrong (`timeout_s`, `retries`, `on_failure`). |
 | **Skill** | One thing the robot can do, in operator terms: a verb. The task handler hands each step to the skill, the skill does it, and reports success or why not. Skills know the robot only through its pack, so the same step works on another robot. |
@@ -22,28 +22,30 @@ Shipped skills (arguments: [skills.md](skills.md)):
 
 | Skill | What the robot does |
 |---|---|
-| `navigate_to` | Drives the base to a named location or to its stance at an object and stops there, facing the stored direction. With Nav2 it plans around obstacles; without it drives a direct path. |
-| `drive_straight` | Drives the base a short distance forward or back (no obstacle avoidance), for example up to a rack and out again. |
-| `move_joints` | Moves arms, torso or head to a named joint pose such as `home`, or to given joint values. |
-| `move_gripper` | Moves one or both grippers (the tool centre points, TCP) to a point on an object, a named tool pose, or by an offset from where they are. |
-| `grip` | Opens or closes the fingers. Closing at an object point makes the hand hold that object; opening lets go. |
-| `move_object` | Moves the object the robot holds, with the holding hands locked to it: by an offset, to a held pose such as `carry`, or onto a contact of another object. |
-| `set_posture` | Swings the elbows to a side while the hands stay where they are. |
+| `move` | Moves the robot: drives the base to a target (with Nav2 it plans around obstacles, without it drives a direct path; a short straight drive for a rack), moves one or both grippers (the tool centre points, TCP) to a hand target or by an offset from where they are, moves the held object (with the holding hands locked to it) to a carry pose or onto a contact of another object, swings the elbows to a side while the hands stay, and moves arms, torso or head to a joint target such as `home`. What moves comes from the target. |
+| `grip` | Opens or closes the fingers. Closing at a hand target on an object makes the hand hold that object; opening lets go. |
 | `wait` | Waits for a number of seconds (not slowed by the speed override). |
+
+Older cells (before schema 4) have six skills where `move` is: `navigate_to`, `drive_straight`, `move_gripper`,
+`move_object`, `set_posture`, `move_joints`. `taskweave config migrate` turns them into `move` steps
+([migration_targets.md](migration_targets.md)).
 
 Four more terms you will meet in missions, messages and the teach tools:
 
-- **Point.** A place on an object that a hand goes to, written `<instance>/<point>`, for example `part_stack_1/grasp`.
-  It holds one tool pose per hand and is stored relative to the object, so it follows the object when the object moves.
-  Points are taught (`taskweave teach point`) or edited in `objects/<type>.yaml`.
-- **Stance.** Where the base stands to work on an object, written `stance:<instance>` (first variant) or
-  `stance:<instance>/<variant>`. It is stored relative to the object, per robot. Locations (`home`, `staging`) are
-  fixed base poses of the cell.
-- **Held pose.** A named arm shape for carrying a certain type of object (`carry`), per robot.
+- **Target.** A place the robot goes to ([targets.md](targets.md)). Every target says what it moves: the base, a hand, a
+  held object, or joints. A target in the cell is written `<name>` (`staging`), one on a placed object
+  `<instance>/<name>` (`part_stack_1/grasp`).
+- **Hand target.** A place on an object that a hand goes to, such as `part_stack_1/grasp`. It holds one tool pose per
+  hand and is stored relative to the object, so it follows the object when the object moves. Hand targets are taught
+  (`taskweave teach hand`) or edited in `objects/<type>.yaml`.
+- **Stance.** Where the base stands to work on an object, written `<instance>/<name>` (`part_stack_1/pick`). It is a base
+  target stored relative to the object, per robot. Targets of the cell (`home`, `staging`) are fixed base poses.
+- **Carry pose.** A named arm shape or object pose for carrying a certain type of object (`carry`), per robot: an object
+  target in the robot's base frame.
 - **Placed object.** An object instance of the cell (`part_stack_1`, `bin_1`, `fixture_1`), listed in `cell/objects.yaml`
   with its position (stacks also with their item count). While missions run, taskweave keeps a **run-time object
   state** on top of that file: items taken off a stack, objects gone, objects put down (`grip open` with `place_as`
-  creates a new placed object whose points exist from then on). This state is what lets a looping mission finish when
+  creates a new placed object whose targets exist from then on). This state is what lets a looping mission finish when
   every stack is empty. It is not in the cell pack (section 7).
 
 ### The HMI
@@ -55,18 +57,18 @@ address of the robot host only), never on a public one.
 
 The bar at the top shows the robot the stack drives, the pad's mode (`pad: drive`, or the arm it jogs) and a dot: green
 while the page has a live connection to the stack, red when it lost it (the page reconnects by itself). A pad action
-that changed something, such as a taught point, shows there for a moment.
+that changed something, such as a taught target, shows there for a moment.
 
 | Tab | What it is for |
 |---|---|
 | **Run** | Start, pause, resume and abort a mission; its status, its plan step by step, and the robot live in the cell (3D). |
-| **Missions** | Read and edit the mission files, checked before they are saved (writing missions: [missions.md](missions.md)). A step folds to one line (its instruction, skill and arguments in short): tap the line to open or fold it, **Collapse all / Expand all** for the mission; a mission of more than six steps opens folded, and steps that Check names open. Move a step by dragging its handle (the dots left of its number, also by touch), with its ↑ ↓ buttons, or with Alt + ↑ / ↓ on the handle; a `replan_from` keeps pointing at the same step. Arguments are fields made from the skill: a choice of target kind for `to` (a point, an offset, a position, a pose, a contact) with its fields, x / y / z in metres, the hands as checkboxes or a rule (`auto`, `any_one`, `all`), the motion options folded under Motion (advanced). **edit as text** next to an argument shows it as JSON, for what the fields cannot show; an argument you did not touch is saved exactly as it was. |
+| **Missions** | Read and edit the mission files, checked before they are saved (writing missions: [missions.md](missions.md)). A step folds to one line (its instruction, skill and arguments in short): tap the line to open or fold it, **Collapse all / Expand all** for the mission; a mission of more than six steps opens folded, and steps that Check names open. Move a step by dragging its handle (the dots left of its number, also by touch), with its ↑ ↓ buttons, or with Alt + ↑ / ↓ on the handle; a `replan_from` keeps pointing at the same step. Arguments are fields made from the skill: a choice of form for `move` (a target, a hand or object offset, a base drive, an elbow side, joint values) with their fields, x / y / z in metres, the hands as checkboxes or a rule (`auto`, `any_one`, `all`), the motion options folded under Motion (advanced). **edit as text** next to an argument shows it as JSON, for what the fields cannot show; an argument you did not touch is saved exactly as it was. |
 | **Robot** | The robot now: its position, grippers and joints, in 3D with the room the planner keeps around it; below, the navigation and arm settings. |
-| **Teach** | Locations, stances, poses, points and carry poses: where the robot drives to, stands and puts its hands. |
+| **Teach** | Targets: where the robot drives to, stands, puts its hands and which joint values it takes. |
 | **Record** | Record a run (bag, the simulator's videos) and download the recordings. Only there when the stack has a recordings folder. |
 | **Log** | The step events of the last runs, newest last. |
 
-While a mission runs, everything that changes points or settings is locked (the buttons are greyed out and a note says
+While a mission runs, everything that changes targets or settings is locked (the buttons are greyed out and a note says
 why): teach and edit between runs.
 
 ## 2. Running a mission
@@ -87,7 +89,7 @@ means the task handler or skill servers are not running), and `taskweave status`
 
 The plan shows as a **Graph** (the steps and where a failure leads: retry, replan, skip, abort) or a **List**, each step
 with its outcome once it ran. The 3D view below the status shows the robot where the stack believes it is, in the cell
-with its fixtures, and the taught locations, objects and points. **Robot** frames the robot, **Cell** the whole cell,
+with its fixtures, and the taught targets and objects. **Robot** frames the robot, **Cell** the whole cell,
 **Follow** keeps the camera on the robot as it drives, **Labels** shows the names (greyed out while nothing is taught).
 A note `no robot pose` means the stack has no position of the robot: the 3D view and every drive are off until it
 has one again.
@@ -112,8 +114,8 @@ validate (section 7) or `a mission is already active; abort it first`. `--goal T
 A status line reads:
 
 ```
-[running] plan_3 cycle 2 step 4/9: s4 move_gripper "Pre-grasp 10 cm above the part" attempt 1 running 45% 12.3s
-    last error: s4 (move_gripper) failed: ...
+[running] plan_3 cycle 2 step 4/9: s4 move "Pre-grasp 10 cm above the part" attempt 1 running 45% 12.3s
+    last error: s4 (move) failed: ...
 ```
 
 State is one of `idle`, `running`, `paused`, `succeeded`, `failed`, `aborted`. The step number counts within the
@@ -132,7 +134,7 @@ Every step ends with one of these results; the message comes with it in the stat
 | Result | What it means to you | What the handler does |
 |---|---|---|
 | `SUCCEEDED` | The step did what it said. | Next step. |
-| `REJECTED` | The step was refused **before the robot moved**: wrong argument, a name that does not exist (point, stance, pose), the robot is holding something that stops it, nothing is held when something must be. A mission file or the cell config is wrong, or the world is not as the mission assumes. Trying again changes nothing. | No retries. It applies `on_failure` at once. |
+| `REJECTED` | The step was refused **before the robot moved**: wrong argument, a name that does not exist (a target), the robot is holding something that stops it, nothing is held when something must be. A mission file or the cell config is wrong, or the world is not as the mission assumes. Trying again changes nothing. | No retries. It applies `on_failure` at once. |
 | `FAILED` | The step started and did not get there: IK found no solution, a planner failed, the base made no progress, Nav2 did not reach the goal, the gripper closed on nothing, a position check missed. | Retries first (`retries`), then `on_failure`. |
 | `TIMEOUT` | No result within `timeout_s` (plus a grace of 2 s). The handler cancels the skill. | Same as `FAILED`. |
 | `CANCELED` | The skill was stopped by pause or abort. | Not a failure: pause waits, abort ends. |
@@ -164,7 +166,7 @@ metres away:
 | The badge and the coloured rail: `IDLE` grey, `RUNNING` blue, `PAUSED` amber with stripes, `SUCCEEDED` green, `FAILED` and `ABORTED` red | The state in brackets. |
 | The big line: the mission's goal, or `No mission running` | The goal. |
 | `cycle n` at the top right | `cycle n`. |
-| Under the goal: the step (`step 4/9 · move_gripper`), its instruction, a progress bar and the attempt and elapsed time | `step 4/9: s4 move_gripper "..." attempt 1 running 45% 12.3s`. |
+| Under the goal: the step (`step 4/9 · move`), its instruction, a progress bar and the attempt and elapsed time | `step 4/9: s4 move "..." attempt 1 running 45% 12.3s`. |
 | A red box under it | `last error`, as `<step id> (<skill>) <result>: <message>`. Like the status line, it stays until the next failure: after a retry that worked it is still there while the mission runs on. |
 
 In the plan, each step that ran is marked with its result: `SUCCEEDED`, `FAILED` (the attempt that failed, then the
@@ -190,19 +192,24 @@ padding and the inflation zone, and an arrow to the front. **Fit** shows it from
 
 ### Teaching in the HMI
 
-The Teach tab shows the robot's position at the top and one list at a time:
+The Teach tab shows the robot's position at the top and one list at a time. Every list holds targets of one kind
+([targets.md](targets.md)); the list says what it stores and in which file:
 
 | List | What it stores | How to teach it |
 |---|---|---|
-| **Locations** | Base poses of the cell (`cell/locations.yaml`) | Drive the robot there (pad, or a mission step), **+ Location**, a name, **Set from robot**, **Save**. **Drive here** drives to a saved one. |
-| **Stances** | Where the robot stands at a type of object, relative to it, per robot | In the card of the object type: drive the robot to where it should stand at one of the placed objects, choose that object, **Set from robot**, **Save**. Every placed object of the type follows. A per-object override is for the one object that needs another stance. The card's **Placed** view lists the placed objects (read-only: they come from `cell/objects.yaml`). |
-| **Poses** | Arm shapes relative to the robot (`poses.yaml`), such as `home` | Put the arms there with the pad, **+ Pose**, a name, then **Capture from robot** (or the pad's L1 + L3). **Move here** moves the robot into it. |
-| **Points** | Where a gripper goes on an object (a grasp, a place), relative to the object type | Choose at which placed object to teach (**at**: the nearest one by default), put the gripper there with the pad, **+ Point**, **Capture from robot** or L1 + L3. **Go here** drives the gripper there. |
-| **Carry poses** | How the robot carries an object it holds (`move_object` `pose:`) | Typed in as joint values and waypoints; **Test** needs the robot holding such an object. |
+| **Locations** | Base targets of the cell (`cell/targets.yaml`) | Drive the robot there (pad, or a mission step), **+ Location**, a name, **Set from robot**, **Save**. **Drive here** drives to a saved one. |
+| **Stances** | Base targets on a type of object: where the robot stands at it, relative to it, per robot (`robots/<robot>/objects/<type>.yaml`) | In the card of the object type: drive the robot to where it should stand at one of the placed objects, choose that object, **Set from robot**, **Save**. Every placed object of the type follows. A per-object override is for the one object that needs another stance. The card's **Placed** view lists the placed objects (read-only: they come from `cell/objects.yaml`). |
+| **Poses** | Hand and joint targets of the robot itself (`robots/<robot>/targets.yaml`): arm shapes relative to the robot, such as `home` | Put the arms there with the pad, **+ Pose**, a name, then **Capture from robot** (or the pad's L1 + L3). **Move here** moves the robot into it. |
+| **Points** | Hand targets on an object: where a gripper goes on it (a grasp, a place), relative to the object type (`objects/<type>.yaml`) | Choose at which placed object to teach (**at**: the nearest one by default), put the gripper there with the pad, **+ Point**, **Capture from robot** or L1 + L3. **Go here** drives the gripper there. |
+| **Carry poses** | Object targets in the robot's base frame: how the robot carries an object it holds (`carry`) | Typed in as joint values and waypoints; **Test** needs the robot holding such an object. |
+
+The same targets can be taught from a terminal: `taskweave teach base NAME` or `INSTANCE/NAME` (the robot's base pose),
+`taskweave teach hand NAME` or `INSTANCE/NAME` (the tools' poses) and `taskweave teach joints NAME` (the joint values of
+groups). The pad's teach press (L1 + L3) and the `teach.point` action of `operator.yaml` save a hand target.
 
 An entry that is open is the one the pad's teach press (L1 + L3) goes to: open the one you mean before you press.
 Every entry shows which missions use it; one that a mission uses cannot be renamed or deleted. **Numbers** shows and
-edits the stored values, **Advanced** a point's elbow side, straight approach and finger opening. In a number field
+edits the stored values, **Advanced** a hand target's elbow side, straight approach and finger opening. In a number field
 ↑ / ↓ (on a laptop also the small arrows at its right end) change a position by 1 mm and an angle by 1°, with Shift
 by 10 mm or 10°; decimals are written with a dot in every browser language (a typed comma becomes one). **Delete**
 needs a second tap. Saved values are used from the next move or mission start.
@@ -232,8 +239,8 @@ before it starts.
 
 ## 3. Speed
 
-**Standard speed** is what the cell was set up for: the speeds and accelerations in `skills/<skill>.yaml`, the robot
-pack's `skill_overrides.yaml` and the point's own data. At 100 % the robot moves exactly like that.
+**Standard speed** is what the cell was set up for: the speeds and accelerations in `skills/<skill>.yaml` (for `move`: `skills/move/<part>.yaml`), the robot
+pack's `skill_overrides.yaml` and the target's own data. At 100 % the robot moves exactly like that.
 
 | Control | Where | Effect |
 |---|---|---|
@@ -268,52 +275,53 @@ runs started from either.
 effective override. At 10 % a step gets ten times as long; at 100 % it is exactly the stated time. Retries and
 `max_replans` are not scaled. `wait` is not slowed by the override, so its seconds are real seconds.
 
-**Base floor for Nav2.** The Nav2 part of `navigate_to` never drives below a floor, because Nav2's controller cannot do
-the fine final approach into a stance at 10 %. The floor is `min_override` in `skills/navigate_to.yaml` (default 0.3,
-that is 30 %; `0` switches the floor off). In test mode at 10 % the arms and torso move at 10 % while Nav2 drives at 30 %.
-The direct controller that takes over for the last metres, `drive_straight`, the arms, the torso and the grippers
-follow the real override. Each `navigate_to` result carries the value used as `data.speed.nav2_override`. If 30 % is
+**Base floor for Nav2.** The Nav2 phase of a `move` to a base target never drives below a floor, because Nav2's controller
+cannot do the fine final approach into a stance at 10 %. The floor is `min_override` in `skills/move/base.yaml` (default
+0.3, that is 30 %; `0` switches the floor off). In test mode at 10 % the arms and torso move at 10 % while Nav2 drives at
+30 %. The direct controller that takes over for the last metres, a straight drive (`motion.mode: straight`), the arms, the
+torso and the grippers follow the real override. Each such `move` result carries the value used as
+`data.speed.nav2_override`. If 30 % is
 too fast for a first run, lower the floor in the skill file, `taskweave config reload`, and expect worse stance
 accuracy; do not switch it off for production.
 
 ## 4. Hands
 
-Skills that act with the grippers take `hands`:
+`grip`, and `move` to a hand target, take `hands`:
 
 | Value | Meaning |
 |---|---|
 | a hand name (`left`) or a list (`[left, right]`) | Exactly these hands. |
 | `all` | Every hand of the robot. |
-| `auto` | The hands the target defines (a point with both a `left_tool` and a `right_tool` pose uses both), or for a held object the hands that hold it. The default of `move_gripper` and `move_object`. |
+| `auto` | The hands the target defines (a hand target with both a `left_tool` and a `right_tool` pose uses both), or for a held object the hands that hold it. The default of `move`. |
 | `any_one` | One hand, chosen by the robot (below). |
 
-**What `any_one` chooses** (`move_gripper`): only a free hand that can apply to the target (for a point: a hand with an
-`alone` pose or a pose in the pair); among those, hands for which IK has a solution come first, then the hand with
+**What `any_one` chooses** (`move` to a hand target): only a free hand that can apply to the target (for a hand target on an
+object: a hand with an `alone` pose or a pose in the pair); among those, hands for which IK has a solution come first, then the hand with
 the least joint motion from where the arm is now, then the first hand in the robot profile, so the choice repeats.
-`grip any_one` takes the one hand that is at an object point (closing) or the one hand that holds something (opening);
+`grip any_one` takes the one hand that is at an object target (closing) or the one hand that holds something (opening);
 with none or both it is rejected as ambiguous, with `hands any_one is ambiguous: left and right ...: name the hand`.
 
 **Seeing which hand it chose.** The step's message names the hand, and the step result data has `hands` (the hand used)
 and `choice` (every candidate with its joint motion, or the reason it was ruled out). In the status line the step shows
-as `move_gripper "..."` so use the log or the HMI step details to read the result data. If no hand can take the
+as `move "..."` so use the log or the HMI step details to read the result data. If no hand can take the
 target the step is `REJECTED` with `hands any_one: no hand can take it (...)`, one reason per hand.
 
-**Holding rules.** Closing hands that are at an object point makes them hold that object; opening takes them out
+**Holding rules.** Closing hands that are at a hand target on an object makes them hold that object; opening takes them out
 of it; an object with no hand left is released. While a hand holds:
 
-- That arm is locked to the object. `move_gripper` for it and `move_joints` on its arm joints (also inside a `via` or a
-  whole-body pose) are `REJECTED`, with a message naming the holding hand. Open the hand first (`grip open`) or move the
-  object with `move_object`, which keeps every holding hand locked to it.
+- That arm is locked to the object. A hand move for it and a joint move on its arm joints (also inside a `via` or a
+  whole-body target) are `REJECTED`, with a message naming the holding hand. Open the hand first (`grip open`) or move the
+  object with a `move` of the held object (`object: held` or an object target), which keeps every holding hand locked to it.
 - The pad jogs the object, not the arm: a stick on a holding hand's tool moves the held object (the same axes as the
   arm jog; the object turns about its own origin) and every holding hand follows, keeping its grip. Two hands step
   together or not at all: if one hand reaches a limit or its reach, or the step would collide, neither moves (the HMI
   notice says why). The elbow trigger still swings that arm's elbow with the object fixed. Opening the gripper ends the
   hold and the tool jogs the arm again. The jog state is on `/taskweave/jog/state`; a skill that uses the held object
   re-reads its pose from the hands first, so a jogged object is where it really is.
-- The free arm can move: `move_gripper`, `move_joints` of its own arm group and `grip` work. Torso and head may move too; the
+- The free arm can move: a hand move, a joint move of its own arm group and `grip` work. Torso and head may move too; the
   hold follows them.
 - The free arm's path is planned without the held object, so the object itself is not avoided.
-- `move_object` with nothing held is rejected with `nothing is held: move_gripper to the object, then grip close`.
+- A move of the held object with nothing held is rejected with `nothing is held: move to a hand target, then grip close`.
 
 ## 5. After a config change
 
@@ -329,7 +337,7 @@ taskweave config reload --hmi http://<host>:8090   # the same through the HMI, w
 
 ```
 /taskweave/task_handler: reloaded
-  reloaded      cell/locations.yaml
+  reloaded      cell/targets.yaml
   needs restart navigation.yaml: the driving envelope is also laid into the Nav2 launch
 ```
 
@@ -340,10 +348,10 @@ needs a restart is listed on every call until the restart.
 | File | Effect of a change |
 |---|---|
 | `missions/*.yaml` | Read when the next mission starts. Not between steps or cycles of the mission that is running. |
-| `cell/locations.yaml`, `cell/objects.yaml`, `objects/*.yaml`, `robots/<robot>/stances.yaml`, `held_poses.yaml`, `object_points.yaml` | Live: read on every use, effective at once (also in a running mission, from its next step). |
-| `poses.yaml`, `skill_overrides.yaml` of a robot (robot pack, or the cell's copy under `robots/<robot>/`) | Live. |
+| `cell/targets.yaml`, `cell/objects.yaml`, `objects/*.yaml`, `robots/<robot>/objects/*.yaml` | Live: read on every use, effective at once (also in a running mission, from its next step). |
+| `targets.yaml`, `skill_overrides.yaml` of a robot (robot pack, or the cell's copy under `robots/<robot>/`) | Live. |
 | `tests/*.reference.yaml` | Live (read by the smoke test only). |
-| `skills/<name>.yaml`: parameters (speeds, tolerances, `min_override`, implementation `params`) | `taskweave config reload`, between goals; the next goal uses them. |
+| `skills/<name>.yaml` or `skills/move/<part>.yaml`: parameters (speeds, tolerances, `min_override`, implementation `params`) | `taskweave config reload`, between goals; the next goal uses them. |
 | `skills/<name>.yaml`: the implementation `name` or `class`, or a parameter a connection is made from (topics and action name of the Nav2 skill) | Restart the skill servers (the frame-ros / task stack container). |
 | `navigation.yaml` | Driving limits are live, but the envelope is also laid into the Nav2 launch: restart the task stack for Nav2 to see it. |
 | `profile.yaml`, `embodiment.yaml`, `operator.yaml`, `system.yaml`, `pack.yaml` (cell or robot) | Restart the task stack: read at launch (profile `base.limits` alone reload with the skill servers). |
@@ -358,7 +366,7 @@ needs a restart is listed on every call until the restart.
 restart anything while a mission or a recording is running**: check `taskweave status` is `idle`, `succeeded`, `failed` or
 `aborted` first, and ask whoever shares the robot. A restart of the simulator also resets the world (section 7).
 
-The HMI has no general config editor yet. It edits missions (Missions tab), the taught points (Teach tab) and the
+The HMI has no general config editor yet. It edits missions (Missions tab), the taught targets (Teach tab) and the
 navigation and arm settings (Robot tab), each checked before it is saved; every other file is edited as text and
 reloaded as above.
 
@@ -373,10 +381,10 @@ taskweave describe /path/to/cell <robot>       # the robot card and the skills i
 - **`taskweave check <cell>`** lists every file as `ok`, `warn` or an error, and exits 0 only if the pack is valid. It
   loads each file against its schema, checks that profile and embodiment agree, that each skill file loads and each
   mission expands (includes, parameters) into a plan. It does **not** check the arguments of a step or the names it
-  uses: a misspelt point, stance or pose passes `check` and is found when the mission starts (the live catalogue
+  uses: a misspelt target passes `check` and is found when the mission starts (the live catalogue
   rejects it with the step and the argument) or at run time. Run it after every edit and before every mission after
   a pack was changed.
-- **`taskweave config validate PATH`** checks one file the same way and also against the rest of the pack (point, stance and skill
+- **`taskweave config validate PATH`** checks one file the same way and also against the rest of the pack (target and skill
   names, mission ids, `replan_from`, includes). A relative path needs `--cell` (and `--pack robot:<name>` for a robot pack
   file); `--json` gives machine-readable problems with line and column.
 - **Smoke test.** A regression test of a whole mission, run in the simulator from a clean start, compared with a reference
@@ -390,7 +398,7 @@ taskweave smoke run restock --hmi http://<hmi>:8090 --reference tests/restock.re
 
   The table has one row per step: step, instruction, `ref s` (duration in the reference), `now s` (duration now, simulator
   time), `Δ%`, `error` (the largest position error the skill reported) and `result`. A row passes when the step ran in the
-  reference's order, ended `SUCCEEDED`, took no more than the reference plus 10 % plus 1 s (25 % for `navigate_to`), and its
+  reference's order, ended `SUCCEEDED`, took no more than the reference plus 10 % plus 1 s (25 % for a base drive, `move.base`), and its
   error is at most the reference's plus 10 % plus 0.002. Missing steps and steps that are not in the reference fail.
   Exit code 0 passed, 1 failed, 2 could not run (HMI unreachable, recording refused). Read a failure from the first
   failing row: `FAILED`/`TIMEOUT` is a mission or robot problem, a `Δ%` far above the limits on every row means the
@@ -411,19 +419,19 @@ Read `taskweave status` first: the state and `last error` say which row below ap
 |---|---|---|
 | The robot does not move, status `idle` | No mission started, or `taskweave run` was rejected. | `taskweave run <mission>` and read its answer. `rejected: a mission is already active; abort it first` means another run: `taskweave abort`. |
 | `taskweave run` or `status` hangs or says no service | The task handler is not running, or your terminal is on another ROS domain. | Check `ROS_DOMAIN_ID` is the robot's, the workspace is sourced, and the task stack is up (`taskweave skills`). Do not start a second task handler. |
-| `rejected: ...` right at the start, or `plan rejected: ...` | The mission refers to something that does not exist (skill, point, stance, pose, mission id) or has a wrong argument. The message names the step and the argument. | Fix the mission or the cell file named; `taskweave check`; `taskweave config reload`; run again. |
+| `rejected: ...` right at the start, or `plan rejected: ...` | The mission refers to something that does not exist (skill, target, mission id) or has a wrong argument. The message names the step and the argument. | Fix the mission or the cell file named; `taskweave check`; `taskweave config reload`; run again. |
 | `skill 'x' is not in the catalog` / `no skill server offers it` | The skill is not served by this stack, or its server is down. | The skill must be in the launch `skills:` list and have a `skills/<name>.yaml` in the cell. Restart the task stack after fixing. |
 | Running, but the robot stands still | A step is waiting: a `wait`, a very slow override (an override of 1-5 % with the timeouts scaled up), or the skill server waits for MoveIt/Nav2. | Look at `step` and the elapsed time in `status`. Check the speed override (section 3). Paused? State `paused` needs `taskweave resume`. |
-| Step `REJECTED` with `unknown object point '...': expected <instance>/<point>, instances in cell/objects.yaml: ...` | A point is written without its object (`grasp` instead of `part_stack_1/grasp`), the instance name is misspelt, or the instance is not there any more: taken away in the run-time object state or never created (a `place_as` step did not run). The list in the message is what exists now. | Fix the spelling or the mission order. If an object should exist but the list lacks it, the object state is out of date: see "sim was reset" below. `'<name>' was taken in an earlier step or run (object state: state/objects.yaml)` is a single object that was picked, or a stack at count 0: `taskweave state show` lists what is taken, `taskweave state clear` puts it all back (or reset the sim). |
-| Step `FAILED` with `no IK solution for ...` | The target is out of reach from the robot's current stance, torso height or elbow side, or a wrong stance. | Check the stance (is the base where it should be?), re-teach the point, try `motion: {torso: auto}` or a different `elbow`. Not a MoveIt outage. |
+| Step `REJECTED` with `unknown target '...': ...` (also `needs an instance: <instance>/<name>`) | A target of an object is written without its object (`grasp` instead of `part_stack_1/grasp`), the instance name is misspelt, or the instance is not there any more: taken away in the run-time object state or never created (a `place_as` step did not run). The list in the message is what exists now. | Fix the spelling or the mission order. If an object should exist but the list lacks it, the object state is out of date: see "sim was reset" below. `'<name>' was taken in an earlier step or run (object state: state/objects.yaml)` is a single object that was picked, or a stack at count 0: `taskweave state show` lists what is taken, `taskweave state clear` puts it all back (or reset the sim). |
+| Step `FAILED` with `no IK solution for ...` | The target is out of reach from the robot's current stance, torso height or elbow side, or a wrong stance. | Check the stance (is the base where it should be?), re-teach the hand target, try `torso: auto` or a different `elbow`. Not a MoveIt outage. |
 | `no IK service /compute_ik (is MoveIt running?)`, `no FK service /compute_fk`, `collision check (/check_state_validity) did not answer`, `planning service ... did not answer` | MoveIt is not running, still starting, or on another ROS domain. | Check the MoveIt process is up (`ros2 service list \| grep -e compute_ik -e check_state_validity`, same `ROS_DOMAIN_ID` as the stack). Wait a minute after a launch. If it is still missing, restart the task stack (check status first). A probe from a terminal must use the live domain. Services such as `/check_state_validity` only know the robot's model joint names, not base or wheel joints. |
 | `Nav2 is not running (no ... action server)` | Nav2 is not up or the map is missing. | Check the Nav2 launch part of the stack; restart the task stack. |
 | `Nav2 did not reach <target>: ... (1.20 m away)`, or `no progress for N s, X m to go` | Nav2 is stuck: something blocks the route, localisation is wrong, or the stance is unreachable. `no progress` is the direct controller that takes over at the end. | Check the area is clear and the robot's position is right (HMI map or `taskweave status`). With `retries: 1` the retry often works. If it recurs, the stance or the Nav2 settings need attention: tell the person who maintains the cell. |
 | Nav2 drives slowly or "creeps" at a low override | By design: at test mode 10 % Nav2 drives 30 % (the `min_override` floor), the arms 10 %. Timeouts are scaled by the override, so slow is expected. | Raise the override for the drive, or accept it. If the step times out anyway, raise `timeout_s` of that step. If it stops short, see Nav2 above. |
 | After a simulator Stop/Play (or restart) the robot does not move, TF_OLD_DATA warnings, `no IK solution` with the target far ahead | Sim time went back. A TF buffer that still holds the old run's transforms drops the new ones as old data and answers with the old pose; Nav2 and MoveIt keep theirs too. taskweave's own nodes clear their buffers at the jump (log line `clock jumped by ... s: TF buffers cleared`), Nav2 and MoveIt do not. | Wait a few seconds, then retry. `teach` refuses to save for `after_jump_s` after a jump and when its TF or base pose is older than `max_tf_age_s` (the message says which): retry once the robot publishes again. Start the stack with `clock_guard:=true` (`taskweave_bringup` launch argument; node names and timing in a YAML given as `clock_guard_params:=`): it resets the Nav2 lifecycle nodes and restarts move_group after a jump. Without it, restart Nav2 and MoveIt (check `taskweave status` first), and abort a running mission: it cannot continue across a reset. |
 | The simulator was reset or restarted and the objects are not as before | A reset ends every hold (open hands) and clears the run-time object state, so stacks are full again and moved objects are back. The robot is back at its start pose. | Start the mission from the beginning (the robot must be where the first step expects it). Nothing to repair, but a mission that was interrupted halfway does not resume across a reset. The state file is `objects.yaml` in `$TASKWEAVE_STATE_DIR` (default: a `state/` folder next to the cell pack folder); `taskweave state show [CELL_DIR]` prints it, `taskweave state clear [CELL_DIR]` deletes it (the same as deleting the file). Running processes re-read the file on their next use (by modification time), so no reload or restart is needed; `state clear` does not end a hold, a sim reset does. |
-| A held object was lost (dropped, or the sim was reset), and `move_object` says `nothing is held: ...` | The hold registry says the hands are open. Reasons: the grip failed, the hand was opened, a sim reset. After a drop the robot does not know. | `taskweave abort`. Bring the robot to a safe pose (`move_joints home` from a one-step mission), put the object back by hand or reset the cell, then start the mission from the beginning. `... where is the held object now?` means the position of the held object could not be read: same steps. |
-| `move_gripper` / `move_joints` `REJECTED` naming a holding hand | That hand still holds an object. | `grip open` (with `place_as` if the object is put down) before moving that arm, or use `move_object`. |
+| A held object was lost (dropped, or the sim was reset), and `move` says `nothing is held: ...` | The hold registry says the hands are open. Reasons: the grip failed, the hand was opened, a sim reset. After a drop the robot does not know. | `taskweave abort`. Bring the robot to a safe pose (`move {to: home}` from a one-step mission), put the object back by hand or reset the cell, then start the mission from the beginning. `... where is the held object now?` means the position of the held object could not be read: same steps. |
+| `move` to a hand or joint target `REJECTED` naming a holding hand | That hand still holds an object. | `grip open` (with `place_as` if the object is put down) before moving that arm, or move the held object (`object: held`). |
 | Disk full, or the logs are huge, on the host that runs the containers | Container logs grow without limit by default (`docker logs` of a stack that prints status and warnings for days), plus recordings (bags, videos) and the smoke test's `--bag` / `--video`. | `df -h`, `docker system df`, then delete recordings you no longer need. Cap the logs: in the compose service `logging: {driver: json-file, options: {max-size: "50m", max-file: "3"}}`, or `docker run --log-opt max-size=50m --log-opt max-file=3`; it applies to a container when it is created again, not to a running one. Do not delete a running container's log file by hand. |
 | CI (or a slow machine) fails with timeouts but passes again on a rerun | The tests use real nodes and fixed deadlines; a slow runner misses them. | Set `TASKWEAVE_TEST_TIME_SCALE` to a number above 1 (CI uses 4), which stretches the skill tests' deadlines: `TASKWEAVE_TEST_TIME_SCALE=4 python3 -m pytest -q test`. A test that fails at 4 as well is a real failure. |
 
