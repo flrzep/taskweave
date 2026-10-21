@@ -310,7 +310,7 @@ def test_when_local_ik_fails_everywhere_the_global_search_at_the_current_height_
 
 
 def test_the_global_fallback_reaches_heights_beyond_the_nearest_ones_and_can_still_fail():
-    ik = GlobalOnly(works=(0.7,))                       # not among the 3 nearest to 0.45: the local solve had no IK there
+    ik = GlobalOnly(works=(0.7,))       # not among the 3 nearest to 0.45: the local solve had no IK there
     assert ik.solve_with_torso([TOOLS], {}, now(0.45)).height == pytest.approx(0.7)
     with pytest.raises(TorsoError, match='global search'):
         GlobalOnly(works=()).solve_with_torso([TOOLS], {}, now(0.45))
