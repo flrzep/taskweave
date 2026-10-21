@@ -3,7 +3,9 @@
 // a held object: some joints first (e.g. the body), then the object's origin along straight lines through the waypoints (in
 // the robot's base frame). Typed in, not captured: a held object cannot be jogged. Uses app.js ($, el, api, message,
 // DEG, NAME_RE, STEP_M, STEP_DEG), robot.js (JOINT_SKIP) and teach.js (teach, showJoint, unshowJoint, jointUnit, jointStep,
-// numberInput, failText).
+// numberInput, failText). A carry pose the config cannot read (targets layout: a problem in the file, joints the robot
+// has no group for) is listed with its problem, to fix it here. On the targets layout Capture asks the teach node (the
+// object kind); while that is not built it answers why, and the answer is shown.
 
 const heldOpen = new Set();  // `${type}/${name}` of the open editors, kept over reloads
 
@@ -40,7 +42,8 @@ function heldItem(h, isNew = false) {
   const url = (name) => `/api/teach/held/${encodeURIComponent(h.object_type)}/${encodeURIComponent(name)}`;
   const head = el('button', { class: 'point-head', 'aria-expanded': 'false' },
     el('b', { text: isNew ? 'New carry pose' : h.name }), el('span', { class: 'mono', text: isNew ? '' : heldSummary(h) }),
-    h.used_by.length ? el('span', { class: 'used', text: `used by ${h.used_by.join(', ')}` }) : '');
+    h.used_by.length ? el('span', { class: 'used', text: `used by ${h.used_by.join(', ')}` }) : '',
+    h.problems?.length ? el('span', { class: 'bad', text: h.problems.join('; ') }) : '');
   const msg = el('div', { class: 'msg', hidden: '' });
 
   // joints moved first: one row each, removable; more from the robot's joints
@@ -106,11 +109,13 @@ function heldItem(h, isNew = false) {
   const nameInput = el('input', { autocomplete: 'off', spellcheck: 'false', placeholder: 'e.g. carry_high' });
   nameInput.value = h.name;
   const test = el('button', { class: 'btn', text: 'Test (holding one)', 'data-edit': '' });
+  const capture = el('button', { class: 'btn', text: 'Capture from robot', 'data-edit': '' });
+  capture.hidden = isNew || !teach.data.targets_layout;
   const save = el('button', { class: 'btn primary', text: 'Save', 'data-edit': '' });
   const remove = el('button', { class: 'btn danger', text: isNew ? 'Cancel' : 'Delete', 'data-edit': '' });
   test.hidden = isNew;
   const edit = el('div', { class: 'point-edit' },
-    el('div', { class: 'row gap' }, test),
+    el('div', { class: 'row gap' }, test, capture),
     el('div', { class: 'field' }, el('label', { text: 'Name' }), nameInput),
     el('div', { class: 'joint-group' }, el('label', { text: 'Joints, moved first' }), jointBox, jointPicker),
     el('p', { class: 'muted small-text', text: `Then the held ${h.object_type}'s origin moves along straight lines through `
@@ -127,6 +132,15 @@ function heldItem(h, isNew = false) {
     test.disabled = changed;
     if (!ok) { message(msg, failText(result, 'not moved'), true); return; }
     skillResult(msg, result);
+  });
+  capture.addEventListener('click', async () => {
+    capture.disabled = true;
+    message(msg, `Teaching ${h.name} from the held ${h.object_type}…`);
+    const { ok, data: result } = await api('POST', `${url(h.name)}/capture`, {});
+    capture.disabled = false;
+    if (!ok) { message(msg, failText(result, 'not taught'), true); return; }  // the teach node's answer
+    message(msg, `taught ${result.message || h.name} -> ${result.file}`);
+    await loadArm();
   });
   save.addEventListener('click', async () => {
     const name = nameInput.value.trim();

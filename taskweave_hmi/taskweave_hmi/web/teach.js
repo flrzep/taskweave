@@ -105,7 +105,7 @@ function positionItem(p) {
     capture.disabled = false;
     if (!ok) { message(msg, failText(result, 'not captured'), true); return; }
     await loadArm();
-    padNotice({ text: `taught ${p.name} -> ${result.file}`, ok: true });
+    padNotice({ text: `taught ${result.message || p.name} -> ${result.file}`, ok: true });  // the teach node's answer
   });
   test.addEventListener('click', async () => {
     busy(test, robotScope ? `Moving to ${p.name}…` : `Going to ${p.name}${at() ? ` at ${at()}` : ' at the nearest placed one'}…`);
@@ -280,6 +280,7 @@ function newPosition(kind) {
     const { ok, data } = await api('POST', `/api/teach/arm/${encodeURIComponent(t.scope)}/${encodeURIComponent(t.name)}/capture`, t);
     capture.disabled = false;
     if (!ok) { message(msg, failText(data, 'not captured'), true); return; }
+    if (data.message) padNotice({ text: `taught ${data.message} -> ${data.file}`, ok: true });
     box.remove();
     teach.open = keyOf(t);
     await loadArm();
