@@ -34,6 +34,8 @@ def main() -> None:
     for name in ('config', 'robot', 'object', 'grasp', 'from-pose', 'onto', 'contact', 'stance'):
         parser.add_argument(f'--{name}', required=True)
     parser.add_argument('--offset', type=float, default=0.0)
+    parser.add_argument('--then-offset', type=float, default=None,
+                        help='after the line to --offset, a second line onto the contact at this offset (0 = on it)')
     parser.add_argument('--base-z', type=float, default=0.0, help='base frame origin above the cell floor (m)')
     parser.add_argument('--start-height', type=float, required=True)
     parser.add_argument('--tcp-speed', type=float, default=0.05)
@@ -82,6 +84,11 @@ def main() -> None:
         raise SystemExit(f'the start pose has no IK at {args.start_height}: {error}') from error
     state0 = {**current, joint: args.start_height, **arm}
     armset = {n: state0[n] for n in arm}
+    usable = []
+    then = None
+    if args.then_offset is not None:
+        final = onto_pose(target, contact, mine, base_in_cell, args.then_offset)
+        then = tcp_targets({h: target_of(final @ g) for h, g in grips.items()})
     for height in sorted({float(v) for v in ik.torso['candidates']} | {args.start_height}):
         state = {**state0, joint: height}
         starts = ik.tcps_at(goals, state)
@@ -89,9 +96,24 @@ def main() -> None:
         try:
             path = linear_path(ik, starts, goals, armset, args.tcp_speed, args.tcp_turn, state=state)
             verdict = f'line ok ({len(path.points)} steps)'
+            if args.then_offset is not None:       # the next move: from the end of this line onto the contact
+                end = dict(zip(path.names, path.points[-1], strict=True))
+                state2 = {**state, **end}
+                second = ik.tcps_at(then, state2)
+                try:
+                    path2 = linear_path(ik, second, then, {n: state2[n] for n in end}, args.tcp_speed, args.tcp_turn,
+                                        state=state2)
+                    verdict += f'; then line ok ({len(path2.points)} steps)'
+                    usable.append(height)
+                except PathError as error:
+                    verdict += f'; then NO line: {str(error)[:80]}'
+            else:
+                usable.append(height)
         except PathError as error:
             verdict = f'no line: {str(error)[:110]}'
         print(f'  {height:5.3f}  {verdict}  ({time.monotonic() - began:.1f} s)')
+    near = min(usable, key=lambda h: (abs(h - args.start_height), h), default=None)
+    print(f'heights usable for the whole move: {usable}; least torso travel from {args.start_height}: {near}')
     rclpy.shutdown()
 
 

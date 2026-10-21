@@ -148,14 +148,15 @@ class MoveObject(_HeldMotion):
             if goal is None:
                 result = self._carry_pose(ctx, hold, to['pose'], m, mode, planner)
             else:
-                result = self._carry(ctx, hold, goal[0], goal[1], m, mode, planner)
+                result = self._carry(ctx, hold, goal[0], goal[1], m, mode, planner, ahead_pose=goal[2])
         finally:
             self.p, self.tcp_speed, self.tcp_turn, self.plan_scale = saved
         if isinstance(result, SkillResult):
             return result
         label, worst, kind = result
         torso = {'torso': self.torso_reports} if self.torso_reports else {}
-        return SkillResult.succeeded(f'moved {label} (max error {worst:.3f})',
+        height = f', torso {self.torso_reports[-1]["height"]:g}' if self.torso_reports else ''
+        return SkillResult.succeeded(f'moved {label} (max error {worst:.3f}{height})',
                                      world_state={'held_object': hold['object']}, held_object=hold['object'],
                                      hands=hold['hands'], mode=mode, path=kind, max_error=float(worst), motion=m,
                                      **torso)
@@ -191,13 +192,18 @@ class MoveObject(_HeldMotion):
         return hold
 
     def _goal(self, hold: dict, to: dict):
-        """(the held object's pose in the base frame after the move, a label), or a REJECTED / FAILED result."""
+        """(the held object's pose in the base frame after the move, a label, the pose the move after it goes to
+        (onto with an offset: the contact itself) or None), or a REJECTED / FAILED result."""
         if 'onto' in to:
             moved = self._onto(hold, {'to': to['onto'], 'contact': to['contact'], 'offset_m': to.get('offset_m', 0.0)})
             if isinstance(moved, SkillResult):
                 return moved
+            final = None
+            if to.get('offset_m'):
+                final = self._onto(hold, {'to': to['onto'], 'contact': to['contact'], 'offset_m': 0.0})
+                final = final if isinstance(final, np.ndarray) else None
             return moved, f'{hold["object"]} {to["contact"]} to {to["onto"]}' + \
-                (f' (-{to["offset_m"]:g} m)' if to.get('offset_m') else '')
+                (f' (-{to["offset_m"]:g} m)' if to.get('offset_m') else ''), final
         from .points import moved_object
 
         moved = moved_object(hold['object_in_base'], to.get('by'), to.get('at'), float(to.get('turn_deg', 0.0)),
@@ -205,9 +211,10 @@ class MoveObject(_HeldMotion):
         return moved, f'{hold["object"]} ' + (f'to {[round(float(v), 3) for v in to["at"]]}' if 'at' in to else
                                               f'by {[round(float(v), 3) for v in to["by"]]}') + \
             (f', {to["turn_deg"]:g} deg' if to.get('turn_deg') else '') + \
-            (f', tilted {to["tilt_deg"]:g} deg' if to.get('tilt_deg') else '')
+            (f', tilted {to["tilt_deg"]:g} deg' if to.get('tilt_deg') else ''), None
 
-    def _carry(self, ctx, hold: dict, moved: np.ndarray, label: str, m: dict, mode: str, planner: str):
+    def _carry(self, ctx, hold: dict, moved: np.ndarray, label: str, m: dict, mode: str, planner: str,
+               ahead_pose=None):
         """Move the held object to ``moved`` (4x4, base frame) with every hand of the hold: (label, worst joint error,
         path kind) or a failure result. Updates the hold afterwards."""
         goals = {hand: moved @ pose for hand, pose in hold['tcp_in_object'].items()}
@@ -215,7 +222,9 @@ class MoveObject(_HeldMotion):
         chosen, leg = None, Target(label, list(goals), tools)
         if m.get('torso', 'keep') == 'auto' and self._searches(leg):
             # one height for every hand of the hold (the torso carries them all), the held object goes with it
-            chosen = self._torso_choice(ctx, leg, m, mode, 0.0, label, flip=False)
+            ahead = {hand: _target_of(ahead_pose @ pose) for hand, pose in hold['tcp_in_object'].items()} \
+                if ahead_pose is not None else None      # the contact itself, after an offset: the next line
+            chosen = self._torso_choice(ctx, leg, m, mode, 0.0, label, flip=False, ahead=ahead)
             if isinstance(chosen, SkillResult):
                 return chosen
             self.torso_reports.append({'leg': label, **chosen.report()})

@@ -89,6 +89,14 @@ class TorsoError(IkError):
         self.rejected = rejected or []
 
 
+class Samples(list):
+    """The target sets solve_with_torso must solve at every height (the first is the main one), with optional checks
+    that need the main sample's arm solution: ``ahead(height, arm)`` returns why the move that follows (e.g. the final
+    approach after a pre-grasp offset) fails from there, or None; ``verify(height)`` as on a function of the height."""
+    ahead = None
+    verify = None
+
+
 @dataclass
 class TorsoChoice:
     """solve_with_torso's answer: the torso ``height`` (also in ``fixed``, the fixed joints with it set), the arm
@@ -548,6 +556,10 @@ class IkClient:
         if problem:
             raise TorsoError(f'line: {problem}')
         arm, flips, cost = main
+        ahead = getattr(samples, 'ahead', None)    # the next move from here (a pre-grasp's final approach)
+        problem = ahead(height, arm) if ahead is not None else None
+        if problem:
+            raise TorsoError(f'next move: {problem}')
         bend = self._wrist_bend(arm, goals[0] if goals else {})
         if bend is not None:
             cost += float((self.torso.get('weights') or {}).get('wrist', WRIST_WEIGHT)) * bend

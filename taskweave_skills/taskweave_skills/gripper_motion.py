@@ -79,6 +79,7 @@ class Target:
     joints: dict = field(default_factory=dict)         # joints set with the tools (a named pose's, e.g. a lift)
     data: dict = field(default_factory=dict)           # the target's own motion data (motion.resolve layer 3)
     before: Callable[[float], dict] | None = None      # the tools this far further back along their approach
+    offset_m: float = 0.0                              # a point target stopped this far short: the next move goes on
     reached: tuple | None = None                       # (point, instance name, object_in_base): hold.reach on arrival
     choice: dict | None = None                         # hands any_one: which hand was chosen and why (hand_choice)
 
@@ -210,7 +211,9 @@ class MoveGripper(_PointMotion):
         approach = float(m.get('approach_m', 0.0)) if final and leg.before and mode != 'linear' else 0.0
         chosen = None
         if m.get('torso', 'keep') == 'auto' and self._searches(leg):   # ik.torso: the height by search, else the list
-            chosen = self._torso_choice(ctx, leg, m, mode, approach, label)
+            # a pre-grasp offset means the next move goes onto the point: the height must serve that line too
+            ahead = leg.before(-leg.offset_m) if final and leg.before and leg.offset_m > 0 else None
+            chosen = self._torso_choice(ctx, leg, m, mode, approach, label, ahead=ahead)
             if isinstance(chosen, SkillResult):
                 return chosen, 0, label, 'free'
             self.torso_reports.append({'leg': leg.label, **chosen.report()})
@@ -239,22 +242,39 @@ class MoveGripper(_PointMotion):
         (a named pose) already set it."""
         return bool(self.ik is not None and self.ik.torso and leg.tools and self.ik.torso['joint'] not in leg.joints)
 
-    def _torso_choice(self, ctx, leg: Target, m: dict, mode: str, approach: float, label: str, flip=None):
+    def _torso_choice(self, ctx, leg: Target, m: dict, mode: str, approach: float, label: str, flip=None,
+                      ahead=None):
         """ik.solve_with_torso for the leg: the target and, with an approach, the pre-grasp; for a straight line the
         points along it (spaced ik.torso.line_sample_m), so the height holds for the whole line. ``flip``: may a grasp
-        be flipped (default: not on a line). A TorsoChoice or a FAILED result naming every rejected height."""
-        from .ik import IkError
+        be flipped (default: not on a line). ``ahead``: the tools of the move that follows (the point itself after a
+        pre-grasp offset): the height must also let the hands walk a straight line to them from here; if no height
+        can, the choice is made without it (the old behaviour). A TorsoChoice or a FAILED result naming every
+        rejected height."""
+        from .ik import IkError, Samples, TorsoError
 
         current = self._start()
         if current is None:
             return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)')
         ctx.feedback(0.0, 'choosing the torso height')
         try:
-            samples = self._line_samples(leg.tools, current) if mode == 'linear' else [
-                leg.tools, *([leg.before(approach)] if approach > 0 else [])]
-            return self.ik.solve_with_torso(samples, leg.joints, current, lambda: ctx.should_stop,
-                                            elbow=m.get('elbow'),
-                                            allow_flip=mode != 'linear' if flip is None else flip)
+            samples = self._line_samples(leg.tools, current) if mode == 'linear' else Samples(
+                [leg.tools, *([leg.before(approach)] if approach > 0 else [])])
+            flips = mode != 'linear' if flip is None else flip
+
+            def search():
+                return self.ik.solve_with_torso(samples, leg.joints, current, lambda: ctx.should_stop,
+                                                elbow=m.get('elbow'), allow_flip=flips)
+            if ahead is None:
+                return search()
+            samples.ahead = self._ahead_check(ahead, current)
+            try:
+                return search()
+            except TorsoError as error:
+                samples.ahead = None
+                choice = search()          # no height serves the next line too: as before, this move alone
+                choice.skipped = (choice.skipped + '; ' if choice.skipped else '') + (
+                    f'next move ignored, no height serves it ({str(error)[:200]})')
+                return choice
         except LookupError as error:
             return SkillResult.failed(f'{label}: where is the gripper? {error}')
         except IkError as error:
@@ -300,6 +320,31 @@ class MoveGripper(_PointMotion):
             return None
         at.verify = verify
         return at
+
+    def _ahead_check(self, tools: dict, current: dict):
+        """A function (height, arm) -> why the straight line from the hands where ``arm`` (their solution at that
+        height) leaves them to ``tools`` does not exist (walked on the URDF chains), or None."""
+        import re
+
+        from .cartesian import PathError, linear_path, matching_flip, tcp_targets
+
+        joint = self.ik.torso['joint']
+        goals = tcp_targets(tools)
+
+        def check(height: float, arm: dict) -> str | None:
+            state = {**current, joint: height, **arm}
+            starts = self.ik.tcps_at(goals, state)
+            if len(starts) < len(goals):
+                return None
+            aim = matching_flip(goals, starts, self.robot.data.get('tool_frames', {}))
+            moving = {n: state[n] for n in arm if any(
+                re.fullmatch(self.ik.joint_pattern.format(tool=t), n) for t in goals)}
+            try:
+                linear_path(self.ik, starts, aim, moving, self.tcp_speed, self.tcp_turn, state=state)
+            except PathError as error:
+                return str(error)
+            return None
+        return check
 
     def _set_torso(self, ctx, chosen, label: str, planner: str):
         """Move the torso to the chosen height before a straight line (the line keeps it). A failure or None."""
@@ -473,7 +518,7 @@ class MoveGripper(_PointMotion):
             reached = (reference, instance.name, np.linalg.inv(base_in_cell) @ instance_matrix(instance))
         return Target(label, hands, point_targets(point, instance, base_in_cell, offset, names),
                       before=lambda extra: point_targets(point, instance, base_in_cell, offset + extra, names),
-                      reached=reached)
+                      reached=reached, offset_m=offset)
 
     def _pose_target(self, name: str, rule):
         try:

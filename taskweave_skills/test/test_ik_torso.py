@@ -361,3 +361,38 @@ def test_a_direction_stays_open_while_the_cost_keeps_falling():
     choice = ik.solve_with_torso([TOOLS], {}, now(0.494))
     assert choice.height == pytest.approx(0.7)               # keeps going up, never down
     assert min(h for _, h in ik.solved) == 0.4
+
+
+# ---- approach awareness: a pre-grasp height must serve the line onto the point ---------------------------------
+
+def test_an_offset_pose_reachable_at_the_current_height_but_not_the_line_onto_the_point_picks_a_lower_height():
+    from taskweave_skills.ik import Samples
+    samples = Samples([TOOLS])
+    samples.ahead = lambda height, arm: 'out of reach' if height > 0.3 else None      # the next line, from here
+    ik = FakeIk()                                      # the offset pose itself is reachable everywhere
+    choice = ik.solve_with_torso(samples, {}, now(0.6))
+    assert choice.height == pytest.approx(0.3)
+    assert {r['height']: r['reason'] for r in choice.rejected}[0.6] == 'next move: out of reach'
+    assert ik.solve_with_torso(Samples([TOOLS]), {}, now(0.6)).height == pytest.approx(0.6)   # without it: stays
+
+
+def test_the_arm_solution_of_the_offset_pose_is_what_the_next_line_starts_from():
+    from taskweave_skills.ik import Samples
+    seen = []
+    samples = Samples([TOOLS])
+    samples.ahead = lambda height, arm: seen.append((height, dict(arm))) or None
+    FakeIk(reach=lambda tool, target, h: h).solve_with_torso(samples, {}, now(0.4))
+    assert seen[0][0] == pytest.approx(0.4) and seen[0][1]['left_j1'] == pytest.approx(0.4)
+
+
+def test_with_no_height_serving_the_next_line_the_move_is_chosen_alone_as_before():
+    from types import SimpleNamespace
+
+    from taskweave_skills.gripper_motion import MoveGripper, Target
+    ik = FakeIk()
+    skill = SimpleNamespace(ik=ik, _start=lambda: now(0.5), joints=SimpleNamespace(state_topic='t'),
+                            _ahead_check=lambda tools, current: (lambda height, arm: 'no line'))
+    ctx = SimpleNamespace(feedback=lambda *args: None, should_stop=False)
+    leg = Target('x', ['left'], TOOLS)
+    choice = MoveGripper._torso_choice(skill, ctx, leg, {}, 'free', 0.0, 'x', ahead=TOOLS)
+    assert choice.height == pytest.approx(0.5) and 'next move ignored' in choice.skipped
