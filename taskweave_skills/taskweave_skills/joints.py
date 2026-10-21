@@ -32,6 +32,8 @@ from taskweave_core.config.limits import velocity_limits
 from taskweave_core.node_cache import for_node
 from taskweave_core.skill import Skill, SkillResult
 
+from .parts import RESOLVED, in_move
+
 SWING_STRAIGHT_STEPS = 20  # samples of the eased straight move that follows an elbow swing (_swing_first)
 
 
@@ -250,8 +252,9 @@ class _JointSkill(Skill):
             return None
         text = '; '.join(f'{hand} holds {holding[hand]}' for hand in blocked)
         free = sorted(set(self.hold.tool_frames) - set(holding))
-        return SkillResult.rejected(f'{text}: the hand and its arm stay with the object, move it with move_object, or '
-                                    f'open the gripper first' + (f' (free: {", ".join(free)})' if free else ''))
+        way = ('move the object (`object: held` or an object target), or open the gripper first' if in_move(self)
+               else 'the hand and its arm stay with the object, move it with move_object, or open the gripper first')
+        return SkillResult.rejected(f'{text}: {way}' + (f' (free: {", ".join(free)})' if free else ''))
 
     def _follow_holds(self, holds: list, label: str):
         """After a motion that may have moved the base frame of the held objects (torso): each object moved with its
@@ -746,9 +749,18 @@ class _ObjectMotion(_PointMotion):
     def _onto(self, hold: dict, args: dict):
         """The held object's pose (base frame) with its contact ``args['contact']`` on the placed contact
         ``args['to']``, ``offset_m`` back against that contact's z (engage direction); a SkillResult if that cannot be
-        resolved."""
+        resolved. ``args[RESOLVED]`` (``Move``): the placed object (``instance``), the target's pose in its frame
+        (``pose``) and the held object's contact pose (``mine``) instead of the two names."""
         from .points import onto_pose
 
+        resolved = args.get(RESOLVED)
+        if resolved:
+            try:
+                base_in_cell = self.hold.transform(self.cell_frame, self.robot.base['frame'])
+            except LookupError as error:
+                return SkillResult.failed(f'where is the robot? {error}')
+            return onto_pose(resolved['instance'], resolved['pose'], resolved['mine'], base_in_cell,
+                             float(args.get('offset_m', 0.0)))
         instances = self.config.object_instances()
         kind = self.hold.type_of(hold, instances)
         if kind is None:

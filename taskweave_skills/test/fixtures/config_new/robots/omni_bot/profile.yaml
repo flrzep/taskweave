@@ -1,0 +1,2 @@
+name: omni_bot
+base: {type: holonomic, cmd_vel: /omni/cmd_vel, odom: /omni/odom, frame: base_link, limits: {linear: 0.8, angular: 1.5}}

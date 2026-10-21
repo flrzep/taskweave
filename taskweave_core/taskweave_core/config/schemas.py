@@ -823,8 +823,9 @@ MOTION = motion_schema()
 # speeds on top of skills/<skill>.yaml (motion.resolve, layer 2). Same keys as the skill yaml's motion/speed/accel.
 _SKILL_SPEEDS = {'type': 'object', 'additionalProperties': False,
                  'properties': {key: POSITIVE for key in MOTION_SPEED_KEYS + ('base_m_s', 'base_rad_s')}}
-SKILL_OVERRIDES = {
-    'type': 'object', 'propertyNames': NAME,
+SKILL_OVERRIDES = {   # keys: a skill, or a part of one (move.hand)
+    'type': 'object',
+    'propertyNames': {'type': 'string', 'pattern': NAME['pattern'][:-1] + r'(\.' + NAME['pattern'][1:-1] + ')?$'},
     'additionalProperties': {
         'type': 'object', 'additionalProperties': False,
         'properties': {

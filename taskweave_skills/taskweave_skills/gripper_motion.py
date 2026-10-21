@@ -16,6 +16,13 @@ hold it, opening takes them out of the hold.
 
 The skill yaml layout is spec 2.2 (``speed:``, ``accel:``, ``motion:``, ``torso_fallback:``, ``tolerances:``); the
 old flat keys keep working.
+
+In a cell in the targets layout ``MoveGripper`` is ``move.hand`` (``skills/move/hand.yaml``): ``Move`` resolves the
+hand target (``store.target``) and gives it in ``args[RESOLVED]``: ``target`` (the store's Target), ``offset_m``,
+``joints`` (the joint values of its joints part, the torso as the step's ``torso`` option decides), ``data`` (its own
+``approach_m`` and ``elbow``) and, for ``motion.via``, ``via`` (resolved targets). A target with a ``path`` becomes
+legs: its waypoints one after the other, the last one the target. A relative move (``to.by`` / ``to.at``) keeps its
+old arguments.
 """
 
 from __future__ import annotations
@@ -30,12 +37,14 @@ import numpy as np
 from taskweave_core import motion
 from taskweave_core.config import Pose2D
 from taskweave_core.config.schemas import HAND_RULES, VEC3, hands_schema, motion_schema
+from taskweave_core.config.targets import axes_from_rpy
 from taskweave_core.executive import Outcome
 from taskweave_core.gripper import joint_for_opening, opening_for_joint, opening_table
 from taskweave_core.skill import SkillResult
 
 from .collision import HoldCollision, shapes_of
 from .joints import _FingerMotion, _JointSkill, _PointMotion
+from .parts import RESOLVED
 
 # skills/<skill>.yaml (spec 2.2) -> the joint skill parameter names
 SPEED_PARAMS = {'joint_rad_s': 'max_joint_speed', 'joint_linear_m_s': 'max_linear_speed', 'tcp_m_s': 'tcp_speed',
@@ -62,6 +71,17 @@ def translate_params(params: dict) -> tuple[dict, dict]:
     return flat, extra
 
 
+def _axes_target(pose) -> dict:
+    """The tool target {tcp, approach, closing} (base frame) of a Pose3D given as xyz and roll-pitch-yaw."""
+    approach, closing = axes_from_rpy(pose.rpy)
+    return {'tcp': [float(v) for v in pose.xyz], 'approach': list(approach), 'closing': list(closing)}
+
+
+def _pose_matrix(pose) -> np.ndarray:
+    from .ik import rpy_matrix
+    return rpy_matrix(pose.xyz, pose.rpy)
+
+
 def hands_arg(value, default='auto'):
     """A ``hands`` argument as a rule word (auto, any_one, all) or a list of hand names."""
     if value is None:
@@ -83,6 +103,7 @@ class Target:
     offset_m: float = 0.0                              # a point target stopped this far short: the next move goes on
     reached: tuple | None = None                       # (point, instance name, object_in_base): hold.reach on arrival
     choice: dict | None = None                         # hands any_one: which hand was chosen and why (hand_choice)
+    waypoints: list = field(default_factory=list)      # a target with a path: the legs before the last, in order
 
 
 class MoveGripper(_PointMotion):
@@ -168,7 +189,7 @@ class MoveGripper(_PointMotion):
         unfit = self._unfit(target, mode, planner)
         if unfit is not None:
             return unfit
-        legs = self._via(m.get('via') or [], target)
+        legs = self._legs(args, m, target)
         if isinstance(legs, SkillResult):
             return legs
         self.hold.reanchor()
@@ -456,6 +477,8 @@ class MoveGripper(_PointMotion):
         return self._target_for(args, rule)
 
     def _target_for(self, args: dict, rule):
+        if args.get(RESOLVED):
+            return self._store_target(args[RESOLVED], rule)
         to = args['to']
         if 'point' in to:
             target = self._point_target(to['point'], float(to.get('offset_m', 0.0)), rule)
@@ -485,31 +508,51 @@ class MoveGripper(_PointMotion):
         motion (torso auto: also at the other lift heights, like the move itself). A straight line (mode linear) keeps
         the lift and the pose's joints, so it is probed with neither."""
         from .hand_choice import Probe
-        from .ik import IkError
 
         if self.ik is None or not target.tools:
             return Probe()
         m = motion.values(motion.resolve(self.config, self.robot.name, self.name, args, target.data))
         linear = m.get('mode', DEFAULT_MODE) == 'linear'
-        legs = self._via(m.get('via') or [], target)
+        legs = self._legs(args, m, target)
         if isinstance(legs, SkillResult):
             return Probe(False, 0.0, legs.message)
-        approach = 0.0 if linear or not target.before else float(m.get('approach_m', 0.0))
-        goals = [(leg.tools, leg.joints) for leg in legs if leg.tools]
-        if approach > 0:
-            goals.append((target.before(approach), target.joints))
-        goals.append((target.tools, target.joints))
         self._refresh_ik()
         start = self._start()
         stop = (lambda: ctx.should_stop) if ctx is not None else (lambda: False)
+        solved = self._solve_goals(self._goals(legs, target, m, linear), m, linear, start, stop)
+        if isinstance(solved, str):
+            return Probe(False, 0.0, solved)
+        fixed, arm = solved[-1][1:]
+        moved = sum(abs(value - start[name]) for name, value in {**fixed, **arm}.items() if name in (start or {}))
+        repeatable = not any(self.ik.last.get(tool, {}).get('global') for tool in target.tools)
+        return Probe(True, float(moved), repeatable=repeatable)
+
+    def _goals(self, legs: list, target: Target, m: dict, linear: bool) -> list[tuple[str, dict, dict]]:
+        """What the move solves IK for, in order: (label, tools, joints) of each leg that has tools, the start of the
+        approach (a free move to a point that has one) and the target itself."""
+        approach = 0.0 if linear or not target.before else float(m.get('approach_m', 0.0))
+        goals = [(leg.label, leg.tools, leg.joints) for leg in legs if leg.tools]
+        if approach > 0:
+            goals.append((f'{target.label} (approach)', target.before(approach), target.joints))
+        goals.append((target.label, target.tools, target.joints))
+        return goals
+
+    def _solve_goals(self, goals: list, m: dict, linear: bool, start: dict | None, stop):
+        """IK for ``goals`` (``_goals``) as the move itself solves it, with the profile's choose settings and no
+        motion (torso auto: the height by search, else also at the other lift heights; a straight line (mode linear)
+        keeps the lift and the pose's joints, so it is solved with neither): [(label, fixed joints, arm joints)], or
+        the reason why one goal has no solution."""
+        from .ik import IkError
+
         search = m.get('torso', 'keep') == 'auto' and self.ik.torso and not linear
-        for tools, joints in goals:
+        solved = []
+        for label, tools, joints in goals:
             if search and self.ik.torso['joint'] not in joints:   # ik.torso: the height by search
                 try:
                     choice = self.ik.solve_with_torso([tools], joints, start, stop, elbow=m.get('elbow'))
                 except IkError as error:
-                    return Probe(False, 0.0, str(error))
-                fixed, arm = choice.fixed, choice.solution
+                    return str(error)
+                solved.append((label, choice.fixed, choice.solution))
                 continue
             fixeds = [{} if linear else joints]
             if m.get('torso', 'keep') == 'auto' and self.lift_joint and not linear:
@@ -521,12 +564,41 @@ class MoveGripper(_PointMotion):
                 except IkError as error:
                     first = first or error
                     continue
+                solved.append((label, fixed, arm))
                 break
             else:
-                return Probe(False, 0.0, str(first))
-        moved = sum(abs(value - start[name]) for name, value in {**fixed, **arm}.items() if name in (start or {}))
-        repeatable = not any(self.ik.last.get(tool, {}).get('global') for tool in target.tools)
-        return Probe(True, float(moved), repeatable=repeatable)
+                return str(first)
+        return solved
+
+    def dry_run(self, ctx, args):
+        """Resolve the target and solve IK for it, move nothing: the joint goal the move would send (``Move``'s
+        ``dry_run``, e.g. the HMI's preview). ``data.joint_goal`` is the end of the move: the target's joints with
+        the arms solved for it; ``data.legs`` has every goal on the way (via legs, waypoints, the start of the
+        approach, the target) with its own joint values."""
+        target = self._target(args, ctx)
+        if isinstance(target, SkillResult):
+            return target
+        m = motion.values(motion.resolve(self.config, self.robot.name, self.name, args, target.data))
+        mode, planner = m.get('mode', DEFAULT_MODE), m.get('planner', 'auto')
+        unfit = self._unfit(target, mode, planner)
+        if unfit is not None:
+            return unfit
+        legs = self._legs(args, m, target)
+        if isinstance(legs, SkillResult):
+            return legs
+        if self.ik is None or not target.tools:
+            return SkillResult.rejected(f'{target.label} has no tool targets to solve IK for')
+        self._refresh_ik()
+        start = self._start()
+        if start is None:
+            return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)')
+        solved = self._solve_goals(self._goals(legs, target, m, mode == 'linear'), m, mode == 'linear', start,
+                                   lambda: ctx.should_stop)
+        if isinstance(solved, str):
+            return SkillResult.failed(f'{target.label}: {solved}')
+        steps = [{'label': label, 'joint_goal': {**fixed, **arm}} for label, fixed, arm in solved]
+        return SkillResult.succeeded(f'{target.label}: IK solved (nothing moved)', dry_run=True, hands=target.hands,
+                                     mode=mode, joint_goal=steps[-1]['joint_goal'], legs=steps)
 
     def _select(self, rule, defined, what: str):
         """The hands to move: ``rule`` (auto: all the target defines; all; names) among those ``defined``."""
@@ -605,8 +677,81 @@ class MoveGripper(_PointMotion):
                 (f', tilt {to["tilt_deg"]:g} deg' if to.get('tilt_deg') else '')
         return Target(label, hands, {hand: target_of(goal) for hand, goal in goals.items()})
 
-    def _via(self, entries: list, target: Target):
-        """The legs before the target for ``motion.via`` ('pose:<name>' or '<instance>/<point>'), or a REJECTED."""
+    # ---- targets of the targets layout ------------------------------------------------
+    def _store_legs(self, st, rule, offset: float, joints: dict, hands=None):
+        """(hands, [gripper Target per leg of ``st``, the last the target itself]) for a resolved hand target
+        (taskweave_core Target) of this robot, or a REJECTED / FAILED result. ``rule``: the hands rule, or the
+        ``hands`` (a list) to take. The legs have no ``before`` and no ``reached``: the caller sets them on the last."""
+        from .points import instance_matrix, point_poses, point_targets, target_of
+
+        names = None if rule == 'auto' else list(self.hands) if rule == 'all' else list(rule)
+        last_leg = st.poses[-1]
+        last = {**last_leg, 'alone': dict(st.alone) or None}
+        base_in_cell = None
+        if st.frame == 'object':
+            try:
+                base_in_cell = self.hold.transform(self.cell_frame, self.robot.base['frame'])
+            except LookupError as error:
+                return SkillResult.failed(f'where is the robot? {error}')
+        chosen = hands if hands is not None else self._select(rule, point_poses(last, names), st.reference)
+        if isinstance(chosen, SkillResult):
+            return chosen
+        names = None if rule == 'auto' and hands is None else list(chosen)
+
+        def tools_of(point: dict, extra: float) -> dict:
+            if st.frame == 'object':
+                return point_targets(point, st.instance, base_in_cell, extra, names)
+            poses = point_poses(point, names)
+            if names is not None and set(names) - set(poses):
+                raise KeyError(f'the target has no {", ".join(sorted(set(names) - set(poses)))} tool pose')
+            return {tool: _axes_target(pose) if not extra else target_of(_pose_matrix(pose), extra)
+                    for tool, pose in poses.items() if names is None or tool in names}
+
+        legs = []
+        try:
+            for index, leg in enumerate(st.poses[:-1], start=1):
+                legs.append(Target(f'{st.reference} ({index}/{len(st.poses)})', list(chosen),
+                                   tools_of({**leg, 'alone': None}, 0.0), joints=dict(joints)))
+            tools = tools_of(last, offset)
+        except KeyError as error:
+            return SkillResult.rejected(str(error.args[0]))
+        label = st.reference + (f' (-{offset:g} m)' if offset else '')
+        final = Target(label, list(chosen), tools, joints=dict(joints))
+        if st.frame == 'object':
+            final.before = lambda extra: point_targets(last, st.instance, base_in_cell, offset + extra, names)
+            if offset == 0.0:
+                final.reached = (st.reference, st.instance.name,
+                                 np.linalg.inv(base_in_cell) @ instance_matrix(st.instance))
+        elif 'approach_m' in st.data:    # a base-frame target has an approach only when it says so
+            final.before = lambda extra: tools_of(last, offset + extra)
+        final.offset_m = offset
+        final.waypoints = legs
+        return chosen, [*legs, final]
+
+    def _store_target(self, resolved: dict, rule):
+        """The gripper Target of a hand target ``Move`` resolved (see the module doc), or a REJECTED / FAILED
+        result. Its motion data (``approach_m``, ``elbow``) is the target's own."""
+        legs = self._store_legs(resolved['target'], rule, float(resolved.get('offset_m', 0.0)),
+                                resolved.get('joints') or {})
+        if isinstance(legs, SkillResult):
+            return legs
+        target = legs[1][-1]
+        target.data = dict(resolved.get('data') or {})
+        return target
+
+    def _legs(self, args: dict, m: dict, target: Target):
+        """The legs before the target: the ``motion.via`` entries, then the waypoints of a target with a path. A
+        REJECTED result if one cannot be resolved."""
+        via = self._via(m.get('via') or [], target, args)
+        if isinstance(via, SkillResult):
+            return via
+        return [*via, *target.waypoints]
+
+    def _via(self, entries: list, target: Target, args: dict | None = None):
+        """The legs before the target for ``motion.via``, or a REJECTED. Resolved by ``Move`` (``args[RESOLVED]
+        ['via']``: targets that move a hand or joints) or, in older cells, 'pose:<name>' or '<instance>/<point>'."""
+        if args is not None and args.get(RESOLVED):
+            return self._store_via(args[RESOLVED].get('via') or [], target)
         legs = []
         for entry in entries:
             if entry.startswith(VIA_POSE):
@@ -622,6 +767,33 @@ class MoveGripper(_PointMotion):
                 if isinstance(leg, SkillResult):
                     return leg
                 legs.append(replace(leg, label=f'via {entry}', reached=None, before=None))
+        return legs
+
+    def _store_via(self, items: list, target: Target):
+        """Legs for the resolved ``motion.via`` items ({reference, target (a hand or joints Target), joints}): a hand
+        target gives its tools of the hands that go (a base-frame one may have none for them: no leg unless it sets
+        joints), a joints target its joint values."""
+        from .points import TOOL_SUFFIX
+
+        legs = []
+        for item in items:
+            st, label = item['target'], f'via {item["reference"]}'
+            if st.kind == 'joints':
+                if item['joints']:
+                    legs.append(Target(label, target.hands, {}, joints=dict(item['joints'])))
+            elif st.frame == 'base':
+                for index, leg in enumerate(st.poses, start=1):
+                    tools = {key[:-len(TOOL_SUFFIX)]: _axes_target(pose) for key, pose in leg.items()
+                             if key[:-len(TOOL_SUFFIX)] in target.hands}
+                    if tools or item['joints']:
+                        legs.append(Target(label + (f' ({index}/{len(st.poses)})' if len(st.poses) > 1 else ''),
+                                           target.hands, tools, joints=dict(item['joints'])))
+            else:
+                made = self._store_legs(st, list(target.hands), 0.0, item['joints'], hands=list(target.hands))
+                if isinstance(made, SkillResult):
+                    return made
+                legs += [replace(leg, label=label + leg.label[len(st.reference):], reached=None, before=None)
+                         for leg in made[1]]
         return legs
 
 
@@ -733,7 +905,7 @@ class Grip(_FingerMotion):
             holding = self.hold.hand_holds if action == 'open' else {}
             if any(h in holding for h in self.hands):    # name the holding hands (several: ambiguous)
                 return one_hand(rule, holding, self.hands, 'holds an object')
-            return one_hand(rule, at_point, self.hands, 'is at an object point (move_gripper to.point first)')
+            return one_hand(rule, at_point, self.hands, 'is at an object point (move to a hand target first)')
         if rule == 'all' or (rule == 'auto' and action == 'opening'):
             return list(self.hands)
         if rule != 'auto':

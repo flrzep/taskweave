@@ -7,6 +7,10 @@ With the profile's ``torso: {joint, drive_m, tolerance_m}`` the torso goes to ``
 move_joints step: planner, speed override, joint limits), unless it is within ``tolerance_m`` of it or a hand holds
 something (the carry height stays; the result says so). The result's ``data.torso_drive`` reports it; drive_straight
 and the Nav2 implementation do the same. Without ``drive_m`` the torso is never touched.
+In a cell in the targets layout this class is ``move.base`` (parameters ``skills/move/base.yaml``): ``Move`` gives it
+the resolved pose, the torso (``torso`` of the step: ``keep``, or the joint values to go to instead of ``drive_m``)
+and the step's ``motion.speed`` and ``motion.accel`` (fractions) in ``args[RESOLVED]`` (``pose``, ``torso``, ``speed``,
+``accel``).
 Parameters (``skills/navigate_to.yaml``; values below are defaults, each capped by the robot's base limits):
 """
 
@@ -26,6 +30,8 @@ from taskweave_core.config.limits import base_limits, capped_by
 from taskweave_core.config.schemas import ROBOT_PROFILE, default
 from taskweave_core.executive import Outcome
 from taskweave_core.skill import Skill, SkillResult
+
+from .parts import RESOLVED, part_key
 
 MIN_DT_S = 1e-3           # s, floor of a control step (first tick, coarse clock): keeps the accel limits finite
 TORSO_TOLERANCE_M = default(ROBOT_PROFILE, 'torso', 'tolerance_m')   # torso.tolerance_m default
@@ -84,11 +90,14 @@ def _toward(error: float, gain: float, accel: float) -> float:
     return math.copysign(min(gain * abs(error), math.sqrt(2.0 * accel * abs(error))), error)
 
 
-def scaled(p: Params, override: float) -> Params:
-    """``p`` with the velocity limits at the speed override (a fraction); ``p`` itself at 100 %."""
-    if override >= 1.0:
+def scaled(p: Params, override: float, accel: float = 1.0) -> Params:
+    """``p`` with the velocity limits at the speed override (a fraction) and the accelerations at ``accel`` (a
+    fraction); ``p`` itself at 100 %."""
+    if override >= 1.0 and accel >= 1.0:
         return p
-    return replace(p, max_linear=p.max_linear * override, max_angular=p.max_angular * override)
+    override = min(override, 1.0)
+    return replace(p, max_linear=p.max_linear * override, max_angular=p.max_angular * override,
+                   linear_accel=p.linear_accel * accel, angular_accel=p.angular_accel * accel)
 
 
 def command(pose: Pose2D, target: Pose2D, base_type: str, p: Params, previous: tuple, dt: float) -> tuple:
@@ -138,7 +147,9 @@ def _with_drive_height(execute):
     def wrapper(self, ctx, args):
         if self.base['type'] == 'fixed':
             return execute(self, ctx, args)
-        drive, failure = self._drive_height(ctx)
+        resolved = (args.get(RESOLVED) if isinstance(args, dict) else None) or {}
+        self._fraction, self._accel_fraction = resolved.get('speed') or 1.0, resolved.get('accel') or 1.0
+        drive, failure = self._drive_height(ctx, resolved.get('torso'))
         if failure is not None:
             return failure
         result = execute(self, ctx, args)
@@ -183,43 +194,58 @@ class NavigateTo(Skill):
 
     def setup(self, node, config, robot, params):
         super().setup(node, config, robot, params)
+        self._fraction = self._accel_fraction = 1.0   # the step's motion.speed and motion.accel (Move)
         self.pose: Pose2D | None = None
         self.pose_time = -math.inf
         self.lock = threading.Lock()
         self.cmd = node.create_publisher(Twist, self.base['cmd_vel'], 10)
         node.create_subscription(Odometry, self.base['odom'], self._odom, 10)
         self._lift = None   # the torso's move to torso.drive_m: a move_joints of its own, for robots with that key
-        if (robot.data.get('torso') or {}).get('joint') and robot.data.get('joints'):
+        if robot.data.get('joints') and ((robot.data.get('torso') or {}).get('joint') or config.targets_format()):
             from .joint_motion import MoveJoints
-            implementation, _ = config.select_implementation('move_joints', robot.name)
+            key = part_key(config, 'move_joints')
+            implementation, _ = config.select_implementation(key, robot.name)
             self._lift = MoveJoints()
-            self._lift.setup(node, config, robot, config.skill_params('move_joints', implementation))
+            self._lift.name = key
+            self._lift.setup(node, config, robot, config.skill_params(key, implementation))
 
-    def _drive_height(self, ctx):
-        """Move the torso to the profile's torso.drive_m: (what to report in the result or None, a failure result or
-        None). Nothing without drive_m; not while a hand holds something (the object would go with the torso)."""
+    def _drive_height(self, ctx, torso=None):
+        """Move the torso before the base moves: (what to report in the result or None, a failure result or None).
+        ``torso``: None the profile's torso.drive_m (nothing without it), ``keep`` nothing, or {joint: value} the
+        joints to go to instead (``Move``'s torso option or the joints of a base target). Not while a hand holds
+        something (the object would go with the torso)."""
         spec = self.config.robot(self.robot.name).data.get('torso') or {}
-        target = spec.get('drive_m')
-        if target is None:
+        if torso == 'keep':
             return None, None
+        if isinstance(torso, dict) and torso:
+            goal, what = {joint: float(value) for joint, value in torso.items()}, 'torso to ' + ', '.join(
+                f'{joint} {float(value):g}' for joint, value in torso.items())
+        else:
+            if spec.get('drive_m') is None:
+                return None, None
+            goal = {spec['joint']: float(spec['drive_m'])}
+            what = f'torso to the drive height {float(spec["drive_m"]):g}'
         if self._lift is None:
-            return None, SkillResult.failed('torso.drive_m is set, but this skill server started without it: '
-                                             'restart it')
-        joint, target = spec['joint'], float(target)
-        here = self._lift.joints.current([joint], self._lift.p.state_timeout_s)
+            return None, SkillResult.failed('the torso is to move before driving, but this skill server started '
+                                             'without a joint interface: restart it')
+        joint = next(iter(goal))
+        here = self._lift.joints.current(list(goal), self._lift.p.state_timeout_s)
         if here is None:
             return None, SkillResult.failed(f'no joint states on {self._lift.joints.state_topic} (torso {joint})')
-        drive = {'joint': joint, 'from_m': round(here[joint], 4), 'to_m': target, 'moved': False}
+        drive = {'joint': joint, 'from_m': round(here[joint], 4), 'to_m': goal[joint], 'moved': False}
+        if len(goal) > 1:
+            drive['joints'] = dict(goal)
         holding = self._lift.hold.hand_holds
         if holding:
             drive['skipped'] = f'{", ".join(sorted(set(holding.values())))} held: the torso stays at its carry height'
             return drive, None
-        if abs(here[joint] - target) <= float(spec.get('tolerance_m', TORSO_TOLERANCE_M)):
+        tolerance = float(spec.get('tolerance_m', TORSO_TOLERANCE_M))
+        if all(abs(here[name] - value) <= tolerance for name, value in goal.items()):
             return drive, None
-        ctx.feedback(0.0, f'torso to the drive height {target:g}')
-        result = self._lift.execute(ctx, {'joints': {joint: target}})
+        ctx.feedback(0.0, what)
+        result = self._lift.execute(ctx, {'joints': goal})
         if result.outcome != Outcome.SUCCEEDED:
-            return None, replace(result, message=f'torso to the drive height {target:g}: {result.message}')
+            return None, replace(result, message=f'{what}: {result.message}')
         drive['moved'] = True
         return drive, None
 
@@ -250,10 +276,17 @@ class NavigateTo(Skill):
     def execute(self, ctx, args):
         if self.base['type'] == 'fixed':
             return SkillResult.rejected('robot base is fixed')
-        target = self.config.base_target(args['target'], self.robot.name, self._current())
+        target = self._goal_pose(args)
         if self._current() is None:
             return SkillResult.failed(f'no odometry on {self.base["odom"]}')
         return self._drive(ctx, target, args['target'])
+
+    def _goal_pose(self, args) -> Pose2D:
+        """The pose to drive to (cell frame): what ``Move`` resolved, else the location or stance ``args.target``
+        names (the older cell layouts)."""
+        if args.get(RESOLVED):
+            return args[RESOLVED]['pose']
+        return self.config.base_target(args['target'], self.robot.name, self._current())
 
     execute = _with_drive_height(execute)
 
@@ -305,7 +338,8 @@ class NavigateTo(Skill):
             elif work - best_time > self.p.stuck_timeout_s:
                 self.stop()
                 return SkillResult.failed(f'no progress for {self.p.stuck_timeout_s:g} s, {distance:.2f} m from target')
-            previous = command(pose, target, self.base['type'], scaled(self.p, clock.o), previous, dt)
+            previous = command(pose, target, self.base['type'],
+                               scaled(self.p, clock.o * self._fraction, self._accel_fraction), previous, dt)
             self._publish(*previous)
             ctx.feedback(1.0 - min(distance / start_distance, 1.0), f'{distance:.2f} m to go')
             time.sleep(period)

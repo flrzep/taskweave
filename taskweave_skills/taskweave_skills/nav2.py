@@ -342,7 +342,7 @@ class Nav2NavigateTo(NavigateTo):
     def _navigate(self, ctx, args):
         if self.base['type'] == 'fixed':
             return SkillResult.rejected('robot base is fixed')
-        target = self.config.base_target(args['target'], self.robot.name, self._current())
+        target = self._goal_pose(args)
         if self._current() is None:
             return SkillResult.failed(f'no odometry on {self.base["odom"]}')
         if not self.client.wait_for_server(timeout_sec=self.nav['server_timeout_s']):
@@ -359,7 +359,7 @@ class Nav2NavigateTo(NavigateTo):
         self.remaining = math.nan
         clock = ctx.work_clock(self.p.override_slew_per_s)
         clock(ctx.now())
-        self._nav2_limit(clock.o)
+        self._nav2_limit(clock.o * self._fraction)
         sent = self.client.send_goal_async(self._goal(target), feedback_callback=self._feedback)
         if not self._wait(ctx, sent):
             self.stop()
@@ -385,7 +385,7 @@ class Nav2NavigateTo(NavigateTo):
                 self.stop()  # close enough: the direct controller is faster and more precise than Nav2 here
                 return self._drive(ctx, target, args['target'])
             clock(ctx.now())
-            self._nav2_limit(clock.o)
+            self._nav2_limit(clock.o * self._fraction)
             time.sleep(POLL_S)
         with self.goal_lock:
             self.goal_handle = None

@@ -72,6 +72,8 @@ KINDS = (
     _K('object_type', 'cell', 'objects/*.yaml', 'Object type', ('live',), schemas.OBJECT, template={'name': '{name}'}),
     _K('skill', 'cell', 'skills/*.yaml', 'Skill implementations and parameters', ('reload_service',),
        schemas.SKILL_PARAMS, template={'implementations': []}),
+    _K('skill_part', 'cell', 'skills/*/*.yaml', 'Parameters of a part of a skill', ('reload_service',),
+       schemas.SKILL_PARAMS, template={'implementations': []}),
     _K('mission', 'cell', 'missions/*.yaml', 'Mission', ('mission_start',), schemas.MISSION,
        template={'goal': '', 'steps': []}),
     _K('reference_run', 'cell', 'tests/*.reference.yaml', 'Smoke test reference', ('live',),

@@ -1,0 +1,9 @@
+implementations:
+  - name: joint_targets
+    type: script
+    class: taskweave_skills.gripper_motion:Grip
+    requires: {capabilities: [gripper.parallel]}
+cell_frame: world
+speed: {joint_rad_s: 2.0}
+accel: {joint_rad_s2: 3.0}
+tolerances: {position: 0.03, stall_timeout_s: 1.0, state_timeout_s: 3.0}

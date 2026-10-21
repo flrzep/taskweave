@@ -159,7 +159,8 @@ def _cross_object_points(store, c):
 
 
 def _cross_skill_overrides(store, c):
-    return _names_exist(store, c.data, catalogue.enum_values(store, 'skills'), lambda n: [n], 'skill')
+    skills = catalogue.enum_values(store, 'skills')    # a key may name a part of a skill: move.hand
+    return [([n], f'skill {n!r} does not exist', WARNING) for n in c.data if n.partition('.')[0] not in skills]
 
 
 def _cross_stances(store, c):
@@ -487,7 +488,7 @@ CROSS = {'profile': _cross_profile, 'embodiment': _cross_embodiment, 'poses': _c
          'held_poses': _cross_held_poses, 'object_points': _cross_object_points,
          'skill_overrides': _cross_skill_overrides, 'stances': _cross_stances,
          'object_instances': _cross_object_instances, 'object_type': _cross_object_type,
-         'navigation': _cross_navigation, 'mission': _cross_mission, 'skill': _cross_skill,
+         'navigation': _cross_navigation, 'mission': _cross_mission, 'skill': _cross_skill, 'skill_part': _cross_skill,
          'operator': _cross_operator, 'cell_pack': _cross_cell_pack, 'robot_pack': _cross_robot_pack,
          'system': _cross_system, 'cell_targets': _cross_cell_targets, 'robot_targets': _cross_robot_targets,
          'robot_objects': _cross_robot_objects}

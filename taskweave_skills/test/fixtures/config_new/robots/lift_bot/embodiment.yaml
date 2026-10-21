@@ -1,0 +1,4 @@
+name: lift_bot
+summary: Differential test base with a lift and a head.
+capabilities: [base.differential]
+base: {footprint: [0.5, 0.4], max_speed: {linear: 0.8, angular: 1.5}}

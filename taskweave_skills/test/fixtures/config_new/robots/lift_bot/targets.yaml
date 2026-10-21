@@ -1,0 +1,2 @@
+look_up: {moves: joints, joints: {head: [0.2, null]}}
+lift_top: {moves: joints, joints: {torso: 0.5}}

@@ -1,0 +1,34 @@
+name: box
+targets:
+  rim:
+    moves: hand
+    tool_type: parallel_gripper
+    approach_m: 0.1
+    left_tool: {xyz: [0.0, 0.2, 0.3], rpy: [0.0, 3.14159265, 0.0]}
+    right_tool: {xyz: [0.0, -0.2, 0.3], rpy: [0.0, 3.14159265, 0.0]}
+    alone:
+      left_tool: {xyz: [0.0, 0.1, 0.35], rpy: [0.0, 3.14159265, 0.0]}
+  knob:                           # a single right_tool: auto means the right hand
+    moves: hand
+    tool_type: parallel_gripper
+    right_tool: {xyz: [0.0, -0.1, 0.3], rpy: [0.0, 3.14159265, 0.0]}
+  rim_plain:                      # no approach_m of its own: the skill's (or the robot's) applies
+    moves: hand
+    tool_type: parallel_gripper
+    left_tool: {xyz: [0.0, 0.2, 0.3], rpy: [0.0, 3.14159265, 0.0]}
+    right_tool: {xyz: [0.0, -0.2, 0.3], rpy: [0.0, 3.14159265, 0.0]}
+  rim_path:                       # waypoints: above the rim first, then on it
+    moves: hand
+    tool_type: parallel_gripper
+    approach_m: 0.1
+    path:
+      - {left_tool: {xyz: [0.0, 0.2, 0.5], rpy: [0.0, 3.14159265, 0.0]}}
+      - {left_tool: {xyz: [0.0, 0.2, 0.3], rpy: [0.0, 3.14159265, 0.0]}}
+  top:                            # where the box meets another object (move to an object target)
+    moves: object
+    xyz: [0.0, 0.0, 0.1]
+    rpy: [0.0, 0.0, 0.0]
+  base:
+    moves: object
+    xyz: [0.0, 0.0, 0.0]
+    rpy: [0.0, 0.0, 0.0]

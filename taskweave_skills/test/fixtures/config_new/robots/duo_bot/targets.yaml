@@ -1,0 +1,35 @@
+home:
+  moves: joints
+  joints: {left_arm: [0.0, 0.0], right_arm: [0.0, 0.0], torso: 0.0}
+present_left:
+  moves: hand
+  left_tool: {xyz: [0.6, 0.2, 0.4], rpy: [1.5707963267948966, 0.0, 1.5707963267948966]}   # approach +x, closing +z
+  elbow: out
+present_both:
+  moves: hand
+  joints: {torso: 0.1}
+  left_tool: {xyz: [0.6, 0.2, 0.4], rpy: [1.5707963267948966, 0.0, 1.5707963267948966]}
+  right_tool: {xyz: [0.6, -0.2, 0.4], rpy: [1.5707963267948966, 0.0, 1.5707963267948966]}
+present_right:
+  moves: hand
+  right_tool: {xyz: [0.6, -0.2, 0.4], rpy: [1.5707963267948966, 0.0, 1.5707963267948966]}
+carry:                          # the lift first (the box moves with the hands), then straight to the waypoint
+  moves: object
+  type: box
+  joints: {torso: 0.1}
+  path:
+    - {xyz: [0.7, 0.0, 0.1], rpy: [0.0, 0.0, 0.0]}
+carry_steps:                    # two waypoints, no joints
+  moves: object
+  type: box
+  path:
+    - {xyz: [0.7, 0.0, 0.1], rpy: [0.0, 0.0, 0.0]}
+    - {xyz: [0.7, 0.0, 0.2], rpy: [0.0, 0.0, 0.0]}
+arm_pose:                       # sets an arm joint: not allowed with something held
+  moves: object
+  type: box
+  joints: {left_arm: [0.2, null]}
+  xyz: [0.7, 0.0, 0.1]
+  rpy: [0.0, 0.0, 0.0]
+lift_up: {moves: joints, joints: {torso: 0.1}}
+head_up: {moves: joints, joints: {left_arm: [0.3, null]}}

@@ -1,0 +1,2 @@
+implementations:
+  - {name: dispatch, type: script, class: "taskweave_skills.move:Move"}
