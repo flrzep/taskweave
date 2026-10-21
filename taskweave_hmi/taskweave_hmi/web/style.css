@@ -303,6 +303,10 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
 .edit-step { position: relative; }
 .edit-step.has-problem { border-color: var(--bad); box-shadow: inset 4px 0 0 var(--bad); }  /* named by Check or Save */
 .edit-step.has-problem .step-no { color: var(--bad); }
+/* the field a problem's place names (an argument, the skill, a rule), with the problem under it */
+.edit-step .field.has-problem { box-shadow: inset 3px 0 0 var(--bad); padding-left: var(--sp-2); }
+.edit-step .field.has-problem > .arg-head label, .edit-step .field.has-problem > label { color: var(--bad); }
+.problem-note { margin-top: var(--sp-1); }
 .edit-step .icon.confirm { width: auto; padding: 0 var(--sp-2); background: var(--bad); border-color: var(--bad); color: var(--on-fill);
                            font: 600 var(--fs-s) var(--sans); }  /* Remove? (the second tap removes) */  /* the buttons go below the number on a narrow phone */
 .edit-step .handle { cursor: grab; touch-action: none; color: var(--text-muted); border-color: var(--border); background: none; }

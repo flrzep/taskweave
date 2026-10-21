@@ -539,6 +539,7 @@ function stepCard(step, index, steps, expanded) {
       return;
     }
     const skill = state.skills.find((s) => s.name === q('skill').value);
+    if (formsOf(skill?.args_schema)) { formArgs(argsBox, skill.args_schema, args, strays); return; }
     const props = skill?.args_schema?.properties || {};
     const required = skill?.args_schema?.required || [];
     argsBox.replaceChildren(...Object.entries(props).map(([key, spec]) => argField(key, spec, required.includes(key), args[key])),
@@ -630,7 +631,8 @@ function stepSummary(card) {
   const instruction = card.querySelector('.sum-instruction');
   instruction.textContent = step.instruction || 'no instruction';
   instruction.classList.toggle('muted', !step.instruction);
-  const what = [step.include ? `include ${step.include}` : step.skill, argsSummary(step.include ? step.with : step.args)];
+  const what = [step.include ? `include ${step.include}` : step.skill,
+    step.include ? argsSummary(step.with) : step.skill === 'move' ? moveSummary(step.args) : argsSummary(step.args)];
   card.querySelector('.sum-args').textContent = what.filter(Boolean).join(' · ');
   card.querySelector('[data-act="fold"]').title = `${step.instruction}\n${what.filter(Boolean).join(' · ')}`;
 }
@@ -639,6 +641,26 @@ const signed = (n) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0');
 const cm = (m) => +(m * 100).toFixed(1);
 function argsSummary(args) {
   return Object.entries(args || {}).map(([key, value]) => argSummary(key, value)).filter(Boolean).join(' · ');
+}
+// A move step by its form: "to tray_1/place", "hand left by 0 / 0 / +6 cm", "base by −0.3 m", then its options.
+function moveSummary(args) {
+  const rest = { ...(args || {}) };
+  const take = (key) => { const value = rest[key]; delete rest[key]; return value; };
+  const relative = () => ['by', 'at'].map((key) => (rest[key] === undefined ? '' : argSummary(key, take(key)))).filter(Boolean).join(' ');
+  const pairs = (value) => (isPlain(value) ? Object.entries(value).map(([k, v]) => `${k} ${Array.isArray(v) ? v.map((n) => n ?? '–').join(' / ') : v}`).join(', ') : String(value));
+  let head = '';
+  if (rest.to !== undefined) head = `to ${take('to')}`;
+  else if (rest.hand !== undefined) head = `hand ${[].concat(take('hand')).join(' + ')} ${relative()}`;
+  else if (rest.object !== undefined) head = `object ${take('object')} ${relative()}`;
+  else if (rest.base !== undefined) {
+    const by = take('base')?.by;
+    const metres = (n) => signed(+Number(n).toFixed(3));
+    head = Array.isArray(by) ? `base by ${by[1] ? `${metres(by[0])} / ${metres(by[1])}` : metres(by[0])} m` : 'base';
+  } else if (rest.elbow !== undefined) head = `elbow ${pairs(take('elbow'))}`;
+  else if (rest.joints !== undefined) head = `joints ${pairs(take('joints'))}`;
+  delete rest.dry_run;
+  const torso = take('torso');
+  return [head.trim(), argsSummary(rest), torso === undefined ? '' : `torso ${[].concat(torso).join(' / ')}`].filter(Boolean).join(' · ');
 }
 function argSummary(key, value) {
   if (value === undefined || value === null) return '';
@@ -673,6 +695,8 @@ const unitStep = (unit) => ({ m: STEP_M, mm: '1', deg: STEP_DEG, fraction: '0.05
 const isPlain = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
 const isPlaceholder = (value) => typeof value === 'string' && value.includes('{');  // a param or a fact, filled at run time
 const variantsOf = (spec) => spec.oneOf || spec.anyOf || [];
+// the choices of an enum field: its enum, or the enum of an anyOf / oneOf branch (elbow: a side, or {hand: side})
+const enumOf = (spec) => spec.enum || variantsOf(spec).find((v) => Array.isArray(v.enum))?.enum;
 function argKind(spec) {
   const variants = variantsOf(spec);
   if (spec['x-taskweave-widget'] === 'hands' && spec.anyOf?.[1]?.items?.enum) return 'hands';
@@ -680,7 +704,7 @@ function argKind(spec) {
   if (numbers && (spec['x-taskweave-widget'] === 'vec3' || (spec.minItems === spec.maxItems && spec.minItems >= 2 && spec.minItems <= 4))) return 'vec';
   if (variants.length && variants.every((v) => v.properties)) return 'variants';
   if (pointLists(spec)) return 'point';
-  if (spec.enum) return 'enum';
+  if (enumOf(spec)) return 'enum';
   if (spec.type === 'number' || spec.type === 'integer') return 'number';
   if (spec.type === 'boolean') return 'bool';
   if (spec.type === 'string') return 'string';
@@ -737,7 +761,7 @@ function argField(key, spec, required, value) {
   const label = labelFor(key, spec, `${group || labelText(key, spec)}${required || group ? '' : ' (optional)'}`);
   const body = el('div', { class: 'arg-body' });
   const note = el('div', { class: 'msg bad', hidden: '' });
-  let asText = STRUCTURED.has(kind) && !fits(spec, value);
+  let asText = (STRUCTURED.has(kind) || kind === 'enum') && !fits(spec, value);  // an enum's other shape: as text
   let editor = null;
   const toggle = STRUCTURED.has(kind) ? el('button', { class: 'btn small ghost arg-mode', type: 'button' }) : '';
   const build = (current) => {
@@ -795,9 +819,13 @@ function scalarEditor(key, spec, value, required) {
     const kinds = pointLists(spec) || [];
     input = el('select');
     input.dataset.points = '';
+    const choices = enumOf(spec);
     input._fill = (chosen = input.value) => {  // the choices from state.points (again: refreshCatalog), chosen kept
-      const options = (spec.enum || kinds.flatMap((k) => state.points[k] || [])).map(String);
-      fillSelect(input, ['', ...options], chosen);
+      const options = (choices || kinds.flatMap((k) => state.points[k] || [])).map(String);
+      if (!choices && kinds.length > 1) {  // several lists (base, hand, object, joint targets): one group each
+        input.replaceChildren(el('option', { value: '' }), ...kinds.filter((k) => (state.points[k] || []).length).map((k) => el('optgroup',
+          { label: k.charAt(0).toUpperCase() + k.slice(1) }, state.points[k].map((v) => el('option', { value: String(v), text: String(v) })))));
+      } else fillSelect(input, ['', ...options], chosen);
       if (chosen !== '' && !options.includes(chosen)) input.append(el('option', { value: chosen, text: `${chosen} (unknown)` }));
       input.value = chosen;
       input.options[0].textContent = required ? 'choose…' : fallback || 'none';
@@ -805,7 +833,7 @@ function scalarEditor(key, spec, value, required) {
     input._fill(value === undefined ? '' : String(value));
     const read = () => {
       if (input.value === '') return undefined;
-      const known = spec.enum?.find((option) => String(option) === input.value);
+      const known = choices?.find((option) => String(option) === input.value);
       return known !== undefined ? known : input.value;
     };
     return { node: input, read };
@@ -832,10 +860,12 @@ function scalarEditor(key, spec, value, required) {
   return { node: input, read: () => (input.value === '' ? undefined : input.value) };
 }
 
-// JSON text: what the fields cannot show; text that is not JSON is kept as a string
+// JSON text: what the fields cannot show; text that is not JSON is kept as a string, and a string that is no JSON
+// is shown as it is (torso: keep, not "keep")
+const isJson = (text) => { try { JSON.parse(text); return true; } catch (_) { return false; } };
 function textEditor(value) {
   const input = el('textarea', { rows: '2', spellcheck: 'false', class: 'mono' });
-  input.value = value === undefined ? '' : JSON.stringify(value);
+  input.value = value === undefined ? '' : typeof value === 'string' && !isJson(value) ? value : JSON.stringify(value);
   const read = () => {
     if (!input.value.trim()) return undefined;
     try { return JSON.parse(input.value); } catch (_) { return input.value; }
@@ -930,10 +960,111 @@ function variantsEditor(spec, value) {
   return { node: el('div', { class: 'arg-variants' }, chooser, body), read: () => editor.read() };
 }
 
+// ---------- a skill of several forms (move) ----------
+// A skill whose args schema is a oneOf of forms (each only its required keys, the properties shared), as move: a
+// chooser of the forms (their titles), then the chosen form's own keys and the options that apply to it. Which apply
+// comes from the catalog (x-taskweave-move: the options per kind of motion, core's MOVE_OPTIONS); for a form "to" a
+// target it depends on the target's kind (state.points groups), so the options of the other kinds hide while they
+// have no value. A key the step has is always shown (nothing is dropped unseen) but dry_run (never saved in a mission)
+// and the reserved look_at hide. Switching the form keeps the options the new form also takes, and going back to a
+// form brings its values back (while the step is open in the editor).
+const HIDDEN_ARGS = { dry_run: 'never saved in a mission (it is for trying a move by hand)', look_at: 'reserved, not implemented yet' };
+const NEVER_SAVED = ['dry_run'];
+const MOVE_KINDS = ['base', 'straight', 'hand', 'object', 'joints'];  // what a target can move (to)
+function formsOf(schema) {
+  const forms = schema?.oneOf;
+  return Array.isArray(forms) && forms.length > 1 && schema.properties
+    && forms.every((f) => Array.isArray(f.required) && f.required.length && !f.properties) ? forms : null;
+}
+const formIndex = (forms, args) => forms.findIndex((f) => f.required.every((key) => key in (args || {})));
+// the kind of target a name is (base, hand, object, joints), from the pickers' groups; null: not known here
+function targetKind(name) {
+  const found = Object.entries(TARGET_GROUPS).find(([, group]) => (state.points[group] || []).includes(name));
+  return found ? found[0] : null;
+}
+// the kinds whose options a form takes: the form's own (hand, straight, ...), for "to" the target's (all while unknown)
+function formKinds(schema, form, args) {
+  const meta = schema['x-taskweave-move'];
+  const selector = form.required[0];
+  if (meta?.forms?.[selector]) return meta.forms[selector];
+  if (selector !== 'to') return [selector];
+  const kind = targetKind(args?.to);
+  if (kind === 'base') return args?.motion?.mode === 'straight' ? ['straight'] : ['base', 'straight'];
+  return kind ? [kind] : MOVE_KINDS;
+}
+// the keys a form shows for these kinds, in the schema's order: its selector, its relative keys, the options
+function formKeys(schema, form, kinds) {
+  const meta = schema['x-taskweave-move'];
+  const selectors = new Set(formsOf(schema).flatMap((f) => f.required));
+  const hidden = meta?.hidden || HIDDEN_ARGS;
+  return Object.keys(schema.properties).filter((key) => {
+    if (key in hidden) return false;
+    if (form.required.includes(key)) return true;
+    if (!meta) return !selectors.has(key);  // no table: every option
+    const relative = meta.relative?.[form.required[0]];
+    if ((relative || []).includes(key)) return true;
+    if (relative && (meta.not_relative || []).includes(key)) return false;  // offset_m, reference: a target's
+    if (key === 'object') return form.required[0] === 'to' && kinds.includes('object');  // which held object goes
+    return !selectors.has(key) && (meta.options?.[key] || []).some((k) => kinds.includes(k));
+  });
+}
+function formArgs(argsBox, schema, args, strays) {
+  const forms = formsOf(schema);
+  const props = schema.properties;
+  let chosen = formIndex(forms, args);
+  if (chosen < 0 && !Object.keys(args || {}).length) chosen = 0;  // a new step: the first form
+  const memory = {};  // form index -> its values when it was left
+  const chooser = el('div', { class: 'segmented choice', role: 'group', 'aria-label': 'Form' });
+  const head = el('div', { class: 'field wide arg-forms' }, chooser);
+  const dropped = NEVER_SAVED.filter((key) => key in (args || {}));
+  if (dropped.length) head.append(el('div', { class: 'msg warn', text: `${dropped.join(', ')} is left out: ${HIDDEN_ARGS.dry_run}.` }));
+  const fields = () => [...argsBox.querySelectorAll(':scope > [data-arg]')];
+  const current = () => Object.fromEntries(fields().map((f) => [f.dataset.arg, f._value()]).filter(([, v]) => v !== undefined));
+  const draw = (values) => {
+    chooser.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-pressed', String(i === chosen)));
+    const form = forms[chosen];
+    const all = form ? formKeys(schema, form, form.required[0] === 'to' ? MOVE_KINDS : formKinds(schema, form, values)) : [];
+    const shown = Object.keys(values).filter((key) => key in props && !all.includes(key) && !NEVER_SAVED.includes(key));
+    argsBox.replaceChildren(head, ...[...all, ...shown].map((key) => argField(key, props[key], !!form?.required.includes(key), values[key])),
+      ...strays(props));
+    hideOptions();
+  };
+  // a "to" form: the options of the kinds the target is not, while they have no value
+  const hideOptions = () => {
+    const form = forms[chosen];
+    if (!form || form.required[0] !== 'to') return;
+    const values = current();
+    const keys = formKeys(schema, form, formKinds(schema, form, values));
+    fields().forEach((f) => show(f, keys.includes(f.dataset.arg) || f._value() !== undefined || !(f.dataset.arg in props)));
+  };
+  chooser.append(...forms.map((form, index) => {
+    const button = el('button', { type: 'button', text: form.title || form.required.join(' + '), 'aria-pressed': 'false' });
+    if (form.description) button.title = form.description;
+    button.addEventListener('click', () => {
+      if (index === chosen) return;
+      const values = current();
+      if (chosen >= 0) memory[chosen] = values;
+      chosen = index;
+      const keys = formKeys(schema, forms[index], MOVE_KINDS);
+      const others = new Set(forms.flatMap((f) => f.required).filter((key) => !forms[index].required.includes(key)));
+      draw(Object.fromEntries(Object.entries({ ...memory[index], ...values }).filter(([key]) => keys.includes(key) && !others.has(key))));
+      changed(chooser);
+    });
+    return button;
+  }));
+  ['input', 'change'].forEach((type) => argsBox.removeEventListener(type, argsBox._showIf));
+  argsBox._showIf = hideOptions;
+  ['input', 'change'].forEach((type) => argsBox.addEventListener(type, hideOptions));
+  draw(Object.fromEntries(Object.entries(args || {}).filter(([key]) => key in props)));
+}
+
 // [x, y, z] (or roll, pitch, yaw) as three number fields in the unit; all empty: left out, one empty: 0
 function vecEditor(key, spec, value) {
   const unit = unitOf(key, spec);
-  const names = key.startsWith('rpy') ? ['roll', 'pitch', 'yaw'] : ['x', 'y', 'z', 'w'].slice(0, spec.minItems);
+  // the components as the description names them ("[forward, left] in metres"), else x y z
+  const named = (spec.description || '').match(/^\[([a-z_]+(?:, [a-z_]+)+)\]/i)?.[1].split(', ');
+  const names = key.startsWith('rpy') ? ['roll', 'pitch', 'yaw']
+    : named?.length === spec.minItems ? named : ['x', 'y', 'z', 'w'].slice(0, spec.minItems);
   const inputs = names.map((name, i) => {
     const input = el('input', { type: 'number', step: unitStep(unit) || 'any', 'aria-label': `${key} ${name}` });
     input.value = value?.[i] ?? '';
@@ -1127,20 +1258,49 @@ function readMission() {
   return mission;
 }
 
-// The problems of a Check or a refused Save, above the buttons; the steps they name ("step 's3' (...)", a step of an
-// included mission as "<include step id>_...") are marked red until they are edited.
-function showProblems(problems) {
+// The problems of a Check or a refused Save, above the buttons; the steps they name are marked red until they are
+// edited: by the server's places ({problem, step, path}: the step of the mission's own steps and the path in it, e.g.
+// ['args', 'motion', 'mode'] or ['skill']), else by the text ("step 's3' (...)", a step of an included mission as
+// "<include step id>_..."). A place in a step's arguments or settings also marks that field, with the problem under it.
+function showProblems(problems, places = []) {
   show($('problems'), problems.length > 0);
   $('problems').textContent = problems.join('\n');
   const named = problems.flatMap((p) => [...p.matchAll(/step '([^']+)'/g)].map((m) => m[1]));
+  const marks = {};
+  places.forEach((place) => { (marks[place.step] = marks[place.step] || []).push({ path: place.path || [], text: place.message || problems[place.problem] }); });
   [...$('step-editor').children].forEach((card, i) => {
     const step = card._read();
     const id = step.id || `s${i + 1}`;
-    const bad = named.some((n) => n === id || (!!step.include && n.startsWith(`${id}_`)));
+    const bad = i in marks || named.some((n) => n === id || (!!step.include && n.startsWith(`${id}_`)));
     card.classList.toggle('has-problem', bad);
+    card.querySelectorAll('.field.has-problem').forEach(unmarkField);
+    (marks[i] || []).forEach(({ path, text }) => markField(card, path, text));
     if (bad) setExpanded(card, true);  // opens to show what is wrong
   });
   foldButton();
+}
+// the field of a step a problem's path names: an argument (args.<key>, also nested: args.motion.mode marks motion),
+// the skill, or a setting under the rules (on_failure, replan_from, ...)
+function markField(card, path, text) {
+  let field = null;
+  if ((path[0] === 'args' || path[0] === 'with') && path.length > 1) {
+    field = card.querySelector(`.args > [data-arg="${CSS.escape(String(path[1]))}"]`);
+    field?.querySelectorAll('details').forEach((d) => { d.open = true; });
+    if (field) show(field, true);
+  } else if (path.length) {
+    field = card.querySelector(`[data-k="${CSS.escape(String(path[0]))}"]`)?.closest('.field');
+    if (field && card.querySelector('.rules')?.contains(field)) card.querySelector('.rules').open = true;
+  }
+  if (!field) return;
+  field.classList.add('has-problem');
+  const note = el('div', { class: 'msg bad problem-note', text: path.length > 2 ? `${path.slice(1).join('.')}: ${text}` : text });  // motion.mode: ...
+  field.append(note);
+  const clear = () => unmarkField(field);
+  ['input', 'change'].forEach((type) => field.addEventListener(type, clear, { once: true }));
+}
+function unmarkField(field) {
+  field.classList.remove('has-problem');
+  field.querySelectorAll(':scope > .problem-note').forEach((note) => note.remove());
 }
 
 $('btn-add-step').addEventListener('click', () => {
@@ -1152,7 +1312,7 @@ $('btn-validate').addEventListener('click', async () => {
   const name = $('m-name').value.trim() || 'new';
   const { ok, data } = await api('POST', `/api/missions/${encodeURIComponent(name)}/validate`, readMission());
   if (!ok) { alertInline(data); return; }
-  showProblems(data.problems);
+  showProblems(data.problems, data.places);
   message($('save-msg'), data.problems.length ? '' : 'Mission is valid.');
 });
 $('btn-save').addEventListener('click', async () => {
@@ -1161,7 +1321,7 @@ $('btn-save').addEventListener('click', async () => {
   const old = state.editing.isNew ? null : state.editing.name;
   const rename = old && old !== name ? `?rename_from=${encodeURIComponent(old)}` : '';
   const { ok, data } = await api('PUT', `/api/missions/${encodeURIComponent(name)}${rename}`, readMission());
-  if (!ok) { showProblems(data.problems || [data.error || 'not saved']); message($('save-msg'), ''); return; }
+  if (!ok) { showProblems(data.problems || [data.error || 'not saved'], data.places); message($('save-msg'), ''); return; }
   showProblems([]);
   state.dirty = false; show($('editor-dirty'), false);
   state.editing = { ...state.editing, name, isNew: false };
