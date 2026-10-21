@@ -457,6 +457,9 @@ function fillSelect(select, values, selected) {
   select.value = selected ?? '';
 }
 function markDirty() { state.dirty = true; show($('editor-dirty'), true); }
+// Leaving or reloading the page with unsaved mission edits asks first (the browser's own question). Switching tabs keeps
+// them: the editor stays open.
+window.addEventListener('beforeunload', (e) => { if (state.editing && state.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
 async function openEditor(name) {
   await loadCatalog();
