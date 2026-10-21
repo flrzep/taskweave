@@ -529,7 +529,7 @@ OBJECT = {
                     'approach_m': {'type': 'number', 'minimum': 0},
                     # preferred elbow side at this point, robot frame (else the robot profile's ik.choose.elbow)
                     'elbow': {'enum': ELBOW_SIDES},
-                    # single-hand grasps of the same point (move_gripper hands: [<hand>]): <hand>_tool poses that take
+                    # single-hand grasps of the same point (move with hands: [<hand>]): <hand>_tool poses that take
                     # the place of the pair's pose for that hand when it goes alone
                     'alone': {'type': 'object', 'propertyNames': {'pattern': r'.+_tool$'},
                               'additionalProperties': POSE3D},
@@ -853,5 +853,5 @@ def hands_schema(hand_names=(), rules=HAND_RULES) -> dict:
             'x-taskweave-widget': 'hands',
             'description': 'Which hands: a hand name or a list of names; "auto": the hands the target defines (or, '
                            'for a held object, the hands holding it); "any_one": one free hand that can take the '
-                           'target (move_gripper: an IK-feasible hand with the least joint motion, named in the '
-                           'result; grip: the one hand at an object point); "all": every hand.'}
+                           'target (move: an IK-feasible hand with the least joint motion, named in the '
+                           'result; grip: the one hand at an object target); "all": every hand.'}

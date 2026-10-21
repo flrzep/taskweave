@@ -1,6 +1,6 @@
 """The example missions of docs/ (README.md, docs/missions.md) validate against the real skill schemas and a small
 example cell (docs/examples/cell on top of the skills test fixture): skills exist, arguments fit their schemas, every
-point, stance, contact and held pose exists, includes expand. The per-skill example steps of docs/skills.md are
+target exists, includes expand. The per-skill example steps of docs/skills.md are
 checked the same way (test_skills_doc)."""
 
 import copy
@@ -20,7 +20,7 @@ from taskweave_skills import shipped_skills  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO / 'docs' / 'examples'
-FIXTURE = Path(__file__).parent / 'fixtures' / 'config'
+FIXTURE = Path(__file__).parent / 'fixtures' / 'config_new'    # cell schema 4, like the example cell
 ROBOT = 'duo_bot'
 SKILLS = shipped_skills()    # every skill of the package: a new skill is in here without being registered
 
@@ -81,7 +81,7 @@ def test_the_included_block_is_expanded_into_the_mission(cell):
     store = ConfigStore(cell)
     plan = Plan.from_mission(store.expanded_mission('restock'), 'restock', robot=ROBOT)
     assert [step.id for step in plan.steps][:2] == ['pick_s1', 'pick_s2']
-    assert plan.steps[0].skill == 'navigate_to' and plan.steps[-1].skill == 'grip'
+    assert plan.steps[0].skill == 'move' and plan.steps[-1].skill == 'grip'
 
 
 def skill_steps():
@@ -115,7 +115,8 @@ def test_relative_links_and_documented_paths_exist():
     import re
 
     for doc in ['README.md', 'AGENTS.md', 'docs/install.md', 'docs/missions.md', 'docs/skills.md',
-                'docs/configuration.md', 'docs/architecture.md', 'docs/operator.md']:
+                'docs/configuration.md', 'docs/architecture.md', 'docs/operator.md', 'docs/targets.md',
+                'docs/migration_targets.md', 'docs/pack_switchover.md']:
         path = REPO / doc
         text = path.read_text(encoding='utf-8')
         for target in re.findall(r'\]\(([^)#\s]+)(?:#[^)]*)?\)', text):
