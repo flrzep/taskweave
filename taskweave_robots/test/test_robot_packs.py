@@ -52,7 +52,7 @@ def cell(tmp_path):
     (root / 'cell').mkdir(parents=True)
     (root / 'missions').mkdir()
     (root / 'pack.yaml').write_text(f'name: test_cell\nversion: 1\nschema_version: {packs.CELL_SCHEMA}\n')
-    (root / 'cell' / 'locations.yaml').write_text('waiting: {frame: cell, x: 1.0, y: 0.5, yaw: 0.0}\n')
+    (root / 'cell' / 'targets.yaml').write_text('waiting: {moves: base, x: 1.0, y: 0.5, yaw: 0.0}\n')
     (root / 'cell' / 'objects.yaml').write_text('{}\n')
     return root
 
@@ -166,14 +166,14 @@ def test_a_cell_pose_validates_only_when_the_cell_pack_provides_it(cell):
 
     # the cell's own poses file: the pack's poses plus the cell pose (a whole file, so it holds with whole-file
     # overrides as well as with per-key ones)
-    poses = yaml.safe_load((ROBOTS / robot / 'poses.yaml').read_text())
-    poses[CELL_POSE] = {'joints': {'body_joint': 0.5}, 'elbow': 'up', 'tools': {
-        'left': {'tcp': [0.48, -0.295, 0.6], 'approach': [1.0, 0.0, 0.0], 'closing': [0.0, -1.0, 0.0]},
-        'right': {'tcp': [0.48, 0.295, 0.6], 'approach': [1.0, 0.0, 0.0], 'closing': [0.0, 1.0, 0.0]}}}
+    poses = yaml.safe_load((ROBOTS / robot / 'targets.yaml').read_text())
+    poses[CELL_POSE] = {'moves': 'hand', 'joints': {'torso': 0.5}, 'elbow': 'up',
+                        'left_tool': {'xyz': [0.48, -0.295, 0.6], 'rpy': [0.0, -1.570796, -3.141593]},
+                        'right_tool': {'xyz': [0.48, 0.295, 0.6], 'rpy': [0.0, 1.570796, 0.0]}}
     (cell / 'robots' / robot).mkdir(parents=True)
-    (cell / 'robots' / robot / 'poses.yaml').write_text(yaml.safe_dump(poses))
+    (cell / 'robots' / robot / 'targets.yaml').write_text(yaml.safe_dump(poses))
     store.reload()
-    assert store.robot_file_source(robot, 'poses.yaml')['source'] == 'override'
+    assert store.robot_file_source(robot, 'targets.yaml')['source'] == 'override'
     assert validate_plan(mission_plan(store, robot, CELL_POSE, tools=True), catalog(store, robot), store) == []
     assert validate_plan(mission_plan(store, robot, 'home'), catalog(store, robot), store) == []
 

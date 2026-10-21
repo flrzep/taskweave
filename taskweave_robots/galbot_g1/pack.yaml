@@ -1,6 +1,6 @@
 name: galbot_g1
 version: 0.2.3
-schema_version: 1
+schema_version: 2
 requires:
   taskweave: ">=0.2,<0.3"
 description: "Galbot G1: omnidirectional chassis, two 7-joint arms with grippers (no MoveIt config yet)"

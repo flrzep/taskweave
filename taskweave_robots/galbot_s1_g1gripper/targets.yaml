@@ -1,0 +1,21 @@
+# Named targets of the Galbot S1 with Galbot G1 grippers (joint and base-frame targets). A joint target (moves: joints)
+# sets joint groups directly (torso lift in m, head in rad, arms); a hand target (moves: hand) places each tool: the
+# canonical TCP (grasp centre, between the fingers) in base_link coordinates (x forward, y left, z up; base_link =
+# column base, 0.583 m above the floor), rpy = roll, pitch, yaw of the tool frame (z approach, y closing). The arm joints
+# of a hand target are solved by IK (MoveIt) when it is used. Partial joint targets list some groups only (d-pad lift
+# buttons). home is the only full target (it is also the driving pose). Targets for one cell's objects belong to the
+# cell pack (robots/galbot_s1_g1gripper/targets.yaml there).
+# From galbot_s1 (same arms), inside the vendor joint limits of moveit/robot.urdf (19 Oct).
+home:                           # galbot_s1's home: the same link7 poses (within 0.01 mm). The right arm cannot take the
+                                # left's values (vendor limit right_joint2 >= -1.745, left -1.865): solved inside the
+                                # limits on the URDF chain, joint 4 unchanged. Collision-free with the G1 grippers
+                                # open and closed (move_group /check_state_validity, 19 Oct).
+  moves: joints
+  joints:
+    torso: 0.494
+    head: [0.0, 0.0]
+    left_arm: [0.745, -1.865, -0.451, -1.752, -0.001, -0.473, -0.156]
+    right_arm: [0.725, -1.7253, -0.3178, -1.752, -0.1957, -0.4572, -0.3347]
+lift_high: {moves: joints, joints: {torso: 0.6}}
+lift_low: {moves: joints, joints: {torso: 0.1}}
+lift_carry: {moves: joints, joints: {torso: 0.5}} # home's lift height without moving the arms (allowed while holding)
