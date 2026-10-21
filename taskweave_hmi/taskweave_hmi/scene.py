@@ -4,7 +4,8 @@ The browser draws the robot from its URDF (``robots/<robot>/moveit/robot.urdf``,
 file names are rewritten to the server's ``/robot/meshes/<file>`` and the STL files are served from the URDF's
 ``meshes/`` folder. The scene combines what MoveIt avoids (the world collision objects of the planning scene, as
 the server last fetched them) with the config the robot works from (placed objects, locations, object points with
-their tool poses in the object frame). Object types have no served mesh yet: ``mesh`` is null and the browser draws
+their tool poses in the object frame; on a cell pack in the targets layout: the cell's base targets and the types' hand
+targets, points.object_points). Object types have no served mesh yet: ``mesh`` is null and the browser draws
 a marker.
 
 Quaternions in the JSON are [w, x, y, z] (three.js order is x, y, z, w: the viewer reorders); internally they are
