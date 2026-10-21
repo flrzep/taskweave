@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from taskweave_core.config import ConfigStore
+from taskweave_core.config import ConfigStore, target_store
 from taskweave_hmi import arm, held, points, robot, scene, targets
 
 FIXTURES = Path(__file__).resolve().parents[2] / 'taskweave_core' / 'test' / 'fixtures'
@@ -356,10 +356,30 @@ def test_the_lists_read_merged_targets_and_name_a_bad_one_instead_of_failing(sto
     stances.write_text(stances.read_text().replace('bay_2_stack_2_back: {pick: {x: -1.528, y: 0.0, yaw: 0.0}}',
                                                    'bay_2_stack_2_back: {pick: {x: -1.6}}'))
     poses = store.root / 'robots' / ROBOT / 'targets.yaml'
-    poses.write_text(poses.read_text() + 'bad: {moves: joints, joints: {head: [0.1]}}\n')
+    poses.write_text(poses.read_text() + 'bad: {moves: joints, joints: {head: [0.1]}}\n'
+                     'bad_held: {moves: object, xyz: [1.0, 0.0, 0.3], rpy: [0.0, 0.0, 0.0], joints: {head: [0.1]}}\n')
     again = fresh(store)
+    assert points.stance_offsets(again, ROBOT) == again.stance_offsets(ROBOT)      # the store's reader
     frame = next(o for o in points.overview(again, ROBOT)['objects'] if o['object'] == 'frame_type2')
     back = next(i for i in frame['instances'] if i['name'] == 'bay_2_stack_2_back')
     assert back['overrides'][0]['offset'] == {'x': -1.6, 'y': 0.0, 'yaw': 0.0}
     by_name = {p['name']: p for p in robot.overview(again, ROBOT, set())['poses']}
     assert 'has 2 joints' in by_name['bad']['problems'][0] and by_name['home']['problems'] == []
+    assert by_name['bad']['problems'][0] == target_store.pose_target_problems(again, ROBOT)['bad']
+    assert list(by_name)[-1] == 'bad' and by_name['bad']['joints'] == {}         # file order, listed with its problem
+    positions = {p['name']: p for p in arm.overview(again, ROBOT, set())['positions'] if p['scope'] == 'robot'}
+    assert 'has 2 joints' in positions['bad']['problems'][0]
+    held_names = {p['name'] for p in held.overview(again, ROBOT)}                # the store's reader skips it
+    assert 'carry' in held_names and 'bad_held' not in held_names
+    with pytest.raises(ValueError, match='has 2 joints'):                        # asked for by name: the error
+        again.named_pose(ROBOT, 'bad')
+
+
+def test_joints_keep_a_torso_word_and_a_joint_not_given_is_null(store):
+    poses = store.root / 'robots' / ROBOT / 'targets.yaml'
+    poses.write_text(poses.read_text() + 'lift_any_held: {moves: object, xyz: [0.7, 0.0, 0.3], rpy: [0.0, 0.0, 0.0], '
+                                         'joints: {torso: auto}}\n')
+    held.save(store, ROBOT, held.ANY_TYPE, 'lift_any_held', {'joints': {'head_joint2': 0.2},
+                                                              'path': [{'xyz': [0.7, 0, 0.35], 'rpy': [0, 0, 0]}]})
+    target = fresh(store).target('lift_any_held', ROBOT)
+    assert target.joints == {'head': [None, 0.2], 'torso': 'auto'} and target.data['xyz'] == [0.7, 0.0, 0.35]

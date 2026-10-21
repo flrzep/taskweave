@@ -17,7 +17,8 @@ import math
 from collections.abc import Mapping
 
 from taskweave_core.config import ConfigError, ConfigStore
-from taskweave_core.config.limits import joint_limits
+from taskweave_core.config.limits import joint_groups_of, joint_limits
+from taskweave_core.config.targets import GroupError
 
 from . import targets
 
@@ -175,8 +176,8 @@ def _save_object_target(store: ConfigStore, robot: str, obj: str, name: str, joi
     does not show (reference, a torso ``auto`` / ``keep``) are kept; a single pose stays one while it is one."""
     entry = _held_entry(store, robot, obj, name)
     try:
-        groups = targets.group_joints(store, robot, joints, entry.get('joints'))
-    except ValueError as error:
+        groups = joint_groups_of(store, robot, joints, keep=entry.get('joints'))
+    except GroupError as error:
         raise HeldError(str(error)) from error
     data = {k: v for k, v in entry.items() if k not in ('xyz', 'rpy', 'path', 'joints', 'type')}
     data['moves'] = 'object'

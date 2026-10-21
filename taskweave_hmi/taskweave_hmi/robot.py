@@ -21,7 +21,8 @@ from collections.abc import Iterable, Mapping
 from jsonschema import Draft202012Validator
 
 from taskweave_core.config import ConfigError, ConfigStore, schemas
-from taskweave_core.config.limits import joint_limits, joint_problems, mimic_joints, pose_problems
+from taskweave_core.config.limits import joint_groups_of, joint_limits, joint_problems, mimic_joints, pose_problems
+from taskweave_core.config.targets import GroupError
 
 from . import targets
 
@@ -293,8 +294,8 @@ def _save_pose_target(store: ConfigStore, robot: str, name: str, body: Mapping, 
     kind = _pose_kind(store, robot, name)
     entry = targets.plain_entry(store, robot, name)
     try:
-        groups = targets.group_joints(store, robot, joints, entry.get('joints'))
-    except ValueError as error:
+        groups = joint_groups_of(store, robot, joints, keep=entry.get('joints'))
+    except GroupError as error:
         raise RobotSettingsError(str(error)) from error
     tools = body.get('tools') or None
     if tools:

@@ -44,8 +44,9 @@ def robot_objects_file(robot: str, object_type: str = '<type>') -> str:
 
 
 def stance_offsets(store: ConfigStore, robot: str) -> dict:
-    """The robot's stances in the shape of stances.yaml (on a targets cell: its base targets on object types)."""
-    return targets.stance_offsets(store, robot) if targets.active(store) else store.stance_offsets(robot)
+    """The robot's stances in the shape of stances.yaml (on a targets cell the store's reader of its base targets on
+    object types: an instance override is merged with the type's layers, so one may give only some keys)."""
+    return store.stance_offsets(robot)
 
 
 def pose_dict(pose: Pose2D) -> dict:
