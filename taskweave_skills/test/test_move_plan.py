@@ -468,3 +468,25 @@ def test_the_result_names_the_kind_the_module_and_the_target(make):
                         move.modules['hand'])
     assert done.message == 'move hand box_1/rim (left, right): at box_1/rim (max error 0.004)'
     assert done.data['kind'] == 'hand' and done.data['target'] == 'box_1/rim'
+
+
+def test_the_editor_shapes_of_hand_torso_and_the_by_at_choice(make):
+    props = Move.args_schema['properties']
+    assert props['hand']['x-taskweave-widget'] == 'hands'
+    assert [list(option) for option in props['hand']['anyOf']] == [['type'], ['type', 'items', 'minItems',
+                                                                            'uniqueItems']]
+    assert props['torso']['anyOf'][0] == {'enum': ['auto', 'keep']} and props['torso']['anyOf'][1] == {'type': 'number'}
+    move = make()
+    narrowed = Move.schema_for(move.hands)['properties']['hand']
+    assert narrowed['anyOf'][0]['enum'] == ['all', 'left', 'right'] and narrowed['x-taskweave-widget'] == 'hands'
+    forms = {variant['required'][0]: variant for variant in Move.args_schema['oneOf']}
+    assert forms['hand']['x-taskweave-exclusive'] == forms['object']['x-taskweave-exclusive'] == ['by', 'at']
+    assert Move.args_schema['not']['required'] == ['by', 'at']
+    check = lambda step: validate_args(step, Move.schema_for(move.hands), move.config, 'duo_bot')   # noqa: E731
+    for torso in ('auto', 'keep', 0.2, [0.1, None]):
+        assert check({'hand': 'left', 'by': [0, 0, 0.1], 'torso': torso}) == [], torso
+    assert check({'hand': 'left', 'by': [0, 0, 0.1], 'torso': 'up'})
+    assert check({'hand': 'left', 'at': [0.3, 0.1, 1.0], 'rpy_deg': [0, 0, 0]}) == []
+    both = check({'hand': 'left', 'by': [0, 0, 0.1], 'at': [0.3, 0.1, 1.0]})
+    assert len(both) == 1 and 'give by or at, not both' in both[0], both
+    assert check({'object': 'held', 'by': [0, 0, 0.1], 'at': [0, 0, 0]})

@@ -17,13 +17,12 @@ from collections.abc import Mapping
 
 from . import placeholders
 from .config import ConfigError, ConfigStore
-from .config.targets import MOVES_WORD, TORSO, move_option_problems
+from .config.targets import MOVES_WORD, RELATIVE_OPTIONS, TORSO, move_option_problems
 
 MOVE_SKILL = 'move'
 RESOURCES = 'x-taskweave-resources'
 ORDER = ('base', 'hands', 'torso', 'joints')    # the vocabulary of resources, in the order a step lists them
 OPTIONS = ('hands', 'offset_m', 'reference', 'only', 'torso', 'tolerance_deg', 'motion')
-RELATIVE_OPTIONS = ('by', 'at', 'rpy_deg', 'frame', 'turn_deg', 'tilt_deg')
 RELATIVE_FORMS = ('hand', 'object')
 FORM_KEYS = (('hand', 'hand'), ('object', 'object'), ('base', 'straight'), ('elbow', 'elbow'), ('joints', 'joints'))
 KIND_OF_FORM = {'elbow': 'posture'}     # the option table says elbow, the result says posture
@@ -95,6 +94,7 @@ def move_problems(args: Mapping, store: ConfigStore, robot: str) -> list[tuple[l
     if target is not None and target.kind in ('hand', 'object') and target.frame == 'cell':
         add([], f'cell-frame {target.kind} targets are not supported yet')
     options = {key: args[key] for key in OPTIONS if key in args}
+    relative = form in RELATIVE_FORMS and target is None
     for option, value in options.items():
         if _unknown(value) and option != 'motion':
             continue
@@ -108,7 +108,7 @@ def move_problems(args: Mapping, store: ConfigStore, robot: str) -> list[tuple[l
             if speed:
                 add(['motion', 'speed_abs'], speed)
             continue
-        for text in move_option_problems(form, {option: value}):
+        for text in move_option_problems(form, {option: value}, relative, target is not None):
             if option == 'torso' and form in ('base', 'straight') and value == 'auto':
                 text = 'torso auto needs a hand or object target'
             add([option], text)
@@ -117,9 +117,6 @@ def move_problems(args: Mapping, store: ConfigStore, robot: str) -> list[tuple[l
         if 'hand' in args and 'hands' in args:
             add(['hands'], 'hand and hands are two spellings: give one (hand names the hands of a relative move, '
                            'hands filters the hands of a target)')
-        for key in ('offset_m', 'reference'):
-            if key in options:
-                add([key], f'option {key} does not apply to a relative move')
         torso = options.get('torso')
         if isinstance(torso, int | float | list) and not isinstance(torso, bool):
             add(['torso'], 'a relative move takes torso auto or keep (a value needs a target or joints)')
@@ -128,8 +125,6 @@ def move_problems(args: Mapping, store: ConfigStore, robot: str) -> list[tuple[l
             add([key], f'option {key} does not apply')
         if form == 'joints' and target is None and 'only' in options:
             add(['only'], 'option only applies to a joint target (to:)')
-    if form == 'object' and target is not None and options.get('hands') == 'any_one':
-        add(['hands'], 'option hands any_one does not apply')
     return problems
 
 

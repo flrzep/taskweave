@@ -73,7 +73,7 @@ def describe_offline(config_dir: str, robot: str) -> int:
     """Robot card from config alone: skills = those with an implementation that fits the robot."""
     from .config import ConfigStore
     from .embodiment import card_points, robot_card
-    from .skill_server import load_skill_class
+    from .skill import load_skill_class
 
     store = ConfigStore(config_dir)
     skills = []
@@ -109,7 +109,7 @@ def offline_catalog(store, robot: str) -> dict[str, dict]:
     import copy
 
     from .config.schemas import HAND_RULES, hands_schema
-    from .skill_server import load_skill_class
+    from .skill import load_skill_class
 
     hands = list(store.robot(robot).data.get('grippers', {}))
     catalog = {}
@@ -339,7 +339,7 @@ def _consistent(store, robot: str) -> None:
 
 
 def _importable(skill_config: dict) -> None:
-    from .skill_server import load_skill_class
+    from .skill import load_skill_class
 
     broken = []
     for implementation in skill_config.get('implementations', []):

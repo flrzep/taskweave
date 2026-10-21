@@ -305,6 +305,10 @@ def validate_args_structured(args: dict, schema: dict, store: ConfigStore, robot
                 problems.extend((base + list(e.path), e.message) for e in
                                 _sorted_errors(Draft202012Validator(error.schema['oneOf'][index]), error.instance))
             continue
+        exclusive = error.validator == 'not' and (error.schema.get('not') or {}).get('x-taskweave-exclusive')
+        if exclusive:   # keys of which only one may be given
+            problems.append((base, f'give {" or ".join(exclusive)}, not both'))
+            continue
         problems.append((base, error.message))
     seen = set()
     for path, kind, value, kinds in _point_checks(args, checked):

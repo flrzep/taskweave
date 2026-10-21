@@ -1250,3 +1250,19 @@ def test_the_delete_refusal_for_operators_does_not_name_the_code_argument(cell):
     with pytest.raises(TargetWriteError, match='still used by settings') as refused:
         ConfigStore(cell).delete_target('rails_top_steep', ROBOT, type='frame_type2')
     assert 'cascade' not in str(refused.value)
+
+
+def test_the_option_table_holds_the_relative_and_hands_rules():
+    assert model.RELATIVE_KEYS['hand']['at'] == ('at', 'rpy_deg') and model.RELATIVE_KEYS['object']['by'][0] == 'by'
+    assert model.move_option_problems('hand', {'offset_m': 0.1}, relative=True) == [
+        'move hand: option offset_m does not apply to a relative move'
+    ]
+    assert model.move_option_problems('object', {'reference': 'x', 'hands': 'all'}, relative=True) == [
+        'move object: option reference does not apply to a relative move'
+    ]
+    assert model.move_option_problems('hand', {'offset_m': 0.1}) == []
+    assert model.move_option_problems('object', {'hands': 'any_one'}, target=True) == [
+        'move object: option hands any_one does not apply'
+    ]
+    assert model.move_option_problems('hand', {'hands': 'any_one'}, target=True) == []
+    assert model.move_option_problems('object', {'hands': 'any_one'}) == []

@@ -410,6 +410,13 @@ MOTION_OPTIONS: dict[str, tuple[str, ...]] = {  # motion.<key> -> the forms it a
     'elbow': ('hand', 'object'),
     'approach_m': ('hand',),
 }
+RELATIVE_OPTIONS = ('by', 'at', 'rpy_deg', 'frame', 'turn_deg', 'tilt_deg')   # keys of a relative move (hand, object)
+RELATIVE_KEYS = {   # relative form -> by / at -> the keys that go with it (every other relative key is an error)
+    'hand': {'by': ('by', 'frame', 'turn_deg', 'tilt_deg'), 'at': ('at', 'rpy_deg')},
+    'object': {'by': ('by', 'turn_deg', 'tilt_deg'), 'at': ('at',)},
+}
+RELATIVE_NOT = ('offset_m', 'reference')   # options that do not apply to a relative move (hand / object by / at)
+TARGET_HANDS_NOT = {'object': ('any_one',)}   # hands values that do not apply to a target of this form
 MOTION_MODES = {'base': ('nav',), 'straight': ('straight',), 'hand': ('free', 'linear'), 'object': ('linear', 'free')}
 TORSO_VALUES = {
     'base': ('keep', 'number'),
@@ -420,11 +427,19 @@ TORSO_VALUES = {
 }
 
 
-def move_option_problems(form: str, options: dict) -> list[str]:
+def move_option_problems(form: str, options: dict, relative: bool = False, target: bool = False) -> list[str]:
     """What is wrong with the options of a move step that resolves to ``form`` (one of MOVE_FORMS): an option that
-    does not apply to it, a ``motion`` key or ``mode`` or ``torso`` value it does not take."""
+    does not apply to it, a ``motion`` key or ``mode`` or ``torso`` value it does not take. ``relative``: the step is
+    a relative move (``hand`` / ``object`` with by / at), RELATIVE_NOT do not apply; ``target``: it goes to a target
+    (``to``), the ``hands`` values of TARGET_HANDS_NOT do not apply."""
     problems = []
     for option, value in options.items():
+        if relative and option in RELATIVE_NOT:
+            problems.append(f'move {form}: option {option} does not apply to a relative move')
+            continue
+        if target and option == 'hands' and value in TARGET_HANDS_NOT.get(form, ()):
+            problems.append(f'move {form}: option hands {value} does not apply')
+            continue
         forms = MOVE_OPTIONS.get(option)
         if forms is not None and form not in forms:
             problems.append(f'move {form}: option {option} does not apply')
