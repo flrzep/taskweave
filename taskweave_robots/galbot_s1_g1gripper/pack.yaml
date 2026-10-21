@@ -1,5 +1,5 @@
 name: galbot_s1_g1gripper
-version: 0.2.2
+version: 0.2.3
 schema_version: 1
 requires:
   taskweave: ">=0.2,<0.3"

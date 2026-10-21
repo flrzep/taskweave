@@ -2,6 +2,10 @@
 Changelog for package taskweave_core
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.3 (2026-10-21)
+------------------
+* See CHANGELOG.md at the repository root.
+
 0.2.2 (2026-10-21)
 ------------------
 * See CHANGELOG.md at the repository root.

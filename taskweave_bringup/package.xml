@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypelocation="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>taskweave_bringup</name>
-  <version>0.2.2</version>
+  <version>0.2.3</version>
   <description>taskweave bring-up: launch files that start taskweave, the web HMI, Nav2 and MoveIt for any robot pack, with robot and cell data from the packs. Simulator or hardware parts stay with the application.</description>
   <maintainer email="f.rzepczyk@gmail.com">Florian Rzepczyk</maintainer>
   <license>TBD</license>

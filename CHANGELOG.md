@@ -12,6 +12,21 @@
   without them the old behaviour stays.
 - `motion_tuning.follow: {swivel_rad, swivel_steps}` (defaults 1.0, 4).
 
+## 0.2.3 — 2026-10-21
+
+### Held objects and the torso
+- **A torso change while holding moves the holding arms too** (F16): the arms are re-solved at the new height (near the
+  current solution, `motion_tuning.follow`), the object rides the column, and the grip drift is checked along the
+  path. Before, the arms stayed frozen and a held torso drop could end in a collision (on the Galbot S1 the elbows hit
+  the chassis below torso 0.25, so `set_down` never planned).
+- **Torso search:** one height for a whole held path (every leg walked as the move will); the line and look-ahead
+  checks now really use the candidate height in their collision check (they used the current one before);
+  refinement of the grid near a narrow feasible band (`ik.torso.refine`); `data.torso` also on failed results.
+
+### Galbot S1 cell (frame cell config, not in this repo)
+- `frame_type2` has a collision shape (7 boxes); `set_down` levels the frame first and runs at torso 0.27 (the only
+  torso value still set by hand); the frame cycle and the one-hand test run without hand-set torso values.
+
 ## 0.2.2 — 2026-10-21
 
 ### Torso chosen by IK
