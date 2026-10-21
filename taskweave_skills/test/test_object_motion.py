@@ -414,3 +414,144 @@ def test_a_held_pose_that_sets_the_torso_keeps_it_with_torso_auto(system):
     hold_box(system)
     _, data = move(system, {'pose': 'carry'}, motion={'mode': 'free', 'torso': 'auto'})
     assert system.sim.position['lift'] == pytest.approx(0.1, abs=0.03) and 'torso' not in data
+
+
+# ---- F16: a torso change while holding is one whole-body motion ---------------------------------------------------
+
+class RecordingPlanner:
+    """Stands in for MoveIt's planner: records every (goal, keep) it is asked for, the straight move is free."""
+    direct = False
+
+    def __init__(self):
+        self.calls = []
+
+    def plan(self, start, goal, stop=None, keep=None):
+        self.calls.append((dict(goal), keep))
+
+    def free(self, *args):
+        return True
+
+    def violation(self, path, keep):
+        return None
+
+
+def held_with_column(system, skill='move_object'):
+    """Both hands on the crate, the test robot's URDF chains faked (a lift on z carrying both hands), a recording
+    planner on ``skill``. Returns (planner, the arm joints before)."""
+    from taskweave_skills.chain import Chain, Joint
+
+    with_ik_torso(system)
+    hold_box(system)
+    column = Joint('lift', 'prismatic', np.eye(4), np.array([0.0, 0.0, 1.0]), 'column')
+    for name in ('move_object', 'move_joints'):
+        server_skill = system.server.skills[name]
+        server_skill.ik.chains = {hand: (Chain([column]), []) for hand in HANDS}
+        server_skill.planner = RecordingPlanner() if name == skill else None
+    return system.server.skills[skill].planner, dict(system.sim.position)
+
+
+def arms(goal):
+    return {n for n in goal if n.endswith(('joint1', 'joint2'))}
+
+
+def test_a_held_torso_change_is_one_whole_body_goal_with_the_arms_re_solved(system):
+    planner, _ = held_with_column(system)
+    tcps = system.hold.tcp_poses(list(HANDS))
+    move(system, {'pose': 'carry'}, motion={'mode': 'free'})
+    goal, keep = planner.calls[0]
+    assert goal['lift'] == pytest.approx(0.1) and arms(goal) == {f'{h}_joint{i}' for h in HANDS for i in (1, 2)}
+    for hand, tcp in tcps.items():     # the grip stays: the hand rides the column up by the torso delta
+        assert [goal[f'{hand}_joint1'], goal[f'{hand}_joint2']] == pytest.approx([tcp[0, 3], tcp[2, 3] + 0.1], abs=1e-3)
+    assert not keep, 'the holding hands are exempt from keep for the torso segment'
+    targets = [r for r in system.ik.requests if r['start'].get('lift') == pytest.approx(0.1)]
+    assert {r['group'] for r in targets} >= {'left_arm', 'right_arm'}     # solved at the target torso
+
+
+def test_the_hands_target_the_object_shifted_along_the_column(system):
+    planner, _ = held_with_column(system)
+    before = system.hold.held()['object_in_base'].copy()
+    skill = system.server.skills['move_object']
+    seen = {}
+    original = skill.ik.solve
+
+    def spy(tools, fixed, *args, **kwargs):
+        seen.setdefault('tools', tools), seen.setdefault('fixed', fixed)      # the first solve: the torso segment's
+        return original(tools, fixed, *args, **kwargs)
+    skill.ik.solve = spy
+    move(system, {'pose': 'carry'}, motion={'mode': 'free'})
+    assert seen['fixed'] == {'lift': pytest.approx(0.1)}
+    grips = system.hold.held()['tcp_in_object']
+    for hand in HANDS:     # base_T_obj' . obj_T_tcp with obj' = obj shifted up by the delta
+        want = (before @ grips[hand])[:3, 3] + [0.0, 0.0, 0.1]
+        assert np.allclose(seen['tools'][hand]['tcp'], want, atol=1e-6)
+
+
+def test_an_unchanged_torso_keeps_the_old_path_with_the_arms_kept(system):
+    planner, _ = held_with_column(system)
+    move(system, {'pose': 'carry'}, motion={'mode': 'free'})
+    planner.calls.clear()
+    move(system, {'pose': 'carry'}, motion={'mode': 'free'})      # the lift is there already
+    goal, keep = planner.calls[0]
+    assert not arms(goal) and set(goal) == {'lift'}
+    assert {n for n in keep if n.endswith(('joint1', 'joint2'))} == {f'{h}_joint{i}' for h in HANDS for i in (1, 2)}
+
+
+def test_without_chains_the_torso_goal_stays_as_it_was(system):
+    planner, _ = held_with_column(system)
+    for name in ('move_object', 'move_joints'):
+        system.server.skills[name].ik.chains = {}
+    move(system, {'pose': 'carry'}, motion={'mode': 'free'})
+    goal, keep = planner.calls[0]
+    assert not arms(goal) and keep
+
+
+def test_a_hand_that_cannot_follow_the_torso_fails_before_moving(system):
+    planner, _ = held_with_column(system)
+    system.ik.blocked = {'left'}
+    result, _ = move(system, {'pose': 'carry'}, FAILED, motion={'mode': 'free'})
+    assert 'follow the torso' in result.message and not planner.calls and system.sim.position['lift'] == 0.0
+
+
+def test_move_joints_with_a_torso_goal_moves_the_holding_arms_too(system):
+    planner, before = held_with_column(system, 'move_joints')
+    assert run(system, 'move_joints', {'joints': {'lift': 0.1}}).outcome == OK
+    goal, keep = planner.calls[0]
+    assert arms(goal) and not keep
+    assert goal['left_joint2'] == pytest.approx(before['left_joint2'] + 0.1, abs=1e-3)
+
+
+def test_a_linear_move_object_with_torso_auto_lifts_the_arms_with_the_torso(system):
+    planner = RecordingPlanner()
+    with_ik_torso(system)
+    hold_box(system)
+    from taskweave_skills.chain import Chain, Joint
+    column = Joint('lift', 'prismatic', np.eye(4), np.array([0.0, 0.0, 1.0]), 'column')
+    skill = system.server.skills['move_object']
+    skill.ik.chains, skill.planner = {hand: (Chain([column]), []) for hand in HANDS}, planner
+    from taskweave_skills.ik import TorsoChoice
+    skill._torso_choice = lambda *args, **kwargs: TorsoChoice(0.2, {'lift': 0.2}, {}, set(), 0.0)   # the search
+    skill._linear = lambda ctx, tools, label, goals=None: (None, 0.0)    # the fake chains cannot walk a line
+    run(system, 'move_object', {'to': {'by': [0.0, 0.0, 0.1]}, 'motion': {'mode': 'linear', 'torso': 'auto'}})
+    goal, keep = planner.calls[0]
+    assert goal['lift'] == pytest.approx(0.2) and arms(goal) and not keep
+
+
+def test_the_torso_follow_ik_also_starts_from_the_arm_with_its_swivel_turned(system):
+    held_with_column(system)
+    skill = system.server.skills['move_object']
+    seen = {}
+    original = skill.ik.solve
+
+    def spy(tools, fixed, *args, **kwargs):
+        seen.setdefault('nearby', kwargs.get('nearby'))
+        return original(tools, fixed, *args, **kwargs)
+    skill.ik.solve = spy
+    move(system, {'pose': 'carry'}, motion={'mode': 'free'})
+    assert seen['nearby'] is True
+    skill.ik.arms = {'left': {'swivel': 'left_joint1'}}
+    now = {'left_joint1': 0.5, 'left_joint2': 0.2, 'right_joint1': 0.1}
+    seeds = skill.ik._swivelled('left', now)
+    follow = skill.ik.tuning['follow']
+    assert len(seeds) == 2 * follow['swivel_steps'] and {s['left_joint2'] for s in seeds} == {0.2}
+    assert max(s['left_joint1'] for s in seeds) == pytest.approx(0.5 + follow['swivel_rad'])
+    assert 'right_joint1' not in seeds[0] and skill.ik._swivelled('right', now) == []

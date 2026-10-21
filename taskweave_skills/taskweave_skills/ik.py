@@ -354,12 +354,17 @@ class IkClient:
         return future.result().valid
 
     def solve(self, tools: dict, fixed: dict, should_stop=lambda: False, current: dict | None = None,
-              allow_flip: bool = True, elbow=None, global_search: bool = True) -> dict[str, float]:
+              allow_flip: bool = True, elbow=None, global_search: bool = True,
+              nearby: bool = False) -> dict[str, float]:
         """Joint values for every tool target (plus nothing else); raises IkError. ``current``: the joints now, for
         the size-of-move cost when choosing. ``allow_flip`` False: solve the targets as given (no flipped grasp).
         ``elbow``: preferred elbow side for this solve (e.g. an object point's), else the profile's.
-        ``global_search`` False: no fallback to the global solver (slow, and its answer is not repeatable)."""
-        memo = getattr(self, 'memo', {}).get(self._memo_key(tools, fixed, current, allow_flip, elbow))
+        ``global_search`` False: no fallback to the global solver (slow, and its answer is not repeatable).
+        ``nearby``: descend only from the current arm and from it with its swivel joint turned (motion_tuning
+        follow), no profile seeds: the solution stays close to the current configuration, the elbow clear when the
+        nearest branch starts in collision (a hand following the torso: the grip must hold on the way)."""
+        key = None if nearby else self._memo_key(tools, fixed, current, allow_flip, elbow)
+        memo = getattr(self, 'memo', {}).get(key)
         if memo is not None:    # the torso search solved exactly this
             self.elbow_side = elbow or (self.choose or {}).get('elbow')
             self.last = {t: dict(v) for t, v in memo[1].items()}
@@ -393,11 +398,12 @@ class IkClient:
                 chosen[tool] = continued
                 result.update(continued)
                 continue
-            local = [(self.groups[tool], seed, self.timeout_s) for seed in [*self.seeds, here]]
+            local = [(self.groups[tool], seed, self.timeout_s)
+                     for seed in ([here, *self._swivelled(tool, current)] if nearby else [*self.seeds, here])]
             image = self._mirrored(tool, chosen)
             if image:
                 local.insert(0, (self.groups[tool], image, self.timeout_s))
-            if self.choose is not None:
+            if self.choose is not None and not nearby:
                 local += [(self.groups[tool], start, float(self.choose.get('start_timeout_s', START_TIMEOUT_S)))
                           for start in self._starts(tool)]
             fallback = [(self.fallback_groups[tool], {}, self.fallback_timeout_s)] if global_search and \
@@ -615,6 +621,27 @@ class IkClient:
             cost += (weights['limits'] * info.get('limit_cost', 0.0) + weights['motion'] * motion
                      + weights['elbow'] * math.radians(info.get('elbow_deg', 0.0)) / math.pi)
         return cost
+
+    def _swivelled(self, tool: str, current: dict | None) -> list[dict]:
+        """The arm of ``tool`` as it is now with its swivel joint (profile arms.<tool>.swivel) turned both ways in
+        steps up to motion_tuning follow.swivel_rad; none without a swivel joint."""
+        joint = (self.arms.get(tool) or {}).get('swivel')
+        if not joint or joint not in (current or {}):
+            return []
+        arm = {n: float(v) for n, v in current.items() if re.fullmatch(self.joint_pattern.format(tool=tool), n)}
+        follow = self.tuning['follow']
+        steps = int(follow['swivel_steps'])
+        return [{**arm, joint: arm[joint] + sign * follow['swivel_rad'] * i / steps}
+                for i in range(1, steps + 1) for sign in (1, -1)]
+
+    def joint_motion(self, joint: str, state: dict, new: float) -> np.ndarray | None:
+        """What moving ``joint`` to ``new`` does to what it carries (4x4, base frame; chain.joint_motion), None
+        without a chain that has it."""
+        for chain, _ in getattr(self, 'chains', {}).values():
+            motion = chain.joint_motion(state, joint, new)
+            if motion is not None:
+                return motion
+        return None
 
     def tcps_at(self, tools, state: dict) -> dict[str, np.ndarray]:
         """TCP poses (4x4, base frame) of ``tools`` for the joints in ``state`` (chains only; tools without a chain

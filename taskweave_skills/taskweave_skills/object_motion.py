@@ -24,7 +24,6 @@ rewrites missions and skills/move_object.yaml, set_posture.yaml is new.
 from __future__ import annotations
 
 import copy
-import itertools
 
 import numpy as np
 
@@ -33,7 +32,7 @@ from taskweave_core.config.schemas import ELBOW_SIDES, VEC3, hands_schema, motio
 from taskweave_core.skill import SkillResult
 
 from .gripper_motion import RESOURCES, MoveGripper, Target, hands_arg
-from .joints import SWING_STRAIGHT_STEPS, _ObjectMotion, interpolate
+from .joints import _ObjectMotion
 
 OBJECT_MODE = 'linear'                    # the mode of move_object whose yaml has no ``motion.mode``
 HOLD_RULES = ('auto', 'all')              # hands words of the held-object skills: the hold's hands, all hands
@@ -44,7 +43,6 @@ class _HeldMotion(MoveGripper, _ObjectMotion):
     the held-object helpers of the old move_object."""
 
     hand_rules = HOLD_RULES
-    drift_hands: tuple = ()        # hands whose distances _move watches (free move_object with several hands)
 
     def setup(self, node, config, robot, params):
         super().setup(node, config, robot, params)
@@ -294,54 +292,6 @@ class MoveObject(_HeldMotion):
                 return step
             _, worst, kind = step
         return label, worst, kind
-
-    # ---- the grip stays: free paths of several hands -----------------------------------------------------------
-    def _move(self, ctx, goal: dict, label: str, stall_ok: bool = False, path=None):
-        if self.drift_hands:
-            failure = self._drift(goal, path, label)
-            if failure is not None:
-                return failure, None
-        return super()._move(ctx, goal, label, stall_ok, path)
-
-    def _drift(self, goal: dict, path, label: str):
-        """A FAILED result if on the way to ``goal`` (a planned ``path``, else the straight joint move) the distances
-        between the hands change by more than p.grip_drift_m: the hands would pull at, or let go of, the object."""
-        start = self._start()
-        if start is None:
-            return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)')
-        hands = list(self.drift_hands)
-        if path is None:
-            states = [{**start, **interpolate(start, goal, k / SWING_STRAIGHT_STEPS)}
-                      for k in range(SWING_STRAIGHT_STEPS + 1)]
-        else:      # joints the planner did not move go straight alongside (_move)
-            rest = {n: v for n, v in goal.items() if n not in path.names}
-            states = [{**start, **interpolate(start, rest, t / path.duration if path.duration else 1.0),
-                       **dict(zip(path.names, row, strict=True))} for t, row in zip(path.times, path.points,
-                                                                                      strict=True)]
-        poses = [self._tcp_fk(state, hands) for state in states]
-        if poses[0] is None:
-            return SkillResult.rejected(f'{label}: the hands of a free move need the robot\'s URDF chains to be '
-                                        'checked for drifting apart: use mode linear')
-        worst = 0.0
-        for first, second in itertools.combinations(hands, 2):
-            gap = [float(np.linalg.norm(pose[first][:3, 3] - pose[second][:3, 3])) for pose in poses]
-            worst = max(worst, *(abs(g - gap[0]) for g in gap))
-        if worst > self.p.grip_drift_m:
-            return SkillResult.failed(f'{label}: the hands would drift apart on a free path ({worst:.3f} m); '
-                                      'use mode linear')
-        return None
-
-    def _tcp_fk(self, positions: dict, hands: list) -> dict | None:
-        """{hand: TCP pose (4x4, base frame)} for the joints ``positions`` (every joint), from the URDF chains; None
-        if a hand has no chain."""
-        from .ik import rpy_matrix
-
-        chains = getattr(self.ik, 'chains', None) or {}
-        if any(hand not in chains for hand in hands):
-            return None
-        return {hand: chains[hand][0].fk(positions) @ rpy_matrix(self.ik.tools[hand].get('xyz', [0, 0, 0]),
-                                                                 self.ik.tools[hand].get('rpy', [0, 0, 0]))
-                for hand in hands}
 
 
 class SetPosture(_HeldMotion):

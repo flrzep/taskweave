@@ -139,9 +139,15 @@ class MoveJoints(_PoseMotion):
         start = self._start()
         if start is None:
             return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)'), 0
-        if self.planner is not None and not self.planner.free(start, goal, lambda: ctx.should_stop):
-            return SkillResult.failed(f'{label}: the straight joint move is blocked (planner: direct)'), 0
-        result, final = self._move(ctx, goal, label)
+        goal, failure = self._widen(ctx, goal, label)
+        if failure is not None:
+            return failure, 0
+        try:
+            if self.planner is not None and not self.planner.free(start, goal, lambda: ctx.should_stop):
+                return SkillResult.failed(f'{label}: the straight joint move is blocked (planner: direct)'), 0
+            result, final = self._move(ctx, goal, label)
+        finally:
+            self.drift_hands = ()
         if result is not None:
             return result, 0
         return None, max(abs(goal[n] - final[n]) for n in goal)

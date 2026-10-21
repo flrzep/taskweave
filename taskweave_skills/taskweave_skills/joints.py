@@ -19,6 +19,7 @@ old move_object) were removed with the migration to the new skill model (taskwea
 from __future__ import annotations
 
 import functools
+import itertools
 import math
 import threading
 import time
@@ -366,6 +367,56 @@ class _PoseMotion(_JointSkill):
             from .motion_plan import MotionPlanner
             self.planner = MotionPlanner(node, robot)
 
+    # ---- the grip stays: free paths of several hands -----------------------------------------------------------
+    drift_hands: tuple = ()        # hands whose distances _move watches (several hands holding one object)
+
+    def _move(self, ctx, goal: dict, label: str, stall_ok: bool = False, path=None):
+        if self.drift_hands:
+            failure = self._drift(goal, path, label)
+            if failure is not None:
+                return failure, None
+        return super()._move(ctx, goal, label, stall_ok, path)
+
+    def _drift(self, goal: dict, path, label: str):
+        """A FAILED result if on the way to ``goal`` (a planned ``path``, else the straight joint move) the distances
+        between the hands change by more than p.grip_drift_m: the hands would pull at, or let go of, the object."""
+        start = self._start()
+        if start is None:
+            return SkillResult.failed(f'no joint states on {self.joints.state_topic} (robot or sim not running?)')
+        hands = list(self.drift_hands)
+        if path is None:
+            states = [{**start, **interpolate(start, goal, k / SWING_STRAIGHT_STEPS)}
+                      for k in range(SWING_STRAIGHT_STEPS + 1)]
+        else:      # joints the planner did not move go straight alongside (_move)
+            rest = {n: v for n, v in goal.items() if n not in path.names}
+            states = [{**start, **interpolate(start, rest, t / path.duration if path.duration else 1.0),
+                       **dict(zip(path.names, row, strict=True))} for t, row in zip(path.times, path.points,
+                                                                                      strict=True)]
+        poses = [self._tcp_fk(state, hands) for state in states]
+        if poses[0] is None:
+            return SkillResult.rejected(f'{label}: the hands of a free move need the robot\'s URDF chains to be '
+                                        'checked for drifting apart: use mode linear')
+        worst = 0.0
+        for first, second in itertools.combinations(hands, 2):
+            gap = [float(np.linalg.norm(pose[first][:3, 3] - pose[second][:3, 3])) for pose in poses]
+            worst = max(worst, *(abs(g - gap[0]) for g in gap))
+        if worst > self.p.grip_drift_m:
+            return SkillResult.failed(f'{label}: the hands would drift apart on a free path ({worst:.3f} m); '
+                                      'use mode linear')
+        return None
+
+    def _tcp_fk(self, positions: dict, hands: list) -> dict | None:
+        """{hand: TCP pose (4x4, base frame)} for the joints ``positions`` (every joint), from the URDF chains; None
+        if a hand has no chain."""
+        from .ik import rpy_matrix
+
+        chains = getattr(self.ik, 'chains', None) or {}
+        if any(hand not in chains for hand in hands):
+            return None
+        return {hand: chains[hand][0].fk(positions) @ rpy_matrix(self.ik.tools[hand].get('xyz', [0, 0, 0]),
+                                                                 self.ik.tools[hand].get('rpy', [0, 0, 0]))
+                for hand in hands}
+
     def _refresh_ik(self) -> None:
         """The profile's current ik.choose (edited in the HMI) for the next solve."""
         if self.ik is not None:
@@ -419,6 +470,46 @@ class _PoseMotion(_JointSkill):
         arms for; if the straight move is blocked, the elbows swing there first (_swing_first). ``planner``: auto: as
         said; direct: the straight joint move only, failing if it is blocked; planned: always the planner. Sets
         ``path_kind`` (direct, swing_first, planned). Returns (failure or None, worst joint error at the end)."""
+        goal, failure = self._widen(ctx, goal, label)
+        if failure is not None:
+            return failure, 0
+        try:
+            return self._go_to(ctx, goal, label, elbow, planner)
+        finally:
+            self.drift_hands = ()
+
+    def _widen(self, ctx, goal: dict, label: str):
+        """(goal, failure): a torso change while hands hold objects is one whole-body motion. The torso carries the
+        objects (the grips stay), so each holding hand's TCP goes to ``base_T_obj' . obj_T_tcp``, ``obj'`` being the
+        object shifted by what the torso joint does to what it carries (URDF chains); the arms are solved by IK at the
+        goal torso and join ``goal`` (the planner would else keep them as they are, and at some torso heights that
+        pose is in collision). Several hands: ``drift_hands`` is set, the free path must keep their distances. Else
+        ``goal`` as it is (no torso change, nothing held, an arm of the goal's own, no chains)."""
+        from .ik import IkError
+        from .points import target_of
+
+        torso = ((self.ik.torso if self.ik is not None else None) or {}).get('joint')
+        holds = self.hold.held_all()
+        if torso not in goal or not holds or set(self._hands_moved(set(goal) - {torso})) & set(self.hold.hand_holds):
+            return goal, None
+        start = self._start()
+        if start is None or torso not in start or abs(goal[torso] - start[torso]) <= self.p.position_tolerance:
+            return goal, None
+        column = self.ik.joint_motion(torso, start, goal[torso])
+        if column is None:
+            return goal, None
+        tools = {hand: target_of(column @ hold['object_in_base'] @ grip) for hold in holds
+                 for hand, grip in hold['tcp_in_object'].items()}
+        try:
+            arms = self.ik.solve(tools, {n: v for n, v in goal.items() if n not in self._arm_joints(goal)},
+                                 lambda: ctx.should_stop, current=start, allow_flip=False, nearby=True)
+        except IkError as error:
+            return goal, SkillResult.failed(f'{label}: {" and ".join(tools)} cannot follow the torso to '
+                                            f'{goal[torso]:g}: {error}')
+        self.drift_hands = tuple(tools) if len(tools) > 1 else ()
+        return {**goal, **arms}, None
+
+    def _go_to(self, ctx, goal: dict, label: str, elbow, planner):
         from .motion_plan import PlanError
 
         path = None

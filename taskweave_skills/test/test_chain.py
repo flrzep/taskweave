@@ -1,7 +1,9 @@
+import math
+
 import numpy as np
 import pytest
 
-from taskweave_skills.chain import Chain, pose_error
+from taskweave_skills.chain import Chain, Joint, pose_error
 
 AXES = ['0 0 1', '0 1 0', '0 0 1', '0 1 0', '0 0 1', '0 1 0', '0 0 1']
 JOINTS = ''.join(f"""
@@ -92,3 +94,14 @@ def test_the_step_uses_the_chains_tuning(tmp_path):
     target[:3, 3] += [0.05, 0.0, 0.0]
     joints, _ = small.solve_step(START, target, NAMES, LIMITS)
     assert max(abs(joints[n] - START[n]) for n in NAMES) == pytest.approx(0.01)   # the step is capped there
+
+
+def test_a_joint_motion_is_what_the_joint_does_to_everything_it_carries():
+    lift = Joint('lift', 'prismatic', np.eye(4), np.array([0.0, 0.0, 1.0]), 'column')
+    turn = Joint('turn', 'revolute', np.eye(4), np.array([0.0, 0.0, 1.0]), 'head')
+    column = Chain([lift, turn])
+    move = column.joint_motion({'lift': 0.5, 'turn': 0.0}, 'lift', 0.1)
+    assert np.allclose(move[:3, :3], np.eye(3)) and np.allclose(move[:3, 3], [0.0, 0.0, -0.4])
+    spin = column.joint_motion({'lift': 0.5, 'turn': 0.0}, 'turn', math.pi / 2)
+    assert np.allclose(spin @ [1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0])
+    assert column.joint_motion({}, 'nope', 1.0) is None

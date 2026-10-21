@@ -52,6 +52,10 @@ MOTION_TUNING_DEFAULTS = {
         'elbow_deg': 90.0,        # a continuation ending with the elbow further off its side loses to the IK search
         'jump_deg': 120.0,        # a joint turning more than this for a short move (no continuation) is logged
     },
+    'follow': {                   # hands holding an object follow a torso change (joints._widen, ik.solve nearby)
+        'swivel_rad': 1.0,        # IK also starts from the current arm with its swivel joint turned up to this far ...
+        'swivel_steps': 4,        # ... both ways, in this many steps (a solution near the current arm, elbows clear)
+    },
     'plan': {                     # collision-free joint motion (motion_plan.MotionPlanner)
         'tries': 3,               # planning requests when MoveIt's answer is worth a retry
         'deeper_m': 0.005,        # an escape from a start in contact may push a contact no deeper than this more

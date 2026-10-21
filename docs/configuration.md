@@ -354,7 +354,7 @@ the schema does not reject other keys (an old profile may carry `group` or `tool
 jog turns (e.g. the upper-arm roll): without a URDF the jog turns it and IK puts the TCP back (an arm without it has no
 elbow jog then); with a URDF it only sets which way is positive. `motion_tuning` holds the step sizes and thresholds of
 the arm motion code, grouped as `chain` (damped least-squares step), `line` (straight-line steps), `elbow` (elbow side
-and swing), `continuation` (short moves continue the arm's configuration) and `plan` (planner retries, contact depth);
+and swing), `continuation` (short moves continue the arm's configuration), `follow` (hands holding an object follow a torso change: IK also starts from the arm with its swivel joint turned) and `plan` (planner retries, contact depth);
 the schema documents each key and its default. They are read when the skills start (restart frame-ros after a change).
 
 ## Robot description (embodiment)

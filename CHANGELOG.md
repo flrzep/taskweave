@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Held torso change moves the arms too (F16)
+- A torso change while a hand holds an object (a held pose's `joints`, `move_object` with `torso: auto` before a
+  straight line, `move_joints` with a torso goal) is one whole-body motion: each holding hand's TCP goes to
+  `base_T_obj' . obj_T_tcp` (the object rides the column, the grip stays), the arms are solved by IK at the goal torso
+  starting from the current arm and from it with its swivel joint turned, and the planner gets the full joint goal.
+  Before, the holding arms were frozen in their carry posture, which at a low torso put the elbows in the chassis
+  (goal invalid, since 0.1.0). Several holding hands: the path is checked for `grip_drift_m`. Needs the URDF chains;
+  without them the old behaviour stays.
+- `motion_tuning.follow: {swivel_rad, swivel_steps}` (defaults 1.0, 4).
+
 ## 0.2.2 — 2026-10-21
 
 ### Torso chosen by IK

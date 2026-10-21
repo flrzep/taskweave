@@ -107,6 +107,18 @@ class Chain:
     def fk(self, positions: dict[str, float]) -> np.ndarray:
         return self.frames(positions)[1]
 
+    def joint_motion(self, positions: dict[str, float], joint: str, new: float) -> np.ndarray | None:
+        """4x4 (base frame) of what moving ``joint`` from its value in ``positions`` to ``new`` does to everything it
+        carries (a lift: a shift along its axis); None if the joint is not on the chain."""
+        movable = [j for j in self.joints if j.kind != 'fixed']
+        found = next((i for i, j in enumerate(movable) if j.name == joint), None)
+        if found is None:
+            return None
+        frame, one = self.frames(positions)[0][found], movable[found]
+        step = _transform(one.kind, one.axis, new) @ np.linalg.inv(_transform(one.kind, one.axis,
+                                                                              float(positions.get(joint, 0.0))))
+        return frame @ step @ np.linalg.inv(frame)
+
     def link_points(self, positions: dict[str, float], links) -> list[np.ndarray]:
         """Origins (base frame) of the named links of the chain; KeyError for a link not on it."""
         pose, found = np.eye(4), {}

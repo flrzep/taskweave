@@ -64,6 +64,7 @@ motion_tuning:              # how the arm motion code steps (taskweave schemas.M
   elbow: {rate_rad: 0.03, settled_rad: 0.1, swing_max_steps: 200, via_out_deg: 150.0, via_out_until_deg: 120.0,
           probe_rad: 0.01, progress_rad: 0.0001, limit_edge_parts: 5}
   continuation: {max_m: 0.25, max_deg: 45.0, elbow_deg: 90.0, jump_deg: 120.0}   # short moves: no wrist flips
+  follow: {swivel_rad: 1.0, swivel_steps: 4}   # hands holding an object follow a torso change: IK also from the arm with its swivel turned
   plan: {tries: 3, deeper_m: 0.005, unknown_depth_m: 0.3}
 cameras:
   head: {color: /head_camera/color/image_raw, depth: /head_camera/aligned_depth_to_color/image_raw, info: /head_camera/color/camera_info, frame: head_camera_optical_frame}
