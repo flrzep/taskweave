@@ -7,19 +7,19 @@ taskweave runs robot tasks on ROS 2 Jazzy, driven entirely by YAML.
 - A **planner** turns a goal into steps (today: a mission file; later: a VLM).
 - The **task handler** validates the plan, runs the steps, applies retry / replan / skip / abort and publishes status.
 - **Skills** do one step each behind the `RunSkill` action and address the robot through roles of its profile.
-- **Config** holds every name, point, number and rule: a **cell pack** (the work cell) plus **robot packs** (one per model).
+- **Config** holds every name, target, number and rule: a **cell pack** (the work cell) plus **robot packs** (one per model).
 - A global **speed override** (1-100 %, test mode) scales every skill; a **smoke test** replays a mission against a reference.
 
 ## Repo map
 | Path | Contents |
 |---|---|
 | `taskweave_interfaces/` | msgs, srvs, `RunSkill` action (CMake package) |
-| `taskweave_core/taskweave_core/` | `config/` (store, schemas, packs, overlay, catalogue, check, save, migrate*, slim, packfile), `planner.py`, `executive.py`, `task_handler.py`, `skill.py` (base class), `skill_server.py`, `clock_jump.py`, `validation.py`, `motion.py` (motion option resolution), `speed.py`, `speed_gate.py`, `smoke.py`, `teach.py`, `operator_joy.py`, `cli.py` |
-| `taskweave_skills/taskweave_skills/` | the generic skills: `basic` (wait), `navigate`, `drive`, `joint_motion`, `gripper_motion`, `object_motion`; helpers `joints`, `ik`, `chain`, `cartesian`, `motion_plan`, `hold`, `points`, `tcp_jog`, `nav2` |
+| `taskweave_core/taskweave_core/` | `config/` (store, schemas, packs, overlay, catalogue, check, save, `targets` / `target_store` / `target_edit` (the target model, reading, writing), migrate*, slim, packfile), `planner.py`, `executive.py`, `task_handler.py`, `skill.py` (base class), `skill_server.py`, `clock_jump.py`, `validation.py`, `motion.py` (motion option resolution), `speed.py`, `speed_gate.py`, `smoke.py`, `teach.py`, `operator_joy.py`, `cli.py` |
+| `taskweave_skills/taskweave_skills/` | the generic skills: `basic` (wait), `move` (the one motion skill; it builds its parts from `parts.py`: `navigate`, `drive`, `joint_motion`, `gripper_motion`, `object_motion`), `gripper_motion` also has `grip`; helpers `joints`, `ik`, `chain`, `cartesian`, `motion_plan`, `hold`, `points`, `tcp_jog`, `nav2` |
 | `taskweave_hmi/taskweave_hmi/` | web HMI (`server.py`, `web/*.js`): status, control, mission editor, teach, record |
 | `taskweave_bringup/` | launch files `taskweave_bringup.launch.py` (taskweave, HMI, optional Nav2/MoveIt), `taskweave_nav2.launch.py`, `taskweave_moveit.launch.py`; `taskweave_bringup/` (`nav2.py`, `moveit.py`, `hmi.py`, `clock_guard.py`, `robot_files.py`: the logic, testable without launching), `config/nav2_params.yaml` (default Nav2 tuning) |
-| `taskweave_robots/<robot>/` | robot packs (`pack.yaml`, `profile.yaml`, `embodiment.yaml`, `poses.yaml`, `moveit/` ...), installed to `share/taskweave_robots/` |
-| `docs/` | `install.md`, `operator.md` (for the people who run missions; keep it true when the CLI, speed or reload rules change), `architecture.md`, `configuration.md`, `missions.md`, `skills.md` (generated), `pack_switchover.md`, `examples/` |
+| `taskweave_robots/<robot>/` | robot packs (`pack.yaml`, `profile.yaml`, `embodiment.yaml`, `targets.yaml`, `moveit/` ...), installed to `share/taskweave_robots/` |
+| `docs/` | `install.md`, `operator.md` (for the people who run missions; keep it true when the CLI, speed or reload rules change), `architecture.md`, `configuration.md`, `missions.md`, `skills.md` (generated), `targets.md` (the target format), `migration_targets.md`, `pack_switchover.md` (the 1 to 2 record), `examples/` |
 | `tools/gen_skills_doc.py` | generates `docs/skills.md` (needs ROS sourced, see "Add a skill" step 6) |
 | `*/test/` | pytest suites per package; config fixtures in `*/test/fixtures/config` |
 
@@ -82,7 +82,7 @@ change. Launch files go to `share/<name>/launch` through `data_files` in `setup.
    `packs.ROBOT_SCHEMA`; migrations in `config/migrate.py` `MIGRATIONS`, a test per migration). New optional keys with
    a default need neither; renamed or moved ones do. A deployed build rejects unknown keys, so deploy the code before
    the config that uses a new key.
-5. **Fail before moving.** Anything checkable statically (skills, args, points) is checked in `validation.py`.
+5. **Fail before moving.** Anything checkable statically (skills, args, targets) is checked in `validation.py`.
 6. **Speed override.** Skills run on work time (`ctx.work_now()`, `ctx.work_clock()`), never on plain `time`, so the
    override scales moves and timeouts. Two clocks exist on the skill context: node time (`ctx.elapsed()`, `ctx.sleep()`:
    sim time when `use_sim_time` is set, not scaled) and work time (`ctx.work_now()`: node time integrated at the
@@ -113,16 +113,21 @@ off) resets the Nav2 lifecycle nodes and restarts move_group; its decisions are 
    made from goes in `startup_params`), `execute(ctx, args)` returning `SkillResult.succeeded/failed/rejected`. Check `ctx.should_stop` in loops and return
    `ctx.interrupted()`. Implement `stop()` so cancel leaves the hardware safe. Clocks: rule 6.
    **Discovery:** `taskweave_skills.shipped_skills()` finds every `Skill` subclass with a `name` in any module of the
-   package, so the class needs no registration. The docs generator and the doc tests use that one list.
-2. A new point kind needs a branch in `validation.check_point`.
-3. Skill yaml, two copies that must stay equal (`test_migrate_skills` checks it): `docs/examples/skills/<name>.yaml`
-   and the string in `taskweave_core/taskweave_core/config/skill_templates.py` (add it to `TEMPLATES`). **Every
-   shipped skill has both**, also one with no parameters (`wait`); `test_skills_doc.py` fails without them. Content:
-   `implementations: [{name, type: script, class: "module:Class", requires: ...}]`, speeds, tolerances. `requires`
-   lists `capabilities` (embodiment vocabulary), `embodiments`, `cameras`, `action_space`.
+   package, so the class needs no registration. The docs generator and the doc tests use that one list. It leaves out
+   the classes of the six motion skills `move` replaced (`parts.PARTS`: they are `move`'s parts) and any class with
+   `documented = False`.
+2. A new point kind needs a branch in `validation.check_point`. A skill argument that names a target uses
+   `x-taskweave-point: target` and `x-taskweave-target-kinds` ([docs/targets.md](docs/targets.md)).
+3. Skill yaml: `docs/examples/skills/<name>.yaml`. **Every shipped skill has one**, also one with no parameters
+   (`wait`); `test_skills_doc.py` fails without it, and `tools/gen_skills_doc.py` shows its `implementations` in
+   `docs/skills.md`. A skill that hands its work to modules, like `move`, has a folder `docs/examples/skills/<name>/<part>.yaml`
+   with one file per module. (`config/skill_templates.py` is the frozen starting point of the 2 to 3 migration; do not
+   add to it.) Content: `implementations: [{name, type: script, class: "module:Class", requires: ...}]`, speeds,
+   tolerances. `requires` lists `capabilities` (embodiment vocabulary), `embodiments`, `cameras`, `action_space`.
 4. Serving: the skill server serves the names listed in the launch argument `skills:`. Add the name to the list in the
    README "Usage" launch command (the one place that lists them; `test_skills_doc.py` checks that it names every
-   shipped skill), and give a cell that uses it a `skills/<name>.yaml` (start from the example above).
+   shipped skill: today `wait,move,grip`), and give a cell that uses it a `skills/<name>.yaml` (start from the example
+   above).
 5. Tests: schema validation (`oneof_problems` from `taskweave_core/taskweave_core/validation.py` checks the `oneOf` variants of a
    schema, see `test_tool_pose.py`), the argument checks, a ROS test with `RosRig` against a fake robot (see
    `test_joints_ros.py`), and a speed test if it moves.
@@ -175,9 +180,9 @@ The base word must be the one for the profile's `base.type` (`embodiment.check_p
 mismatch, and a second base word is a contradiction too).
 
 ### Add a robot pack
-A pack is a folder `taskweave_robots/<robot>/`. The packs are data only: nothing about a cell (stances, held poses,
-object points belong to the cell pack).
-1. `pack.yaml`: `name` (= the folder), `version`, `schema_version: 1`, `description`. Required. Add a `LICENSE-NOTE.md`
+A pack is a folder `taskweave_robots/<robot>/`. The packs are data only: nothing about a cell (the robot's stances
+and settings on the cell's objects, `robots/<robot>/objects/<type>.yaml`, belong to the cell pack).
+1. `pack.yaml`: `name` (= the folder), `version`, `schema_version: 2`, `description`. Required. Add a `LICENSE-NOTE.md`
    (copy one from `galbot_s1/`): the bundled galbot and a2d packs are vendor-derived, internal use only (licence line in
    `taskweave_robots/package.xml`; the test `test_every_pack_has_a_licence_note` checks each pack has one).
 2. `profile.yaml` (how the hardware is reached) and `embodiment.yaml` (what the robot is), both required:
@@ -186,21 +191,23 @@ object points belong to the cell pack).
      `arms.bimanual`, `gripper.parallel`; the base capability must match `base.type`, `check` reports a mismatch);
      optional `base`, `torso`, `arms`, `tools`, `cameras` descriptions (unknown values `~`). Each `tools` entry needs
      a `grippers.<name>` in the profile.
-   - `poses.yaml` with a `home` pose: optional for loading, but `test_robot_packs.py` runs the generic mission with it.
+   - `targets.yaml` with a `home` joint target (`{moves: joints, joints: {torso: ..., left_arm: [...]}}`, group names of
+     the profile): optional for loading, but `test_robot_packs.py` runs the generic mission with it. The format:
+     [docs/targets.md](docs/targets.md).
 3. What each optional part enables (all are optional; a pack with none of them is valid, but limited):
 
    | Profile / pack part | Enables |
    |---|---|
-   | `joints` (`command`, `state`; `linear`, `groups`, `limits`) | `move_joints` and named joint poses. `groups`: `move_joints only`. `limits`: joint -> `[lower, upper]` laid over the URDF's, checked before a move (docs/configuration.md); none from either source = unchecked |
+   | `joints` (`command`, `state`; `linear`, `groups`, `limits`) | joint targets and `move` of joint values (the `joints` part of `move`). `groups`: the names targets and `only` use. `limits`: joint -> `[lower, upper]` laid over the URDF's, checked before a move (docs/configuration.md); none from either source = unchecked |
    | `grippers` | `grip`, hands for every arm skill |
-   | `tool_frames` + `ik` (+ `arms.<tool>.elbow`) | `move_gripper`, `move_object`, `set_posture`, tool poses in `poses.yaml`, elbow control. Needs `moveit/` and a MoveIt `GetPositionIK` service behind `ik.service` |
+   | `tool_frames` + `ik` (+ `arms.<tool>.elbow`) | `move` of hands, held objects and elbows (the `hand`, `object`, `posture` parts), hand and object targets in `targets.yaml`, elbow control. Needs `moveit/` and a MoveIt `GetPositionIK` service behind `ik.service` |
    | `planning` + `moveit/` (URDF, SRDF, `kinematics.yaml`, `joint_limits.yaml`, collision meshes) | collision-free paths (`motion.planner`), URDF-based straight lines, velocity limits |
    | `navigation.yaml`, `base.footprint`, `base.limits` | the driving envelope for Nav2, base speed caps |
    | `motion_tuning`, `skill_overrides.yaml` | arm motion step sizes and this robot's speeds per skill (all default) |
    | `sim.yaml`, `pose_targets.yaml` | inputs of the simulator application, no taskweave schema |
 
-   A pack **without** `ik` and `moveit/` is valid: it drives, takes joint poses and grips, but `move_gripper` /
-   `move_object` reject (no `ik`) and nothing is planned around obstacles. Add the parts as the hardware needs them.
+   A pack **without** `ik` and `moveit/` is valid: it drives, takes joint targets and grips, but `move` of hands and held
+   objects rejects (no `ik`) and nothing is planned around obstacles. Add the parts as the hardware needs them.
 4. Install: the CMake install copies every folder at install time, so a new pack folder is picked up by the next
    `colcon build --packages-select taskweave_robots` (no reconfigure, no GLOB). If an older build tree still ignores
    it, remove `build/taskweave_robots` once. The tests read the source folder, so they need no build; hidden and
@@ -227,19 +234,22 @@ object points belong to the cell pack).
    `ros2 service list | grep -E "compute_ik|check_state_validity"`, on the robot's own ROS domain.
 
 ### Add a cell pack (an application's config)
-1. `pack.yaml` with `name`, `version`, `schema_version: 3`; `system.yaml` with `robot_packs: [..]` if packs live outside
+1. `pack.yaml` with `name`, `version`, `schema_version: 4`; `system.yaml` with `robot_packs: [..]` if packs live outside
    the install.
-2. `cell/layout.yaml`, `cell/locations.yaml`, `cell/objects.yaml` (placed instances; `stack: {count, pitch}`).
-3. `objects/<type>.yaml`: points with taught tool poses (`taskweave teach point <instance>/<point>`) and `contacts`.
-4. `robots/<robot>/stances.yaml`, `held_poses.yaml`, `object_points.yaml`: what this robot does at this cell.
+2. `cell/layout.yaml`, `cell/targets.yaml`, `cell/objects.yaml` (placed instances; `stack: {count, pitch}`).
+3. `objects/<type>.yaml`: `targets:` with hand points (taught tool poses, `taskweave teach hand <instance>/<name>`) and
+   contacts (`moves: hand` / `moves: object`).
+4. `robots/<robot>/objects/<type>.yaml`: what this robot does at this cell: its stances (`moves: base`), its settings
+   (elbow, grip opening) on the type's targets, `handled_from`, `instances:` overrides. Optionally
+   `robots/<robot>/targets.yaml` (a keyed override of the pack's).
 5. `skills/<skill>.yaml` for each skill the missions use (start from `docs/examples/skills/`),
    `missions/<name>.yaml`.
 6. New cell from nothing: `taskweave config init <dir> --robot <pack> [--name N]` (empty, passes `check`); one file
    between hosts: `taskweave config export <cell> f.tar.gz`, `taskweave config import f.tar.gz <cell> [--force]`
    (checked before anything changes; folder swap with `.bak-<time>`, or a commit when the target is a git work tree;
    `taskweave_core/taskweave_core/config/packfile.py`, which the HMI can call too).
-7. From an older layout: `taskweave config migrate <cell>` (runs every migration up to schema 3; `migrate-skills`
-   is the 2 to 3 step alone).
+7. From an older layout: `taskweave config migrate <cell>` (runs every migration up to schema 4; `migrate-skills`
+   is the 2 to 3 step alone; 3 to 4 is [docs/migration_targets.md](docs/migration_targets.md)).
    Check: `taskweave check <cell>`. Details: [docs/configuration.md](docs/configuration.md).
 
 ### Add a skill to a live cell
@@ -279,10 +289,10 @@ git. Any new cache of file contents must be dropped in `save._refresh`. Tests: `
 See [docs/missions.md](docs/missions.md). Put it in `<cell>/missions/<name>.yaml`. Validate in layers:
 - `taskweave check <cell>` (offline; `ConfigStore.check_pack()` returns the same as problem dicts) checks the schema and the
   cross-file rules of every file of the pack and its robot packs (config API below), and that every mission expands.
-  It does **not** check skill arguments, nor whether a point, contact, stance or pose a step names exists:
-  those need the skills' argument schemas.
+  It does **not** check skill arguments, nor whether a target a step names exists: those need the skills' argument
+  schemas (`taskweave check <cell> --missions` does, with the skill packages and ROS).
 - The HMI editor and the task handler check them against the live skill catalog before a start.
-- To catch a misspelt point, contact, stance or pose name before anything moves: start the skills and read the refusal
+- To catch a misspelt target name before anything moves: start the skills and read the refusal
   (`taskweave run <mission>` prints `rejected:` with the reason; the HMI editor shows it too). Offline, the test
   `taskweave_skills/test/test_docs_examples.py` shows the Python check: `validate_plan(plan, catalog(store), store)` with
   the catalog built from the skill classes.
@@ -290,6 +300,18 @@ See [docs/missions.md](docs/missions.md). Put it in `<cell>/missions/<name>.yaml
   `validate_plan` on every example. Add a mission that teaches something to `docs/examples/missions/` and to the list in
   that test (the docs must show it verbatim); it runs against `docs/examples/cell` (robot `duo_bot`, a copy of the
   skills test fixture's).
+
+### Targets
+A place the robot goes to is a target: `moves: base | hand | object | joints`, its frame from its file
+([docs/targets.md](docs/targets.md)). The model (parsing, the per-key merge of the four layers, joint group values, the
+per-kind option table of `move`) is `config/targets.py`; reading and resolving `<name>` / `<instance>/<name>` is
+`config/target_store.py` (`ConfigStore.target`, `targets`, `target_names`); writing (save, delete, rename, with the layers
+kept) is `config/target_edit.py`. The skill `move` (`taskweave_skills/taskweave_skills/move.py`) resolves what a step asks for and hands
+it to a part (`parts.py`). A new kind of target field in a skill schema is `x-taskweave-point: target` plus
+`x-taskweave-target-kinds`. The migration from schema 3 is `config/migrate_targets.py` and `migrate_move.py`; its golden
+files are `taskweave_core/test/fixtures/migrate_targets/docs_before` (input) and `docs_cell` (output), and
+`docs/examples` is that output (`test_migrate_targets.py` keeps them equal, `--regenerate` makes the golden files).
+Tests: `test_targets.py`, `test_migrate_targets.py`, `taskweave_skills/test/test_move_plan.py` (and the other `test_move_*` files).
 
 ### Speed override and test mode
 - Service `/taskweave/task_handler/set_speed_override` (`SetSpeedOverride`: `percent`, `test_percent`, `set_test_mode`,

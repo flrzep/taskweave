@@ -800,12 +800,12 @@ class MoveGripper(_PointMotion):
 class Grip(_FingerMotion):
     name = 'grip'
     description = ('Open or close the fingers of one or more hands, or set their opening in mm. Closing hands that '
-                   'are at an object point (move_gripper to.point with no offset) makes them hold that object, also '
-                   'one hand of a two-hand point; opening takes hands out of their hold, and a hold left with no '
+                   'are at an object target (move to a hand target with no offset) makes them hold that object, also '
+                   'one hand of a two-hand target; opening takes hands out of their hold, and a hold left with no '
                    'hands is released. opening sets the finger gap (opening_mm) and leaves the holds alone. open '
                    'with place_as records where the released object now is, as a placed object of that name '
                    '(object state). Closing on an object takes it off its stack in the object state. '
-                   'hands any_one is the one hand at an object point (rejected if none or both).')
+                   'hands any_one is the one hand at an object target (rejected if none or both).')
     args_schema = {
         'type': 'object',
         'required': ['action'],

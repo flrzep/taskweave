@@ -9,8 +9,9 @@
 It needs the ROS 2 environment sourced (the skill modules import rclpy message packages) and ``taskweave_core`` and
 ``taskweave_skills`` on the PYTHONPATH (or installed), but no running ROS graph and no robot: it imports the classes and
 reads their attributes (``name``, ``description``, ``args_schema``, ``needs``, ``achieves``, ``default_timeout_s``)
-without constructing them. The ``requires`` of a skill come from its skill yaml template (taskweave_core.config.
-skill_templates); the example steps come from docs/examples/skill_steps.yaml. Both are data: change them, then run this.
+without constructing them. The ``requires`` of a skill come from its skill yaml in the example cell
+(docs/examples/skills/*.yaml, the files a cell pack starts from); the example steps come from
+docs/examples/skill_steps.yaml. Both are data: change them, then run this.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ import yaml
 REPO = Path(__file__).resolve().parents[1]
 OUTPUT = REPO / 'docs' / 'skills.md'
 EXAMPLES = REPO / 'docs' / 'examples' / 'skill_steps.yaml'
+SKILL_FILES = REPO / 'docs' / 'examples' / 'skills'
 SKILL_PACKAGE = 'taskweave_skills'
 
 INTRO = """\
@@ -38,7 +40,7 @@ INTRO = """\
 
 A skill executes one step of a mission: `{instruction, skill, args}`. The arguments are checked against the skill's JSON
 schema (tables below) before anything moves; values with `{placeholders}` are checked when the step starts. Arguments
-that name a point (a stance, an object point, a contact, a held pose, a joint pose) are checked against the config too.
+that name a target (a base, hand, object or joint target) are checked against the config too.
 How to write missions: [missions.md](missions.md). How a skill is configured and which robots can run it:
 [configuration.md](configuration.md) (skill implementations, skill parameters).
 
@@ -51,8 +53,8 @@ Every step can also set the decision rules `timeout_s`, `retries`, `on_failure`,
 |---|---|
 | `hands` | Which hands act: a hand name from the robot profile (`grippers`), a list of names, or a rule word: `auto` (the hands the target defines or, for a held object, the hands that hold it), `any_one` (one free hand that can take the target), `all` (every hand). Each skill accepts the rule words listed in its table. |
 | `vec3` | `[x, y, z]`, three numbers. |
-| `point` | A string naming something in the config. The point kind is shown in the description: `base_target` (`location:<name>`, `stance:<instance>[/<variant>]` or a bare location name), `instance_point` (`<instance>/<point>`), `instance_contact` (`<instance>/<contact>`), `tool_pose`, `joint_pose_only`, `joint_group`, `held_pose`, `held_object`, `via_target`. |
-| `motion` | Options of the arm skills, see the `motion` table of each skill. Defaults come from the skill yaml, then the robot (`skill_overrides.yaml`), then the target's own data (a point's `approach_m`, `elbow`), then the step. |
+| `point` | A string naming something in the config. The point kind is shown in the description: `target` (`<name>` for a cell, base or joint target, `<instance>/<name>` for a target of a placed object; the kinds a field takes are named in its description, see [targets.md](targets.md)), `joint_group`, `held_object`. |
+| `motion` | Options of the motion, see the `motion` table of `move`. Defaults come from the skill yaml (`skills/move/<part>.yaml`), then the robot (`skill_overrides.yaml`), then the target's own data (a hand target's `approach_m`, `elbow`), then the step. |
 
 `RunSkill` outcomes: `SUCCEEDED`, `FAILED` (ran but missed the goal), `TIMEOUT`, `CANCELED`, `REJECTED` (invalid
 arguments or unmet preconditions; nothing moved).
@@ -78,10 +80,15 @@ def ordered(skills: list[type], order: list[str]) -> list[type]:
 
 
 def templates() -> dict[str, dict]:
-    """skill name -> parsed skill yaml template (implementations, parameters), for the skills that have one."""
-    from taskweave_core.config.skill_templates import TEMPLATES
+    """skill name -> parsed skill yaml of the example cell (implementations, parameters), where there is one."""
+    return {path.stem: yaml.safe_load(path.read_text(encoding='utf-8')) for path in sorted(SKILL_FILES.glob('*.yaml'))}
 
-    return {name: yaml.safe_load(text) for name, text in TEMPLATES.items()}
+
+def parts(name: str) -> dict[str, dict]:
+    """part name -> parsed yaml of ``skills/<name>/<part>.yaml`` in the example cell (a skill that hands its work to
+    modules, like ``move``)."""
+    folder = SKILL_FILES / name
+    return {path.stem: yaml.safe_load(path.read_text(encoding='utf-8')) for path in sorted(folder.glob('*.yaml'))}
 
 
 # ---- schema rendering -----------------------------------------------------------------------------------------
@@ -190,6 +197,10 @@ def requirement_notes(schema: dict) -> list[str]:
     if 'oneOf' in schema:
         forms = [' + '.join(f'`{key}`' for key in variant.get('required', [])) for variant in schema['oneOf']]
         notes.append('Give exactly one of: ' + ' or '.join(forms) + '.')
+        if all(variant.get('title') for variant in schema['oneOf']):
+            titled = [f'{variant["title"].lower()} ({" + ".join(f"`{key}`" for key in variant["required"])})'
+                      for variant in schema['oneOf']]
+            notes.append('The forms: ' + '; '.join(titled) + '.')
     then = schema.get('then', {}).get('required')
     condition = schema.get('if', {}).get('properties', {})
     for key, value in condition.items():
@@ -212,6 +223,25 @@ def implementations(template: dict | None, skill: type) -> list[str]:
     return lines + ['```']
 
 
+def part_lines(name: str) -> list[str]:
+    """The modules of a skill that has some: which file configures each, and its implementations."""
+    found = parts(name)
+    if not found:
+        return []
+    lines = ['### Parts', '',
+             f'`{name}` hands each step to the module that does that kind of motion. Each module is configured in '
+             f'`skills/{name}/<part>.yaml` (`implementations` with `requires`, speeds, tolerances) and is served '
+             f'or not on its own: a kind whose module has no implementation for the robot is rejected with the '
+             f'reasons, the other kinds work.', '', '| Part | File | Implementations (first that fits the robot is served) |',
+             '|---|---|---|']
+    for part, data in found.items():
+        entries = ', '.join(f'`{item["name"]}` (`{item["class"].split(":")[-1]}`'
+                            + (f', requires {", ".join(item["requires"].get("capabilities", []))}'
+                               if item.get('requires') else '') + ')' for item in data.get('implementations', []))
+        lines.append(f'| `{name}.{part}` | `skills/{name}/{part}.yaml` | {entries} |')
+    return lines + ['']
+
+
 def step_yaml(step: dict) -> list[str]:
     body = yaml.safe_dump([step], sort_keys=False, default_flow_style=None, width=110).splitlines()
     return ['```yaml', *body, '```']
@@ -231,6 +261,7 @@ def section(skill: type, template: dict | None, steps: list[dict]) -> list[str]:
     if skill.achieves:
         lines.append('- Achieves: ' + '; '.join(skill.achieves))
     lines += ['', '### Implementation and requires', ''] + implementations(template, skill) + ['']
+    lines += part_lines(skill.name)
     lines += ['### Arguments', '']
     properties = schema.get('properties', {})
     lines += requirement_notes(schema) + ([''] if requirement_notes(schema) else [])

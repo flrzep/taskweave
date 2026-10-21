@@ -5,8 +5,11 @@ synthetic cells for every construct of the design (name clashes, run-time instan
 and keyed overrides, first-variant mismatch, contact references, every step form), the equivalence dump of
 tools/dump_targets.py, robot packs, idempotence and the stops.
 
-The golden output of the docs example cell is fixtures/migrate_targets/docs_cell; to make it again after a change of the
-migration (read the diff before committing it):
+The input is fixtures/migrate_targets/docs_before (the docs example cell as it was in schema 3), the golden output is
+fixtures/migrate_targets/docs_cell, and docs/examples is that output with polished comments
+(test_the_docs_examples_are_the_golden_files).
+To make the golden output again after a change of the migration (read the diff before committing it), then bring the
+data of docs/examples up to date by hand (the test names what differs):
 
     python3 taskweave_core/test/test_migrate_targets.py --regenerate
 """
@@ -33,6 +36,7 @@ HERE = Path(__file__).parent
 FIXTURES = HERE / 'fixtures'
 REPO = HERE.parents[1]
 DOCS = REPO / 'docs' / 'examples'
+BEFORE = FIXTURES / 'migrate_targets' / 'docs_before'   # the docs example cell as it was before schema 4
 GOLDEN = FIXTURES / 'migrate_targets' / 'docs_cell'
 ROBOT = 'bot_two_arm'
 TOLERANCE = 1e-6
@@ -178,10 +182,8 @@ def test_the_equivalence_compare_sees_a_difference_and_a_missing_entry(old_cell,
 
 # ---- the docs example cell -------------------------------------------------------------------------------------------
 def docs_cell(target: Path) -> Path:
-    """The docs example as one cell pack: the cell, the example missions and the skill files of docs/examples."""
-    shutil.copytree(DOCS / 'cell', target)
-    shutil.copytree(DOCS / 'missions', target / 'missions')
-    shutil.copytree(DOCS / 'skills', target / 'skills', dirs_exist_ok=True)
+    """The docs example cell as it was before schema 4 (fixtures/migrate_targets/docs_before), as one cell pack."""
+    shutil.copytree(BEFORE, target)
     return target
 
 
@@ -194,6 +196,17 @@ def test_the_docs_example_cell_is_migrated_to_the_golden_files(tmp_path):
     for name in want:
         assert got[name] == want[name], f'{name} differs from fixtures/migrate_targets/docs_cell'
     assert run(cell)[0] == 0 and tree(cell) == got
+
+
+def test_the_docs_examples_are_the_golden_files():
+    """docs/examples (cell, missions, skills) is the migrated docs cell (same data, the comments may be polished)."""
+    want = tree(GOLDEN)
+    got = dict(tree(DOCS / 'cell'))
+    for part in ('missions', 'skills'):
+        got.update({f'{part}/{name}': text for name, text in tree(DOCS / part).items()})
+    assert sorted(got) == sorted(want)
+    for name in want:   # the data; the docs polish the comments of the files
+        assert yaml.safe_load(got[name]) == yaml.safe_load(want[name]), f'docs/examples differs from the golden {name}'
 
 
 def test_the_migrated_docs_example_checks_and_its_steps_are_valid(tmp_path, capsys):

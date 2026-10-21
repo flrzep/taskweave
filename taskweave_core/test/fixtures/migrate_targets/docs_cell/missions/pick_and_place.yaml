@@ -7,7 +7,7 @@ steps:
     skill: move
     args: {to: home_pose}
   - id: to_part
-    instruction: Drive to the pick stance at the part stack
+    instruction: Drive to the pick position at the part stack
     skill: move
     args: {to: part_stack_1/pick}
   - instruction: Open both grippers

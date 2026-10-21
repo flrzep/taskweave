@@ -1,0 +1,16 @@
+# skills/move/joints.yaml: the part of `move` that goes to a joint target or joint group values. Keys: speed, accel,
+# tolerances, motion (the step's motion overrides them).
+implementations:
+  - name: joint_targets         # joint-space moves; with a planner in the robot profile the path avoids collisions
+    type: script
+    class: taskweave_skills.joint_motion:MoveJoints
+speed:                          # standard speeds; a step's motion.speed (fraction) or speed_abs scales them
+  joint_rad_s: 1.2              # rad/s
+  joint_linear_m_s: 0.25        # m/s for prismatic joints (profile joints.linear)
+accel: {joint_rad_s2: 3.0}
+motion: {planner: auto}         # the step's motion overrides these
+tolerances:
+  position: 0.03
+  settle_s: 0.3
+  stall_timeout_s: 5.0          # sim time
+  state_timeout_s: 5.0          # no joint states this long (wall time) -> fail; rides out sim stalls (UI asset loads)

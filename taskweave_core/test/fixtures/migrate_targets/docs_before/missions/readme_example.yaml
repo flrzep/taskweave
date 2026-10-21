@@ -1,0 +1,37 @@
+goal: Move parts from the fullest stack into the bin
+loop: forever                       # once | forever
+facts:
+  next_stack: {fullest: part, among: "part_stack_*"}   # fixed for each cycle; none left = mission complete
+defaults: {timeout_s: 120, retries: 1, on_failure: abort}
+steps:
+  - id: to_stack
+    instruction: Drive to the pick position at {next_stack}
+    skill: navigate_to
+    args: {target: "stance:{next_stack}"}      # where this robot stands at that stack (robots/<robot>/stances.yaml)
+  - instruction: Open both grippers
+    skill: grip
+    args: {hands: all, action: open}
+  - instruction: Pre-grasp 10 cm above the part
+    skill: move_gripper
+    args: {to: {point: "{next_stack}/grasp", offset_m: 0.1}}
+    retries: 2
+    on_failure: replan              # ask the planner again ...
+    replan_from: to_stack           # ... starting at the drive
+  - instruction: Onto the part
+    skill: move_gripper
+    args: {to: {point: "{next_stack}/grasp"}}
+  - instruction: Close both grippers on the part
+    skill: grip
+    args: {hands: all, action: close}
+  - instruction: Lift it 20 cm
+    skill: move_object
+    args: {to: {by: [0, 0, 0.2]}}
+  - instruction: Drive to the bin
+    skill: navigate_to
+    args: {target: "stance:bin_1/place"}
+  - instruction: Part onto the seat of the bin
+    skill: move_object
+    args: {to: {onto: bin_1/seat, contact: base}}
+  - instruction: Let go
+    skill: grip
+    args: {hands: all, action: open}

@@ -1,8 +1,4 @@
-# The example cell of docs/missions.md. `taskweave check docs/examples/cell` validates it on its own; the robot is
-# duo_bot, a neutral test robot with two arms, a lift and two parallel grippers (robots/duo_bot here, a copy of the
-# robot of taskweave_skills/test/fixtures/config), not a shipped pack: the tool poses and stances are made up for it.
+# cell pack: everything about this cell; the robots come from robot packs (taskweave config migrate)
 name: example_cell
 version: 1
-schema_version: 3
-requires:
-  taskweave: ">=0.2,<0.3"
+schema_version: 4

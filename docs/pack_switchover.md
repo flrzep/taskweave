@@ -1,5 +1,9 @@
 # Switching the frame-sim host to cell pack + robot packs
 
+> This page is the record of the first move, schema 1 to 2 (one config directory to cell pack + robot packs). The file
+> names below are those of that time. The move to targets and the skill `move` (schema 3 to 4, taskweave 0.3) is
+> [migration_targets.md](migration_targets.md); `taskweave config migrate` runs both.
+
 Before: one config directory, `/data/frame-sim/config` (= `/workspace/frame-sim/config` in the containers), with whole
 robot folders in `robots/<robot>/`. After: that directory is the cell pack (`pack.yaml`, schema 2) and keeps only the
 robots' cell-specific files (`stances.yaml`, `held_poses.yaml`, `object_points.yaml`); profile, embodiment, moveit/,

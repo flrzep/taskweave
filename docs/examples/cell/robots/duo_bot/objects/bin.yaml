@@ -1,0 +1,4 @@
+handled_from: place
+targets:
+  place: {moves: base, x: -0.70, y: 0.0, yaw: 0.0}
+  pick: {moves: base, x: -0.70, y: 0.0, yaw: 0.0}

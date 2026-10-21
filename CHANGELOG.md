@@ -1,6 +1,70 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (unreleased)
+
+### Breaking changes (cell pack schema 4, robot pack schema 2)
+- **Targets.** Everything the robot goes to is one thing now, a target (`moves: base | hand | object | joints`, frame from
+  the file). `cell/locations.yaml`, `robots/<r>/stances.yaml`, `object_points.yaml`, `held_poses.yaml`, `poses.yaml` and the
+  `points:` / `contacts:` of object types are gone: see [docs/targets.md](docs/targets.md).
+- **One skill, `move`.** `navigate_to`, `drive_straight`, `move_gripper`, `move_object`, `set_posture` and `move_joints` are
+  replaced by `move`; the served skills are `wait`, `move`, `grip` (launch `skills:=wait,move,grip`). Skill configs are
+  `skills/move.yaml` and `skills/move/{base,straight,hand,object,posture,joints}.yaml`; a robot's `skill_overrides.yaml`
+  is keyed `move.hand`, ... A cell of schema 3 still runs the old six skills.
+- **One reference syntax.** `<name>` or `<instance>/<name>`; the `stance:`, `location:`, `pose:` prefixes and the
+  `<object>.<point>` form are refused with a message that names `taskweave config migrate`.
+- A cell of schema 3 needs `taskweave config migrate <cell>` (docs/migration_targets.md); the robot packs shipped here
+  are migrated (`targets.yaml`, `schema_version: 2`).
+- Version numbers, the packs' `requires` (`>=0.3,<0.4`) and the date of this section are set at the release.
+
+### Targets
+- Four files: `cell/targets.yaml`, `objects/<type>.yaml` (`targets:`), `robots/<r>/objects/<type>.yaml` (stances, the
+  robot's settings on a type's targets, `instances:` overrides, `handled_from`), `robots/<r>/targets.yaml` (base-frame and
+  joint targets; keyed override in the cell). An object-frame target is the per-key merge of its four layers.
+- Joints part by joint group (`torso`, `head`, `left_arm`, ...): a number, a list with `null`, `auto`, `keep`. Paths
+  (`path:` waypoints) on base, hand and object targets. `reference` on a contact names the part of the held object that
+  goes there. `handled_from` makes the turn of a symmetric object explicit (it was the first stance in the file).
+- `ConfigStore.target`, `targets`, `target_names`, `save_target`, `delete_target`, `rename_target`; checks for unique
+  names, unknown settings, joint groups, grip width against the tool stroke; catalogue kinds and enums for the editors.
+- Cell-frame hand and object targets are in the format, and `move` rejects them until they are built.
+
+### The `move` skill
+- Six forms in one schema: `to` a target, `hand` + `by`/`at`, `object` + `by`/`at`, `base: {by}`, `elbow`, `joints`.
+  What moves comes from the target. Options per kind are checked in the pack check and at run time (`hands`, `offset_m`,
+  `reference`, `only`, `torso`, `tolerance_deg`, `motion`); `torso: auto | keep | value` is a step option now.
+- `move` hands each step to the part that does that kind of motion (the old skill classes, same behaviour); a part with no
+  implementation for the robot answers `REJECTED "this robot cannot do <kind>"` and the others keep working. The result
+  has `data.kind`, `data.module`, `data.target`.
+- `dry_run: true` resolves and solves IK and moves nothing (`data.joint_goal`), for the HMI preview.
+- `look_at` is reserved and answers REJECTED.
+
+### Migration 3 -> 4
+- `taskweave config migrate CELL [--robot-packs DIR] [--dry-run]` converts the files, rewrites every mission step and
+  `operator.yaml` action to `move`, renames clashing names (`_stance`, `_held`, `_pose`, `_contact`), flags what it
+  cannot map cleanly, migrates writable robot packs, keeps comments, is idempotent and writes `pack.yaml` last.
+  `taskweave config migrate PACK_DIR` migrates a robot pack or a folder of them. `torso: keep` is written on object
+  steps so nothing changes. Equivalence harness: `tools/dump_targets.py`. See docs/migration_targets.md.
+- The docs example cell is the golden output of the migration (`taskweave_core/test/fixtures/migrate_targets`).
+
+### Teach, validation, plan and smoke
+- `taskweave teach base|hand|joints NAME_OR_INSTANCE/NAME [--instance] [--tool ...]`; `location`, `stance` and `point` are
+  the old names. `TeachPoint.srv`: `name` is a target reference, `kind` is `base | hand | object | joints`,
+  `instance_override` replaces `stance_instance`. An existing target keeps the keys a teach does not set.
+- Plan validation has one point kind, `target`, with `x-taskweave-target-kinds`; hand targets are checked against the
+  robot's tools; the old skill names answer "replaced by move" with the move form. `taskweave check --missions` validates
+  every mission's plan against the served skills.
+- Plan steps get `kind` and `resources` (narrowed per step: base, hands, torso, joints) when the plan is validated, so a
+  UI can light the resource a `move` step uses. The robot card lists targets by kind.
+- Smoke test: the duration tolerance follows the kind of motion (`move.base` 25 %, the rest 10 %); a reference recorded
+  with the old skills compares against a run of `move` steps, and back (old skill names are aliases of `move.<kind>`).
+
+### HMI (adapter by the HMI session)
+- The HMI reads and writes targets: locations, stances, hand points, robot poses and carry poses on the new store with
+  the same API; updates keep the layers and comments; store errors answer 404 / 422; manual skill runs use `move {to}`.
+
+### Docs
+- New: `docs/targets.md`, `docs/migration_targets.md`. Updated for targets and `move`: README, AGENTS, `docs/configuration.md`,
+  `missions.md`, `operator.md`, `architecture.md`, `install.md`; `docs/skills.md` documents `wait`, `move`, `grip`
+  (the generator reads the skill files of `docs/examples/skills`); `docs/pack_switchover.md` stays the 1 -> 2 record.
 
 ### Object jog with the pad (F18)
 - A tool that holds an object no longer refuses the pad jog: its twist moves the held object (same axes as the arm

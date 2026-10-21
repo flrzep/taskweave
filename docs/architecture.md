@@ -24,13 +24,13 @@ class Planner(ABC):
 | Implementation | Status |
 |---|---|
 | `MissionFilePlanner`: loads `config/missions/<name>.yaml`; `replan` restarts the mission from the world state | first |
-| VLM planner: prompts a model with goal, world state, skill catalog, named points and optionally a camera image; output must be a valid `Plan` | later |
+| VLM planner: prompts a model with goal, world state, skill catalog, named targets and optionally a camera image; output must be a valid `Plan` | later |
 
 ### Task handler
 A ROS 2 node that
 
 1. validates a plan before anything moves: every skill exists in the catalog, every `args` object matches the skill's
-   JSON schema, every referenced point exists in config;
+   JSON schema, every referenced target exists in config and fits the step (a hand option on a base target is refused);
 2. resolves placeholders (`{fullest_stack}`) from the world state when a step starts;
 3. sends the step to the skill through `RunSkill` and forwards feedback to `TaskStatus`;
 4. applies the decision rules on failure or timeout: `retry` → `replan` / `skip` / `abort`;
@@ -58,12 +58,12 @@ cameras, action spaces). The embodiment drives three decisions:
 1. **Which skills a robot can run.** Each skill lists implementations with `requires`; the skill server serves the
    first that fits, and plans using a skill with no fitting implementation are rejected.
 2. **What a planner may ask for.** `describe_robot` (service `/taskweave/describe_robot`, CLI `taskweave describe`)
-   returns a robot card (summary, capabilities, limits, cameras, known points) plus the skill catalog filtered to this
+   returns a robot card (summary, capabilities, limits, cameras, known targets by kind) plus the skill catalog filtered to this
    robot. This is the input for a VLM planner.
-3. **Whether a grasp fits.** Object points carry `tool_type` and `grip_width_m`, checked against the robot's tools.
+3. **Whether a grasp fits.** Hand targets on objects carry `tool_type` and `grip_width_m`, checked against the robot's tools.
 
 ### Configuration
-All application knowledge is data: cell layout, named locations, objects with taught points, robot profile and
+All application knowledge is data: cell layout, targets (named places, stances, hand points, carry and joint poses), objects, robot profile and
 embodiment, skill implementations and parameters, missions. See [configuration.md](configuration.md).
 
 ## Interfaces
@@ -76,7 +76,7 @@ embodiment, skill implementations and parameters, missions. See [configuration.m
 | `SkillInfo`, `ListSkills` | msg, srv | skill catalog → task handler, planners |
 | `StartMission` | srv | operator / MES → task handler |
 | `DescribeRobot` | srv | planners → task handler (robot card + filtered catalog) |
-| `TeachPoint` | srv | operator → teach node (save the current base pose or tool poses by name) |
+| `TeachPoint` | srv | operator → teach node (save the current base pose, tool poses or joint values as a target, by name) |
 | `SpeedOverride` | msg | task handler → skills: the global speed override and test mode (latched, `/taskweave/speed_override`) |
 | `SetSpeedOverride` | srv | operator → task handler: the single write path of the override (`/taskweave/task_handler/set_speed_override`) |
 | `/taskweave/pause`, `/taskweave/resume`, `/taskweave/abort` | `std_srvs/Trigger` | operator → task handler |
@@ -86,12 +86,14 @@ embodiment, skill implementations and parameters, missions. See [configuration.m
 
 ## Design rules
 
-1. **Nothing hard-coded.** Numbers, names, points and rules live in config. Code only holds behaviour.
-2. **Task-space targets.** Locations are poses in the cell frame; grasp and hang points are tool poses relative to an
-   object or fixture. Joint angles are never stored as targets.
+1. **Nothing hard-coded.** Numbers, names, targets and rules live in config. Code only holds behaviour.
+2. **One kind of place, in task space.** A [target](targets.md) says what it moves and gets its frame from its file: base
+   poses in the cell, stances and hand points relative to an object, carry poses relative to the robot. One skill,
+   `move`, goes to any of them. A joint target is for a pose that has no task-space meaning (`home`) and names joint
+   groups, never joints.
 3. **Two files per robot.** How the hardware is reached (profile) is separate from what the robot can do
-   (embodiment). A new robot needs both plus its robot-specific hints; missions, cell config and object points stay
-   unchanged. Skills it cannot run are filtered out and reported, not attempted.
-4. **Fail before moving.** Anything that can be checked statically (skills, arguments, points) is checked when the plan
+   (embodiment). A new robot needs both plus its robot-specific hints; missions, cell config and the targets on objects
+   stay unchanged. Skills it cannot run are filtered out and reported, not attempted.
+4. **Fail before moving.** Anything that can be checked statically (skills, arguments, targets) is checked when the plan
    is validated.
 5. **Every step is observable.** Status and episode markers are published for every step and attempt.

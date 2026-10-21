@@ -7,7 +7,7 @@
 
 A skill executes one step of a mission: `{instruction, skill, args}`. The arguments are checked against the skill's JSON
 schema (tables below) before anything moves; values with `{placeholders}` are checked when the step starts. Arguments
-that name a point (a stance, an object point, a contact, a held pose, a joint pose) are checked against the config too.
+that name a target (a base, hand, object or joint target) are checked against the config too.
 How to write missions: [missions.md](missions.md). How a skill is configured and which robots can run it:
 [configuration.md](configuration.md) (skill implementations, skill parameters).
 
@@ -20,8 +20,8 @@ Every step can also set the decision rules `timeout_s`, `retries`, `on_failure`,
 |---|---|
 | `hands` | Which hands act: a hand name from the robot profile (`grippers`), a list of names, or a rule word: `auto` (the hands the target defines or, for a held object, the hands that hold it), `any_one` (one free hand that can take the target), `all` (every hand). Each skill accepts the rule words listed in its table. |
 | `vec3` | `[x, y, z]`, three numbers. |
-| `point` | A string naming something in the config. The point kind is shown in the description: `base_target` (`location:<name>`, `stance:<instance>[/<variant>]` or a bare location name), `instance_point` (`<instance>/<point>`), `instance_contact` (`<instance>/<contact>`), `tool_pose`, `joint_pose_only`, `joint_group`, `held_pose`, `held_object`, `via_target`. |
-| `motion` | Options of the arm skills, see the `motion` table of each skill. Defaults come from the skill yaml, then the robot (`skill_overrides.yaml`), then the target's own data (a point's `approach_m`, `elbow`), then the step. |
+| `point` | A string naming something in the config. The point kind is shown in the description: `target` (`<name>` for a cell, base or joint target, `<instance>/<name>` for a target of a placed object; the kinds a field takes are named in its description, see [targets.md](targets.md)), `joint_group`, `held_object`. |
+| `motion` | Options of the motion, see the `motion` table of `move`. Defaults come from the skill yaml (`skills/move/<part>.yaml`), then the robot (`skill_overrides.yaml`), then the target's own data (a hand target's `approach_m`, `elbow`), then the step. |
 
 `RunSkill` outcomes: `SUCCEEDED`, `FAILED` (ran but missed the goal), `TIMEOUT`, `CANCELED`, `REJECTED` (invalid
 arguments or unmet preconditions; nothing moved).
@@ -32,32 +32,25 @@ override applies on top.
 
 | Skill | Purpose |
 |---|---|
-| [`move_gripper`](#move_gripper) | Move the gripper (TCP) of one or more hands to a target: a point on a placed object (to.point, offset_m stops short along its approach), a named tool pose of this robot (to.pose), an offset from where the hands are now (to.by, with turn and tilt) or an absolute pose (to.at, one hand). |
+| [`move`](#move) | Move the robot. |
 | [`grip`](#grip) | Open or close the fingers of one or more hands, or set their opening in mm. |
-| [`move_joints`](#move_joints) | Move joint groups (torso, head, an arm) to a named joint pose or to given joint values and hold them. |
-| [`move_object`](#move_object) | Move the object held with the grippers (grip close at its point first) with the hands that hold it: every hand keeps its grip, locked in orientation and distance to the object. |
-| [`set_posture`](#set_posture) | Change the arm shape while the hands stay where they are: the elbows swing toward a side (robot frame, out = away from the body) along the arms' null space, as far as joint limits and collisions allow. |
-| [`navigate_to`](#navigate_to) | Drive the robot base to a named location or stance and stop there, facing the stored heading. |
-| [`drive_straight`](#drive_straight) | Drive the base straight forward (positive) or backward (negative) by a short distance, keeping its heading, without obstacle avoidance: to move up to a rack or table the arms reach over, and back out again. |
 | [`wait`](#wait) | Wait for the given number of seconds (simulation time when use_sim_time is set). |
 
-## `move_gripper`
+## `move`
 
-Move the gripper (TCP) of one or more hands to a target: a point on a placed object (to.point, offset_m stops short
-along its approach), a named tool pose of this robot (to.pose), an offset from where the hands are now (to.by, with
-turn and tilt) or an absolute pose (to.at, one hand). mode free: collision-free path in joint space (with a planner),
-the last approach_m of a point in a straight line; mode linear: the TCPs on straight lines. motion sets speed, elbow
-side, planner and the like; its defaults come from the skill, the robot and the point. Arriving at a point with no
-offset makes closing the grippers a grasp of that object. hands any_one picks one free hand that can take the target
-(IK-feasible first, then the least joint motion; motions within any_one_tolerance_rad count as equal, then the profile
-order); the chosen hand is in the result (data.hands, data.choice). A hand that holds an object stays with it
-(REJECTED, naming the hand); the free hand may move meanwhile.
+Move the robot. Forms: `to` a target (its kind says what moves: a base target drives the base, a hand target moves
+hands, an object target moves the held object, a joint target moves joints); `hand` + `by` / `at` moves hands relative
+to now; `object: held` + `by` / `at` moves the held object relative to now; `base: {by: [forward, left]}` drives
+straight; `elbow` swings the elbows to a side while the hands stay; `joints` moves joint groups to values. Options:
+hands, offset_m, reference, only, torso (auto / keep / a value), tolerance_deg, motion (mode, speed, accel, planner,
+via ...); which apply depends on the kind of motion. A hand that holds an object stays with it. dry_run resolves and
+solves without moving.
 
-- Class: `taskweave_skills.gripper_motion:MoveGripper`
-- Default timeout: 60 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
-- Uses: `hands`, `torso`
-- Needs: the robot stands where the target is in reach (e.g. at the object's stance); the moving hands hold nothing
-- Achieves: gripper at the target
+- Class: `taskweave_skills.move:Move`
+- Default timeout: 120 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
+- Uses: `base`, `hands`, `torso`, `joints`
+- Needs: the target is in reach of where the robot is
+- Achieves: the thing that moves is at the target
 
 ### Implementation and requires
 
@@ -65,58 +58,56 @@ Implementation entry of the shipped skill yaml (`implementations:` in `skills/<n
 
 ```yaml
 implementations:
-- name: ik_planned
-  type: script
-  class: taskweave_skills.gripper_motion:MoveGripper
-  requires:
-    capabilities: [arms.bimanual]
-- name: ik_single
-  type: script
-  class: taskweave_skills.gripper_motion:MoveGripper
-  requires:
-    capabilities: [arms.single]
+- {name: dispatch, type: script, class: 'taskweave_skills.move:Move'}
 ```
+
+### Parts
+
+`move` hands each step to the module that does that kind of motion. Each module is configured in `skills/move/<part>.yaml` (`implementations` with `requires`, speeds, tolerances) and is served or not on its own: a kind whose module has no implementation for the robot is rejected with the reasons, the other kinds work.
+
+| Part | File | Implementations (first that fits the robot is served) |
+|---|---|---|
+| `move.base` | `skills/move/base.yaml` | `navigate_direct` (`NavigateTo`) |
+| `move.hand` | `skills/move/hand.yaml` | `ik_planned` (`MoveGripper`, requires arms.bimanual), `ik_single` (`MoveGripper`, requires arms.single) |
+| `move.joints` | `skills/move/joints.yaml` | `joint_targets` (`MoveJoints`) |
+| `move.object` | `skills/move/object.yaml` | `ik_held` (`MoveObject`, requires arms.bimanual), `ik_held_single` (`MoveObject`, requires arms.single) |
+| `move.posture` | `skills/move/posture.yaml` | `null_space` (`SetPosture`, requires arms.bimanual), `null_space_single` (`SetPosture`, requires arms.single) |
+| `move.straight` | `skills/move/straight.yaml` | `drive_straight` (`DriveStraight`) |
 
 ### Arguments
 
+Give exactly one of: `to` or `hand` or `object` or `base` or `elbow` or `joints`.
+The forms: go to a target (`to`); move hands relative to now (`hand`); move a held object relative to now (`object`); drive the base straight (`base`); elbow side (`elbow`); joint values (`joints`).
+
 | Argument | Type | Required | Default | Unit | Description |
 |---|---|---|---|---|---|
-| `to` | one of the variants below | yes | - | - | Where the gripper goes. |
-| `hands` | hands | no | - | - | Which hands: a hand name or a list of names; "auto": the hands the target defines (or, for a held object, the hands holding it); "any_one": one free hand that can take the target (move_gripper: an IK-feasible hand with the least joint motion, named in the result; grip: the one hand at an object point); "all": every hand. (rule words: `auto`, `any_one`, `all`) |
+| `to` | string | no | - | - | A target: &lt;name&gt; (a cell, base or joint target) or &lt;instance&gt;/&lt;name&gt; (a target of a placed object). What moves (base, hands, held object, joints) comes from the target. (point kind `target`) |
+| `hand` | any | no | - | - | Which hands move relative to now (with by or at): a hand name, a list, or all. |
+| `object` | string | no | - | - | held: the held object moves relative to now (with by or at), or a placed-object name when several are held. With `to`: which held object. |
+| `base` | object (table below) | no | - | - | Options, see the table below. |
+| `elbow` | one of `down`, `up`, `out`, `in`, `back`, `forward` or object | no | - | - | The elbows swing toward this side, the hands stay: one side for the hands of `hands` (default: the holding hands, else all), or {hand: side}. |
+| `joints` | object | no | - | - | Joint group values: a number, or a list in the group's joint order (null leaves that joint where it is). |
+| `hands` | hands | no | - | - | Which hands: a hand name or a list of names; "auto": the hands the target defines (or, for a held object, the hands holding it); "any_one": one free hand that can take the target (move: an IK-feasible hand with the least joint motion, named in the result; grip: the one hand at an object target); "all": every hand. (rule words: `auto`, `any_one`, `all`) |
+| `offset_m` | number | no | - | m | Stop this far short of a hand or object target, back along its approach (engage) direction. (min 0) |
+| `reference` | string | no | - | - | An object target: which target of the held object's type goes there (default: the target's own reference, else the object's origin). |
+| `by` | vec3 | no | - | - | [x, y, z] in metres relative to now (hand or object). |
+| `at` | vec3 | no | - | - | [x, y, z] in metres, robot frame (hand: exactly one hand). |
+| `rpy_deg` | vec3 | no | - | - | With `at`, hand: orientation in degrees, robot frame. |
+| `frame` | one of `robot`, `tool` | no | `robot` | - | With `by`, hand: robot (x forward, y left, z up) or tool (along the TCP axes). |
+| `turn_deg` | number | no | - | - | With `by`: turn about the vertical (or the approach axis with frame tool), degrees. |
+| `tilt_deg` | number | no | - | - | With `by`: tilt about the robot y axis, degrees. |
+| `only` | list of string | no | - | - | A joint target: move only these groups of it. (no repeats) |
+| `torso` | any | no | - | - | The torso for this move: auto (choose a height; hand and object targets), keep (do not move it), or a value (a number, or a list for several joints). |
+| `tolerance_deg` | number | no | - | deg | Elbow: fail if the elbows would stop further than this from the side. (above 0) |
 | `motion` | object (table below) | no | - | - | Options, see the table below. |
+| `look_at` | string | no | - | - | Reserved (the head looks at a target): not implemented yet, set the head through joints. |
+| `dry_run` | boolean | no | `False` | - | Resolve and solve IK, move nothing: the result has data.joint_goal. |
 
-### `to` variants
-
-Give exactly one of these forms.
-
-**object point**
+### `base` options
 
 | Argument | Type | Required | Default | Unit | Description |
 |---|---|---|---|---|---|
-| `point` | string | yes | - | - | &lt;instance&gt;/&lt;point&gt;: a point taught on a placed object (e.g. the grasp point of a frame in a bin). (point kind `instance_point`) |
-| `offset_m` | number | no | - | m | Stop this far back along the point's approach direction (pre-grasp). (min 0) |
-
-**named tool pose**
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `pose` | string | yes | - | - | A named pose of this robot that places tools (robots/&lt;robot&gt;/poses.yaml: tools). (point kind `tool_pose`) |
-
-**relative to now**
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `by` | vec3 | yes | - | - | [x, y, z] in metres, in the chosen frame. |
-| `frame` | one of `robot`, `tool` | no | `robot` | - | robot: x forward, y left, z up. tool: along the TCP axes (z = approach). |
-| `turn_deg` | number | no | - | - | Turn about the vertical (frame robot) or the approach axis (frame tool), degrees. |
-| `tilt_deg` | number | no | - | - | Tilt about the y axis, degrees. |
-
-**absolute pose**
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `at` | vec3 | yes | - | - | [x, y, z] in metres, robot frame: where the TCP goes. Exactly one hand. |
-| `rpy_deg` | vec3 | no | - | - | Orientation (roll, pitch, yaw) in degrees, robot frame. Default: keep. |
+| `by` | list of number | yes | - | - | [forward, left] in metres: a straight drive keeping the heading (left only on a holonomic base). |
 
 ### `motion` options
 
@@ -124,15 +115,14 @@ All optional (Motion (advanced)). Defaults are those of the skill yaml, the robo
 
 | Argument | Type | Required | Default | Unit | Description |
 |---|---|---|---|---|---|
-| `mode` | one of `free`, `linear` | no | `free` | - | free: joint space, planned around obstacles. linear: the TCP on a straight line. |
+| `mode` | one of `nav`, `straight`, `free`, `linear` | no | - | - | nav (default) / straight: a base target. free (default) / linear: a hand target. linear (default) / free: an object target. Not for the other forms. |
 | `speed` | number | no | `1` | fraction | Fraction of the skill standard speed (1 = standard). The global speed override applies on top. (above 0; max 1) |
 | `speed_abs` | object (table below) | no | - | - | Absolute speeds instead of the fraction. Capped by the robot limits. |
 | `accel` | number | no | `1` | fraction | Fraction of the standard acceleration. (above 0; max 1) |
 | `elbow` | one of `down`, `up`, `out`, `in`, `back`, `forward` | no | - | - | Elbow side kept or reached (robot frame). Default: the point's, else the robot's. |
 | `planner` | one of `auto`, `direct`, `planned` | no | `auto` | - | auto: straight joint move if free, else elbow swing first, else planner. direct: straight joint move only. planned: always the planner. |
 | `approach_m` | number | no | - | m | free mode: the last part of the way, straight along the approach. 0 = planned all the way. (min 0; only with `mode` = `free`) |
-| `torso` | one of `keep`, `auto` | no | `keep` | - | auto: choose the torso height (robot profile ik.torso: the least torso and arm motion that is reachable and collision free, both hands at one height; else the first of the configured heights that is reachable). keep: never move the torso. |
-| `via` | list of string | no | - | - | Reserved. Waypoints to pass: "pose:&lt;joint pose&gt;" or "&lt;instance&gt;/&lt;point&gt;". |
+| `via` | list of string | no | - | - | Waypoints to pass, in order: hand targets (hand move) or joint targets (joints move). |
 | `tolerance` | number | no | - | - | End accuracy: m for hand skills, rad or m for joints. (above 0) |
 
 #### `motion.speed_abs` options
@@ -147,44 +137,119 @@ All optional (Motion (advanced)). Defaults are those of the skill yaml, the robo
 ### Example
 
 ```yaml
-- instruction: Both hands 10 cm above the grasp point of the part
-  skill: move_gripper
+- instruction: Drive to the pick position at the part stack
+  skill: move
+  args: {to: part_stack_1/pick}
+```
+
+```yaml
+- instruction: Drive to a target of the cell
+  skill: move
+  args: {to: staging}
+```
+
+```yaml
+- instruction: Move up to the work position straight ahead
+  skill: move
   args:
-    to: {point: part_stack_1/grasp, offset_m: 0.1}
+    to: fixture_1/work
+    motion: {mode: straight}
+```
+
+```yaml
+- instruction: Back out 40 cm
+  skill: move
+  args:
+    base:
+      by: [-0.4, 0]
+```
+
+```yaml
+- instruction: Both hands 10 cm above the grasp point of the part
+  skill: move
+  args: {to: part_stack_1/grasp, offset_m: 0.1}
 ```
 
 ```yaml
 - instruction: Left hand only, straight onto the point, at half speed
-  skill: move_gripper
+  skill: move
   args:
-    to: {point: part_stack_1/grasp}
+    to: part_stack_1/grasp
     hands: [left]
     motion: {mode: linear, speed: 0.5}
 ```
 
 ```yaml
 - instruction: Both hands to the presentation pose
-  skill: move_gripper
-  args:
-    to: {pose: present_both}
+  skill: move
+  args: {to: present_both}
 ```
 
 ```yaml
 - instruction: Hands 5 cm up from where they are
-  skill: move_gripper
+  skill: move
   args:
-    to:
-      by: [0, 0, 0.05]
+    hand: all
+    by: [0, 0, 0.05]
+```
+
+```yaml
+- instruction: Lift the held part 20 cm
+  skill: move
+  args:
+    object: held
+    by: [0, 0, 0.2]
+    torso: keep
+```
+
+```yaml
+- instruction: Into the carry pose
+  skill: move
+  args: {to: carry, torso: keep}
+```
+
+```yaml
+- instruction: Part onto the seat of the bin, 5 cm short of it
+  skill: move
+  args: {to: bin_1/seat, offset_m: 0.05, torso: keep}
+```
+
+```yaml
+- instruction: Swing the elbows out, the part staying where it is
+  skill: move
+  args: {elbow: out}
+```
+
+```yaml
+- instruction: Arms in the driving pose
+  skill: move
+  args: {to: home_pose}
+```
+
+```yaml
+- instruction: Only the left arm to the pose, half speed
+  skill: move
+  args:
+    to: home_pose
+    only: [left_arm]
+    motion: {speed: 0.5}
+```
+
+```yaml
+- instruction: The lift to a given height
+  skill: move
+  args:
+    joints: {torso: 0.2}
 ```
 
 ## `grip`
 
-Open or close the fingers of one or more hands, or set their opening in mm. Closing hands that are at an object point
-(move_gripper to.point with no offset) makes them hold that object, also one hand of a two-hand point; opening takes
+Open or close the fingers of one or more hands, or set their opening in mm. Closing hands that are at an object target
+(move to a hand target with no offset) makes them hold that object, also one hand of a two-hand target; opening takes
 hands out of their hold, and a hold left with no hands is released. opening sets the finger gap (opening_mm) and
 leaves the holds alone. open with place_as records where the released object now is, as a placed object of that name
 (object state). Closing on an object takes it off its stack in the object state. hands any_one is the one hand at an
-object point (rejected if none or both).
+object target (rejected if none or both).
 
 - Class: `taskweave_skills.gripper_motion:Grip`
 - Default timeout: 20 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
@@ -211,7 +276,7 @@ implementations:
 | Argument | Type | Required | Default | Unit | Description |
 |---|---|---|---|---|---|
 | `action` | one of `open`, `close`, `opening` | yes | - | - | open / close, or opening: go to opening_mm. |
-| `hands` | hands | no | - | - | Which hands: a hand name or a list of names; "auto": the hands the target defines (or, for a held object, the hands holding it); "any_one": one free hand that can take the target (move_gripper: an IK-feasible hand with the least joint motion, named in the result; grip: the one hand at an object point); "all": every hand. (rule words: `auto`, `any_one`, `all`) |
+| `hands` | hands | no | - | - | Which hands: a hand name or a list of names; "auto": the hands the target defines (or, for a held object, the hands holding it); "any_one": one free hand that can take the target (move: an IK-feasible hand with the least joint motion, named in the result; grip: the one hand at an object target); "all": every hand. (rule words: `auto`, `any_one`, `all`) |
 | `opening_mm` | number | no | - | mm | opening: required, the finger gap. close: stay this wide (default: the point's grip, else fully closed). open: open only this wide. (min 0; only with `action` = `opening` / `open` / `close`) |
 | `place_as` | string | no | - | - | With open: the released object is a placed object of this name now (object state). (only with `action` = `open`) |
 | `motion` | object (table below) | no | - | - | Options, see the table below. |
@@ -247,361 +312,6 @@ All optional (Motion (advanced)). Defaults are those of the skill yaml, the robo
 - instruction: Let go and record where the part now is
   skill: grip
   args: {hands: all, action: open, place_as: part_stack_2}
-```
-
-## `move_joints`
-
-Move joint groups (torso, head, an arm) to a named joint pose or to given joint values and hold them. `only` restricts
-the move to some groups, `motion.via` passes waypoints first, `motion.speed` slows the step. With a motion planner the
-path avoids collisions; without one it is a straight joint-space move. A hand that holds an object stays with it: a
-move of its arm joints is REJECTED, naming the hand. The other arm, torso and head may move (the holding arm keeps its
-joints and the object moves with it).
-
-- Class: `taskweave_skills.joint_motion:MoveJoints`
-- Default timeout: 60 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
-- Uses: `joints`
-- Needs: the motion path is free of obstacles
-- Achieves: joints at the target
-
-### Implementation and requires
-
-Implementation entry of the shipped skill yaml (`implementations:` in `skills/<name>.yaml`):
-
-```yaml
-implementations:
-- {name: joint_targets, type: script, class: 'taskweave_skills.joint_motion:MoveJoints'}
-```
-
-### Arguments
-
-Give exactly one of: `pose` or `joints`.
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `pose` | string | no | - | - | A named pose of this robot (robots/&lt;robot&gt;/poses.yaml) with joint values only (e.g. home, lift_high). (point kind `joint_pose_only`) |
-| `joints` | map name to number | no | - | - | {joint name: value} in rad (metres for prismatic joints). |
-| `only` | list of string | no | - | - | Move only these joint groups of the target (profile joints.groups, e.g. torso, head, left_arm); the target's other joints stay as they are. (no repeats) |
-| `motion` | object (table below) | no | - | - | Options, see the table below. |
-
-### `motion` options
-
-All optional (Motion (advanced)). Defaults are those of the skill yaml, the robot and the target.
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `speed` | number | no | `1` | fraction | Fraction of the skill standard speed (1 = standard). The global speed override applies on top. (above 0; max 1) |
-| `speed_abs` | object (table below) | no | - | - | Absolute speeds instead of the fraction. Capped by the robot limits. |
-| `accel` | number | no | `1` | fraction | Fraction of the standard acceleration. (above 0; max 1) |
-| `planner` | one of `auto`, `direct`, `planned` | no | `auto` | - | auto: straight joint move if free, else elbow swing first, else planner. direct: straight joint move only. planned: always the planner. |
-| `tolerance` | number | no | - | - | End accuracy: m for hand skills, rad or m for joints. (above 0) |
-| `via` | list of string or map name to number | no | - | - | Waypoints to pass, in order: a joint pose name (poses.yaml) or a {joint: value} map. |
-
-#### `motion.speed_abs` options
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `tcp_m_s` | number | no | - | - | (above 0) |
-| `tcp_rad_s` | number | no | - | - | (above 0) |
-| `joint_rad_s` | number | no | - | - | (above 0) |
-| `joint_linear_m_s` | number | no | - | - | (above 0) |
-
-### Example
-
-```yaml
-- instruction: Arms in the driving pose
-  skill: move_joints
-  args: {pose: home}
-```
-
-```yaml
-- instruction: Only the left arm to the pose, half speed
-  skill: move_joints
-  args:
-    pose: home
-    only: [left_arm]
-    motion: {speed: 0.5}
-```
-
-```yaml
-- instruction: The lift to a given height
-  skill: move_joints
-  args:
-    joints: {lift: 0.2}
-```
-
-## `move_object`
-
-Move the object held with the grippers (grip close at its point first) with the hands that hold it: every hand keeps
-its grip, locked in orientation and distance to the object. Target (to): by an offset in the robot frame (x forward, y
-left, z up) with optional turn about the vertical and tilt (far side up); at a position (where the object origin goes,
-orientation kept); pose, a named held pose of this robot for this kind of object (e.g. carry: torso first, then
-straight lines); or onto a contact of a placed object (the held object contact goes there, offset_m short of it).
-motion.mode linear: straight lines (default); free: joint-space path with a planner, with two hands checked so the
-hands do not drift apart (otherwise use linear).
-
-- Class: `taskweave_skills.object_motion:MoveObject`
-- Default timeout: 60 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
-- Uses: `hands`, `torso`
-- Needs: an object held with the grippers
-- Achieves: the held object moved
-
-### Implementation and requires
-
-Implementation entry of the shipped skill yaml (`implementations:` in `skills/<name>.yaml`):
-
-```yaml
-implementations:
-- name: ik_held
-  type: script
-  class: taskweave_skills.object_motion:MoveObject
-  requires:
-    capabilities: [arms.bimanual]
-- name: ik_held_single
-  type: script
-  class: taskweave_skills.object_motion:MoveObject
-  requires:
-    capabilities: [arms.single]
-```
-
-### Arguments
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `to` | one of the variants below | yes | - | - | Where the held object goes. |
-| `object` | string | no | - | - | Only needed when several objects are held: which one (placed-object name). (point kind `held_object`) |
-| `hands` | hands | no | - | - | Which hands: a hand name or a list of names; "auto": the hands the target defines (or, for a held object, the hands holding it); "any_one": one free hand that can take the target (move_gripper: an IK-feasible hand with the least joint motion, named in the result; grip: the one hand at an object point); "all": every hand. (rule words: `auto`, `all`) |
-| `motion` | object (table below) | no | - | - | Options, see the table below. |
-
-### `to` variants
-
-Give exactly one of these forms.
-
-**by an offset**
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `by` | vec3 | yes | - | - | [x, y, z] in metres, robot frame (x forward, y left, z up). |
-| `turn_deg` | number | no | - | - | Turn about the vertical through the object, degrees. |
-| `tilt_deg` | number | no | - | - | Tilt about the robot y axis through the object, far side up, degrees. |
-
-**to a position**
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `at` | vec3 | yes | - | - | [x, y, z] in metres, robot frame: where the object origin goes. Orientation kept. |
-
-**held pose**
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `pose` | string | yes | - | - | A held pose of this robot for the object type (robots/&lt;robot&gt;/held_poses.yaml), e.g. carry. (point kind `held_pose`) |
-
-**onto a contact**
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `onto` | string | yes | - | - | &lt;instance&gt;/&lt;contact&gt;: where on a placed object the held object goes. (point kind `instance_contact`) |
-| `contact` | string | yes | - | - | The held object's contact that goes there. |
-| `offset_m` | number | no | - | m | Stop this far before the contact, against its engage direction. (min 0) |
-
-### `motion` options
-
-All optional (Motion (advanced)). Defaults are those of the skill yaml, the robot and the target.
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `mode` | one of `free`, `linear` | no | `free` | - | free: joint space, planned around obstacles. linear: the TCP on a straight line. |
-| `speed` | number | no | `1` | fraction | Fraction of the skill standard speed (1 = standard). The global speed override applies on top. (above 0; max 1) |
-| `speed_abs` | object (table below) | no | - | - | Absolute speeds instead of the fraction. Capped by the robot limits. |
-| `accel` | number | no | `1` | fraction | Fraction of the standard acceleration. (above 0; max 1) |
-| `planner` | one of `auto`, `direct`, `planned` | no | `auto` | - | auto: straight joint move if free, else elbow swing first, else planner. direct: straight joint move only. planned: always the planner. |
-| `tolerance` | number | no | - | - | End accuracy: m for hand skills, rad or m for joints. (above 0) |
-| `torso` | one of `keep`, `auto` | no | `keep` | - | auto: choose the torso height (robot profile ik.torso: the least torso and arm motion that is reachable and collision free, both hands at one height; else the first of the configured heights that is reachable). keep: never move the torso. |
-
-#### `motion.speed_abs` options
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `tcp_m_s` | number | no | - | - | (above 0) |
-| `tcp_rad_s` | number | no | - | - | (above 0) |
-| `joint_rad_s` | number | no | - | - | (above 0) |
-| `joint_linear_m_s` | number | no | - | - | (above 0) |
-
-### Example
-
-```yaml
-- instruction: Lift the held part 20 cm
-  skill: move_object
-  args:
-    to:
-      by: [0, 0, 0.2]
-```
-
-```yaml
-- instruction: Into the carry pose
-  skill: move_object
-  args:
-    to: {pose: carry}
-```
-
-```yaml
-- instruction: Part onto the seat of the bin, 5 cm short of it
-  skill: move_object
-  args:
-    to: {onto: bin_1/seat, contact: base, offset_m: 0.05}
-```
-
-## `set_posture`
-
-Change the arm shape while the hands stay where they are: the elbows swing toward a side (robot frame, out = away from
-the body) along the arms' null space, as far as joint limits and collisions allow. Default hands: the hands that hold
-something, else all. A held object does not move. Fails before moving if the elbows would stop more than tolerance_deg
-off the side.
-
-- Class: `taskweave_skills.object_motion:SetPosture`
-- Default timeout: 60 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
-- Uses: `hands`
-- Needs: the hands stay in reach of where they are
-- Achieves: the elbows toward the given side, the hands unchanged
-
-### Implementation and requires
-
-Implementation entry of the shipped skill yaml (`implementations:` in `skills/<name>.yaml`):
-
-```yaml
-implementations:
-- name: null_space
-  type: script
-  class: taskweave_skills.object_motion:SetPosture
-  requires:
-    capabilities: [arms.bimanual]
-- name: null_space_single
-  type: script
-  class: taskweave_skills.object_motion:SetPosture
-  requires:
-    capabilities: [arms.single]
-```
-
-### Arguments
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `elbow` | one of `down`, `up`, `out`, `in`, `back`, `forward` | yes | - | - | The hands and any held object stay; the arms swing their elbows toward this side (robot frame, out = away from the body), as far as joint limits and collisions allow. |
-| `tolerance_deg` | number | no | - | deg | Fail if the elbows would stop further than this from the side (default: skill config elbow_tolerance_deg). (above 0) |
-| `hands` | hands | no | - | - | Which hands: a hand name or a list of names; "auto": the hands the target defines (or, for a held object, the hands holding it); "any_one": one free hand that can take the target (move_gripper: an IK-feasible hand with the least joint motion, named in the result; grip: the one hand at an object point); "all": every hand. (rule words: `auto`, `all`) |
-| `motion` | object (table below) | no | - | - | Options, see the table below. |
-
-### `motion` options
-
-All optional (Motion (advanced)). Defaults are those of the skill yaml, the robot and the target.
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `speed` | number | no | `1` | fraction | Fraction of the skill standard speed (1 = standard). The global speed override applies on top. (above 0; max 1) |
-| `speed_abs` | object (table below) | no | - | - | Absolute speeds instead of the fraction. Capped by the robot limits. |
-| `accel` | number | no | `1` | fraction | Fraction of the standard acceleration. (above 0; max 1) |
-| `tolerance` | number | no | - | - | End accuracy: m for hand skills, rad or m for joints. (above 0) |
-
-#### `motion.speed_abs` options
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `tcp_m_s` | number | no | - | - | (above 0) |
-| `tcp_rad_s` | number | no | - | - | (above 0) |
-| `joint_rad_s` | number | no | - | - | (above 0) |
-| `joint_linear_m_s` | number | no | - | - | (above 0) |
-
-### Example
-
-```yaml
-- instruction: Swing the elbows out, the part staying where it is
-  skill: set_posture
-  args: {elbow: out}
-```
-
-## `navigate_to`
-
-Drive the robot base to a named location or stance and stop there, facing the stored heading. Direct path, no obstacle
-avoidance. The Nav2 implementation (taskweave_skills.nav2:Nav2NavigateTo) plans around obstacles and drives its Nav2
-phase never slower than its param min_override (default 0.3): at a 10 % override Nav2 drives 30 %, the direct
-controller 10 %. The step result reports it as data.speed.nav2_override.
-
-- Class: `taskweave_skills.navigate:NavigateTo`
-- Default timeout: 120 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
-- Needs: the path to the target is free
-- Achieves: robot base at the target pose
-
-### Implementation and requires
-
-Implementation entry of the shipped skill yaml (`implementations:` in `skills/<name>.yaml`):
-
-```yaml
-implementations:
-- {name: navigate_direct, type: script, class: 'taskweave_skills.navigate:NavigateTo'}
-```
-
-### Arguments
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `target` | string | yes | - | - | location name, "location:&lt;name&gt;" or "stance:&lt;name&gt;". (point kind `base_target`) |
-
-### Example
-
-```yaml
-- instruction: Drive to the pick stance at the part stack
-  skill: navigate_to
-  args: {target: 'stance:part_stack_1'}
-```
-
-```yaml
-- instruction: Drive to a named location
-  skill: navigate_to
-  args: {target: staging}
-```
-
-## `drive_straight`
-
-Drive the base straight forward (positive) or backward (negative) by a short distance, keeping its heading, without
-obstacle avoidance: to move up to a rack or table the arms reach over, and back out again. A holonomic base can also
-move sideways.
-
-- Class: `taskweave_skills.drive:DriveStraight`
-- Default timeout: 60 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
-- Needs: the strip the base drives over is free
-- Achieves: robot base moved by the distance
-
-### Implementation and requires
-
-Implementation entry of the shipped skill yaml (`implementations:` in `skills/<name>.yaml`):
-
-```yaml
-implementations:
-- {name: drive_straight, type: script, class: 'taskweave_skills.drive:DriveStraight'}
-```
-
-### Arguments
-
-Give exactly one of: `distance_m` or `to`.
-
-| Argument | Type | Required | Default | Unit | Description |
-|---|---|---|---|---|---|
-| `distance_m` | number | no | - | - | forward (+) or backward (-), metres. |
-| `to` | string | no | - | - | a stance or location straight ahead or behind (instead of distance_m). (point kind `base_target`) |
-| `sideways_m` | number | no | - | - | left (+) or right (-), metres; holonomic bases only. |
-
-### Example
-
-```yaml
-- instruction: Back out 40 cm
-  skill: drive_straight
-  args: {distance_m: -0.4}
-```
-
-```yaml
-- instruction: Move up to the work stance straight ahead
-  skill: drive_straight
-  args: {to: 'stance:fixture_1/work'}
 ```
 
 ## `wait`

@@ -1,0 +1,18 @@
+home_pose: {moves: joints, joints: {torso: 0.0, left_arm: [0.0, 0.0], right_arm: [0.0, 0.0]}}
+present_left:
+  moves: hand
+  left_tool: {xyz: [0.6, 0.2, 0.4], rpy: [1.570796, 0.0, 1.570796]}
+  elbow: out
+present_both:
+  moves: hand
+  left_tool: {xyz: [0.6, 0.2, 0.4], rpy: [1.570796, 0.0, 1.570796]}
+  right_tool: {xyz: [0.6, -0.2, 0.4], rpy: [1.570796, 0.0, 1.570796]}
+  joints:
+    torso: 0.1
+# Where this robot holds an object of a type (`move` to carry).
+carry:
+  moves: object
+  joints:
+    torso: 0.1
+  path:
+  - {xyz: [0.7, 0.0, 0.1], rpy: [0.0, 0.0, 0.0]}

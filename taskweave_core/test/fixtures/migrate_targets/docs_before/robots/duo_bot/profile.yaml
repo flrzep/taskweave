@@ -1,0 +1,16 @@
+# Test robot with two 2-joint arms, a lift and two gripper joints, driven by joint position targets. Tool frames are
+# the flange links (published by the test as TF); IK is answered by a fake /compute_ik.
+name: duo_bot
+base: {type: fixed, cmd_vel: /duo/cmd_vel, odom: /duo/odom, frame: base_link}
+joints: {command: /duo/joint_command, state: /duo/joint_states, linear: [lift],
+          groups: {torso: [lift], left_arm: [left_joint1, left_joint2], right_arm: [right_joint1, right_joint2]}}
+grippers:
+  left: {joint: left_grip, open: 1.0, closed: 0.0, opening_m: [[0.0, 0.0], [1.0, 0.08]]}
+  right: {joint: right_grip, open: 1.0, closed: 0.0, opening_m: [[0.0, 0.0], [1.0, 0.08]]}
+tool_frames:
+  left: {link: left_link7, xyz: [0.0, 0.0, 0.0], rpy: [0.0, 0.0, 0.0]}
+  right: {link: right_link7, xyz: [0.0, 0.0, 0.0], rpy: [0.0, 0.0, 0.0]}
+ik:
+  groups: {left: left_arm, right: right_arm}
+  joints: '{tool}_joint[1-2]'
+  timeout_s: 0.2

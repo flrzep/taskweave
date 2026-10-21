@@ -2,7 +2,7 @@ goal: Pull the lever of the fixture with the left hand and let go again
 loop: once
 defaults: {timeout_s: 90, retries: 0, on_failure: abort}
 steps:
-  - instruction: Drive to the work stance at the fixture
+  - instruction: Drive to the work position at the fixture
     skill: move
     args: {to: fixture_1/work}
   - instruction: Open the left gripper

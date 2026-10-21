@@ -37,15 +37,22 @@ def test_every_skill_is_documented_with_an_example(generator):
         assert f'## `{skill.name}`' in text
 
 
-def test_every_shipped_skill_has_a_template_and_an_example_yaml(generator):
-    """AGENTS.md "add a skill": config/skill_templates.py (what taskweave config migrate-skills starts from) and
-    docs/examples/skills/<name>.yaml, kept equal by test_migrate_skills."""
-    from taskweave_core.config.skill_templates import TEMPLATES
+def test_the_skills_of_the_docs_are_wait_move_grip(generator):
+    """The catalogue of a cell in the targets layout: three skills. The classes of the six motion skills ``move``
+    replaced are its parts, not documented as skills."""
+    assert {skill.name for skill in generator.load_skills()} == {'wait', 'move', 'grip'}
+    text = generator.OUTPUT.read_text(encoding='utf-8')
+    for part in ('base', 'straight', 'hand', 'object', 'posture', 'joints'):
+        assert f'`move.{part}`' in text and f'skills/move/{part}.yaml' in text
 
+
+def test_every_shipped_skill_has_a_skill_yaml_in_the_example_cell(generator):
+    """AGENTS.md "add a skill": docs/examples/skills/<name>.yaml is what a cell pack's skill file starts from, and
+    what the reference shows as `requires`. ``move`` also has its parts in docs/examples/skills/move/."""
     names = {skill.name for skill in generator.load_skills()}
-    assert names == set(TEMPLATES), 'skill_templates.TEMPLATES needs one entry per skill'
     for name in names:
         assert (REPO / 'docs' / 'examples' / 'skills' / f'{name}.yaml').is_file(), f'docs/examples/skills/{name}.yaml'
+    assert set(generator.parts('move')) == {'base', 'straight', 'hand', 'object', 'posture', 'joints'}
 
 
 def test_the_launch_example_names_every_shipped_skill(generator):

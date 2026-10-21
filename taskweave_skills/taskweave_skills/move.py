@@ -154,7 +154,6 @@ class Move(Skill):
     needs = ['the target is in reach of where the robot is']
     achieves = ['the thing that moves is at the target']
     default_timeout_s = 120.0
-    documented = False    # left out of shipped_skills() (so out of docs/skills.md) until the docs are switched over
 
     # ---- setup ----------------------------------------------------------------------------------------------
     def __copy__(self):
