@@ -102,6 +102,8 @@ def type_of(schema: dict) -> str:
     if 'oneOf' in schema:
         return 'one of the variants below'
     kind = schema.get('type', 'any')
+    if isinstance(kind, list):      # e.g. [number, 'null']: a number or empty
+        return ' or '.join(str(k) for k in kind)
     if kind == 'array':
         item = schema.get('items', {})
         return f'list of {type_of(item)}' if item else 'list'
@@ -133,8 +135,10 @@ def description_of(name: str, schema: dict) -> str:
     if schema.get('x-taskweave-point'):
         notes.append(f'point kind `{schema["x-taskweave-point"]}`')
     if schema.get('x-taskweave-widget') == 'hands':
-        rules = schema['anyOf'][0]['enum']
-        notes.append('rule words: ' + ', '.join(f'`{rule}`' for rule in rules if rule in HAND_WORDS))
+        # the rule words sit in an enum branch; a class-level hands field (move's `hand`) may have none
+        rules = [rule for item in schema.get('anyOf', []) for rule in item.get('enum', [])]
+        if any(rule in HAND_WORDS for rule in rules):
+            notes.append('rule words: ' + ', '.join(f'`{rule}`' for rule in rules if rule in HAND_WORDS))
     show_if = schema.get('x-taskweave-show-if')
     if show_if:
         notes.append('only with ' + ' and '.join(f'`{key}` = ' + ' / '.join(f'`{v}`' for v in values)

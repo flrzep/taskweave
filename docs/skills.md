@@ -82,7 +82,7 @@ The forms: go to a target (`to`); move hands relative to now (`hand`); move a he
 | Argument | Type | Required | Default | Unit | Description |
 |---|---|---|---|---|---|
 | `to` | string | no | - | - | A target: &lt;name&gt; (a cell, base or joint target) or &lt;instance&gt;/&lt;name&gt; (a target of a placed object). What moves (base, hands, held object, joints) comes from the target. (point kind `target`) |
-| `hand` | any | no | - | - | Which hands move relative to now (with by or at): a hand name, a list, or all. |
+| `hand` | hands | no | - | - | Which hands move relative to now (with by or at): a hand name, a list, or all. |
 | `object` | string | no | - | - | held: the held object moves relative to now (with by or at), or a placed-object name when several are held. With `to`: which held object. |
 | `base` | object (table below) | no | - | - | Options, see the table below. |
 | `elbow` | one of `down`, `up`, `out`, `in`, `back`, `forward` or object | no | - | - | The elbows swing toward this side, the hands stay: one side for the hands of `hands` (default: the holding hands, else all), or {hand: side}. |
@@ -97,7 +97,7 @@ The forms: go to a target (`to`); move hands relative to now (`hand`); move a he
 | `turn_deg` | number | no | - | - | With `by`: turn about the vertical (or the approach axis with frame tool), degrees. |
 | `tilt_deg` | number | no | - | - | With `by`: tilt about the robot y axis, degrees. |
 | `only` | list of string | no | - | - | A joint target: move only these groups of it. (no repeats) |
-| `torso` | any | no | - | - | The torso for this move: auto (choose a height; hand and object targets), keep (do not move it), or a value (a number, or a list for several joints). |
+| `torso` | one of `auto`, `keep` or number or list of number or null | no | - | - | The torso for this move: auto (choose a height; hand and object targets), keep (do not move it), or a value (a number, or a list for several joints). |
 | `tolerance_deg` | number | no | - | deg | Elbow: fail if the elbows would stop further than this from the side. (above 0) |
 | `motion` | object (table below) | no | - | - | Options, see the table below. |
 | `look_at` | string | no | - | - | Reserved (the head looks at a target): not implemented yet, set the head through joints. |
