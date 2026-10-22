@@ -129,6 +129,17 @@ def test_the_renames_and_drops_are_printed(old_cell):
     assert any(line.startswith('rename  held pose') and 'set_down -> set_down_held' in line for line in lines)
 
 
+def test_pack_yaml_keeps_its_comments_and_requires(old_cell):
+    text = (old_cell / 'pack.yaml').read_text(encoding='utf-8')
+    write(old_cell / 'pack.yaml', '# the cell of the test bench\n' + text.rstrip('\n')
+          + '\nrequires: {taskweave: ">=0.2"}\n')
+    assert run(old_cell)[0] == 0
+    after = (old_cell / 'pack.yaml').read_text(encoding='utf-8')
+    assert after.startswith('# the cell of the test bench\n')
+    assert data(old_cell / 'pack.yaml')['requires'] == {'taskweave': '>=0.2'}
+    assert data(old_cell / 'pack.yaml')['schema_version'] == 4
+
+
 def test_a_second_run_changes_nothing_and_a_dry_run_changes_nothing(old_cell, tmp_path):
     before = tree(old_cell)
     code, lines = run(old_cell, dry_run=True)

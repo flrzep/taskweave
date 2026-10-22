@@ -212,11 +212,17 @@ def split_robot_packs(cell: Path, robot_packs: Path | None, dry_run: bool, say) 
 
 def write_cell_pack(cell: Path, name: str, version: int, dry_run: bool, say) -> None:
     pack = packs.read_pack(cell) or {}
-    name = re.sub(r'[^A-Za-z0-9_\-]', '_', name)
-    name = name if re.match(r'[A-Za-z_]', name) else f'cell_{name}'
-    text = ('# cell pack: everything about this cell; the robots come from robot packs (taskweave config migrate)\n'
-            + yaml.safe_dump({'name': pack.get('name', name), 'version': pack.get('version', 1),
-                              'schema_version': version}, sort_keys=False))
+    path = cell / packs.PACK_FILE
+    old = path.read_text(encoding='utf-8') if path.is_file() else ''
+    if pack and re.search(r'(?m)^schema_version:\s*\d+\s*$', old):
+        # an existing pack.yaml keeps its comments and keys (name, version, requires, ...): only the schema changes
+        text = re.sub(r'(?m)^schema_version:\s*\d+\s*$', f'schema_version: {version}', old)
+    else:
+        name = re.sub(r'[^A-Za-z0-9_\-]', '_', name)
+        name = name if re.match(r'[A-Za-z_]', name) else f'cell_{name}'
+        text = ('# cell pack: everything about this cell; the robots come from robot packs (taskweave config migrate)\n'
+                + yaml.safe_dump({**pack, 'name': pack.get('name', name), 'version': pack.get('version', 1),
+                                  'schema_version': version}, sort_keys=False))
     say(f'{"would " if dry_run else ""}write   pack.yaml  (schema_version {version})')
     if not dry_run:
         with (cell / packs.PACK_FILE).open('w', encoding='utf-8', newline='') as stream:    # LF on Windows too
