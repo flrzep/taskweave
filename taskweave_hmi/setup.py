@@ -13,7 +13,7 @@ def tree(folder: str) -> list[tuple[str, list[str]]]:
 
 setup(
     name=PACKAGE,
-    version='0.3.0',
+    version='0.3.1',
     packages=find_packages(exclude=['test']),
     package_data={PACKAGE: ['web/**/*']},
     data_files=[

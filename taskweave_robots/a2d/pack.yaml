@@ -1,5 +1,5 @@
 name: a2d
-version: 0.3.0
+version: 0.3.1
 schema_version: 2
 requires:
   taskweave: ">=0.3,<0.4"

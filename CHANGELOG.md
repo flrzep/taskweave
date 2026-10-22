@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 — 2026-10-22
+
+- **Version of an installed taskweave:** `taskweave_version()` took the first matching package metadata; a colcon
+  install folder built over several releases keeps the egg-info of each, so a 0.3.0 deploy reported 0.2.0 and the
+  robot packs' `requires: >=0.3` stopped the launch. It now takes the newest.
+
 ## 0.3.0 — 2026-10-22
 
 ### Breaking changes (cell pack schema 4, robot pack schema 2)

@@ -90,13 +90,25 @@ def taskweave_version() -> str:
     try:
         from importlib.metadata import distributions, version
 
-        for dist in distributions():
-            if (dist.metadata['Name'] or '').replace('-', '_') == 'taskweave_core' and \
-                    here.is_relative_to(Path(dist.locate_file('')).resolve()):
-                return dist.version
+        # an install folder built over several releases keeps the metadata of each one: the newest is this copy's
+        mine = [dist.version for dist in distributions()
+                if (dist.metadata['Name'] or '').replace('-', '_') == 'taskweave_core'
+                and here.is_relative_to(Path(dist.locate_file('')).resolve())]
+        if mine:
+            return newest_version(mine)
         return version('taskweave_core')
     except Exception:  # metadata missing or unreadable
         return 'unknown'
+
+
+def newest_version(versions: list[str]) -> str:
+    """The highest of ``versions`` (PEP 440), or the last one when one of them is no version."""
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        return max(versions, key=Version)
+    except InvalidVersion:
+        return versions[-1]
 
 
 def check_requires(pack: dict, path: Path, label: str) -> None:

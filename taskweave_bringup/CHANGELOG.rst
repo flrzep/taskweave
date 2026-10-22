@@ -2,6 +2,10 @@
 Changelog for package taskweave_bringup
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.3.1 (2026-10-22)
+------------------
+* See CHANGELOG.md at the repository root.
+
 0.3.0 (2026-10-22)
 ------------------
 * See CHANGELOG.md at the repository root.

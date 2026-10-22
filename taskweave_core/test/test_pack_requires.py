@@ -100,6 +100,22 @@ def test_the_version_is_the_running_source_trees(monkeypatch):
     assert real() == expected
 
 
+def test_an_install_folder_with_the_metadata_of_older_builds_reports_the_newest(monkeypatch):
+    """A colcon install folder keeps the egg-info of every build (0.1.0 ... 0.3.0 side by side); the first one found
+    was taken and a 0.3.0 deploy reported 0.2.0 (the robot pack's requires then stopped the launch)."""
+    import importlib
+    from types import SimpleNamespace
+
+    real = importlib.reload(packs)
+    here = Path(real.__file__).resolve()
+    monkeypatch.setattr(Path, 'is_file', lambda self: False if self.name == 'package.xml' else Path.exists(self))
+    dists = [SimpleNamespace(metadata={'Name': 'taskweave_core'}, version=v, locate_file=lambda _: here.parents[3])
+             for v in ('0.1.0', '0.2.0', '0.3.0', '0.2.3')]
+    monkeypatch.setattr('importlib.metadata.distributions', lambda: dists)
+    assert real.taskweave_version() == '0.3.0'
+    assert real.newest_version(['0.2.10', '0.2.9']) == '0.2.10'
+
+
 def test_a_folder_that_is_no_cell_says_so(tmp_path):
     """No pack.yaml and none of an old cell's folders: 'no cell pack here', not 'migrate schema 1'."""
     (tmp_path / 'scripts').mkdir()
