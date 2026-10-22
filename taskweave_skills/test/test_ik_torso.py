@@ -502,3 +502,99 @@ def test_beyond_the_nearest_heights_the_global_search_skips_heights_whose_local_
     choice = ik.solve_with_torso([TOOLS], {}, now(0.6))
     assert choice.height <= 0.3 + 1e-9 and ik.global_calls and min(ik.global_calls) >= 0.25 - 1e-9
     assert 0.0 not in {h for h, g, _ in ik.hints if g} and 0.1 not in {h for h, g, _ in ik.hints if g}
+
+
+# ---- F17: the global-only band is remembered, and heights no arm can reach cost no IK call -----------------------
+
+GRID_75 = [*GRID, 0.75]
+
+
+class Counting(GlobalOnly):
+    """GlobalOnly that counts every solve() call (``calls``: [(height, global_search)]) like a timeout each."""
+
+    def solve(self, tools, fixed, should_stop=lambda: False, current=None, allow_flip=True, elbow=None,
+              global_search=True):
+        self.calls = getattr(self, 'calls', [])
+        self.calls.append((fixed['lift'], global_search))
+        return super().solve(tools, fixed, should_stop, current, allow_flip, elbow, global_search)
+
+
+def test_a_band_only_the_global_search_found_is_tried_first_next_time_and_the_search_falls_back_when_it_fails():
+    from taskweave_skills.ik import Samples
+    samples = Samples([TOOLS, {'left': TOOLS['left']}])           # a held path: two waypoints
+    ik = Counting(works=(0.3,), grid=GRID_75)
+    first = ik.solve_with_torso(samples, {}, now(0.5))
+    first_calls = len(ik.calls)
+    assert first.height == pytest.approx(0.3) and first.skipped.startswith('no height solved with local IK')
+    ik.calls.clear()
+    again = ik.solve_with_torso(samples, {}, now(0.5))
+    assert again.height == pytest.approx(0.3) and 'remembered band' in again.skipped
+    assert ik.calls == [(0.3, True), (0.3, True)]                  # one global solve per waypoint, nothing else
+    assert len(ik.calls) * 4 < first_calls
+    ik.works = ()                                                  # the scene changed: the band is gone
+    ik.calls.clear()
+    with pytest.raises(TorsoError):
+        ik.solve_with_torso(samples, {}, now(0.5))
+    assert len(ik.calls) > 10 and not ik.bands                     # the full search ran, the memory was dropped
+    ik.works = (0.3,)
+    assert ik.solve_with_torso(samples, {}, now(0.5)).height == pytest.approx(0.3)
+    other = Samples([{'left': {**TOOLS['left'], 'tcp': [0.9, 0.2, 0.0]}}])        # another target: its own search
+    ik.calls.clear()
+    assert 'remembered' not in ik.solve_with_torso(other, {}, now(0.5)).skipped
+    assert len(ik.calls) > 2
+
+
+def test_a_search_the_local_pass_solves_is_not_remembered_and_runs_the_same_every_time():
+    ik = FakeIk(reach=lambda tool, target, h: 0.0 if h >= 0.3 else None)
+    first = ik.solve_with_torso([TOOLS], {}, now(0.1))
+    assert not ik.bands and ik.solve_with_torso([TOOLS], {}, now(0.1)).skipped == first.skipped
+
+
+class Reach(Counting):
+    """Counting with the real S1 left arm chain, so heights no arm can reach are known without IK."""
+
+    def __init__(self, **kw):
+        import re
+        from pathlib import Path
+
+        import yaml
+
+        from taskweave_skills.chain import Chain
+        super().__init__(**kw)
+        root = Path(__file__).resolve().parents[2] / 'taskweave_robots' / 'galbot_s1'
+        if not (root / 'moveit' / 'robot.urdf').exists():
+            pytest.skip('the S1 robot pack is not next to the tests')
+        self.tools = yaml.safe_load((root / 'profile.yaml').read_text())['tool_frames']
+        chain = Chain.from_urdf(root / 'moveit' / 'robot.urdf', 'base_link', self.tools['left']['link'])
+        self.torso['joint'] = 'body_joint'
+        self.chains = {'left': (chain, [n for n in chain.movable if re.fullmatch('left_joint[1-7]', n)])}
+
+
+def test_heights_the_arm_cannot_reach_are_skipped_before_any_ik_call_and_the_band_is_found_with_far_fewer():
+    floor = {'left': {'tcp': [0.85, 0.25, -0.4], 'approach': [0, 0, -1], 'closing': [0, 1, 0]}}
+    current = {**now(0.5), 'body_joint': 0.5}
+
+    class Lift(Reach):                 # the fake's 'lift' is the S1's body_joint
+        def solve(self, tools, fixed, *args, **kw):
+            return super().solve(tools, {**fixed, 'lift': fixed['body_joint']}, *args, **kw)
+
+    ik = Lift(works=(0.2,), grid=GRID_75)
+    ik.chains = {**ik.chains}
+    choice = ik.solve_with_torso([floor], {}, current)
+    assert choice.height == pytest.approx(0.2)
+    assert {h for h, _ in ik.calls}.isdisjoint({0.3, 0.4, 0.5, 0.6, 0.7, 0.75})     # 0.97 m+ from the shoulder
+    reasons = {r['height']: r['reason'] for r in choice.rejected}
+    assert reasons[0.5].startswith('out of reach: left target') and reasons[0.3].startswith('out of reach')
+    assert ik._unreachable([floor], 0.2) is None and ik._unreachable([floor], 0.0) is None
+
+
+def test_the_global_pass_skips_the_local_descents_at_a_height_whose_local_solve_just_found_no_ik():
+    seen = []
+
+    class Watch(Counting):
+        def solve(self, tools, fixed, *args, **kw):
+            seen.append((fixed['lift'], kw.get('global_search', True), getattr(self, 'global_only', False)))
+            return super().solve(tools, fixed, *args, **kw)
+    Watch(works=(0.3,), grid=GRID_75).solve_with_torso([TOOLS], {}, now(0.5))
+    assert (0.3, False, False) in seen and (0.3, True, True) in seen       # local first, then global alone
+    assert not [s for s in seen if s[2] and not s[1]]
