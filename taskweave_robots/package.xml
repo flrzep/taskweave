@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypelocation="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>taskweave_robots</name>
-  <version>0.2.3</version>
+  <version>0.3.0</version>
   <description>taskweave robot packs (data only): per robot model its profile, embodiment, MoveIt config, navigation, sim asset section and named poses, nothing about a cell. Installed to share/taskweave_robots/&lt;robot&gt;/.</description>
   <maintainer email="f.rzepczyk@gmail.com">Florian Rzepczyk</maintainer>
   <!-- vendor-derived robot data (URDF, meshes, limits from the Galbot / Agibot simulation assets): internal use only,

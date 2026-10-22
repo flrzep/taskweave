@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypelocation="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>taskweave_core</name>
-  <version>0.2.3</version>
+  <version>0.3.0</version>
   <description>taskweave core: config loading and validation, planners, the task handler and the skill server base class.</description>
   <maintainer email="f.rzepczyk@gmail.com">Florian Rzepczyk</maintainer>
   <license>TBD</license>

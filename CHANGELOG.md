@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.3.0 — 2026-10-22
 
 ### Breaking changes (cell pack schema 4, robot pack schema 2)
 - **Targets.** Everything the robot goes to is one thing now, a target (`moves: base | hand | object | joints`, frame from

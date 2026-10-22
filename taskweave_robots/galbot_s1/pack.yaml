@@ -1,6 +1,6 @@
 name: galbot_s1
-version: 0.2.3
+version: 0.3.0
 schema_version: 2
 requires:
-  taskweave: ">=0.2,<0.3"
+  taskweave: ">=0.3,<0.4"
 description: "Galbot S1: differential steering chassis, lifting torso, two 7-joint arms with Ge103In grippers; MoveIt config (URDF, SRDF, collision meshes)"
