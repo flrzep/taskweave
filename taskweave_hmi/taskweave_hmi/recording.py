@@ -528,7 +528,9 @@ class Recorder:
     def _start_mission(self, mission: str) -> tuple[bool, str]:
         from taskweave_interfaces.srv import StartMission
 
-        response = self.bridge.call(self.bridge.start_client, StartMission.Request(mission=mission, start_step=''))
+        from .server import START_TIMEOUT_S
+        response = self.bridge.call(self.bridge.start_client, StartMission.Request(mission=mission, start_step=''),
+                                    START_TIMEOUT_S)
         return response.accepted, response.message
 
     def _abort_mission(self) -> None:

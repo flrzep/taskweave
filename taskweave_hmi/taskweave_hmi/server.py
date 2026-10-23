@@ -137,6 +137,7 @@ from . import arm, held, missions, points, recording, robot, scene, targets
 WEB = Path(__file__).parent / 'web'
 STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
 CALL_TIMEOUT_S = 5.0
+START_TIMEOUT_S = 30.0  # start_mission answers once the plan is checked: seconds on a large cell (0.3.1 took minutes)
 STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'graph.js', 'record.js', 'viewer3d.js', 'style.css',
                 'viewer3d-demo.html')  # the 3D viewer alone, full window: for testing it
 VENDOR = WEB / 'vendor'  # the 3D view's libraries, served below /vendor/
@@ -870,13 +871,13 @@ class Bridge(Node):
                     'pad_mode': self.pad_mode, 'speed': self.speed_state, 'manual': self.manual_view()}
 
     # ---- service calls -------------------------------------------------------------
-    def call(self, client, request):
+    def call(self, client, request, timeout_s: float = CALL_TIMEOUT_S):
         if not client.wait_for_service(timeout_sec=CALL_TIMEOUT_S):
             raise TimeoutError(f'{client.srv_name} not available - is the task handler running?')
         done = threading.Event()
         future = client.call_async(request)
         future.add_done_callback(lambda _: done.set())
-        if not done.wait(CALL_TIMEOUT_S) or future.result() is None:
+        if not done.wait(timeout_s) or future.result() is None:
             raise TimeoutError(f'{client.srv_name}: no response')
         return future.result()
 
@@ -1059,7 +1060,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'POST' and route == ['start']:
                 body = self._body()
                 response = bridge.call(bridge.start_client, StartMission.Request(
-                    mission=body['mission'], start_step=str(body.get('start_step') or '')))
+                    mission=body['mission'], start_step=str(body.get('start_step') or '')), START_TIMEOUT_S)
                 status = HTTPStatus.OK if response.accepted else HTTPStatus.UNPROCESSABLE_ENTITY
                 return self._json({'accepted': response.accepted, 'message': response.message,
                                    'plan_id': response.plan_id}, status)
