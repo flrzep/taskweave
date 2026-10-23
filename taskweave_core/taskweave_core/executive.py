@@ -29,6 +29,9 @@ from .speed import WorkClock
 from .world_state import WorldState
 
 # skill data kept in step_finished (smoke test)
+# step_status while the first plan is prepared: the state is running, there is a plan id and step count, but no step
+PLANNING_STATUS = 'planning'
+
 EPISODE_DATA = ('path', 'mode', 'choice', 'plan_s', 'plan_points', 'torso')
 
 
@@ -98,6 +101,7 @@ class Executive:
         self._running = False          # a skill is executing for the current token
         self._interrupt: str | None = None  # 'pause' | 'abort' | 'timeout' while waiting for a CANCELED result
         self._replans: dict[str, int] = {}
+        self._preview: tuple[str, int] | None = None   # plan id and step count shown while the plan is prepared
 
     # ---- operator / node API -------------------------------------------------
     def start(self, start_step: str = '') -> Status:
@@ -108,6 +112,13 @@ class Executive:
             if self.status.state in ACTIVE:
                 raise RuntimeError('a mission is already active')
             self.status = Status(state=State.RUNNING)
+            preview = getattr(self.planner, 'preview', None)
+            self._preview = preview(1) if preview else None
+            if self._preview:   # the plan is being prepared (loaded, validated): say what is coming meanwhile
+                self.status.plan_id, self.status.step_count = self._preview
+                self.status.cycle, self.status.step_status = 1, PLANNING_STATUS
+                self._log(f'planning {self._preview[0]} ({self._preview[1]} steps)')
+                self.on_status(self.status)
             self._begin_cycle(1, start_step)
             return self.status
 
@@ -193,7 +204,7 @@ class Executive:
         if problems:
             self._finish(State.FAILED, 'plan rejected: ' + '; '.join(problems))
             return
-        self.plan = plan
+        self.plan, self._preview = plan, None
         self.status.plan_id, self.status.goal, self.status.step_count = plan.plan_id, plan.goal, len(plan.steps)
         try:
             first = plan.index_of(start_step) if start_step else 0
@@ -273,6 +284,11 @@ class Executive:
             self._finish(State.FAILED, reason)
 
     def _finish(self, state: State, message: str) -> None:
+        if self._preview:   # no plan came of it: the id and count shown while planning are not a plan's
+            self._preview = None
+            self.status.plan_id, self.status.step_count = '', 0
+        if self.status.step_status == PLANNING_STATUS:
+            self.status.step_status = ''
         if state in (State.FAILED, State.ABORTED):
             self.status.last_error = message
         self.status.step_index, self.status.step = -1, None

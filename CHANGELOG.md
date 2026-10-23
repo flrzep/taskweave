@@ -17,6 +17,15 @@
   `stances`, `object_points`, `joint_poses`, `held_poses`. `ConfigStore.targets_format()` stays and is always True.
 - `tools/dump_targets.py` is migration-only: it reads an unmigrated cell with its own `OldLayoutStore`.
 - The classes of the old motion skills stay as the parts of `move`; the smoke aliases for old skill names stay.
+- **The first mission start after a restart no longer takes minutes (F19).** Since 0.3.1 `taskweave_version()` scanned
+  the metadata of every installed distribution on each call, and every robot file lookup calls it (through the robot
+  pack's `requires` check): an 18-step plan did about 125 scans (1.6 s in an idle container, minutes on a loaded one,
+  the task handler busy at 50 % CPU, and the HMI's 5 s start timeout passed). It is worked out once per process, and
+  the metadata is only parsed for distributions at this copy's own location.
+- **Status while a plan is prepared:** `start_mission` publishes, before the plan is validated, a `running` status with
+  the plan id and step count (`Planner.preview(cycle)`), cycle 1, no step (`step_index` -1) and `step_status`
+  `planning`; a start while one is being prepared is refused ("already active"). The wire format is unchanged (no new
+  state value: an HMI that indexes its state names would fail on one).
 
 ## 0.3.1 — 2026-10-22
 

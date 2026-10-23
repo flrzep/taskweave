@@ -121,3 +121,20 @@ def test_a_folder_that_is_no_cell_says_so(tmp_path):
     (tmp_path / 'scripts').mkdir()
     with pytest.raises(ConfigError, match='no cell pack here'):
         ConfigStore(tmp_path)
+
+
+def test_the_version_is_worked_out_once_per_process(monkeypatch):
+    """Scanning the installed metadata took 70 ms and ran for every robot file lookup (100 s at the first mission start
+    of a cell: every step reads several files): the answer is kept."""
+    import importlib
+
+    real = importlib.reload(packs).taskweave_version
+    first = real()
+
+    def scanned(*args, **kwargs):
+        raise AssertionError('the metadata was scanned again')
+
+    monkeypatch.setattr(Path, 'is_file', lambda self: False)
+    monkeypatch.setattr('importlib.metadata.distributions', scanned)
+    monkeypatch.setattr('importlib.metadata.version', scanned)
+    assert real() == first

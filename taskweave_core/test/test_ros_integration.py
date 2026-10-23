@@ -116,6 +116,38 @@ def test_mission_runs_to_success_and_updates_world(system):
     wait_until(lambda: any(s.state == TaskStatus.RUNNING for s in statuses), what='a RUNNING status message')
 
 
+def test_the_status_says_planning_while_the_plan_is_validated(system):
+    """A slow validation (the first start after a restart took minutes in a cell with many steps) shows as running with
+    the plan id, the step count and 'planning', not as a mission without a plan; a second start meanwhile is refused."""
+    import threading
+
+    handler, client, statuses, _ = system
+    inside, release = threading.Event(), threading.Event()
+    real = handler._validate
+
+    def slow(plan):
+        inside.set()
+        release.wait(20)
+        return real(plan)
+
+    handler._validate = slow
+    future = client.create_client(StartMission, names.START_MISSION)
+    assert future.wait_for_service(timeout_sec=30)
+    answer = future.call_async(StartMission.Request(mission='patrol'))
+    try:
+        wait_until(inside.is_set, what='the validation to begin')
+        wait_until(lambda: any(s.step_status == 'planning' and s.plan_id == 'patrol-0001' and s.step_count > 0
+                               and s.state == TaskStatus.RUNNING for s in statuses), what='the planning status')
+        assert not answer.done()
+        refused = call(client, StartMission, names.START_MISSION, StartMission.Request(mission='patrol'))
+        assert not refused.accepted and 'already active' in refused.message
+    finally:
+        release.set()
+    wait_until(answer.done, what='the answer of start_mission')
+    assert answer.result().accepted
+    wait_for(handler, {'SUCCEEDED', 'FAILED'})
+
+
 def test_invalid_mission_is_rejected_before_moving(system, config_dir):
     handler, client, _, _ = system
     (config_dir / 'missions' / 'lost.yaml').write_text(

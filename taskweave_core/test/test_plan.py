@@ -106,6 +106,16 @@ def test_mission_planner_loop_rules(config_dir):
     assert once.make_plan({'done': True}, 2) is None
 
 
+def test_mission_planner_previews_the_plan_it_makes(config_dir):
+    """The status shows the id and step count while the plan is prepared: the same the plan then has."""
+    planner = MissionFilePlanner(ConfigStore(config_dir), 'patrol')
+    for _ in range(2):   # the id counts up per plan made; a preview does not use one up
+        assert planner.preview(1) == planner.preview(1)
+        plan_id, count = planner.preview(1)
+        plan = planner.make_plan({}, 1)
+        assert (plan.plan_id, len(plan.steps)) == (plan_id, count)
+
+
 def test_mission_planner_replans_from_named_step(config_dir):
     store = ConfigStore(config_dir)
     planner = MissionFilePlanner(store, 'patrol', goal='custom goal')

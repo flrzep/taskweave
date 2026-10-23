@@ -45,7 +45,7 @@ from .config import ConfigError, ConfigStore
 from .config.reload import Reloader
 from .conversions import plan_to_msg, skill_info_to_dict, status_to_msg
 from .embodiment import card_points, robot_card
-from .executive import ACTIVE, Executive, Outcome, Status
+from .executive import ACTIVE, PLANNING_STATUS, Executive, Outcome, State, Status
 from .plan import Plan, Step
 from .planner import MissionFilePlanner
 from .skill_server import spin
@@ -192,6 +192,8 @@ class TaskHandler(Node):
         self.dispatcher = RosDispatcher(self)
         self.executive: Executive | None = None
         self._published_plan: Plan | None = None
+        self._starting: Status | None = None   # while a start is prepared (catalog, plan): what the status shows
+        self._start_lock = threading.Lock()
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.status_pub = self.create_publisher(TaskStatus, names.STATUS, latched)
         self.plan_pub = self.create_publisher(PlanMsg, names.PLAN, latched)
@@ -254,7 +256,7 @@ class TaskHandler(Node):
         return step_kind_resources(step, schemas, self.config, self.robot)
 
     def _publish_status(self, status: Status | None = None) -> None:
-        status = status or (self.executive.status if self.executive else Status())
+        status = status or self._starting or (self.executive.status if self.executive else Status())
         self.status_pub.publish(status_to_msg(status, self.get_clock().now().to_msg(), self.now()))
 
     def _on_status(self, status: Status) -> None:
@@ -358,6 +360,20 @@ class TaskHandler(Node):
         if self.executive and self.executive.status.state in ACTIVE:
             response.accepted, response.message = False, 'a mission is already active; abort it first'
             return response
+        if not self._start_lock.acquire(blocking=False):
+            response.accepted, response.message = False, 'a mission is being started'
+            return response
+        try:
+            return self._start_locked(request, response)
+        finally:
+            self._starting = None
+            self._publish_status()   # the latched 'planning' status is replaced (a refused start leaves it otherwise)
+            self._start_lock.release()
+
+    def _start_locked(self, request, response):
+        # Until the executive shows the plan's id, the status says what is going on: running, no step, 'planning'
+        self._starting = Status(state=State.RUNNING, goal=request.goal or '', cycle=1, step_status=PLANNING_STATUS)
+        self._publish_status()
         try:
             self.config.reload()  # pick up config edits between missions
             planner = MissionFilePlanner(self.config, request.mission, request.goal or None, self.robot)
@@ -369,6 +385,7 @@ class TaskHandler(Node):
                                    on_status=self._on_status, on_episode=self._on_episode,
                                    timeout_grace_s=self.get_parameter('timeout_grace_s').value,
                                    speed=lambda: self.speed.percent / 100.0, annotate=self._annotate)
+        self._starting = None   # the executive's status takes over (it shows the plan id and count while it plans)
         self._speed_run(True)
         status = self.executive.start(request.start_step)
         response.accepted = status.state in ACTIVE or status.state.name == 'SUCCEEDED'

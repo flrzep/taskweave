@@ -76,10 +76,13 @@ def read_pack(folder: Path) -> dict | None:
     return data
 
 
+@functools.cache
 def taskweave_version() -> str:
     """The version of the taskweave_core that is running: the package.xml of its source tree, else the metadata of the
     installed copy this file belongs to (not just any installed taskweave_core: an older one may come first on the
-    path), else any installed one."""
+    path), else any installed one. Worked out once per process: it does not change while running, and the metadata
+    scan of an installed copy reads every distribution on the path (a ROS install has hundreds; this was run for
+    every robot file lookup, 100 s at the first mission start of a cell with many steps)."""
     import re
 
     here = Path(__file__).resolve()
@@ -92,9 +95,10 @@ def taskweave_version() -> str:
         from importlib.metadata import distributions, version
 
         # an install folder built over several releases keeps the metadata of each one: the newest is this copy's
+        # the cheap test (where the metadata lives) before the expensive one (parsing it for the name)
         mine = [dist.version for dist in distributions()
-                if (dist.metadata['Name'] or '').replace('-', '_') == 'taskweave_core'
-                and here.is_relative_to(Path(dist.locate_file('')).resolve())]
+                if here.is_relative_to(Path(dist.locate_file('')).resolve())
+                and (dist.metadata['Name'] or '').replace('-', '_') == 'taskweave_core']
         if mine:
             return newest_version(mine)
         return version('taskweave_core')

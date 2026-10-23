@@ -242,3 +242,31 @@ def test_unknown_start_step_fails_before_dispatch():
     ex.start('zz')
     assert ex.status.state == State.FAILED and 'zz' in ex.status.last_error
     assert d.started == []
+
+
+class PreviewPlanner(ListPlanner):
+    def preview(self, cycle):
+        return 'p1', len(self.steps)
+
+
+def test_the_status_shows_the_plan_while_it_is_prepared():
+    """The plan is validated before the first step: meanwhile the status is running with the plan id, the step count
+    and 'planning' as step status (no step), so a slow validation does not look like a mission without a plan."""
+    seen = []
+    ex, d, _, _ = make([step('a'), step('b')])
+    ex.planner = PreviewPlanner([step('a'), step('b')])
+    ex.on_status = lambda s: seen.append((s.state, s.plan_id, s.step_count, s.step_index, s.step_status))
+    ex.validate = lambda plan: seen.append('validating') or []
+    ex.start()
+    assert seen[0] == (State.RUNNING, 'p1', 2, -1, 'planning')
+    assert seen[1] == 'validating'
+    assert seen[2][:4] == (State.RUNNING, 'p1', 2, 0) and seen[2][4] == 'dispatched'
+
+
+def test_a_rejected_plan_leaves_no_preview_behind():
+    ex, d, _, _ = make([step('a')])
+    ex.planner = PreviewPlanner([step('a')])
+    ex.validate = lambda plan: ['no good']
+    status = ex.start()
+    assert status.state == State.FAILED and 'no good' in status.last_error
+    assert (status.plan_id, status.step_count, status.step_status) == ('', 0, '')
