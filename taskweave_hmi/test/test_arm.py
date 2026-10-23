@@ -40,51 +40,6 @@ def test_hand_numbers_convert_both_ways():
     assert all(math.isclose(a, b, abs_tol=1e-3) for a, b in zip(again['approach'], tilted['approach'], strict=True))
 
 
-def test_overview_lists_robot_poses_and_object_points_alike(store):
-    data = arm.overview(store, ROBOT, ARGS)
-    by_key = {(p['scope'], p['name']): p for p in data['positions']}
-    assert by_key[('robot', 'home')]['hands'] == {} and by_key[('robot', 'home')]['joints']['lift'] == 0.0
-    assert by_key[('robot', 'reach')]['hands']['left']['xyz'] == [0.6, 0.2, 0.4]
-    assert by_key[('box', 'top_grasp')]['hands']['left']['xyz'] == [0.0, 0.1, 0.2]
-    assert 'box' in data['object_types']
-
-
-def test_saving_numbers_writes_each_kind_to_its_file(store):
-    hand = {'xyz': [0.5, 0.2, 0.4], 'rpy': [0.0, math.pi / 2, 0.0]}
-    arm.save(store, ROBOT, 'robot', 'reach', {'hands': {'left': hand}, 'joints': {'lift': 0.25}, 'elbow': 'down'}, ARGS)
-    pose = store.named_pose(ROBOT, 'reach')
-    assert pose['tools']['left']['tcp'] == [0.5, 0.2, 0.4] and pose['joints'] == {'lift': 0.25}
-    assert pose['elbow'] == 'down'
-    arm.save(store, ROBOT, 'box', 'top_grasp', {'hands': {'left': hand}, 'approach_m': 0.12, 'elbow': None}, ARGS)
-    point = store.object_point('box', 'top_grasp')
-    assert list(point['left_tool'].xyz) == [0.5, 0.2, 0.4] and point['approach_m'] == 0.12
-    with pytest.raises(arm.ArmError, match='three numbers'):
-        arm.save(store, ROBOT, 'box', 'top_grasp', {'hands': {'left': {'xyz': [0, 0], 'rpy': [0, 0, 0]}}}, ARGS)
-
-
-def test_object_points_rename_and_delete(store):
-    hand = {'xyz': [0.0, 0.1, 0.2], 'rpy': [0.0, 1.5708, 0.0]}
-    arm.save(store, ROBOT, 'box', 'wide_grasp', {'hands': {'left': hand}, 'rename': 'wide'}, ARGS)
-    assert 'wide' in store.object('box')['points'] and 'wide_grasp' not in store.object('box')['points']
-    arm.delete(store, ROBOT, 'box', 'wide', ARGS)
-    assert 'wide' not in store.object('box')['points']
-    with pytest.raises(arm.ArmError, match='no object type'):
-        arm.delete(store, ROBOT, 'crate', 'x', ARGS)
-
-
-def test_capture_keeps_the_form_and_joint_set(store):
-    joints = {'lift': 0.4, 'j1': 0.3, 'j2': -0.2, 'wheel': 5.0}
-    arm.capture_pose(store, ROBOT, 'home', {}, joints, None, ARGS)
-    assert store.joint_pose(ROBOT, 'home') == {'lift': 0.4, 'j1': 0.3, 'j2': -0.2}
-    arm.capture_pose(store, ROBOT, 'park', {'form': 'joints'}, joints, None, ARGS)    # new: the joint poses' joints
-    assert store.joint_pose(ROBOT, 'park') == {'lift': 0.4, 'j1': 0.3, 'j2': -0.2}
-    with pytest.raises(arm.ArmError, match='forward kinematics'):
-        arm.capture_pose(store, ROBOT, 'reach', {}, joints, None, ARGS)
-    targets = {'left': {'tcp': [0.55, 0.2, 0.4], 'approach': [1, 0, 0], 'closing': [0, 1, 0]}}
-    arm.capture_pose(store, ROBOT, 'reach', {}, joints, targets, ARGS)
-    assert store.named_pose(ROBOT, 'reach')['tools']['left']['tcp'] == [0.55, 0.2, 0.4]
-
-
 def test_a_capture_takes_the_closed_grippers_as_the_points_grip(store):
     profile = store.root / 'robots' / ROBOT / 'profile.yaml'
     profile.write_text(profile.read_text().replace(

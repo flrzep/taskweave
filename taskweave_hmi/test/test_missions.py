@@ -8,8 +8,9 @@ from taskweave_hmi.missions import MissionError, delete, list_missions, save, te
 
 FIXTURE = Path(__file__).resolve().parents[2] / 'taskweave_core' / 'test' / 'fixtures' / 'config'
 CATALOG = {
-    'navigate_to': {'type': 'object', 'required': ['target'],
-                    'properties': {'target': {'type': 'string', 'x-taskweave-point': 'base_target'}}},
+    'move': {'type': 'object', 'required': ['to'],
+             'properties': {'to': {'type': 'string', 'x-taskweave-point': 'target',
+                                   'x-taskweave-target-kinds': ['base']}}},
     'wait': {'type': 'object', 'required': ['seconds'], 'properties': {'seconds': {'type': 'number', 'minimum': 0}}},
 }
 
@@ -28,10 +29,10 @@ def test_list_marks_invalid_files(store):
 
 def test_save_validates_before_writing(store):
     mission = template('demo_bot')
-    mission['steps'][0] = {'instruction': 'go', 'skill': 'navigate_to', 'args': {'target': 'nowhere'}}
+    mission['steps'][0] = {'instruction': 'go', 'skill': 'move', 'args': {'to': 'nowhere'}}
     with pytest.raises(MissionError) as error:
         save('new_one', mission, store, CATALOG, 'demo_bot')
-    assert any("unknown location 'nowhere'" in p for p in error.value.problems)
+    assert any("unknown target 'nowhere'" in p for p in error.value.problems)
     assert not (store.root / 'missions' / 'new_one.yaml').exists()
 
 
@@ -51,17 +52,17 @@ def test_save_without_edits_keeps_every_step_key(store):
     # what the HMI sends back for a mission it opened and saved unchanged: an include step keeps include and with
     missions_dir = store.root / 'missions'
     (missions_dir / 'go_to.yaml').write_text(
-        'goal: Drive somewhere\nparams:\n  where: {point: base_target, description: a stance}\nloop: once\n'
-        'steps:\n  - instruction: Drive to {where}\n    skill: navigate_to\n    args: {target: "{where}"}\n')
+        'goal: Drive somewhere\nparams:\n  where: {point: target, description: a stance}\nloop: once\n'
+        'steps:\n  - instruction: Drive to {where}\n    skill: move\n    args: {to: "{where}"}\n')
     (missions_dir / 'tour.yaml').write_text(
         'goal: A tour\nloop: once\nsteps:\n  - id: there\n    instruction: To the shelf\n    include: go_to\n'
-        '    with: {where: "stance:shelf_a"}\n    on_failure: skip\n'
+        '    with: {where: "shelf_a/front"}\n    on_failure: skip\n'
         '  - instruction: Wait\n    skill: wait\n    args: {seconds: 1}\n')
     store.reload()
     before = store.mission('tour')
     save('tour', before, store, CATALOG, 'demo_bot')
     assert ConfigStore(store.root).mission('tour') == before
-    assert '\n  with: {where: stance:shelf_a}\n' in (missions_dir / 'tour.yaml').read_text()
+    assert '\n  with: {where: shelf_a/front}\n' in (missions_dir / 'tour.yaml').read_text()
 
 
 def test_schema_and_robot_problems_are_reported(store):

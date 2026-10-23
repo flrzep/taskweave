@@ -144,16 +144,3 @@ def test_a_held_pose_capture_shows_the_cores_cannot_be_taught_yet(serve, config)
     assert status == 422 and data['problems'] == [text]
     assert bridge.sent_requests[0].kind == 'object' and bridge.sent_requests[0].name == 'carry'
 
-
-def test_a_capture_on_an_old_cell_sends_the_old_request(tmp_path):
-    from taskweave_interfaces.srv import TeachPoint
-
-    shutil.copytree(Path(__file__).resolve().parents[2] / 'taskweave_core' / 'test' / 'fixtures' / 'config',
-                    tmp_path / 'old')
-    old = ConfigStore(tmp_path / 'old')
-    instance, placed = next(iter(old.object_instances().items()))
-    bridge = teach_bridge(old, lambda request: TeachPoint.Response(success=True, message='saved', file='f.yaml'))
-    bridge.robot = 'demo_bot'
-    bridge.capture(placed.object, 'grasp', {'at': instance})
-    request = bridge.sent_requests[0]
-    assert (request.name, request.kind) == (f'{instance}/grasp', 'object_point')

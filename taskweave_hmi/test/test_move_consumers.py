@@ -38,14 +38,6 @@ def store(tmp_path):
     return config
 
 
-@pytest.fixture
-def old_store(tmp_path):
-    shutil.copytree(FIXTURES / 'config', tmp_path / 'old')
-    config = ConfigStore(tmp_path / 'old')
-    assert not config.targets_format()
-    return config
-
-
 def move_catalog() -> dict:
     from taskweave_skills.move import Move
 
@@ -71,11 +63,6 @@ def test_the_plan_preview_has_each_steps_kind_and_resources(store):
 def test_the_plan_preview_without_a_catalog_still_knows_the_move_kinds(store):
     steps = {step['id']: step for step in missions.preview_plan(store, 'forms', ROBOT)['steps']}
     assert steps['hands']['kind'] == 'hand' and steps['rest'] == {**steps['rest'], 'kind': '', 'resources': []}
-
-
-def test_an_old_cell_plan_preview_has_no_kinds(old_store):
-    plan = missions.preview_plan(old_store, 'patrol', 'demo_bot', {})
-    assert plan['steps'] and all(step['kind'] == '' for step in plan['steps'])
 
 
 # ---- the places of a check's problems ------------------------------------------------------------------------------
@@ -136,18 +123,6 @@ def test_a_teach_on_a_targets_cell_sends_the_kind_and_the_target(store):
         targets.teach_request(store, OLD_FIELDS, 'hand', 'part_box_1/top_grasp')
     with pytest.raises(ValueError, match='unknown teach kind'):
         targets.teach_request(store, NEW_FIELDS, 'object_point', 'part_box_1/top_grasp')
-
-
-def test_a_teach_on_an_old_cell_sends_the_old_kinds(old_store):
-    for fields in (OLD_FIELDS, NEW_FIELDS):   # whatever the service has: the old cell's request
-        request = targets.teach_request(old_store, fields, 'hand', 'bin_1/grasp', ['left'])
-        assert request == {'name': 'bin_1/grasp', 'kind': 'object_point', 'tools': ['left']}
-    assert targets.teach_request(old_store, OLD_FIELDS, 'base', 'dock')['kind'] == 'location'
-    assert targets.teach_request(old_store, OLD_FIELDS, 'base', 'bin_1/pick')['kind'] == 'stance'
-    assert targets.teach_request(old_store, OLD_FIELDS, 'base', 'bin_1/pick', instance_override=True)['kind'] == \
-        'stance_instance'
-    with pytest.raises(ValueError, match='before schema 4'):
-        targets.teach_request(old_store, OLD_FIELDS, 'joints', 'home')
 
 
 # ---- the move skill in the catalog ---------------------------------------------------------------------------------

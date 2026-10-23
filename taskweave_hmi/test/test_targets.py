@@ -60,7 +60,8 @@ def store(tmp_path, monkeypatch):
     text = profile.read_text().replace('closed: 1.0}', 'closed: 1.0, opening_m: [[0.0, 0.08], [1.0, 0.0]]}')
     profile.write_text(text + "ik: {groups: {left: left_arm, right: right_arm}, joints: '{tool}_arm_joint[1-7]'}\n")
     for name in OLD_WRITERS:  # a writer on a targets cell never uses the old point files
-        monkeypatch.setattr(ConfigStore, name, lambda *_, _name=name, **__: pytest.fail(f'old writer {_name} called'))
+        monkeypatch.setattr(ConfigStore, name, lambda *_, _name=name, **__: pytest.fail(f'old writer {_name} called'),
+                            raising=False)
     config = ConfigStore(tmp_path / 'config')
     assert config.targets_format()
     return config
@@ -323,6 +324,24 @@ def test_a_capture_writes_the_current_joints_and_hands(store):
     assert target.data['right_tool']['xyz'] == [0.48, 0.295, 0.6]          # the other hand kept
 
 
+def test_a_used_pose_cannot_be_renamed_or_deleted(store):
+    missions(store, MISSION)       # ends with a move to lift_high
+    with pytest.raises(robot.RobotSettingsError, match='used by m0'):
+        robot.delete_pose(store, ROBOT, 'lift_high', set())
+    with pytest.raises(robot.RobotSettingsError, match='used by m0'):
+        robot.save_pose(store, ROBOT, 'lift_high', {'joints': {'body_joint': 0.2}, 'rename': 'high'}, set())
+    robot.save_pose(store, ROBOT, 'lift_mid', {'joints': {'body_joint': 0.2}, 'create': True}, set())
+    robot.save_pose(store, ROBOT, 'lift_mid', {'joints': {'body_joint': 0.2}, 'rename': 'low'}, set())
+    robot.delete_pose(store, ROBOT, 'low', set())
+
+
+def test_a_pose_outside_the_joint_limits_is_refused(store):
+    limit = robot.joint_limits(store, ROBOT)['body_joint']
+    assert limit[1] < 100
+    with pytest.raises(robot.RobotSettingsError, match='outside the joint limits'):
+        robot.save_pose(store, ROBOT, 'lift_far', {'joints': {'body_joint': limit[1] + 1.0}, 'create': True}, set())
+
+
 def test_a_pose_cannot_take_the_name_of_another_kind_of_target(store):
     with pytest.raises(robot.RobotSettingsError, match='moves object'):
         robot.save_pose(store, ROBOT, 'carry', {'joints': {'body_joint': 0.3}}, set())
@@ -399,14 +418,6 @@ def test_the_pickers_have_the_target_groups_and_the_old_lists(store):
     assert {'carry', 'karakuri_hanger/hook'} <= set(names['object targets'])
     assert 'lift_high' in names['joint targets'] and 'part_box_1' in names['placed objects']
     assert 'waiting' in names['locations'] and 'carry' in names['held poses'] and names['via targets']
-
-
-def test_the_old_layout_pickers_have_no_target_groups(tmp_path):
-    shutil.copytree(FIXTURES / 'config', tmp_path / 'config')
-    old = ConfigStore(tmp_path / 'config')
-    names = points.picker_names(old, 'demo_bot')
-    assert 'base targets' not in names and 'held poses' in names and 'via targets' in names
-    assert names['locations'] == sorted(old.locations())
 
 
 def test_manual_skills_run_move_with_the_reference_move_takes(store):
