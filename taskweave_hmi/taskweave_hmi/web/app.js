@@ -200,6 +200,10 @@ function renderRun() {
   $('goal').textContent = s.goal || 'No mission running';
   $('cycle').textContent = s.plan_id ? `${s.plan_id} · cycle ${s.cycle}` : '';
   const active = s.state === 'running' || s.state === 'paused';
+  // the task handler prepares the plan: running, no step yet, step_status 'planning'
+  const planning = s.state === 'running' && s.step_index === -1 && s.step_status === 'planning';
+  if (planning) $('state').textContent = 'planning';
+  if (planning) $('cycle').textContent = `${s.plan_id} · planning ${s.step_count} step${s.step_count === 1 ? '' : 's'}…`;
   show($('current'), active && !!s.step);
   if (s.step) {
     $('step-meta').textContent = `step ${s.step_index + 1}/${s.step_count} · ${s.step.skill} · attempt ${s.attempt}`;
