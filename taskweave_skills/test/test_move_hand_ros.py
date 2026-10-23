@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from conftest import TIME_SCALE, RosRig, connect, copy_config, wait_ready, wait_until
 
@@ -355,6 +356,57 @@ def test_via_goes_through_a_joint_target_or_a_hand_target_first(system):
     assert system.ik.requests[0]['group'] == 'right_arm' and system.ik.requests[0]['xyz'] == pytest.approx(
         (0.6, -0.2, 0.4))                                                     # the via target first, then the point
     assert data['hands'] == ['right']
+
+
+def hold_by_registry(system, hand, instance='box_1', point='rim'):
+    """``hand`` holds ``instance`` (the registry, without moving the sim)."""
+    system.hold.reach([hand], f'{instance}/{point}', instance, np.eye(4))
+    system.hold.close_hands([hand])
+
+
+def park(system, hand, joint1, joint2):
+    """Put a hand's joints at a place (sim and target) and wait until the skill sees them."""
+    for name, value in ((f'{hand}_joint1', joint1), (f'{hand}_joint2', joint2)):
+        system.sim.position[name] = system.sim.target[name] = value
+    joints = system.move.modules['hand'].joints
+
+    def seen():
+        state = joints.snapshot(1.0) or {}
+        return (abs(state.get(f'{hand}_joint1', 9) - joint1) < 1e-6
+                and abs(state.get(f'{hand}_joint2', 9) - joint2) < 1e-6)
+    wait_until(seen, what=f'the {hand} joints at {joint1}, {joint2}')
+
+
+def test_any_one_probes_the_approach_start_and_the_via_legs(system):             # P3 M1
+    rim = {'to': 'box_1/rim', 'motion': {'approach_m': 0}}
+    go(system, {**rim, 'hands': ['left']})
+    goal = system.ik.requests[-1]['xyz']
+    system.ik.unreachable = lambda side, xyz: side == 'left' and sum(
+        abs(a - b) for a, b in zip(xyz, goal, strict=True)) > 0.02       # left reaches the grasp itself, nothing else
+    park(system, 'left', 0.6, 0.35)
+    assert go(system, {**rim, 'hands': 'any_one'})[1]['hands'] == ['left']
+    _, data = go(system, {'to': 'box_1/rim', 'hands': 'any_one', 'motion': {'approach_m': 0.2}})  # pre-grasp: no left
+    assert data['hands'] == ['right']
+    assert data['choice']['candidates']['left']['feasible'] is False
+    park(system, 'left', 0.6, 0.35)
+    _, data = go(system, {**rim, 'hands': 'any_one', 'motion': {'approach_m': 0, 'via': ['present_both']}})
+    assert data['hands'] == ['right']                                      # left cannot reach the via target either
+
+
+def test_a_via_target_with_nothing_for_the_target_hand_adds_no_leg(system):
+    go(system, {'to': 'present_both', 'hands': ['right'], 'motion': {'via': ['present_left']}})
+    at(system, 'right', 0.6, 0.4)
+
+
+@pytest.mark.parametrize('hands', [['right'], 'any_one'])
+def test_a_via_leg_moves_only_the_target_hands(system, hands):                    # M7
+    hold_by_registry(system, 'left')
+    left_before = {k: v for k, v in system.sim.position.items() if k.startswith('left')}
+    system.sim.history.clear()
+    go(system, {'to': 'present_right', 'hands': hands, 'motion': {'via': ['present_both']}})
+    assert system.ik.requests and {r['group'] for r in system.ik.requests} == {'right_arm'}
+    assert {k: v for k, v in system.sim.position.items() if k.startswith('left')} == left_before
+    assert not any(k.startswith('left') for h in system.sim.history for k in h)
 
 
 def test_tolerance_fails_a_hand_that_ends_further_off(system):

@@ -922,6 +922,73 @@ def test_init_cell_writes_a_cell_of_the_current_schema(tmp_path, monkeypatch):
 
 
 # ---- regenerate the golden docs cell ---------------------------------------------------------------------------------
+# ---- old point keys schema 4 rejects ------------------------------------------------------------------------------
+TOOL = 'right_tool: {xyz: [0, 0, 0.1], rpy: [0, 0, 0]}'
+
+
+def add_point(cell: Path, *lines: str) -> None:
+    path = cell / 'objects' / 'karakuri_hanger.yaml'
+    block = '  hold:\n' + ''.join(f'    {line}\n' for line in lines)
+    write(path, path.read_text().replace('contacts:', block + 'contacts:', 1))
+
+
+def hanger(cell: Path) -> dict:
+    return data(cell / 'objects' / 'karakuri_hanger.yaml')['targets']
+
+
+def test_the_older_approach_form_becomes_approach_m(old_cell):
+    add_point(old_cell, TOOL, 'approach: {axis: z, distance: 0.12}')
+    code, lines = run(old_cell)
+    assert code == 0, lines
+    assert hanger(old_cell)['hold'] == {
+        'moves': 'hand', 'right_tool': {'xyz': [0, 0, 0.1], 'rpy': [0, 0, 0]}, 'approach_m': 0.12}
+    assert not [line for line in lines if line.startswith('FLAG') and 'point hold' in line]
+    assert ConfigStore(old_cell).check_pack() == []
+
+
+def test_an_approach_axis_other_than_z_is_dropped_and_flagged(old_cell):
+    add_point(old_cell, TOOL, 'approach: {axis: x, distance: 0.12, extra: 1}')
+    code, lines = run(old_cell)
+    assert code == 0
+    point = hanger(old_cell)['hold']
+    assert point['approach_m'] == 0.12 and 'approach' not in point
+    flags = [line for line in lines if line.startswith('FLAG') and 'point hold' in line]
+    assert any('axis x dropped' in f for f in flags) and any('keys extra' in f for f in flags)
+
+
+def test_an_approach_m_beside_an_approach_form_wins(old_cell):
+    add_point(old_cell, TOOL, 'approach_m: 0.2', 'approach: {axis: z, distance: 0.12}')
+    code, lines = run(old_cell)
+    assert code == 0
+    assert hanger(old_cell)['hold']['approach_m'] == 0.2
+    assert any('distance 0.12 dropped' in line for line in lines)
+
+
+def test_a_tool_pose_frame_is_dropped_and_a_foreign_one_flagged(old_cell):
+    add_point(old_cell, 'right_tool: {frame: karakuri_hanger, xyz: [0, 0, 0.1], rpy: [0, 0, 0]}',
+              'left_tool: {frame: cell, xyz: [0, 0, 0.1], rpy: [0, 0, 0]}')
+    code, lines = run(old_cell)
+    assert code == 0
+    point = hanger(old_cell)['hold']
+    assert 'frame' not in point['right_tool'] and 'frame' not in point['left_tool']
+    flags = [line for line in lines if line.startswith('FLAG') and 'point hold' in line]
+    assert len(set(flags)) == 1 and 'left_tool frame cell dropped' in flags[0]     # printed again at the end
+
+
+def test_a_point_key_that_is_no_tool_pose_is_flagged(old_cell):
+    add_point(old_cell, TOOL, 'left: {xyz: [0, 0, 0.1], rpy: [0, 0, 0]}')
+    _, lines = run(old_cell)
+    assert any(line.startswith('FLAG') and 'key left is no <tool>_tool pose' in line for line in lines)
+
+
+def test_a_contact_frame_naming_the_type_is_dropped(old_cell):
+    path = old_cell / 'objects' / 'karakuri_hanger.yaml'
+    write(path, path.read_text().replace('hook: {', 'hook: {frame: karakuri_hanger, '))
+    code, _ = run(old_cell)
+    assert code == 0
+    assert hanger(old_cell)['hook'] == {'moves': 'object', 'xyz': [0.0, 0.0, 0.0], 'rpy': [3.1416, 0.0, 0.0]}
+
+
 if __name__ == '__main__':
     import tempfile
 

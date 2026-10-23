@@ -676,6 +676,50 @@ def migrate_locations(plan: Plan, book: Book, say) -> None:
     say(f'move    cell/locations.yaml -> cell/targets.yaml  ({len(document)} base target(s), moves: base)')
 
 
+def _clean_point(plan: Plan, say, type_name: str, name: str, entry) -> None:
+    """The old point keys schema 4 rejects, in place. ``approach: {axis, distance}`` (the older point form; no reader
+    ever used it, the straight part of an approach was ``approach_m`` and its direction the TCP z axis, which is
+    what the target model defines): ``distance`` becomes ``approach_m`` (an ``approach_m`` already there wins), ``axis``
+    is dropped, flagged when it named something else than z. A tool pose's ``frame`` is dropped (a hand point is in
+    the object's frame), flagged when it named another frame. A key that is no ``<tool>_tool`` pose is flagged."""
+    where = f'objects/{type_name}.yaml point {name}'
+    if 'approach' in entry:
+        old = entry['approach']
+        position = list(entry).index('approach')
+        item = entry.ca.items.get('approach')
+        del entry['approach']
+        entry.ca.items.pop('approach', None)
+        old = old if isinstance(old, Mapping) else {}
+        extra = sorted(str(key) for key in old if key not in ('axis', 'distance'))
+        axis = old.get('axis')
+        if axis is not None and str(axis).lower() not in ('z', '+z'):
+            _flag(plan, say, f'{where}: approach axis {axis} dropped: the approach is along the tool z axis '
+                  '(no reader ever used the axis)')
+        if extra:
+            _flag(plan, say, f'{where}: approach keys {", ".join(extra)} dropped (no reader used them)')
+        if old.get('distance') is not None:
+            if 'approach_m' in entry:
+                if float(entry['approach_m']) != float(old['distance']):
+                    _flag(plan, say, f'{where}: approach distance {old["distance"]} dropped, approach_m '
+                          f'{entry["approach_m"]} stays')
+            else:
+                entry.insert(position, 'approach_m', old['distance'])
+                if item:
+                    entry.ca.items['approach_m'] = item
+    poses = [entry.get('alone') or {}, entry]
+    for table in poses:
+        for key, pose in list(table.items()):
+            if not isinstance(pose, Mapping) or key in model.HAND_ATTRIBUTES:
+                continue
+            if not model.is_tool_key(str(key)):
+                _flag(plan, say, f'{where}: key {key} is no <tool>_tool pose: schema 4 rejects it, rename or '
+                      'remove it')
+            elif 'frame' in pose:
+                frame = pose.pop('frame')
+                if str(frame) not in (type_name, 'object'):
+                    _flag(plan, say, f'{where}: {key} frame {frame} dropped: a hand point is in the object frame')
+
+
 def migrate_object_types(plan: Plan, book: Book, say) -> None:
     """objects/<type>.yaml: ``points`` and ``contacts`` become ``targets``, at the place of the first of the two."""
     for path in sorted((plan.cell / 'objects').glob('*.yaml')):
@@ -686,6 +730,13 @@ def migrate_object_types(plan: Plan, book: Book, say) -> None:
         keys = [key for key in document if key in ('points', 'contacts')]
         for key in keys:
             for name, entry in (document[key] or {}).items():
+                if key == 'points':
+                    _clean_point(plan, say, type_name, name, entry)
+                elif str(entry.get('frame')) not in ('None', 'cell', 'base', 'object', 'none'):
+                    frame = entry.pop('frame')      # a contact is in the object frame; schema 4 names the frames
+                    if str(frame) != type_name:
+                        _flag(plan, say, f'objects/{type_name}.yaml contact {name}: frame {frame} dropped: a '
+                              'contact is in the object frame')
                 entry.insert(0, 'moves', 'hand' if key == 'points' else 'object')
                 if key == 'contacts' and (type_name, name) in book.contact_ref:
                     entry['reference'] = book.contact_ref[(type_name, name)]

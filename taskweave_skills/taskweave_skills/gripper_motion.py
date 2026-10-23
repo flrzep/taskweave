@@ -91,15 +91,6 @@ def hands_arg(value, default='auto'):
     return list(value)
 
 
-def _hand_motion() -> dict:
-    """The motion argument of the hand skill: ``via`` entries are named poses (``pose:<name>``) or <instance>/<point>,
-    resolved by the skill itself (the schema kind of the old point model does not exist any more)."""
-    schema = motion_schema()
-    schema['properties']['via'] = {k: v for k, v in schema['properties']['via'].items() if k != 'items'}
-    schema['properties']['via']['items'] = {'type': 'string'}
-    return schema
-
-
 @dataclass
 class Target:
     """Where move_gripper goes: ``tools`` {hand: {tcp, approach, closing}} (base frame), plus what goes with them."""
@@ -164,7 +155,7 @@ class MoveGripper(_PointMotion):
                      'rpy_deg': {**VEC3, 'description': 'Orientation (roll, pitch, yaw) in degrees, robot frame. '
                                                         'Default: keep.'}}}]},
             'hands': hands_schema(),
-            'motion': _hand_motion(),
+            'motion': motion_schema(),
         },
     }
     needs = ["the robot stands where the target is in reach (e.g. at the object's stance)",
@@ -758,7 +749,8 @@ class MoveGripper(_PointMotion):
 
     def _via(self, entries: list, target: Target, args: dict | None = None):
         """The legs before the target for ``motion.via``, or a REJECTED. Resolved by ``Move`` (``args[RESOLVED]
-        ['via']``: targets that move a hand or joints) or, in older cells, 'pose:<name>' or '<instance>/<point>'."""
+        ['via']``: targets that move a hand or joints) or, without it (the skill used on its own), 'pose:<name>' or
+        '<instance>/<point>'."""
         if args is not None and args.get(RESOLVED):
             return self._store_via(args[RESOLVED].get('via') or [], target)
         legs = []

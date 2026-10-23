@@ -282,8 +282,8 @@ class NavigateTo(Skill):
         return self._drive(ctx, target, args['target'])
 
     def _goal_pose(self, args) -> Pose2D:
-        """The pose to drive to (cell frame): what ``Move`` resolved, else the location or stance ``args.target``
-        names (the older cell layouts)."""
+        """The pose to drive to (cell frame): what ``Move`` resolved, else the base target ``args.target``
+        names (the skill used on its own)."""
         if args.get(RESOLVED):
             return args[RESOLVED]['pose']
         return self.config.base_target(args['target'], self.robot.name, self._current())

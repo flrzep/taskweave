@@ -145,7 +145,8 @@ def test_motion_schema_fragment():
     assert props['speed']['x-taskweave-unit'] == 'fraction' and props['approach_m']['x-taskweave-unit'] == 'm'
     assert props['approach_m']['x-taskweave-show-if'] == {'mode': ['free']}
     assert props['mode']['default'] == 'free' and props['planner']['default'] == 'auto'
-    assert props['via']['items']['x-taskweave-point'] == 'via_target'
+    assert props['via']['items']['x-taskweave-point'] == 'target'
+    assert props['via']['items']['x-taskweave-target-kinds'] == ['hand', 'joints']
 
 
 def test_motion_schema_subset_is_a_copy():

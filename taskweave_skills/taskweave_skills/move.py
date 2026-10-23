@@ -15,9 +15,8 @@ step to the module that does that kind of motion, the six parts (``parts.py``):
 
 Each part is built from ``skills/move/<part>.yaml`` (implementations with ``requires``, parameters) like a skill of its
 own; one that has no implementation for the robot answers REJECTED "this robot cannot do <kind>" and the others
-work. The parts are the classes of the old motion skills, which a cell of an older layout still serves under their old
-names. ``Move`` gives a part what it resolved in ``args[RESOLVED]`` (``parts.py``), so it hands over the same targets
-the old skills made of their names.
+work. The parts are the classes of the former motion skills. ``Move`` gives a part what it resolved in
+``args[RESOLVED]`` (``parts.py``), so it hands over the same targets the old skills made of their names.
 
 The result is the part's, with ``kind`` (base, straight, hand, object, posture, joints), ``module`` and ``target``
 added to its data and its message prefixed with the kind and the target. ``dry_run: true`` resolves and solves, moves

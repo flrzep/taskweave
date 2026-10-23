@@ -796,8 +796,9 @@ MOTION_PROPERTIES = {
               'description': 'auto: choose the torso height (robot profile ik.torso: the least torso and arm motion '
                              'that is reachable and collision free, both hands at one height; else the first of the '
                              'configured heights that is reachable). keep: never move the torso.'},
-    'via': {'type': 'array', 'items': {'type': 'string', 'x-taskweave-point': 'via_target'},
-            'description': 'Reserved. Waypoints to pass: "pose:<joint pose>" or "<instance>/<point>".'},
+    'via': {'type': 'array', 'items': {'type': 'string', 'x-taskweave-point': 'target',
+                                       'x-taskweave-target-kinds': ['hand', 'joints']},
+            'description': 'Waypoints to pass, in order: hand targets (hand move) or joint targets (joints move).'},
     'tolerance': {'type': 'number', 'exclusiveMinimum': 0,
                   'description': 'End accuracy: m for hand skills, rad or m for joints.'},
 }

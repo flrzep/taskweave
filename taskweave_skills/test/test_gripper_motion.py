@@ -463,14 +463,6 @@ def test_planner_options_and_speed_options(system):
     assert 1.8 < time.monotonic() - start < 20.0
 
 
-def test_via_goes_through_the_waypoint_first(system):
-    go(system, {'to': {'pose': 'present_left'}})
-    system.sim.history.clear()
-    go(system, {'to': {'pose': 'present_both'}, 'motion': {'via': ['pose:home']}})
-    at(system, 'left', 0.6, 0.4)
-    assert min(h['left_joint1'] for h in system.sim.history if 'left_joint1' in h) < 0.1     # home, then the pose
-
-
 def test_tolerance_fails_a_hand_that_ends_further_off(system):
     result, _ = go(system, {'to': {'pose': 'present_left'}, 'motion': {'tolerance': 0.01}}, FAILED)   # TF never moves
     assert 'left is 0.1' in result.message and 'tolerance 0.01 m' in result.message
@@ -778,32 +770,12 @@ def far_from(goal):
     return lambda side, xyz: side == 'left' and sum(abs(a - b) for a, b in zip(xyz, goal, strict=True)) > 0.02
 
 
-def test_any_one_probes_the_approach_start_and_the_via_legs(system):             # P3 M1
-    go(system, {**RIM, 'hands': ['left']})
-    goal = system.ik.requests[-1]['xyz']
-    system.ik.unreachable = far_from(goal)                  # left reaches the grasp itself, nothing else
-    park(system, 'left', 0.6, 0.35)
-    assert go(system, {**RIM, 'hands': 'any_one'})[1]['hands'] == ['left']
-    near = {'to': {'point': 'box_1/rim'}, 'hands': 'any_one'}
-    _, data = go(system, {**near, 'motion': {'approach_m': 0.2}})          # the pre-grasp is out of reach for left
-    assert data['hands'] == ['right']
-    assert data['choice']['candidates']['left']['feasible'] is False
-    park(system, 'left', 0.6, 0.35)
-    _, data = go(system, {**RIM, 'hands': 'any_one', 'motion': {'approach_m': 0, 'via': ['pose:present_both']}})
-    assert data['hands'] == ['right']                                      # left cannot reach the via pose either
-
-
 def test_the_probed_motion_counts_the_torso_too(system):                       # P3 M2
     skill = system.server.skills['move_gripper']
     park(system, 'left', 0.0, 0.0)
     args = {'to': {'pose': 'present_both'}, 'hands': 'any_one'}  # sets lift 0.1, left to 0.6, 0.4
     probe = skill._probe(args, skill._target_for(args, ['left']))
     assert probe.feasible and probe.motion_rad == pytest.approx(0.6 + 0.4 + 0.1)
-
-
-def test_a_via_pose_with_nothing_for_the_target_hand_adds_no_leg(system):
-    go(system, {'to': {'pose': 'present_both'}, 'hands': ['right'], 'motion': {'via': ['pose:present_left']}})
-    at(system, 'right', 0.6, 0.4)
 
 
 def test_a_holding_hand_is_never_chosen(system):
@@ -876,17 +848,6 @@ def test_place_as_refuses_to_place_two_holds_with_one_name(system):             
     assert 'box_9' not in system.server.config.object_instances()
     result = run(system, 'grip', {'action': 'open', 'hands': ['left'], 'place_as': 'box_9'})   # one hold: fine
     assert result.outcome == OK and 'placed box_9' in result.message, result.message
-
-
-@pytest.mark.parametrize('hands', [['right'], 'any_one'])
-def test_a_via_pose_leg_moves_only_the_target_hands(system, hands):               # M7
-    hold_by_registry(system, 'left')
-    left_before = {k: v for k, v in system.sim.position.items() if k.startswith('left')}
-    system.sim.history.clear()
-    go(system, {'to': {'pose': 'present_right'}, 'hands': hands, 'motion': {'via': ['pose:present_both']}})
-    assert system.ik.requests and {r['group'] for r in system.ik.requests} == {'right_arm'}
-    assert {k: v for k, v in system.sim.position.items() if k.startswith('left')} == left_before
-    assert not any(k.startswith('left') for h in system.sim.history for k in h)
 
 
 def shifted(system, name='box_1', by=1.0):
