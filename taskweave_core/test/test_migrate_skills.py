@@ -17,7 +17,7 @@ from taskweave_core.validation import validate_plan
 
 pytest.importorskip('ruamel.yaml')
 
-FIXTURE = Path(__file__).parent / 'fixtures' / 'config'
+FIXTURE = Path(__file__).parent / 'fixtures' / 'config_schema3'     # the demo cell before schema 4
 ROBOT = 'demo_bot'
 POSES = """\
 # poses of the demo bot
@@ -331,7 +331,7 @@ def test_a_reference_into_an_included_split_step_follows_it(cell):
 
 def test_the_migrated_missions_load_as_plans_and_the_old_names_are_gone(cell):
     run(cell)
-    store = ConfigStore(cell)
+    store = ConfigStore(cell, check_schema=False)     # schema 3: what the 2 -> 3 migration left
     for name in store.mission_names():
         plan = Plan.from_mission(store.expanded_mission(name), name, robot=ROBOT)
         assert not {step.skill for step in plan.steps} & set(ms.OLD_SKILLS)
@@ -395,7 +395,7 @@ def test_skill_yamls_carry_the_cells_values_and_the_old_files_go(cell):
     assert posture['speed'] == {'joint_rad_s': 1.3} and posture['elbow_tolerance_deg'] == 15.0
     assert posture['tolerances']['stall_timeout_s'] == 5.5 and 'tcp_m_s' not in posture['speed']
     for name in ('move_gripper', 'grip', 'move_joints', 'move_object', 'set_posture'):   # the store reads them
-        ConfigStore(cell).skill_config(name)
+        ConfigStore(cell, check_schema=False).skill_config(name)
 
 
 def test_a_new_skill_yaml_that_exists_is_kept(cell):
@@ -414,8 +414,6 @@ def test_a_pose_with_joints_and_tools_gets_a_joint_twin_and_keeps_its_comments(c
     assert poses['grasp_ready_joints'] == {'lift': 0.3} and 'tools' in poses['grasp_ready']   # j1 is an arm joint
     assert poses['grasp_ready']['joints'] == {'lift': 0.3, 'j1': 0.5} and list(poses)[-1] == 'grasp_ready_joints'
     assert any('grasp_ready has joints and tools: added grasp_ready_joints' in line for line in lines)
-    store = ConfigStore(cell)
-    assert store.named_pose(ROBOT, 'grasp_ready_joints')['tools'] == {}
 
 
 def test_a_profile_without_groups_keeps_every_joint_and_says_so(cell):
@@ -483,7 +481,7 @@ def test_a_schema_1_cell_is_sent_to_migrate_and_migrate_runs_the_whole_chain(cel
 
 def test_the_store_refuses_schema_2_and_names_the_command(cell):
     (cell / 'pack.yaml').write_text('name: cell\nversion: 1\nschema_version: 2\n')
-    with pytest.raises(ConfigError, match='run taskweave config migrate-skills'):
+    with pytest.raises(ConfigError, match='run taskweave config migrate '):
         ConfigStore(cell)
     assert ConfigStore(cell, check_schema=False).mission_names()
 
@@ -573,7 +571,7 @@ def test_a_placeholder_to_is_new_form_unless_a_contact_is_given(cell):
         ('move_object', {'to': {'onto': '{target}', 'contact': 'plate'}})]
     assert not ms.is_old_move_object({'to': '{target}', 'hands': 'all'}) and ms.is_old_move_object({'to': 'h/hook'})
     run(cell)
-    store = ConfigStore(cell)
+    store = ConfigStore(cell, check_schema=False)     # schema 3: what the 2 -> 3 migration left
     plan = Plan.from_mission({'goal': 'g', 'steps': [{'instruction': 'i', 'skill': 'move_object',
                                                        'args': {'to': '{target}'}}]}, 'p', robot=ROBOT)
     problems = validate_plan(plan, {'move_object': {'type': 'object'}}, store)
@@ -582,20 +580,20 @@ def test_a_placeholder_to_is_new_form_unless_a_contact_is_given(cell):
 
 # ---- the old names in validation -----------------------------------------------------------------------------------
 @pytest.mark.parametrize('skill, args, text', [
-    ('move_to_pose', {'pose': 'home'}, 'the skill move_to_pose was removed, use move_joints'),
-    ('go_to_point', {'point': 'a/b'}, 'the skill go_to_point was removed, use move_gripper'),
+    ('move_to_pose', {'pose': 'home'}, 'the skill move_to_pose was replaced by move'),    # (move replaced it, 3 -> 4)
+    ('go_to_point', {'point': 'a/b'}, 'the skill go_to_point was replaced by move'),
     ('gripper', {'side': 'both', 'action': 'open'}, 'the skill gripper was removed, use grip'),
-    ('move_object', {'by': [0, 0, 1]}, 'move_object takes its target as `to` now'),
-    ('move_object', {'elbow': 'up'}, 'the elbow argument is the skill set_posture')])
+    ('move_object', {'by': [0, 0, 1]}, 'the skill move_object was replaced by move'),
+    ('move_object', {'elbow': 'up'}, 'the skill move_object was replaced by move')])
 def test_validation_names_the_migration_command_for_an_old_skill(cell, skill, args, text):
     run(cell)
-    store = ConfigStore(cell)
+    store = ConfigStore(cell, check_schema=False)     # schema 3: what the 2 -> 3 migration left
     catalog = {skill: {'type': 'object'}}     # even a catalog that still offers it
     plan = Plan.from_mission({'goal': 'g', 'steps': [{'instruction': 'i', 'skill': skill, 'args': args}]}, 'p',
                              robot=ROBOT)
     problems = validate_plan(plan, catalog, store)
     assert len(problems) == 1 and text in problems[0]
-    assert f'run `taskweave config migrate-skills {store.root}`' in problems[0]
+    assert '`taskweave config migrate' in problems[0] and str(store.root) in problems[0]
 
 
 def test_a_removed_implementation_class_names_the_command():

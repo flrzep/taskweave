@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **Cell packs of schema 3 and robot packs of schema 1 are no longer read at run time.** `CELL_SCHEMA_OLDEST` is 4 and
+  `ROBOT_SCHEMA_OLDEST` is 2: loading an older pack says `run taskweave config migrate <dir>`. `taskweave config
+  migrate` still takes a cell pack of schema 1, 2 or 3 (and robot packs of schema 1) up to the current schema, offline.
+- Removed with the old format: the old-format branches of the deprecated readers (`locations`, `stance_offsets`,
+  `stance_variants`, `stances`, `joint_poses`, `named_pose`, `point_names`, `held_pose(s)`, `object_point`,
+  `instance_point`, `object_contact`, `instance_contact`: thin readers over `target()` now, for the HMI until it uses
+  targets), the old writers (`save_base_pose`, `save_stance`, `save_object_point*`, `rename_object_point`,
+  `save_held_pose`, `set_named_pose`, `set_joint_pose`, `update_point`, `delete_point`), `stance_names`,
+  `tool_pose_names`, `joint_pose`, `packs.targets_format`, the point kinds of the old skills in `validation`
+  (`LEGACY_KINDS`), the teach node's old kinds on a cell of schema 3 (the kind names `location`, `stance`,
+  `stance_instance`, `object_point` are still taken as aliases of `base` and `hand`), serving the six old skills under
+  their own names (`served_names(requested)`: they are folded into `move`) and the dynamic enums `locations`,
+  `stances`, `object_points`, `joint_poses`, `held_poses`. `ConfigStore.targets_format()` stays and is always True.
+- `tools/dump_targets.py` is migration-only: it reads an unmigrated cell with its own `OldLayoutStore`.
+- The classes of the old motion skills stay as the parts of `move`; the smoke aliases for old skill names stay.
+
 ## 0.3.1 — 2026-10-22
 
 - **Version of an installed taskweave:** `taskweave_version()` took the first matching package metadata; a colcon

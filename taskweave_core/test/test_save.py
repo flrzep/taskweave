@@ -16,7 +16,7 @@ from taskweave_core import cli
 from taskweave_core.config import ConfigStore, SaveConflict, SaveError, packs
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'config'
-LOCATIONS = 'cell/locations.yaml'
+LOCATIONS = 'cell/targets.yaml'
 posix_only = pytest.mark.skipif(os.name != 'posix', reason='flock, groups and modes need a POSIX system')
 
 
@@ -62,7 +62,7 @@ def test_a_text_save_writes_it_as_given_and_commits_that_path(store, repo):
     assert text(store) == new and '# moved' in text(store) and '# start position' in text(store)
     assert result['hash'] == store.file_hash(LOCATIONS) and result['reload'] == ['live'] and result['override'] is None
     assert result['rev'] == git(repo, 'rev-parse', 'HEAD') and len(revs(repo)) == 2
-    assert git(repo, 'log', '-1', '--format=%s') == 'HMI: edit cell/locations.yaml'
+    assert git(repo, 'log', '-1', '--format=%s') == 'HMI: edit cell/targets.yaml'
     assert git(repo, 'log', '-1', '--format=%an <%ae>').startswith('taskweave HMI <hmi@')
     assert store.locations()['dock'].x == 2.5       # not stale
 
@@ -75,7 +75,7 @@ def test_the_caller_gives_message_and_author(store, repo):
 def test_data_is_merged_into_the_file_keeping_comments_and_order(store):
     data = yaml.safe_load(text(store))
     data['dock']['x'] = 2.0
-    data['bay'] = {'frame': 'cell', 'x': 3.0, 'y': 0.0, 'yaw': 0.0}
+    data['bay'] = {'moves': 'base', 'x': 3.0, 'y': 0.0, 'yaw': 0.0}
     store.save(LOCATIONS, data, base=store.file_hash(LOCATIONS))
     after = text(store)
     assert after.startswith('# Named base poses in the cell frame.') and '# start position' in after
@@ -195,7 +195,7 @@ def test_each_save_is_one_commit_of_that_path_only(store, repo):
     store.save(LOCATIONS, text(store) + '# two\n', base=store.file_hash(LOCATIONS))
     assert len(revs(repo)) == 3
     for rev in revs(repo)[:2]:
-        assert git(repo, 'show', '--name-only', '--format=', rev) == 'config/cell/locations.yaml'
+        assert git(repo, 'show', '--name-only', '--format=', rev) == 'config/cell/targets.yaml'
     assert 'objects/box.yaml' in git(repo, 'status', '--porcelain') and 'untracked.txt' in git(
         repo, 'status', '--porcelain')
 
@@ -413,13 +413,13 @@ def test_history_show_and_restore(store, repo):
     store.save(LOCATIONS, text(store).replace('x: 2.5', 'x: 3.5'), base=store.file_hash(LOCATIONS),
                author='Bo <bo@x.org>')
     rows = store.history(LOCATIONS)
-    assert [r['message'] for r in rows] == ['HMI: edit cell/locations.yaml', 'first', 'start']
+    assert [r['message'] for r in rows] == ['HMI: edit cell/targets.yaml', 'first', 'start']
     assert rows[0]['author'] == 'Bo <bo@x.org>' and rows[0]['rev'] == git(repo, 'rev-parse', 'HEAD')
     assert rows[0]['time'].startswith('20') and 'T' in rows[0]['time'] and len(store.history(LOCATIONS, limit=2)) == 2
     assert store.show(LOCATIONS, rows[2]['rev']) == original and store.show(LOCATIONS, 'HEAD~1') != original
     done = store.restore(LOCATIONS, rows[2]['rev'], base=store.file_hash(LOCATIONS), author='Cy <cy@x.org>')
     assert text(store) == original and done['rev']
-    assert git(repo, 'log', '-1', '--format=%s|%an') == f'restore cell/locations.yaml to {rows[2]["rev"][:8]}|Cy'
+    assert git(repo, 'log', '-1', '--format=%s|%an') == f'restore cell/targets.yaml to {rows[2]["rev"][:8]}|Cy'
     assert len(store.history(LOCATIONS)) == 4
     with pytest.raises(ValueError):
         store.show(LOCATIONS, 'nonsense')

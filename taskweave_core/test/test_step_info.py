@@ -51,10 +51,10 @@ def test_the_field_in_a_schema_carries_its_kinds(store):
     assert text.startswith('args.to: ') and 'moves the base' in text
 
 
-def test_the_old_point_kinds_are_refused_on_a_targets_cell(store):
+def test_the_point_kinds_of_the_old_point_model_are_unknown(store):
     for kind in ('base_target', 'joint_pose', 'tool_pose', 'object_point', 'instance_point', 'instance_contact',
                  'via_target', 'joint_pose_only', 'held_pose'):
-        assert 'before schema 4' in check_point(kind, 'waiting', store, ROBOT), kind
+        assert 'unknown point kind' in check_point(kind, 'waiting', store, ROBOT), kind
     assert check_point('held_object', 'karakuri_hanger', store, ROBOT) is None
     assert check_point('joint_group', 'left_arm', store, ROBOT) is None
     assert 'unknown point kind' in check_point('nope', 'x', store, ROBOT)

@@ -135,7 +135,7 @@ navigation) a map and a clock of the robot or its simulator. Add `move` and `gri
 
 ## 8. Upgrade an older cell pack
 
-A cell pack has a `schema_version` in its `pack.yaml`. A newer taskweave rejects an older pack (and an older taskweave
+A cell pack has a `schema_version` in its `pack.yaml`. A newer taskweave rejects an older pack at run time with `run taskweave config migrate <dir>` (and an older taskweave
 rejects unknown keys of a newer one), so upgrade the pack when you move to a new release:
 
 ```bash

@@ -197,7 +197,7 @@ def _cross_object_type(store, c):
             continue
         for point, settings in c.data.get('points', {}).items():
             out += [(['points', point], f'robot {robot!r}: {m}', WARNING) for m in check_grasp(settings, embodiment)]
-    return out + (_cross_object_type_targets(store, c) if store.targets_format() else [])
+    return out + _cross_object_type_targets(store, c)
 
 
 def navigation_problems(data: dict, base: dict) -> list[tuple[list, str]]:

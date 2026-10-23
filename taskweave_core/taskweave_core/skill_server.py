@@ -14,10 +14,9 @@ goal: the parameters of skills/<name>.yaml and base.limits of the profile. A cha
 embodiment part bound at start (topics, joint interface, IK, planning, hands) or a skill's ``startup_params`` is
 reported as needs_restart. While a goal is active the answer is ``busy``.
 
-Which skills are served depends on the cell pack. A cell in the targets layout (schema 4) is launched with ``wait``,
-``move`` and ``grip``: the motion skills of the old layout (navigate_to, drive_straight, move_gripper, move_object,
-set_posture, move_joints) are what ``move`` does, so asking for any of them serves ``move`` (once). An older cell
-serves the names it is asked for, and ``move`` is not served there (it needs targets): ``served_names``.
+A cell is launched with ``wait``, ``move`` and ``grip``: the motion skills of the old layout (navigate_to,
+drive_straight, move_gripper, move_object, set_posture, move_joints) are what ``move`` does, so asking for any of them
+serves ``move`` (once): ``served_names``.
 
 A skill with parts (``move``) keeps the parts' configuration in ``skills/<skill>/<part>.yaml``; a change to one
 reloads the skill (``skill_of``).
@@ -55,21 +54,16 @@ OLD_MOTION_SKILLS = ('navigate_to', 'drive_straight', 'move_gripper', 'move_obje
 TARGET_SKILLS = ('wait', 'move', 'grip')   # what the launch of a cell in the targets layout asks for
 
 
-def served_names(requested: list[str], targets: bool) -> tuple[list[str], list[str]]:
-    """(the skills to serve, notes on what was left out or folded) for the names asked for (the ``skills``
-    parameter) and a cell pack in the targets layout (``targets``) or not. In the targets layout the motion skills of
-    the old layout are folded into ``move`` (the launch lists ``wait,move,grip``); other skills are served as asked.
-    Before the targets layout ``move`` cannot be served, and the old skills are. Order of the request is kept."""
+def served_names(requested: list[str]) -> tuple[list[str], list[str]]:
+    """(the skills to serve, notes on what was folded) for the names asked for (the ``skills`` parameter): the motion
+    skills of the old layout are folded into ``move`` (the launch lists ``wait,move,grip``); other skills are served
+    as asked. Order of the request is kept."""
     notes: list[str] = []
     served: list[str] = []
     for name in requested:
-        if targets and name in OLD_MOTION_SKILLS:
-            notes.append(f'{name}: replaced by move in the targets layout (cell schema 4), serving move')
+        if name in OLD_MOTION_SKILLS:
+            notes.append(f'{name}: replaced by move (cell schema 4), serving move')
             name = 'move'
-        elif not targets and name == 'move':
-            notes.append('move: needs a cell pack in the targets layout (cell schema 4): run taskweave config migrate; '
-                         'not served')
-            continue
         if name not in served:
             served.append(name)
     return served, notes
@@ -96,8 +90,7 @@ class SkillServer(Node):
         implementations: dict[str, dict] = {}
         if skills is None:
             skills = []
-            requested, notes = served_names([n for n in self.get_parameter('skills').value if n],
-                                            self.config.targets_format())
+            requested, notes = served_names([n for n in self.get_parameter('skills').value if n])
             for note in notes:
                 self.get_logger().info(note)
             for skill_name in requested:

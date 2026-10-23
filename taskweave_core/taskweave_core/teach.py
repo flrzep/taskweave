@@ -1,6 +1,6 @@
 """Teach node: saves where the robot is now as a target: its base pose, its tools' TCP poses, or its joint values.
 
-Cell schema 4 (targets): the request names a target reference and a kind, and the node writes it with
+The request names a target reference and a kind, and the node writes it with
 ``ConfigStore.save_target`` (comments and neighbours kept, the file chosen by the target):
 
     base    ``<name>``             the base pose in the cell frame            -> cell/targets.yaml
@@ -16,10 +16,8 @@ teach (default every tool of the profile's ``tool_frames``), the groups of a joi
 groups, else every group of the profile). An existing target keeps every key the teach does not set (joints, elbow,
 the other tools), a new one gets the pose only.
 
-A cell before schema 4 keeps the old kinds: ``location`` (cell/locations.yaml), ``stance`` / ``stance_instance``
-(robots/<robot>/stances.yaml), ``object_point`` (objects/<object>.yaml). The new kinds ``base`` and ``hand`` are taken
-for them (``<name>`` a location, ``<instance>/<variant>`` a stance, a hand teach an object point); and the old kinds
-for the targets of a cell of schema 4.
+The kinds of the old point model are still taken as aliases: ``location`` and ``stance`` are ``base``,
+``stance_instance`` is ``base`` with ``instance_override``, ``object_point`` is ``hand``.
 
 The base pose comes from the robot profile's ``base.odom`` topic, which must report the pose in the cell frame (ground
 truth in simulation, the localisation output on a real robot); the TCP poses come from TF (profile ``tool_frames``:
@@ -54,7 +52,7 @@ from .config.poses import Pose3D, quaternion_from_rpy, quaternion_multiply, rota
 
 MAX_POSE_AGE_S = 1.0  # default of max_tf_age_s (the HMI imports it)
 OLD_KINDS = {'location': ('base', False), 'stance': ('base', False), 'stance_instance': ('base', True),
-             'object_point': ('hand', False)}      # the kinds before cell schema 4 -> (kind, instance_override)
+             'object_point': ('hand', False)}      # the kinds of the old point model -> (kind, instance_override)
 NEW_KINDS = ('base', 'hand', 'joints', 'object')
 NOT_BUILT = ('a held object in the base frame cannot be taught yet: write the pose of the object target in '
              'robots/<robot>/targets.yaml (or use the HMI)')
@@ -97,14 +95,11 @@ class Teach(Node):
                                + (f', joints from {topic}' if topic else ''))
 
     def _skill_cell_frame(self) -> str:
-        for skill in ('move.hand', 'move_gripper'):
-            try:
-                frame = self.config.skill_config(skill).get('cell_frame')
-            except (ConfigError, KeyError):
-                continue
-            if frame:
-                return frame
-        return 'world'
+        try:
+            frame = self.config.skill_config('move.hand').get('cell_frame')
+        except (ConfigError, KeyError):
+            frame = None
+        return frame or 'world'
 
     def _forget_pose(self) -> None:
         self.pose = None  # the base pose of the old run
@@ -172,8 +167,6 @@ class Teach(Node):
                 override = override or old_override
             elif asked not in NEW_KINDS:
                 raise Refused(f'unknown kind {asked!r} (it is one of {", ".join(NEW_KINDS)})')
-            if not self.config.targets_format():
-                return self._teach_old(request, response, asked, kind, override)
             if kind == 'object':
                 raise Refused(NOT_BUILT)
             text, written = getattr(self, f'_teach_{kind}')(request, override)
@@ -314,56 +307,6 @@ class Teach(Node):
         data = {**existing, 'moves': 'joints', 'joints': {**existing.get('joints', {}), **values}}
         written = self.config.save_target(request.name, data, self.robot.name, note=None if existing else self._note())
         return ', '.join(f'{group} {value}' for group, value in values.items()), written
-
-    # ---- cells before schema 4 --------------------------------------------------------------------------------
-    def _teach_old(self, request, response, asked: str, kind: str, override: bool):
-        """A cell of the layout before schema 4: location / stance / object point, as before (``base`` and ``hand``
-        map onto them: a name with ``/`` is a stance)."""
-        if kind == 'hand':
-            return self._teach_object_point(request, response)
-        if kind in ('joints', 'object'):
-            response.success, response.message = False, (
-                f'{kind} {request.name!r}: this cell is in the layout before schema 4 (taskweave config migrate): '
-                'it can teach a location, a stance or an object point')
-            return response
-        if asked not in OLD_KINDS:
-            asked = ('stance_instance' if override else 'stance') if ts.SEPARATOR in request.name else 'location'
-        if reason := self._stale():
-            response.success, response.message = False, f'{asked or "location"} {request.name!r}: {reason}'
-            return response
-        if self.pose is None:
-            response.success, response.message = False, f'no current pose on {self.robot.base["odom"]}'
-            return response
-        try:
-            if asked in ('stance', 'stance_instance'):
-                path, offset = self.config.save_stance(request.name, self.pose, self.robot.name,
-                                                       per_instance=asked == 'stance_instance')
-                stored = f'offset {offset.to_dict()} (base at {self.pose.to_dict()})'
-            else:
-                path, stored = self.config.save_base_pose(request.name, self.pose, asked), self.pose.to_dict()
-        except (ValueError, OSError) as error:
-            response.success, response.message = False, str(error)
-            return response
-        response.success, response.file = True, str(path)
-        response.message = f'{asked} {request.name!r} = {stored}'
-        self.get_logger().info(f'taught {response.message} -> {path}')
-        return response
-
-    def _teach_object_point(self, request, response):
-        tools = list(request.tools) or list(self.robot.data.get('tool_frames', {}))
-        try:
-            poses = self._tcp_poses(tools)
-            note = self._note()
-            path, stored = self.config.save_object_point(request.name, poses, note, self.robot.name, self.pose)
-        except Exception as error:  # noqa: BLE001 - tf2 raises several types; the caller gets the message
-            response.success, response.message = False, f'object point {request.name!r}: {error}'
-            return response
-        response.success, response.file = True, str(path)
-        response.message = f'object point {request.name!r}: ' + '; '.join(
-            f'{tool} xyz {[round(v, 3) for v in pose.xyz]} rpy {[round(v, 3) for v in pose.rpy]}'
-            for tool, pose in stored.items())
-        self.get_logger().info(f'taught {response.message} -> {path}')
-        return response
 
 
 def main(args=None):

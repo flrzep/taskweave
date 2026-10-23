@@ -1,0 +1,2 @@
+implementations:
+  - {name: wait, type: script, class: "taskweave_skills.basic:Wait"}

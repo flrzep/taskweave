@@ -19,15 +19,16 @@ from taskweave_interfaces.msg import TaskStatus  # noqa: E402
 from taskweave_interfaces.srv import DescribeRobot, ListSkills, StartMission  # noqa: E402
 
 
-class NavigateTo(Skill):
-    name = 'navigate_to'
+class Move(Skill):
+    name = 'move'
     description = 'Test double: arrives immediately and records where it went.'
-    args_schema = {'type': 'object', 'required': ['target'],
-                   'properties': {'target': {'type': 'string', 'x-taskweave-point': 'base_target'}}}
+    args_schema = {'type': 'object', 'required': ['to'],
+                   'properties': {'to': {'type': 'string', 'x-taskweave-point': 'target',
+                                         'x-taskweave-target-kinds': ['base']}}}
 
     def execute(self, ctx, args):
         ctx.feedback(1.0, 'arrived')
-        return SkillResult.succeeded(world_state={'robot_at': args['target']})
+        return SkillResult.succeeded(world_state={'robot_at': args['to']})
 
 
 class Wait(Skill):
@@ -48,7 +49,7 @@ def system(config_dir):
     with RosRig() as ros:
         params = [Parameter('config_dir', value=str(config_dir)), Parameter('robot', value='demo_bot')]
         handler = ros.add(TaskHandler(parameter_overrides=params))
-        ros.add(SkillServer(skills=[NavigateTo(), Wait()], node_name='test_skills', parameter_overrides=params))
+        ros.add(SkillServer(skills=[Move(), Wait()], node_name='test_skills', parameter_overrides=params))
         client = ros.add(rclpy.create_node('test_client'))
         ros.spin(8)
         statuses = []
@@ -102,7 +103,7 @@ def press_until(joy, button, condition, what, patience_s=4.0):
 def test_catalog_lists_skills_from_servers(system):
     _, client, _, _ = system
     skills = call(client, ListSkills, names.LIST_SKILLS, ListSkills.Request()).skills
-    assert sorted(s.name for s in skills) == ['navigate_to', 'wait']
+    assert sorted(s.name for s in skills) == ['move', 'wait']
 
 
 def test_mission_runs_to_success_and_updates_world(system):
@@ -118,10 +119,10 @@ def test_mission_runs_to_success_and_updates_world(system):
 def test_invalid_mission_is_rejected_before_moving(system, config_dir):
     handler, client, _, _ = system
     (config_dir / 'missions' / 'lost.yaml').write_text(
-        'goal: g\nrobot: demo_bot\nsteps:\n  - {instruction: go, skill: navigate_to, args: {target: nowhere}}\n')
+        'goal: g\nrobot: demo_bot\nsteps:\n  - {instruction: go, skill: move, args: {to: nowhere}}\n')
     response = call(client, StartMission, names.START_MISSION, StartMission.Request(mission='lost'))
     assert not response.accepted
-    assert "unknown location 'nowhere'" in response.message
+    assert "unknown target 'nowhere'" in response.message
 
 
 def test_failure_retries_then_aborts_mission(system, config_dir):
@@ -150,8 +151,8 @@ def test_describe_robot_returns_card_and_served_skills(system):
     _, client, _, _ = system
     response = call(client, DescribeRobot, names.DESCRIBE_ROBOT, DescribeRobot.Request())
     assert response.card.startswith('Robot: demo_bot')
-    assert '- navigate_to(target' in response.card and 'stance:shelf_a' in response.card
-    assert sorted(s.name for s in response.skills) == ['navigate_to', 'wait']
+    assert '- move(to' in response.card and 'shelf_a/front' in response.card
+    assert sorted(s.name for s in response.skills) == ['move', 'wait']
 
 
 @pytest.fixture

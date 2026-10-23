@@ -119,10 +119,9 @@ def check_grasp(point: Mapping[str, Any], embodiment: Mapping[str, Any]) -> list
 
 
 def card_points(store, robot: str) -> dict[str, list[str]]:
-    """The named points of the robot card, by kind: the targets of a cell of schema 4 (``store.target_names``: base,
-    hand, object and joint targets, <instance>/<name> for those on placed objects, the placed objects), else the
-    point kinds of the older layout (``store.point_names``)."""
-    return store.target_names(robot) if store.targets_format() else store.point_names(robot)
+    """The named points of the robot card, by kind: the targets of the cell (``store.target_names``: base, hand,
+    object and joint targets, <instance>/<name> for those on placed objects, the placed objects)."""
+    return store.target_names(robot)
 
 
 def robot_card(embodiment: Mapping[str, Any], skills: Iterable[Mapping[str, Any]],

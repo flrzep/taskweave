@@ -19,8 +19,9 @@ taskweave check /path/to/cell --missions             # every file and every miss
   is written last, so an interrupted run leaves the pack at the old schema and the next run finishes the job.
 - A second run changes nothing: `cell pack schema 4, nothing to do`.
 - Comments and key order stay. Step ids, instructions, `include`, `with`, `defaults`, `facts` and `params` stay.
-- An old taskweave refuses a schema 4 cell (`update taskweave`), and taskweave 0.3 refuses an older cell
-  (`run taskweave config migrate <dir>`).
+- An old taskweave refuses a schema 4 cell (`update taskweave`), and this taskweave refuses an older cell and an
+  older robot pack at run time (`run taskweave config migrate <dir>`): migrate first. `migrate` itself keeps reading
+  cell packs of schema 1, 2 and 3 and robot packs of schema 1.
 
 Robot packs are migrated too: the robot packs the cell uses (found through `system.yaml` `robot_packs`,
 `TASKWEAVE_ROBOT_PACKS`, `--robot-packs DIR`) when they are writable. An installed read-only pack is only reported

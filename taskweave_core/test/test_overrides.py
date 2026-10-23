@@ -13,7 +13,6 @@ FIXTURE = Path(__file__).parent / 'fixtures' / 'config'
 ROBOT = 'demo_bot'
 NAV = ('# robot pack navigation\nenvelope: {front: 0.5, back: 0.4, left: 0.3, right: 0.3}\npadding: 0.1\n'
        'driving:\n  max_forward: 0.5\n  max_turn: 1.0\n  sideways: false\n')
-POSES = '# robot pack poses\nhome: {lift: 0.1}\nready: {lift: 0.2}\n'
 
 
 @pytest.fixture(autouse=True)
@@ -24,7 +23,7 @@ def no_outside_packs(monkeypatch):
 
 @pytest.fixture
 def cell(tmp_path):
-    """Cell pack + a robot pack (profile, embodiment, navigation, poses) the cell can override."""
+    """Cell pack + a robot pack (profile, embodiment, navigation) the cell can override."""
     cell = tmp_path / 'cell'
     shutil.copytree(FIXTURE, cell)
     pack = tmp_path / 'packs' / ROBOT
@@ -33,7 +32,6 @@ def cell(tmp_path):
     for name in ('profile.yaml', 'embodiment.yaml'):
         shutil.move(cell / 'robots' / ROBOT / name, pack / name)
     (pack / 'navigation.yaml').write_text(NAV)
-    (pack / 'poses.yaml').write_text(POSES)
     (cell / 'system.yaml').write_text('robot: demo_bot\nrobot_packs: [../packs]\n')
     return cell, pack
 
@@ -84,13 +82,6 @@ def test_keyed_override_loads_over_the_pack_file(cell):
     assert 'padding' not in nav and nav['envelope']['front'] == 0.5
 
 
-def test_poses_merge_one_level_a_pose_is_replaced_whole(cell):
-    root, _ = cell
-    override(root, 'poses.yaml', '~override: keys\nhome: {lift: 0.5, tilt: 0.1}\nready: ~delete\nextra: {lift: 0.3}\n')
-    poses = ConfigStore(root).joint_poses(ROBOT)
-    assert poses == {'home': {'lift': 0.5, 'tilt': 0.1}, 'extra': {'lift': 0.3}}
-
-
 def test_the_merged_result_is_validated(cell):
     root, _ = cell
     override(root, 'navigation.yaml', '~override: keys\nenvelope: ~delete\n')       # envelope is required
@@ -126,28 +117,20 @@ def test_save_writes_only_the_delta(cell):
 
 def test_read_only_pack_edit_creates_a_keyed_override(cell, tmp_path, monkeypatch):
     root, pack = cell
+    (pack / 'targets.yaml').write_text(TARGETS)
     installed = installed_only(root, pack, tmp_path, monkeypatch)
     store = ConfigStore(root)
-    path = store.set_joint_pose(ROBOT, 'ready', {'lift': 0.25})
-    assert path == root / 'robots' / ROBOT / 'poses.yaml'
-    assert yaml.safe_load(path.read_text()) == {'~override': 'keys', 'ready': {'lift': 0.25}}
-    assert store.joint_poses(ROBOT) == {'home': {'lift': 0.1}, 'ready': {'lift': 0.25}}
-    store.set_joint_pose(ROBOT, 'home', rename='base')                                  # a pack key goes by ~delete
-    assert yaml.safe_load(path.read_text())['home'] == overlay.DELETE
-    assert set(store.joint_poses(ROBOT)) == {'base', 'ready'}
-    assert (installed / 'poses.yaml').read_text() == POSES
-
-
-def test_a_pack_update_to_another_key_reaches_the_cell(cell, tmp_path, monkeypatch):
-    root, pack = cell
-    installed = installed_only(root, pack, tmp_path, monkeypatch)
-    store = ConfigStore(root)
-    store.set_joint_pose(ROBOT, 'ready', {'lift': 0.25})                                # the cell changes `ready`
-    (installed / 'poses.yaml').write_text(POSES.replace('home: {lift: 0.1}', 'home: {lift: 0.15}')
-                                          + 'stow: {lift: 0.0}\n')
-    poses = store.joint_poses(ROBOT)
-    assert poses['home'] == {'lift': 0.15} and poses['stow'] == {'lift': 0.0}           # the update is not shadowed
-    assert poses['ready'] == {'lift': 0.25}                                             # the cell's change stays
+    present = {'moves': 'hand', 'left_tool': {'xyz': [0.6, 0.2, 0.4], 'rpy': [0.0, 0.0, 0.0]}, 'elbow': 'out'}
+    [path] = store.save_target('present', present, ROBOT)
+    assert path == root / 'robots' / ROBOT / 'targets.yaml'
+    data = yaml.safe_load(path.read_text())
+    assert set(data) == {'~override', 'present'} and data['~override'] == 'keys'
+    assert data['present']['left_tool']['xyz'] == [0.6, 0.2, 0.4]
+    assert store.target('carry', ROBOT).kind == 'object'                                # the rest: the pack's file
+    store.rename_target('carry', 'hold', ROBOT)                                         # a pack key goes by ~delete
+    assert yaml.safe_load(path.read_text())['carry'] == overlay.DELETE
+    assert store.target('hold', ROBOT).kind == 'object'
+    assert (installed / 'targets.yaml').read_text() == TARGETS
 
 
 def test_a_full_copy_override_loads_the_same(cell):
@@ -168,13 +151,6 @@ def test_edit_of_a_full_copy_becomes_a_delta(cell):
     assert store.navigation(ROBOT)['padding'] == 0.3 and store.navigation(ROBOT)['driving']['max_forward'] == 0.5
 
 
-def test_cell_only_files_are_unchanged(cell):
-    root, _ = cell
-    store = ConfigStore(root)
-    path = store.save_held_pose(ROBOT, 'box', 'carry', {'lift': 0.1}, [])
-    assert '~override' not in path.read_text()
-
-
 def test_source_info_counts_the_keys(cell):
     root, _ = cell
     store = ConfigStore(root)
@@ -186,18 +162,21 @@ def test_source_info_counts_the_keys(cell):
     assert source['source'] == 'override' and source['override'] == 'keys' and source['pack']      # old keys stay
     assert source['override_keys'] == ['driving.max_forward', 'driving.sideways', 'padding']
     assert source['override_count'] == 3 and source['override_deleted'] == ['padding']
-    override(root, 'poses.yaml', 'home: {lift: 0.1}\nready: {lift: 0.9}\nnew: {lift: 0}\n')   # whole file: what differs
-    source = store.robot_file_source(ROBOT, 'poses.yaml')
-    assert source['override'] == 'file' and sorted(source['override_keys']) == ['new', 'ready']
+    (root.parent / 'packs' / ROBOT / 'targets.yaml').write_text(TARGETS)
+    changed = TARGETS.replace('0.5, 0.2', '0.9, 0.2') + 'new: {moves: joints, joints: {}}\n'
+    override(root, 'targets.yaml', changed)
+    source = store.robot_file_source(ROBOT, 'targets.yaml')                           # whole file: what differs
+    assert source['override'] == 'file' and sorted(source['override_keys']) == ['new', 'present']
     assert source['override_count'] == 2 and source['override_deleted'] == []
 
 
 def test_slim_dry_run_real_and_idempotent(cell):
     root, _ = cell
     nav = override(root, 'navigation.yaml', NAV.replace('max_turn: 1.0', 'max_turn: 3.0'))
-    poses = override(root, 'poses.yaml', POSES)                                          # same as the pack
+    (root.parent / 'packs' / ROBOT / 'targets.yaml').write_text(TARGETS)
+    poses = override(root, 'targets.yaml', TARGETS)                                      # same as the pack
     store = ConfigStore(root)
-    before = (store.navigation(ROBOT), store.joint_poses(ROBOT))
+    before = (store.navigation(ROBOT), store.targets(ROBOT).keys())
     text = nav.read_text()
     lines = []
     assert slim(root, dry_run=True, say=lines.append) == 0
@@ -210,7 +189,7 @@ def test_slim_dry_run_real_and_idempotent(cell):
     assert not poses.exists()
     assert any('drops' in line and 'envelope' in line for line in lines)
     fresh = ConfigStore(root)
-    assert (fresh.navigation(ROBOT), fresh.joint_poses(ROBOT)) == before
+    assert (fresh.navigation(ROBOT), fresh.targets(ROBOT).keys()) == before
     slimmed, again = nav.read_text(), []
     assert slim(root, say=again.append) == 0
     assert nav.read_text() == slimmed and again[-1] == 'nothing to slim'
@@ -298,7 +277,7 @@ def test_slim_does_not_write_outside_the_cell_pack(cell, tmp_path):
 
 
 # ---- targets.yaml (cell schema 4): merged one level deep, slim handles it like poses.yaml ----
-TARGETS = ('# robot pack targets\nhome: {moves: joints, joints: {lift: 0.1}}\n'
+TARGETS = ('# robot pack targets\nhome_j: {moves: joints, joints: {lift: 0.1}}\n'
            'present: {moves: hand, left_tool: {xyz: [0.5, 0.2, 0.4], rpy: [0, 0, 0]}, elbow: out}\n'
            'carry: {moves: object, path: [{xyz: [0.7, 0, 0.1], rpy: [0, 0, 0]}]}\n')
 
@@ -307,14 +286,14 @@ def test_slim_of_a_whole_file_copy_of_the_targets_keeps_the_targets_that_differ(
     root, pack = cell
     (pack / 'targets.yaml').write_text(TARGETS)
     copy = override(root, 'targets.yaml', TARGETS.replace('lift: 0.1', 'lift: 0.3'))
-    before = ConfigStore(root).target('home', ROBOT)
+    before = ConfigStore(root).target('home_j', ROBOT)
     lines = []
     assert slim(root, say=lines.append) == 0
-    assert yaml.safe_load(copy.read_text()) == {'~override': 'keys', 'home': {'moves': 'joints',
-                                                                              'joints': {'lift': 0.3}}}
+    assert yaml.safe_load(copy.read_text()) == {'~override': 'keys', 'home_j': {'moves': 'joints',
+                                                                                'joints': {'lift': 0.3}}}
     assert any('drops' in line and 'present' in line and 'carry' in line for line in lines)
     after = ConfigStore(root)
-    assert after.target('home', ROBOT).joints == before.joints == {'lift': 0.3}
+    assert after.target('home_j', ROBOT).joints == before.joints == {'lift': 0.3}
     assert after.target('present', ROBOT).data['elbow'] == 'out'        # the pack's targets still apply
     assert after.target('carry', ROBOT).kind == 'object'
     again = []

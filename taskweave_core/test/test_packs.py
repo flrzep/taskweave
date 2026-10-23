@@ -10,6 +10,7 @@ from taskweave_core.config import ConfigError, ConfigStore, packs
 from taskweave_core.config.migrate import migrate as migrate_chain
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'config'
+OLD_FIXTURE = Path(__file__).parent / 'fixtures' / 'config_schema3'     # the same cell as it was in schema 3
 
 
 def migrate(*args, **kwargs):
@@ -17,8 +18,23 @@ def migrate(*args, **kwargs):
     return migrate_chain(*args, latest=3, **kwargs)
 
 
+def migrated(cell: Path) -> ConfigStore:
+    """A store that reads the cell pack the 1 -> 3 migrations left (schema 3: not loadable at run time)."""
+    return ConfigStore(cell, check_schema=False)
+
+
 ROBOT = 'demo_bot'
-POSES = '# robot pack poses\nhome: {lift: 0.1}   # pack comment\n'
+POSES = '# robot pack poses\nhome: {lift: 0.1}   # pack comment\n'      # a schema 3 file (the migrations)
+TARGETS = ('# robot pack targets\nhome_hand: {moves: hand, left_tool: {xyz: [0.1, 0.0, 0.0], rpy: [0.0, 0.0, 0.0]}}'
+           '   # pack comment\n')
+
+
+def hand(x: float) -> dict:
+    return {'moves': 'hand', 'left_tool': {'xyz': [x, 0.0, 0.0], 'rpy': [0.0, 0.0, 0.0]}}
+
+
+def x_of(store: ConfigStore, name: str = 'home_hand') -> float:
+    return store.target(name, ROBOT).tool_poses['left'].xyz[0]
 
 
 @pytest.fixture(autouse=True)
@@ -41,10 +57,10 @@ def robot_pack(folder: Path, robot: str = ROBOT, files: dict | None = None, sche
 
 @pytest.fixture
 def split(tmp_path):
-    """The test config with the robot's profile, embodiment and a poses file in a robot pack (system.yaml)."""
+    """The test config with the robot's profile, embodiment and a targets file in a robot pack (system.yaml)."""
     cell = tmp_path / 'cell'
     shutil.copytree(FIXTURE, cell)
-    pack = robot_pack(tmp_path / 'packs', files={'poses.yaml': POSES})
+    pack = robot_pack(tmp_path / 'packs', files={'targets.yaml': TARGETS})
     for name in ('profile.yaml', 'embodiment.yaml'):
         shutil.move(cell / 'robots' / ROBOT / name, pack / name)
     (cell / 'system.yaml').write_text('robot: demo_bot\nrobot_packs: [../packs]\n')
@@ -55,36 +71,39 @@ def test_robot_files_come_from_the_robot_pack(split):
     store, pack = split
     assert store.robot(ROBOT).base['type'] == 'holonomic'
     assert store.robot_file(ROBOT, 'profile.yaml') == pack / 'profile.yaml'
-    assert store.robot_file(ROBOT, 'stances.yaml') == store.root / 'robots' / ROBOT / 'stances.yaml'
+    assert store.robot_file(ROBOT, 'objects') == store.root / 'robots' / ROBOT / 'objects'
     assert store.stance('shelf_a', ROBOT).yaw == pytest.approx(1.5708)
     source = store.robot_file_source(ROBOT, 'profile.yaml')
     assert source['source'] == 'robot pack' and 'system.yaml' in source['pack']
-    assert store.display_path(pack / 'poses.yaml') == 'demo_bot robot pack: poses.yaml'
+    assert store.display_path(pack / 'targets.yaml') == 'demo_bot robot pack: targets.yaml'
 
 
 def test_search_order_cell_env_system_installed(split, tmp_path, monkeypatch):
     store, pack = split
-    installed = robot_pack(tmp_path / 'installed', files={'poses.yaml': 'home: {lift: 0.3}\n'})
+    def file(x: float) -> str:
+        return f'home_hand: {{moves: hand, left_tool: {{xyz: [{x}, 0.0, 0.0], rpy: [0.0, 0.0, 0.0]}}}}\n'
+
+    installed = robot_pack(tmp_path / 'installed', files={'targets.yaml': file(0.3)})
     monkeypatch.setattr(packs, 'installed_location', lambda: installed.parent)
-    assert store.named_pose(ROBOT, 'home')['joints'] == {'lift': 0.1}              # system.yaml before installed
-    (pack / 'poses.yaml').unlink()
-    assert store.named_pose(ROBOT, 'home')['joints'] == {'lift': 0.3}              # file by file: then installed
-    env = robot_pack(tmp_path / 'env', files={'poses.yaml': 'home: {lift: 0.2}\n'})
+    assert x_of(store) == 0.1                                                      # system.yaml before installed
+    (pack / 'targets.yaml').unlink()
+    assert x_of(store) == 0.3                                                      # file by file: then installed
+    env = robot_pack(tmp_path / 'env', files={'targets.yaml': file(0.2)})
     monkeypatch.setenv(packs.ROBOT_PACKS_ENV, str(env))                            # a robot pack itself
-    assert store.named_pose(ROBOT, 'home')['joints'] == {'lift': 0.2}
-    (store.root / 'robots' / ROBOT / 'poses.yaml').write_text('home: {lift: 0.4}\n')
-    assert store.named_pose(ROBOT, 'home')['joints'] == {'lift': 0.4}              # cell override first
-    assert store.robot_file_source(ROBOT, 'poses.yaml')['source'] == 'override'
+    assert x_of(store) == 0.2
+    (store.root / 'robots' / ROBOT / 'targets.yaml').write_text(file(0.4))
+    assert x_of(store) == 0.4                                                      # cell override first
+    assert store.robot_file_source(ROBOT, 'targets.yaml')['source'] == 'override'
     assert [p.location.origin for p in store.robot_packs(ROBOT)] == ['env', 'system.yaml', 'installed']
 
 
 def test_saves_cell_files_to_the_cell_and_pack_files_to_the_pack(split):
     store, pack = split
-    path = store.set_joint_pose(ROBOT, 'ready', {'lift': 0.2})
-    assert path == pack / 'poses.yaml' and '# pack comment' in path.read_text()
-    assert not (store.root / 'robots' / ROBOT / 'poses.yaml').exists()
-    path = store.save_held_pose(ROBOT, 'box', 'carry', {'lift': 0.1}, [])         # cell-specific: the cell pack
-    assert path == store.root / 'robots' / ROBOT / 'held_poses.yaml'
+    [path] = store.save_target('ready_hand', hand(0.2), ROBOT)
+    assert path == pack / 'targets.yaml' and '# pack comment' in path.read_text()
+    assert not (store.root / 'robots' / ROBOT / 'targets.yaml').exists()
+    [path] = store.save_target('shelf_a/side', {'moves': 'base', 'x': -0.9, 'y': 0.0, 'yaw': 0.0}, ROBOT)
+    assert path == store.root / 'robots' / ROBOT / 'objects' / 'shelf.yaml'         # cell-specific: the cell pack
     assert store.robot_save_path(ROBOT, 'navigation.yaml') == pack / 'navigation.yaml'  # new file: the writable pack
 
 
@@ -93,13 +112,13 @@ def test_read_only_pack_edits_become_a_cell_override(split, tmp_path, monkeypatc
     (store.root / 'system.yaml').write_text('robot: demo_bot\n')                   # only the installed share
     shutil.move(pack, tmp_path / 'installed' / ROBOT)
     monkeypatch.setattr(packs, 'installed_location', lambda: tmp_path / 'installed')
-    installed = tmp_path / 'installed' / ROBOT / 'poses.yaml'
-    path = store.set_joint_pose(ROBOT, 'ready', {'lift': 0.2})
-    assert path == store.root / 'robots' / ROBOT / 'poses.yaml'
-    assert 'ready' in path.read_text() and 'home' not in path.read_text()         # only what the cell changed
-    assert installed.read_text() == POSES
-    assert store.named_pose(ROBOT, 'home')['joints'] == {'lift': 0.1}             # the rest from the pack's file
-    assert store.robot_file_source(ROBOT, 'poses.yaml')['source'] == 'override'
+    installed = tmp_path / 'installed' / ROBOT / 'targets.yaml'
+    [path] = store.save_target('ready_hand', hand(0.2), ROBOT)
+    assert path == store.root / 'robots' / ROBOT / 'targets.yaml'
+    assert 'ready_hand' in path.read_text() and 'home_hand' not in path.read_text()  # only what the cell changed
+    assert installed.read_text() == TARGETS
+    assert x_of(store) == 0.1                                                      # the rest from the pack's file
+    assert store.robot_file_source(ROBOT, 'targets.yaml')['source'] == 'override'
     assert store.display_path(store.robot_save_path(ROBOT, 'profile.yaml')) == f'robots/{ROBOT}/profile.yaml'
 
 
@@ -114,16 +133,26 @@ def test_missing_robot_file_names_the_places_searched(split):
 def test_schema_version_is_checked(tmp_path):
     shutil.copytree(FIXTURE, tmp_path / 'cell')
     (tmp_path / 'cell' / 'pack.yaml').unlink()
-    with pytest.raises(ConfigError, match='cell pack schema 1, this taskweave needs 3: run taskweave config migrate '):
+    with pytest.raises(ConfigError, match='cell pack schema 1, this taskweave needs 4: run taskweave config migrate '):
         ConfigStore(tmp_path / 'cell')
-    (tmp_path / 'cell' / 'pack.yaml').write_text('name: cell\nversion: 1\nschema_version: 2\n')
-    with pytest.raises(ConfigError, match='cell pack schema 2, this taskweave needs 3: run taskweave config '
-                                          'migrate-skills'):
-        ConfigStore(tmp_path / 'cell')
-    shutil.copytree(tmp_path / 'cell', tmp_path / 'newer')   # (a pack.yaml is read again only when its mtime changes)
+    for old in (2, 3):      # (a pack.yaml is read again only when its mtime changes: one folder per schema)
+        shutil.copytree(tmp_path / 'cell', tmp_path / f'old{old}')
+        (tmp_path / f'old{old}' / 'pack.yaml').write_text(f'name: cell\nversion: 1\nschema_version: {old}\n')
+        with pytest.raises(ConfigError, match=f'cell pack schema {old}, this taskweave needs 4: run taskweave config '
+                                              'migrate '):
+            ConfigStore(tmp_path / f'old{old}')
+    shutil.copytree(tmp_path / 'cell', tmp_path / 'newer')
     (tmp_path / 'newer' / 'pack.yaml').write_text('name: cell\nversion: 1\nschema_version: 5\n')
     with pytest.raises(ConfigError, match='update taskweave'):
         ConfigStore(tmp_path / 'newer')
+
+
+def test_a_robot_pack_of_schema_1_says_migrate(split):
+    store, pack = split
+    (pack / 'pack.yaml').write_text('name: demo_bot\nversion: 0.1.0\nschema_version: 1\n')
+    with pytest.raises(ConfigError, match=r'robot pack schema 1, this taskweave reads schema 2 to 2: run taskweave '
+                                          r'config migrate '):
+        store.robot(ROBOT)
 
 
 def test_robot_pack_needs_pack_yaml_and_its_schema(split):
@@ -140,7 +169,7 @@ def test_robot_pack_needs_pack_yaml_and_its_schema(split):
 def old_config(tmp_path):
     """A config directory from before packs (schema 1): whole robot folders in robots/."""
     cell = tmp_path / 'config'
-    shutil.copytree(FIXTURE, cell)
+    shutil.copytree(OLD_FIXTURE, cell)
     (cell / 'pack.yaml').unlink()
     folder = cell / 'robots' / ROBOT
     (folder / 'moveit').mkdir()
@@ -167,8 +196,8 @@ def test_migration_splits_and_is_idempotent(old_config, tmp_path):
     assert sorted(p.name for p in (old_config / 'robots' / ROBOT).iterdir()) == ['stances.yaml']
     assert 'robot_packs:\n- ../robot_packs' in (old_config / 'system.yaml').read_text()
     assert 'name: test_cell' in (old_config / 'pack.yaml').read_text()
-    store = ConfigStore(old_config)
-    assert store.robot(ROBOT).name == ROBOT and store.stances(ROBOT)
+    store = migrated(old_config)
+    assert store.robot(ROBOT).name == ROBOT and (old_config / 'robots' / ROBOT / 'stances.yaml').is_file()
     assert store.robot_file(ROBOT, 'moveit/robot.urdf') == pack / 'moveit' / 'robot.urdf'
     again = []
     assert migrate(old_config, tmp_path / 'robot_packs', say=again.append) == 0
@@ -189,7 +218,7 @@ def test_migration_removes_copies_and_keeps_differences(old_config, tmp_path, mo
     assert any('keep    robots/demo_bot/poses.yaml  as a cell override' in line for line in lines)
     assert any(line.startswith('remove  robots/demo_bot/moveit/') for line in lines)
     assert not (old_config / 'system.yaml').exists()    # nothing moved: no robot_packs entry needed
-    store = ConfigStore(old_config)
+    store = migrated(old_config)
     assert store.robot_file_source(ROBOT, 'poses.yaml')['source'] == 'override'
     assert store.robot_file(ROBOT, 'profile.yaml') == installed / 'profile.yaml'
     assert os.path.samefile(store.robot_file(ROBOT, 'moveit'), installed / 'moveit')
@@ -218,7 +247,7 @@ def test_migration_writes_an_absolute_path_across_windows_drives(old_config, tmp
     assert migrate(old_config, tmp_path / 'robot_packs', say=lambda line: None) == 0
     entry = (old_config / 'system.yaml').read_text()
     assert (tmp_path / 'robot_packs').resolve().as_posix() in entry
-    assert ConfigStore(old_config).robot(ROBOT).name == ROBOT
+    assert migrated(old_config).robot(ROBOT).name == ROBOT
 
 
 def test_migration_does_not_delete_robot_pack_files_through_a_linked_robot_folder(old_config, tmp_path, monkeypatch):
@@ -344,15 +373,15 @@ def test_migration_keeps_a_unit_with_a_file_the_pack_lacks(same_as_pack):
     assert (moveit / 'extra.yaml').is_file()
 
 
-def test_slim_does_not_remove_a_file_it_cannot_remove(same_as_pack, monkeypatch):
+def test_slim_does_not_remove_a_file_it_cannot_remove(split, monkeypatch):
     from taskweave_core.config import migrate as module
     from taskweave_core.config.slim import slim
 
-    assert migrate(same_as_pack, say=lambda line: None) == 0
-    profile = same_as_pack / 'robots' / ROBOT / 'profile.yaml'
-    shutil.copy(ConfigStore(same_as_pack).robot_file(ROBOT, 'profile.yaml'), profile)   # an old whole-file copy
+    store, pack = split
+    profile = store.root / 'robots' / ROBOT / 'profile.yaml'
+    shutil.copy(pack / 'profile.yaml', profile)                                   # an old whole-file copy
     monkeypatch.setattr(module, '_entry_blocker', lambda path: 'Permission denied')
     lines = []
-    assert slim(same_as_pack, say=lines.append) == 1
+    assert slim(store.root, say=lines.append) == 1
     assert profile.is_file()
     assert any(line.startswith('cannot remove ') and 'profile.yaml' in line for line in lines)

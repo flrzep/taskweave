@@ -59,10 +59,6 @@ def test_check_passes_on_the_new_format_cell():
     assert {'cell_targets', 'robot_objects', 'robot_targets', 'object_type', 'cell_pack'} <= kinds
 
 
-def test_check_passes_on_the_old_format_twin():
-    assert ConfigStore(FIXTURES / 'targets_old').check_pack() == []
-
-
 def test_the_command_line_check_passes_on_the_new_format_cell(capsys):
     from taskweave_core.cli import main
 
@@ -261,7 +257,7 @@ def test_the_catalogue_knows_the_four_target_files():
     assert catalogue.kind_of('robots/bot_two_arm/objects/frame_type2.yaml').kind == 'robot_objects'
     assert catalogue.kind_of('robots/bot_two_arm/targets.yaml').kind == 'robot_targets'
     assert catalogue.kind_of('targets.yaml', 'robot:bot_two_arm').kind == 'robot_targets'
-    assert catalogue.kind_of('cell/locations.yaml').kind == 'locations'  # the old kinds stay for the old layout
+    assert catalogue.kind_of('cell/locations.yaml').kind == 'locations'  # the kinds of the old files stay (editor)
     kinds = {k['kind'] for k in ConfigStore(FIXTURES / 'targets_new').file_kinds()}
     assert {'cell_targets', 'robot_objects', 'robot_targets', 'object_type', 'locations', 'stances'} <= kinds
 
@@ -305,14 +301,12 @@ def test_the_new_enums_have_values():
     assert store.enum_values('target_types') == ['frame_type2', 'karakuri_hanger', 'part_box']
     assert set(store.enum_values('base_targets_of', ROBOT)) == {'pick', 'staging', 'hang', 'knob_stance'}
     assert {'torso', 'head', 'left_arm', 'right_arm'} <= set(store.enum_values('joint_groups', ROBOT))
-    old = ConfigStore(FIXTURES / 'targets_old')
-    assert old.enum_values('targets') == [] and old.enum_values('stances', ROBOT)
 
 
 # ---- the schema numbers ---------------------------------------------------------------------------
 def test_the_schema_numbers():
     assert (packs.CELL_SCHEMA, packs.ROBOT_SCHEMA) == (4, 2)
-    assert (packs.CELL_SCHEMA_OLDEST, packs.ROBOT_SCHEMA_OLDEST) == (3, 1)  # until the switch-over drops the old layout
+    assert (packs.CELL_SCHEMA_OLDEST, packs.ROBOT_SCHEMA_OLDEST) == (4, 2)  # older ones: taskweave config migrate
 
 
 def write_pack(folder: Path, schema: int, name='cell') -> Path:
@@ -322,16 +316,16 @@ def write_pack(folder: Path, schema: int, name='cell') -> Path:
     return folder
 
 
-@pytest.mark.parametrize('schema', [3, 4])
-def test_cell_schemas_three_and_four_are_read(tmp_path, schema):
-    assert ConfigStore(write_pack(tmp_path / 'c', schema)).targets_format() == (schema == 4)
+def test_cell_schema_four_is_read(tmp_path):
+    assert ConfigStore(write_pack(tmp_path / 'c', 4)).targets_format()
 
 
-def test_cell_schemas_below_and_above_are_refused(tmp_path):
+@pytest.mark.parametrize('schema', [1, 2, 3])
+def test_cell_schemas_below_and_above_are_refused(tmp_path, schema):
     with pytest.raises(
-        ConfigError, match='cell pack schema 2, this taskweave needs 3: run taskweave config migrate-skills'
+        ConfigError, match=f'cell pack schema {schema}, this taskweave needs 4: run taskweave config migrate '
     ):
-        ConfigStore(write_pack(tmp_path / 'a', 2))
+        ConfigStore(write_pack(tmp_path / 'a', schema))
     with pytest.raises(ConfigError, match='cell pack schema 5, this taskweave reads schema 4: update taskweave'):
         ConfigStore(write_pack(tmp_path / 'b', 5))
 
@@ -339,26 +333,29 @@ def test_cell_schemas_below_and_above_are_refused(tmp_path):
 def test_the_pack_check_accepts_the_cell_and_robot_schemas_that_are_read(tmp_path):
     cell = write_pack(tmp_path / 'c', 4)
     assert ConfigStore(cell).validate_file('pack.yaml') == []
-    for schema, ok in ((1, True), (2, True), (3, False)):
+    for schema, ok in ((1, False), (2, True), (3, False)):
         pack = write_pack(tmp_path / f'robot{schema}', schema, 'bot')
         result = ConfigStore(cell).validate_file('pack.yaml', (pack / 'pack.yaml').read_text(), 'robot:bot')
         assert (result == []) == ok, (schema, result)
     assert (
-        'reads 3 to 4'
+        'reads 4 to 4'
         in ConfigStore(cell).validate_file('pack.yaml', 'name: c\nversion: 1\nschema_version: 5\n')[0]['message']
     )
 
 
-@pytest.mark.parametrize('schema,ok', [(1, True), (2, True), (3, False)])
-def test_robot_pack_schemas_one_and_two_are_read(tmp_path, schema, ok):
+def test_robot_pack_schema_two_is_read(tmp_path):
+    assert ConfigStore(copy_with_pack(tmp_path, 2)).robot_packs('bot_a')
+
+
+@pytest.mark.parametrize(
+    'schema,hint', [(1, 'run taskweave config migrate '), (3, 'update taskweave')]
+)
+def test_robot_pack_schemas_below_and_above_are_refused(tmp_path, schema, hint):
     cell = copy_with_pack(tmp_path, schema)
-    if ok:
-        assert ConfigStore(cell).robot_packs('bot_a')
-    else:
-        with pytest.raises(
-            ConfigError, match='robot pack schema 3, this taskweave reads schema 1 to 2: update taskweave'
-        ):
-            ConfigStore(cell).robot_packs('bot_a')
+    with pytest.raises(ConfigError, match=f'robot pack schema {schema}, this taskweave reads schema 2 to 2: {hint}'):
+        ConfigStore(cell).robot_packs('bot_a')
+    if schema == 1:     # the migrations read it
+        assert ConfigStore(cell, check_schema=False).robot_packs('bot_a')
 
 
 def copy_with_pack(tmp_path: Path, schema: int) -> Path:

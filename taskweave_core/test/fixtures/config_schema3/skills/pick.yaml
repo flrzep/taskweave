@@ -1,0 +1,11 @@
+implementations:
+  - name: pick_vla
+    type: vla
+    class: "some_policies.vla:Pick"
+    requires: {capabilities: [arms.bimanual, camera.wrist.rgbd], action_space: joint_pos_bimanual, embodiments: [a2d]}
+  - name: pick_scripted
+    type: script
+    class: "some_skills.pick:Pick"
+    requires: {capabilities: [arms.single, gripper.parallel]}
+    params: {approach_speed: 0.1}
+lift_height: 0.2

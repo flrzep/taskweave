@@ -36,9 +36,21 @@ def new():
     return ConfigStore(FIXTURES / 'targets_new')
 
 
+def load_dump_tool():
+    """tools/dump_targets.py: its OldLayoutStore still reads a cell pack of the old point model (migration-only)."""
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location('dump_targets', FIXTURES.parents[2] / 'tools' / 'dump_targets.py')
+    module = importlib.util.module_from_spec(spec)
+    sys.modules['dump_targets'] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 @pytest.fixture
 def old():
-    return ConfigStore(FIXTURES / 'targets_old')
+    return load_dump_tool().OldLayoutStore(FIXTURES / 'targets_old', check_schema=False)
 
 
 @pytest.fixture
@@ -56,7 +68,9 @@ def append(path: Path, text: str) -> None:
 
 # ---- every example of the design loads ------------------------------------------------------------
 def test_the_new_cell_is_in_the_targets_layout_and_the_old_twin_is_not(new, old):
-    assert new.targets_format() and not old.targets_format()
+    assert new.targets_format() and not old.targets_format()      # (old: the migration tool's reader)
+    with pytest.raises(ConfigError, match='run taskweave config migrate'):
+        ConfigStore(FIXTURES / 'targets_old')
 
 
 def test_cell_targets_are_base_targets_in_the_cell_frame(new):
@@ -267,8 +281,6 @@ def test_the_old_readers_give_the_same_numbers_on_the_new_layout(old, new):
     )
     assert new.named_pose(ROBOT, 'lift_high') == old.named_pose(ROBOT, 'lift_high')
     assert new.named_pose(ROBOT, 'home')['joints'] == old.named_pose(ROBOT, 'home')['joints']
-    assert new.tool_pose_names(ROBOT) == old.tool_pose_names(ROBOT) == ['frame_grasp_approach']
-    assert new.joint_pose(ROBOT, 'lift_low') == old.joint_pose(ROBOT, 'lift_low')
     with pytest.raises(KeyError, match='has no point'):
         new.object_point('frame_type2', 'hook_plate')  # an object target is not a point
     with pytest.raises(KeyError, match='no contact'):
@@ -290,26 +302,6 @@ def test_the_old_readers_list_the_same_names(old, new):
     assert sorted(names['held poses']) == ['carry', 'hang-approach', 'set_down_held', 'stand_up']
     assert 'karakuri_hanger/hook' in names['placed object contacts']
     assert set(names['stances']) == {n.replace('/knob', '/knob_stance') for n in expected['stances']}
-
-
-def test_the_old_writers_refuse_on_the_new_layout(new):
-    with pytest.raises(ValueError, match='save_target'):
-        new.save_base_pose('somewhere', Pose2D(1.0, 2.0, 0.0))
-    with pytest.raises(ValueError, match='save_target'):
-        new.save_held_pose(ROBOT, 'frame_type2', 'x', {}, [])
-    with pytest.raises(ValueError, match='save_target'):
-        new.set_named_pose(ROBOT, 'home', {'body_joint': 0.1})
-    with pytest.raises(ValueError, match='save_target'):
-        new.save_object_point_settings('part_box', 'top_grasp', {'elbow': 'up'}, robot=ROBOT)
-
-
-def test_the_old_layout_is_untouched(old):
-    assert old.stance('bay_1_stack_1_back/pick', ROBOT) == Pose2D(6.0 - 1.528, 3.5, 0.0, 'cell')
-    assert old.locations()['waiting'] == Pose2D(2.0, 0.0, 0.0, 'cell')
-    assert not (FIXTURES / 'targets_old' / 'cell' / 'targets.yaml').exists()
-    assert old.check_pack() == []
-    with pytest.raises(TargetError, match='unknown target'):
-        old.target('waiting', ROBOT)
 
 
 # ---- symmetric objects and the handled_from key ---------------------------------------------------
@@ -1103,15 +1095,6 @@ def test_one_bad_target_does_not_hide_the_other_poses(cell):
 
     assert set(ts.pose_target_problems(store, ROBOT)) == {'bad_pose', 'bad_held'}
     assert 'tail' in pose_problems(store, ROBOT, 'bad_pose')[0]
-
-
-def test_the_generic_point_editors_refuse_old_files_on_the_new_layout(new):
-    with pytest.raises(ValueError, match='save_target'):
-        new.update_point('cell/locations.yaml', ['x'], Pose2D(0, 0, 0))
-    with pytest.raises(ValueError, match='save_target'):
-        new.delete_point(f'robots/{ROBOT}/poses.yaml', ['home'])
-    with pytest.raises(ValueError, match='save_target'):
-        new.delete_point('objects/frame_type2.yaml', ['points', 'x'])
 
 
 def test_write_refusals_are_target_write_errors_and_lookups_stay_key_errors(cell):

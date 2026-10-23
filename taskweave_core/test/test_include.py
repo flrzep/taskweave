@@ -74,10 +74,10 @@ def test_points_on_an_object_a_step_puts_down_are_checked_later(config_dir):
     from taskweave_core.validation import validate_plan
     store = ConfigStore(config_dir)
     catalog = {'grip': {'type': 'object', 'properties': {'place_as': {'type': 'string'}}},
-               'move_gripper': {'type': 'object', 'properties': {
-                   'point': {'type': 'string', 'x-taskweave-point': 'instance_point'}}}}
+               'move': {'type': 'object', 'properties': {
+                   'to': {'type': 'string', 'x-taskweave-point': 'target'}}}}
     steps = [{'instruction': 'put it down', 'skill': 'grip', 'args': {'place_as': 'on_floor'}},
-             {'instruction': 'to it', 'skill': 'move_gripper', 'args': {'point': 'on_floor/top_grasp'}}]
+             {'instruction': 'to it', 'skill': 'move', 'args': {'to': 'on_floor/top_grasp'}}]
     assert validate_plan(Plan.from_mission({'goal': 'g', 'steps': steps}, 'p', robot='demo_bot'), catalog, store) == []
     before = Plan.from_mission({'goal': 'g', 'steps': steps[::-1]}, 'p', robot='demo_bot')
     assert any('on_floor' in p for p in validate_plan(before, catalog, store))  # used before it is put down

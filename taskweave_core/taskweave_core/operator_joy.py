@@ -33,7 +33,7 @@ drive. The mode is published on names.OPERATOR_MODE. Tool links and the base fra
 Teaching hand targets (optional): jog the tools onto the object, then press the teach button while holding
 ``hold_button`` (default: the jog enable button, L1), so a stray press stores nothing. It stores the TCP of the tool
 being jogged (in drive mode: of every tool) as ``point`` (a hand target, ``<instance>/<name>``, kind ``hand`` of the
-teach node; an object point on a cell before schema 4) through the teach node. ``point`` is
+teach node) through the teach node. ``point`` is
 read from operator.yaml at each press, so it can be changed while the system runs:
 
     joy:
@@ -265,8 +265,7 @@ class OperatorJoy(Node):
             self._notice('teach: teach node not available', False)
             return
         self.get_logger().info(f'teach {point} ({", ".join(tools) or "all tools"})')
-        kind = 'hand' if self.store.targets_format() else 'object_point'   # a hand target of the object
-        request = TeachPoint.Request(name=point, kind=kind, tools=tools)
+        request = TeachPoint.Request(name=point, kind='hand', tools=tools)    # a hand target of the object
         self.teach_client.call_async(request).add_done_callback(self._taught)
 
     def _taught(self, future) -> None:

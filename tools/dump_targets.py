@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Dump every resolvable target of a cell pack as a JSON table, and compare two tables (the equivalence check of the
-targets migration, cell schema 3 -> 4).
+targets migration, cell schema 3 -> 4). This tool is migration-only: an
+unmigrated cell is read with OldLayoutStore, the old readers the store itself no longer has.
 
     python3 tools/dump_targets.py CELL_DIR [--robot R ...] [--out FILE]      write the table (stdout without --out)
     python3 tools/dump_targets.py --compare BEFORE.json AFTER.json [--log MIGRATE_OUTPUT] [--tolerance 1e-6]
@@ -24,13 +25,16 @@ import json
 import math
 import re
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'taskweave_core'))
 
-from taskweave_core.config import ConfigStore, Pose2D  # noqa: E402
+from taskweave_core.config import ConfigError, ConfigStore, Pose2D, packs, schemas  # noqa: E402
 from taskweave_core.config import targets as model  # noqa: E402
+from taskweave_core.config.poses import Pose3D, wrap_angle  # noqa: E402
 
+POINT_METADATA = ('approach', 'tool_type', 'grip_width_m', 'approach_m', 'elbow', 'alone')
 NEARS = [
     None,
     (7.0, 1.0, 0.0),
@@ -43,6 +47,168 @@ NEARS = [
     (8.0, 2.5, 3.1416),
     (6.8, 1.0, -1.5708),
 ]
+
+
+class OldLayoutStore(ConfigStore):
+    """A ConfigStore that still reads a cell pack of the old point model (schema 3: locations.yaml, stances.yaml,
+    poses.yaml, held_poses.yaml, object_points.yaml, objects' ``points`` and ``contacts``): the old readers the store
+    had before they were removed. For a cell of schema 4 every reader is the store's own (thin readers over
+    ``target()``). Only this tool needs it: the equivalence check compares what the old readers answer before the
+    migration with what the migrated cell answers."""
+
+    def targets_format(self) -> bool:
+        return packs.cell_schema(self.root) >= 4
+
+    def locations(self):
+        if self.targets_format():
+            return super().locations()
+        data = self._load('cell/locations.yaml', schemas.POINTS2D, required=False, default={})
+        return {name: Pose2D.from_dict(pose) for name, pose in data.items()}
+
+    def stance_offsets(self, robot):
+        if self.targets_format():
+            return super().stance_offsets(robot)
+        return self._load(f'robots/{robot}/stances.yaml', schemas.STANCES, required=False, default={})
+
+    def stance_variants(self, robot, instance):
+        if self.targets_format():
+            return super().stance_variants(robot, instance)
+        data = self.stance_offsets(robot)
+        variants = dict(data.get('objects', {}).get(instance.object, {}))
+        variants.update(data.get('instances', {}).get(instance.name, {}))
+        return {name: Pose2D(float(v['x']), float(v['y']), float(v['yaw']), instance.object)
+                for name, v in variants.items()}
+
+    def handling_instance(self, instance, robot, near):
+        if self.targets_format():
+            return super().handling_instance(instance, robot, near)
+        step = None if near is None else self._load(f'objects/{instance.object}.yaml', schemas.OBJECT, required=False,
+                                                    default={}).get('yaw_symmetry_deg')
+        offset = next(iter(self.stance_variants(robot, instance).values()), None) if step else None
+        if offset is None:
+            return instance
+        turns = [replace(instance, pose=Pose2D(instance.pose.x, instance.pose.y,
+                                               wrap_angle(instance.pose.yaw + math.radians(k * step)),
+                                               instance.pose.frame))
+                 for k in range(round(360 / step))]
+
+        def distance(turn):
+            stance = turn.pose.compose(offset)
+            return math.hypot(stance.x - near.x, stance.y - near.y)
+
+        return min(turns, key=distance)
+
+    def joint_poses(self, robot):
+        if self.targets_format():
+            return super().joint_poses(robot)
+        return self._load(f'robots/{robot}/poses.yaml', schemas.JOINT_POSES, required=False, default={})
+
+    def named_pose(self, robot, name):
+        if self.targets_format():
+            return super().named_pose(robot, name)
+        poses = self.joint_poses(robot)
+        if name not in poses:
+            raise KeyError(f'unknown pose {name!r} for robot {robot!r}')
+        entry = poses[name]
+        if 'tools' in entry:
+            return {'joints': {j: float(v) for j, v in entry.get('joints', {}).items()}, 'tools': dict(entry['tools']),
+                    'elbow': entry.get('elbow')}
+        return {'joints': {j: float(v) for j, v in entry.items()}, 'tools': {}, 'elbow': None}
+
+    def stance_names(self, robot):
+        names = []
+        for instance in self.object_instances().values():
+            for index, variant in enumerate(self.stance_variants(robot, instance)):
+                names.append('stance:' + (instance.name if index == 0 else f'{instance.name}/{variant}'))
+        return names
+
+    def tool_pose_names(self, robot):
+        return sorted(name for name, entry in self.joint_poses(robot).items() if 'tools' in entry)
+
+    def point_names(self, robot):
+        if self.targets_format():
+            return super().point_names(robot)
+        from taskweave_core.config.limits import joint_groups
+
+        objects = []
+        for path in sorted((self.root / 'objects').glob('*.yaml')):
+            objects += [f'{path.stem}.{name}' for name in self.object(path.stem).get('points', {})]
+        placed, contacts = [], []     # <instance>/<point>, <instance>/<contact>
+        for name, instance in sorted(self.object_instances().items()):
+            try:
+                placed += [f'{name}/{point}' for point in self.object(instance.object).get('points', {})]
+                contacts += [f'{name}/{c}' for c in self.object(instance.object).get('contacts', {})]
+            except ConfigError:
+                continue
+        joint_poses = sorted(self.joint_poses(robot))
+        held = sorted({name for poses in self.held_poses(robot).values() for name in poses})
+        return {'locations': sorted(self.locations()), 'stances': self.stance_names(robot),
+                'joint poses': joint_poses, 'tool poses': self.tool_pose_names(robot), 'object points': objects,
+                'joint-only poses': sorted(n for n, p in self.joint_poses(robot).items() if 'tools' not in p),
+                'joint groups': sorted(joint_groups(self, robot)),
+                'placed object points': placed, 'placed object contacts': contacts,
+                'placed objects': sorted(self.object_instances()), 'held poses': held,
+                'via targets': [f'pose:{pose}' for pose in joint_poses] + placed}
+
+    def held_poses(self, robot):
+        if self.targets_format():
+            return super().held_poses(robot)
+        return self._load(f'robots/{robot}/held_poses.yaml', schemas.HELD_POSES, required=False, default={})
+
+    def held_pose(self, robot, obj, name):
+        if self.targets_format():
+            return super().held_pose(robot, obj, name)
+        entry = self.held_poses(robot)[obj][name]
+        return {'joints': dict(entry.get('joints', {})),
+                'path': [Pose3D.from_dict(p, 'base') for p in entry.get('path', [])]}
+
+    def robot_object_points(self, robot):
+        if self.targets_format():
+            return super().robot_object_points(robot)
+        return self._load(f'robots/{robot}/object_points.yaml', schemas.ROBOT_OBJECT_POINTS, required=False,
+                          default={})
+
+    def object_point(self, obj, point, robot=None):
+        if self.targets_format():
+            return super().object_point(obj, point, robot)
+        points = self.object(obj).get('points', {})
+        if point not in points:
+            raise KeyError(f'object {obj!r} has no point {point!r}')
+        entry = dict(points[point])
+        result = {key: entry.pop(key, None) for key in POINT_METADATA}
+        result.update({tool: Pose3D.from_dict(pose, obj) for tool, pose in entry.items()})
+        if result.get('alone'):
+            result['alone'] = {tool: Pose3D.from_dict(pose, obj) for tool, pose in result['alone'].items()}
+        if robot:
+            result.update(self.robot_object_points(robot).get(obj, {}).get(point, {}))
+        return result
+
+    def instance_point(self, reference, robot=None, near=None):
+        if self.targets_format():
+            return super().instance_point(reference, robot, near)
+        name, _, point = reference.partition('/')
+        instances = self.object_instances()
+        if name not in instances or not point:
+            raise KeyError(f'unknown object point {reference!r}')
+        instance = instances[name] if robot is None else self.handling_instance(instances[name], robot, near)
+        return instance, self.object_point(instance.object, point, robot)
+
+    def object_contact(self, obj, contact):
+        if self.targets_format():
+            return super().object_contact(obj, contact)
+        contacts = self.object(obj).get('contacts', {})
+        if contact not in contacts:
+            raise KeyError(f'object {obj!r} has no contact {contact!r}')
+        return Pose3D.from_dict(contacts[contact], obj)
+
+    def instance_contact(self, reference):
+        if self.targets_format():
+            return super().instance_contact(reference)
+        name, _, contact = reference.partition('/')
+        instances = self.object_instances()
+        if name not in instances or not contact:
+            raise KeyError(f'unknown object contact {reference!r}')
+        return instances[name], self.object_contact(instances[name].object, contact)
 
 
 def _pose2(pose) -> list[float]:
@@ -177,7 +343,7 @@ def collect_native(store: ConfigStore, robots: list[str]) -> dict:
 
 
 def dump(cell: str | Path, robots=None) -> dict:
-    store = ConfigStore(cell, check_schema=False)
+    store = OldLayoutStore(cell, check_schema=False)
     names = _robots(store, robots)
     table = {
         'cell': str(cell),

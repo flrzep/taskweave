@@ -44,10 +44,10 @@ def write(path: Path, text: str) -> Path:
 def cell(tmp_path) -> Path:
     """A cell pack whose system.yaml names the pack folder ../packs; returns the cell (config) directory."""
     config = tmp_path / 'config'
-    write(config / 'pack.yaml', 'name: test_cell\nversion: 1\nschema_version: 3\n')
+    write(config / 'pack.yaml', 'name: test_cell\nversion: 1\nschema_version: 4\n')
     write(config / 'system.yaml', 'robot: test_bot\nrobot_packs: [../packs]\n')
     pack = tmp_path / 'packs' / 'test_bot'
-    write(pack / 'pack.yaml', 'name: test_bot\nversion: 0.1.0\nschema_version: 1\ndescription: test\n')
+    write(pack / 'pack.yaml', 'name: test_bot\nversion: 0.1.0\nschema_version: 2\ndescription: test\n')
     write(pack / 'profile.yaml', PROFILE)
     write(pack / 'embodiment.yaml', EMBODIMENT)
     write(pack / 'navigation.yaml', NAVIGATION)

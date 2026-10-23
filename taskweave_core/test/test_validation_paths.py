@@ -21,16 +21,16 @@ SCHEMA = {
     'type': 'object', 'required': ['to'], 'additionalProperties': False, 'properties': {
         'to': {'oneOf': [
             {'title': 'object point', 'type': 'object', 'required': ['point'], 'additionalProperties': False,
-             'properties': {'point': {'type': 'string', 'x-taskweave-point': 'instance_point'},
+             'properties': {'point': {'type': 'string', 'x-taskweave-point': 'target'},
                             'offset_m': {'type': 'number', 'minimum': 0}}},
             {'title': 'named pose', 'type': 'object', 'required': ['pose'], 'additionalProperties': False,
-             'properties': {'pose': {'type': 'string', 'x-taskweave-point': 'joint_pose'}}},
+             'properties': {'pose': {'type': 'string', 'x-taskweave-point': 'target'}}},
             {'title': 'relative', 'type': 'object', 'required': ['by'], 'additionalProperties': False,
              'properties': {'by': VEC3, 'turn_deg': {'type': 'number'}}},
         ]},
         'hands': HANDS,
         'motion': MOTION,
-        'steps': {'type': 'array', 'items': {'type': 'string', 'x-taskweave-point': 'instance_point'}},
+        'steps': {'type': 'array', 'items': {'type': 'string', 'x-taskweave-point': 'target'}},
     },
 }
 
@@ -53,7 +53,7 @@ def test_valid_nested_args_pass(store):
 def test_nested_point_check_reports_the_nested_path(store):
     assert check({'to': {'point': 'box_1/nope'}}, store)[0][0] == ['args', 'to', 'point']
     [(path, message)] = check({'to': {'point': 'box_1/nope'}}, store)
-    assert 'no point' in message
+    assert 'no target' in message
     strings = validate_args({'to': {'point': 'box_1/nope'}}, SCHEMA, store, 'demo_bot')
     assert strings == [f'args.to.point: {message}']
 
@@ -168,7 +168,7 @@ def test_plan_structured_covers_step_level_problems(store):
 
 def test_flat_schemas_behave_as_before(store):
     flat = {'type': 'object', 'required': ['target', 'n'], 'properties': {
-        'target': {'type': 'string', 'x-taskweave-point': 'base_target'}, 'n': {'type': 'integer'}}}
+        'target': {'type': 'string', 'x-taskweave-point': 'target'}, 'n': {'type': 'integer'}}}
     assert validate_args({'target': '{where}', 'n': '{n}'}, flat, store, 'demo_bot') == []
     assert validate_args({'n': '{n}'}, flat, store, 'demo_bot') == ["args: 'target' is a required property"]
     problems = validate_args({'target': 'nowhere', 'n': 'x'}, flat, store, 'demo_bot')

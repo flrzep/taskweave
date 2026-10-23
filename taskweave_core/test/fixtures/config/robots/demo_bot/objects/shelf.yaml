@@ -1,0 +1,8 @@
+# Robot-specific base poses relative to objects (object frame). First variant = default.
+handled_from: front
+targets:
+  front: {moves: base, x: 0.0, y: -0.75, yaw: 1.5708} # 0.75 m in front, facing the shelf
+  side: {moves: base, x: -0.8, y: 0.0, yaw: 0.0}
+instances:
+  shelf_b:
+    front: {x: 0.0, y: -0.9, yaw: 1.5708}   # less room in front of shelf B

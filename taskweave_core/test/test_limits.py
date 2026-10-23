@@ -3,8 +3,7 @@ import math
 import pytest
 
 from taskweave_core.config import ConfigStore
-from taskweave_core.config.limits import joint_limits, joint_problems, mimic_joints, pose_problems
-from taskweave_core.validation import check_point
+from taskweave_core.config.limits import joint_limits, joint_problems, mimic_joints
 
 URDF = """<?xml version="1.0"?>
 <robot name="demo_bot">
@@ -16,14 +15,6 @@ URDF = """<?xml version="1.0"?>
   <joint name="wheel" type="continuous"><parent link="base_link"/><child link="wheel"/></joint>
 </robot>
 """
-POSES = """home: {lift: 0.1, j1: 0.0}
-too_high: {lift: 0.7, j1: 0.0}
-borrowed: {leg_joint1: 0.3}
-reach:
-  joints: {lift: 0.6}
-  tools:
-    left: {tcp: [0.6, 0.2, 0.4], approach: [1, 0, 0], closing: [0, 1, 0]}
-"""
 
 
 @pytest.fixture
@@ -31,7 +22,6 @@ def store(config_dir):
     folder = config_dir / 'robots' / 'demo_bot'
     (folder / 'moveit').mkdir()
     (folder / 'moveit' / 'robot.urdf').write_text(URDF)
-    (folder / 'poses.yaml').write_text(POSES)
     profile = folder / 'profile.yaml'
     profile.write_text(profile.read_text() + 'joints: {command: /cmd, state: /js, linear: [lift]}\n')
     return ConfigStore(config_dir)
@@ -58,23 +48,17 @@ def test_mimic_joints_name_the_joint_they_follow(store, config_dir):
     assert mimic_joints(ConfigStore(config_dir), 'demo_bot') == {}
 
 
-def test_poses_outside_the_limits_or_with_foreign_joints_are_problems(store):
-    assert pose_problems(store, 'demo_bot', 'home') == []
-    assert pose_problems(store, 'demo_bot', 'too_high') == ['lift: 0.700 m is outside 0.000..0.500 m']
-    assert pose_problems(store, 'demo_bot', 'borrowed') == ['leg_joint1: this robot has no such joint']
-    assert pose_problems(store, 'demo_bot', 'reach') == ['lift: 0.600 m is outside 0.000..0.500 m']  # tool pose joints
-    assert 'deg is outside' in joint_problems({'j1': 2.0}, joint_limits(store, 'demo_bot'))[0]
-
-
-def test_missions_cannot_use_a_pose_outside_the_limits(store):
-    assert check_point('joint_pose', 'home', store, 'demo_bot') is None
-    assert 'does not fit robot' in check_point('joint_pose', 'too_high', store, 'demo_bot')
+def test_joints_outside_the_limits_or_foreign_are_problems(store):
+    limits, linear = joint_limits(store, 'demo_bot'), {'lift'}
+    assert joint_problems({'lift': 0.1, 'j1': 0.0}, limits, linear) == []
+    assert joint_problems({'lift': 0.7}, limits, linear) == ['lift: 0.700 m is outside 0.000..0.500 m']
+    assert joint_problems({'leg_joint1': 0.3}, limits, linear) == ['leg_joint1: this robot has no such joint']
+    assert 'deg is outside' in joint_problems({'j1': 2.0}, limits)[0]       # (targets: test_targets.py pose_problems)
 
 
 def test_a_robot_without_known_limits_is_not_checked(config_dir):
     store = ConfigStore(config_dir)
-    (config_dir / 'robots' / 'demo_bot' / 'poses.yaml').write_text('anything: {x: 99.0}\n')
-    assert joint_limits(store, 'demo_bot') == {} and pose_problems(store, 'demo_bot', 'anything') == []
+    assert joint_limits(store, 'demo_bot') == {} and joint_problems({'x': 99.0}, {}) == []
 
 
 # ---- velocity limits (T2.6) --------------------------------------------------------------------------------------

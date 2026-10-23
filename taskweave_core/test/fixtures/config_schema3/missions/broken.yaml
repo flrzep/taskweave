@@ -1,0 +1,5 @@
+goal: A bad on_failure value
+steps:
+  - instruction: x
+    skill: wait
+    on_failure: explode

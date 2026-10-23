@@ -82,7 +82,6 @@ def test_the_teach_button_stores_the_jogged_tool_relative_to_the_object(system):
     point = store.object_point('box', 'top_grasp')
     # TCP in the cell: flange (1.2, 2.0, 0.6) + 0.1 along cell -x = (1.1, 2.0, 0.6); top item at z 0.2
     assert point['left_tool'].xyz == pytest.approx((0.1, 0.0, 0.4), abs=1e-4)
-    assert 'taught' in (store.root / 'objects' / 'box.yaml').read_text()
 
 
 # ---- stale TF / clock jump: teach refuses to store what it cannot trust ----------------------------------------
@@ -149,8 +148,8 @@ def test_teach_refuses_a_stance_or_location_with_a_pose_from_before_a_jump(teach
     assert teach_node.pose is None  # the pre-jump base pose is gone
 
 
-def test_the_new_kinds_are_taken_for_the_old_ones_on_a_cell_before_schema_4(teach_node):
-    """base: a location (no /) or a stance (with /); hand: an object point; joints and object: not on this layout."""
+def test_the_kind_names_of_the_old_point_model_are_aliases(teach_node):
+    """location and stance are base, stance_instance is base with instance_override, object_point is hand."""
     from nav_msgs.msg import Odometry
 
     from taskweave_interfaces.srv import TeachPoint
@@ -164,10 +163,10 @@ def test_the_new_kinds_are_taken_for_the_old_ones_on_a_cell_before_schema_4(teac
     odom.pose.pose.position.x, odom.pose.pose.orientation.w = 4.0, 1.0
     teach_node._odom(odom)
     store = ConfigStore(teach_node.config.root)
-    assert ask('spot', 'base').success and store.locations()['spot'].x == 4.0
-    assert ask('pile/pick', 'base', True).success
+    assert ask('spot', 'location').success and store.target('spot', 'demo_bot').pose.x == 4.0
+    assert ask('pile/pick', 'stance_instance').success
     assert 'pile' in store.stance_offsets('demo_bot')['instances']
+    assert ask('pile/rest', 'stance').success and store.target('pile/rest', 'demo_bot').kind == 'base'
     flange_at(teach_node, 0.0)
-    assert ask('pile/top_grasp', 'hand').success
-    refused = ask('home', 'joints')
-    assert not refused.success and 'before schema 4' in refused.message
+    assert ask('pile/top_grasp', 'object_point').success
+    assert store.target('pile/top_grasp', 'demo_bot').kind == 'hand'

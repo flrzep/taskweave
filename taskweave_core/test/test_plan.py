@@ -7,10 +7,10 @@ from taskweave_core.planner import MissionFilePlanner
 from taskweave_core.validation import validate_plan
 
 CATALOG = {
-    'navigate_to': {
+    'move': {
         'type': 'object',
-        'required': ['target'],
-        'properties': {'target': {'type': 'string', 'x-taskweave-point': 'base_target'}},
+        'required': ['to'],
+        'properties': {'to': {'type': 'string', 'x-taskweave-point': 'target', 'x-taskweave-target-kinds': ['base']}},
         'additionalProperties': False,
     },
     'wait': {
@@ -22,7 +22,7 @@ CATALOG = {
     'pick': {
         'type': 'object',
         'required': ['grasp', 'count'],
-        'properties': {'grasp': {'type': 'string', 'x-taskweave-point': 'object_point'}, 'count': {'type': 'integer'}},
+        'properties': {'grasp': {'type': 'string', 'x-taskweave-point': 'target'}, 'count': {'type': 'integer'}},
     },
 }
 
@@ -57,12 +57,12 @@ def test_valid_plan_has_no_problems(config_dir):
 def test_validation_reports_every_problem_before_start(config_dir):
     store = ConfigStore(config_dir)
     plan = plan_from(store)
-    plan.steps[0].args = {'target': 'stance:nowhere'}
+    plan.steps[0].args = {'to': 'nowhere'}
     plan.steps[1].args = {'seconds': -1}
     plan.steps[2].skill = 'teleport'
     plan.steps[2].replan_from = 'ghost'
     problems = validate_plan(plan, CATALOG, store)
-    assert any("unknown stance 'nowhere'" in p for p in problems)
+    assert any("unknown target 'nowhere'" in p for p in problems)
     assert any('args.seconds' in p and 'minimum' in p for p in problems)
     assert any('no skill server offers it' in p for p in problems)
     assert any("replan_from 'ghost'" in p for p in problems)
@@ -71,17 +71,20 @@ def test_validation_reports_every_problem_before_start(config_dir):
 def test_placeholder_args_are_checked_later(config_dir):
     store = ConfigStore(config_dir)
     plan = plan_from(store)
-    plan.steps[0].args = {'target': 'stance:{next_stance}'}
+    plan.steps[0].args = {'to': '{next_target}'}
     assert validate_plan(plan, CATALOG, store) == []
 
 
 def test_object_point_references(config_dir):
     store = ConfigStore(config_dir)
+    with open(config_dir / 'cell' / 'objects.yaml', 'a') as f:
+        f.write('box_1: {object: box, frame: cell, x: 1.0, y: 2.0, yaw: 0.0}\n')
+    store = ConfigStore(config_dir)
     plan = plan_from(store)
-    plan.steps[1].skill, plan.steps[1].args = 'pick', {'grasp': 'box.top_grasp', 'count': '{n}'}
+    plan.steps[1].skill, plan.steps[1].args = 'pick', {'grasp': 'box_1/top_grasp', 'count': '{n}'}
     assert validate_plan(plan, CATALOG, store) == []
-    plan.steps[1].args = {'grasp': 'box.side_grasp', 'count': 1}
-    assert any("no point 'side_grasp'" in p for p in validate_plan(plan, CATALOG, store))
+    plan.steps[1].args = {'grasp': 'box_1/side_grasp', 'count': 1}
+    assert any("no target 'side_grasp'" in p for p in validate_plan(plan, CATALOG, store))
 
 
 def test_unknown_robot_is_reported(config_dir):

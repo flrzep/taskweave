@@ -142,7 +142,8 @@ def split_robot_packs(cell: Path, robot_packs: Path | None, dry_run: bool, say) 
         robot = folder.name
         adding = [entry] if target is not None and not on_path else []
         search = packs.locations(cell, configured + adding, tuple(adding))
-        robot_packs_found = [p for p in (packs.robot_pack(loc, robot) for loc in search) if p is not None]
+        robot_packs_found = [p for p in (packs.robot_pack(loc, robot, packs.MIGRATION_OLDEST) for loc in search)
+                             if p is not None]
         gone = set()    # entries removed or moved out of the folder
         keep_folder = False
         for name in packs.ROBOT_PACK_FILES:

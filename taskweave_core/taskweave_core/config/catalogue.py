@@ -352,11 +352,10 @@ def _kinds_of(store, robot: str, type: str) -> dict[str, str]:
 
 
 def enum_values(store, name: str, robot: str | None = None) -> list[str]:
-    """Values of a dynamic enum in this pack: robots, skills, missions, objects (types), instances, locations,
-    skill_keys (skills and their parts: move.hand), stances, object_points, joint_poses, held_poses, hands, joints,
-    tools, and for the targets layout targets (plain
-    names), object_targets (names on object types), target_types, base_targets_of (base targets on object types:
-    ``handled_from``), joint_groups. Robot-bound ones take ``robot`` (none: the union over the cell's robots)."""
+    """Values of a dynamic enum in this pack: robots, skills, missions, objects (types), instances, skill_keys (skills
+    and their parts: move.hand), hands, joints, tools, targets (plain names), object_targets (names on object types),
+    target_types, base_targets_of (base targets on object types: ``handled_from``), joint_groups. Robot-bound ones take
+    ``robot`` (none: the union over the cell's robots)."""
     from .limits import joint_groups, joint_limits
 
     robots = [robot] if robot else store.robot_names()
@@ -380,21 +379,14 @@ def enum_values(store, name: str, robot: str | None = None) -> list[str]:
                                                            for p in (root / 'skills').glob('*/*.yaml'))}),
         'missions': lambda: stems('missions'), 'objects': lambda: stems('objects'),
         'instances': lambda: sorted(store.object_instances(state=False)),
-        'locations': lambda: sorted(store.locations()),
-        'stances': lambda: per_robot(store.stance_names),
-        'object_points': lambda: per_robot(lambda r: store.point_names(r)['object points']),
-        'joint_poses': lambda: per_robot(lambda r: store.joint_poses(r)),
-        'held_poses': lambda: per_robot(lambda r: {n for poses in store.held_poses(r).values() for n in poses}),
         'hands': lambda: per_robot(lambda r: store.robot(r).data.get('grippers', {})),
         'joints': lambda: per_robot(lambda r: joint_limits(store, r)),
         'tools': lambda: per_robot(lambda r: store.embodiment(r).get('tools', {})),
-        'targets': lambda: per_robot(lambda r: _plain_target_names(store, r)) if store.targets_format() else [],
-        'object_targets': lambda: sorted({n for names in store.object_target_names(robot).values() for n in names})
-        if store.targets_format() else [],
+        'targets': lambda: per_robot(lambda r: _plain_target_names(store, r)),
+        'object_targets': lambda: sorted({n for names in store.object_target_names(robot).values() for n in names}),
         'target_types': lambda: stems('objects'),
         'base_targets_of': lambda: per_robot(lambda r: {
-            n for t in store.object_target_names(r) for n, m in _kinds_of(store, r, t).items() if m == 'base'})
-        if store.targets_format() else [],
+            n for t in store.object_target_names(r) for n, m in _kinds_of(store, r, t).items() if m == 'base'}),
         'joint_groups': lambda: per_robot(lambda r: joint_groups(store, r)),
     }
     if name not in table:

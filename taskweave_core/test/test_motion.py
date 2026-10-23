@@ -85,7 +85,7 @@ def test_other_robots_do_not_see_the_override(config_dir):
 def test_robot_overrides_found_in_a_robot_pack(config_dir, tmp_path):
     pack = tmp_path / 'packs' / 'demo_bot'
     pack.mkdir(parents=True)
-    (pack / 'pack.yaml').write_text('name: demo_bot\nversion: 1\nschema_version: 1\n')
+    (pack / 'pack.yaml').write_text('name: demo_bot\nversion: 1\nschema_version: 2\n')
     (pack / 'skill_overrides.yaml').write_text('reach: {motion: {approach_m: 0.07}}\n')
     (config_dir / 'system.yaml').write_text(f'robot_packs: ["{(tmp_path / "packs").as_posix()}"]\n')
     store = ConfigStore(config_dir)
@@ -103,7 +103,7 @@ def test_skill_overrides_file_is_validated(config_dir):
 def test_target_data_for_reads_the_point(config_dir):
     (config_dir / 'cell' / 'objects.yaml').write_text('box_1: {object: box, frame: cell, x: 1.0, y: 2.0, yaw: 0.0}\n')
     path = config_dir / 'objects' / 'box.yaml'
-    path.write_text(path.read_text().replace('top_grasp:\n', 'top_grasp:\n    approach_m: 0.15\n    elbow: up\n', 1))
+    path.write_text(path.read_text().replace('    approach_m: 0.1\n', '    approach_m: 0.15\n    elbow: up\n', 1))
     store = ConfigStore(config_dir)
     assert motion.target_data_for(store, 'demo_bot', {'to': {'point': 'box_1/top_grasp'}}) == \
         {'approach_m': 0.15, 'elbow': 'up'}

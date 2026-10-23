@@ -7,9 +7,7 @@ in config (object points also fit the robot's tools), and ``replan_from`` target
 Skills mark point arguments in their schema with ``"x-taskweave-point": "target" | "joint_group" | "held_object"``,
 at any depth (nested objects, oneOf variants, list items). A ``target`` is a name the store resolves (cell schema 4);
 ``x-taskweave-target-kinds`` next to it lists the kinds of target the field takes (base, hand, object, joints). The
-other kinds (``base_target``, ``joint_pose``, ``tool_pose``, ``object_point``, ``instance_point``,
-``instance_contact``, ``via_target``, ``joint_pose_only``, ``held_pose``) are the point kinds of the skills of a cell
-before schema 4 (LEGACY_KINDS); on a cell of schema 4 a skill that still marks one is told to use ``target``.
+point kinds of the old point model (``base_target``, ``joint_pose``, ``object_point``, ...) are not known any more.
 A ``move`` step is also checked per kind of motion (step_info.move_problems): an option the kind does not take.
 Values that contain placeholders are only checked once their values are known (at step start): the skip is by path,
 so a placeholder may stand for a scalar, one vec3 component or a whole field. So are points on an object an earlier
@@ -32,8 +30,6 @@ from .step_info import MOVE_SKILL, move_problems, step_info
 
 POINT_KEYWORD = 'x-taskweave-point'
 KINDS_KEYWORD = 'x-taskweave-target-kinds'
-LEGACY_KINDS = ('base_target', 'joint_pose', 'tool_pose', 'object_point', 'instance_point', 'instance_contact',
-                'via_target', 'joint_pose_only', 'held_pose')    # the point kinds before cell schema 4
 
 
 def validate_plan(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) -> list[str]:
@@ -93,7 +89,7 @@ def _plan_problems(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) 
             problems.append((path, message, f'{where}: {label}{message}'))
 
         step.kind, step.resources = step_kind_resources(step, catalog, store, plan.robot)
-        removed = (replaced_by_move_message(step.skill, str(store.root)) if store.targets_format() else None) \
+        removed = replaced_by_move_message(step.skill, str(store.root)) \
             or removed_skill_message(step.skill, step.args, str(store.root))
         if removed:   # an old skill name: say how to migrate, whatever the catalog offers
             add(removed, here + ['skill'])
@@ -112,7 +108,7 @@ def _plan_problems(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) 
         for path, message in validate_args_structured(step.args, catalog[step.skill], store, plan.robot,
                                                       later=put_down):
             add(message, here + path, label=f'{".".join(str(part) for part in path)}: ')
-        if step.skill == MOVE_SKILL and store.targets_format():
+        if step.skill == MOVE_SKILL:
             for path, message in move_problems(step.args, store, plan.robot):
                 add(message, here + path, label=f'{".".join(str(part) for part in path)}: ')
         if isinstance(step.args.get('place_as'), str):
@@ -340,70 +336,18 @@ def check_point(kind: str, value, store: ConfigStore, robot: str, kinds=()) -> s
                 problems = check_grasp({**found.data, **found.data.get('alone', {})}, store.embodiment(robot))
                 if problems:
                     return f'{value} does not fit robot {robot!r}: ' + '; '.join(problems)
-        elif kind in LEGACY_KINDS and store.targets_format():
-            return (f'point kind {kind!r} is for cells before schema 4: this cell has targets, the skill schema '
-                    'must say "x-taskweave-point": "target"')
-        elif kind == 'base_target':
-            store.base_target(str(value), robot)
-        elif kind == 'joint_pose':
-            from .config.limits import pose_problems
-
-            problems = pose_problems(store, robot, str(value))   # raises KeyError for an unknown pose
-            if problems:
-                return f'pose {value} does not fit robot {robot!r}: ' + '; '.join(problems)
-        elif kind == 'tool_pose':   # a named pose that places tools (move_gripper to.pose)
-            from .config.limits import pose_problems
-
-            if not store.named_pose(robot, str(value))['tools']:    # raises KeyError for an unknown pose
-                return f'pose {value} places no tools (joint values only): use move_joints'
-            problems = pose_problems(store, robot, str(value))
-            if problems:
-                return f'pose {value} does not fit robot {robot!r}: ' + '; '.join(problems)
-        elif kind == 'joint_pose_only':   # a joint pose without tool targets; a leading pose: is allowed (via items)
-            name = str(value).removeprefix('pose:')
-            problem = check_point('joint_pose', name, store, robot)
-            if problem is None and store.named_pose(robot, name)['tools']:
-                return f'pose {name} places tools: use move_gripper to.pose'
-            return problem
         elif kind == 'joint_group':
             from .config.limits import joint_groups
 
             groups = joint_groups(store, robot)
             if str(value) not in groups:
                 return f'robot {robot!r} has no joint group {value!r} (has: {", ".join(sorted(groups)) or "none"})'
-        elif kind in ('object_point', 'instance_point'):
-            # object_point: <instance>/<point> (a placed object) or <object>.<point> (a type's point);
-            # instance_point: only <instance>/<point>, for skills that go to one placed object
-            if kind == 'instance_point' and '/' not in str(value):
-                example = next(iter(store.point_names(robot)['placed object points']), '<instance>/<point>')
-                return f'{value} names no placed object: use <instance>/<point>, e.g. {example}'
-            if '/' in str(value):
-                instance, _ = store.instance_point(str(value))
-                obj, point = instance.object, str(value).partition('/')[2]
-            else:
-                obj, _, point = str(value).partition('.')
-                store.object_point(obj, point)
-            problems = check_grasp(store.object(obj)['points'][point], store.embodiment(robot))
-            if problems:
-                return f'{value} does not fit robot {robot!r}: ' + '; '.join(problems)
-        elif kind == 'via_target':  # a waypoint: pose:<joint pose> or <instance>/<point>
-            text = str(value)
-            if text.startswith('pose:'):
-                return check_point('joint_pose', text.removeprefix('pose:'), store, robot)
-            return check_point('instance_point', text, store, robot)
-        elif kind == 'instance_contact':  # <instance>/<contact>: where a held object is put
-            store.instance_contact(str(value))
-        elif kind == 'held_pose':  # a held pose of the robot for any object type (the held type is known at run time)
-            names = sorted({name for poses in store.held_poses(robot).values() for name in poses})
-            if str(value) not in names:
-                return (f'robot {robot!r} has no held pose {value!r} (robots/{robot}/held_poses.yaml; it has: '
-                        f'{", ".join(names) or "none"})')
         elif kind == 'held_object':  # the placed object a skill acts on while it is held
             if str(value) not in store.object_instances():
                 return str(store.missing_instance(
                     str(value), f'unknown placed object {value!r}: held objects are placed objects').args[0])
         else:
-            return f'unknown point kind {kind!r} in skill schema'
+            return f'unknown point kind {kind!r} in skill schema (target, joint_group or held_object)'
     except KeyError as error:
         return str(error.args[0]) if error.args else repr(error)
     except ConfigError as error:

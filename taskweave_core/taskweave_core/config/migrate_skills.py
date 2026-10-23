@@ -34,7 +34,7 @@ from pathlib import Path
 
 import yaml
 
-from . import packs, skill_templates
+from . import packs, schemas, skill_templates
 
 COMMAND = 'taskweave config migrate-skills'
 OLD_SKILLS = ('move_to_pose', 'go_to_point', 'gripper')    # gone; move_object keeps its name, its args changed
@@ -173,7 +173,9 @@ class PoseBook:
         self.poses: dict[str, dict] = {}
         for robot in self.robots:
             try:
-                self.poses[robot] = dict(self.store.joint_poses(robot))
+                # poses.yaml as the old layout has it (the store's joint_poses reads targets now)
+                self.poses[robot] = dict(self.store._load(f'robots/{robot}/poses.yaml', schemas.JOINT_POSES,
+                                                          required=False, default={}))
             except ConfigError as error:
                 say(f'note    robots/{robot}/poses.yaml not readable ({error}): its poses are not classified')
                 self.poses[robot] = {}

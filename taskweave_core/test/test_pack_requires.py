@@ -22,7 +22,7 @@ def cell(tmp_path, name: str, requires: str | None) -> Path:
     folder = tmp_path / name
     shutil.copytree(FIXTURE, folder)
     extra = '' if requires is None else f'requires:\n  taskweave: "{requires}"\n'
-    (folder / 'pack.yaml').write_text(f'name: test_cell\nversion: 7\nschema_version: 3\n{extra}')
+    (folder / 'pack.yaml').write_text(f'name: test_cell\nversion: 7\nschema_version: 4\n{extra}')
     return folder
 
 

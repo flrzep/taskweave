@@ -42,10 +42,9 @@ def test_the_names_a_skill_server_serves():
     from taskweave_core.skill_server import served_names, skill_of
 
     old = ['wait', 'navigate_to', 'drive_straight', 'move_gripper', 'move_object', 'set_posture', 'move_joints', 'grip']
-    served, notes = served_names(old, targets=True)
+    served, notes = served_names(old)
     assert served == ['wait', 'move', 'grip'] and len(notes) == 6          # six folded into move, once
-    assert served_names(['wait', 'move', 'grip'], targets=True) == (['wait', 'move', 'grip'], [])
-    served, notes = served_names(['move', 'wait', 'navigate_to'], targets=False)
-    assert served == ['wait', 'navigate_to'] and 'needs a cell pack in the targets layout' in notes[0]
-    assert served_names(['custom'], targets=True)[0] == ['custom']          # other skills are served as asked
+    assert served_names(['wait', 'move', 'grip']) == (['wait', 'move', 'grip'], [])
+    assert served_names(['move', 'wait', 'navigate_to'])[0] == ['move', 'wait']
+    assert served_names(['custom'])[0] == ['custom']                        # other skills are served as asked
     assert skill_of('/cell/skills/move/hand.yaml') == 'move' and skill_of('skills/wait.yaml') == 'wait'

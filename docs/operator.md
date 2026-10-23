@@ -26,7 +26,7 @@ Shipped skills (arguments: [skills.md](skills.md)):
 | `grip` | Opens or closes the fingers. Closing at a hand target on an object makes the hand hold that object; opening lets go. |
 | `wait` | Waits for a number of seconds (not slowed by the speed override). |
 
-Older cells (before schema 4) have six skills where `move` is: `navigate_to`, `drive_straight`, `move_gripper`,
+Cells before schema 4 (which this taskweave no longer runs: migrate them) had six skills where `move` is: `navigate_to`, `drive_straight`, `move_gripper`,
 `move_object`, `set_posture`, `move_joints`. `taskweave config migrate` turns them into `move` steps
 ([migration_targets.md](migration_targets.md)).
 

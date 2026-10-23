@@ -32,9 +32,10 @@ from . import schemas
 CELL_SCHEMA = 4         # cell pack layout this taskweave writes and reads (1: one config directory with whole robot
                         # folders, 2: robot packs, 3: skills move_to_pose / go_to_point / gripper / old move_object
                         # replaced, 4: targets: cell/targets.yaml, targets in objects/*.yaml, robots/<r>/objects/*.yaml)
-CELL_SCHEMA_OLDEST = 3  # the oldest cell layout still read (the targets migration, 3 -> 4, is a separate task)
+CELL_SCHEMA_OLDEST = 4  # the oldest cell layout read at run time (older ones: taskweave config migrate)
 ROBOT_SCHEMA = 2        # robot pack layout this taskweave writes and reads (2: targets.yaml in place of poses.yaml)
-ROBOT_SCHEMA_OLDEST = 1  # the oldest robot pack layout still read
+ROBOT_SCHEMA_OLDEST = 2  # the oldest robot pack layout read at run time (older ones: taskweave config migrate)
+MIGRATION_OLDEST = 1    # the oldest layout taskweave config migrate reads (cell and robot packs)
 PACK_FILE = 'pack.yaml'
 ROBOT_PACKS_ENV = 'TASKWEAVE_ROBOT_PACKS'
 INSTALLED_PACKAGE = 'taskweave_robots'
@@ -148,17 +149,11 @@ def check_cell_schema(folder: Path) -> None:
         raise _error(Path(folder), 'no cell pack here: pass the cell pack folder (the one with pack.yaml, e.g. config)')
     version = cell_schema(folder)
     if version < CELL_SCHEMA_OLDEST:
-        command = 'migrate-skills' if version == 2 else 'migrate'   # 2 -> 3 is the skill migration (migrate_skills.py)
         raise _error(Path(folder) / PACK_FILE, f'cell pack schema {version}, this taskweave needs '
-                                               f'{CELL_SCHEMA_OLDEST}: run taskweave config {command} {folder}')
+                                               f'{CELL_SCHEMA_OLDEST}: run taskweave config migrate {folder}')
     if version > CELL_SCHEMA:
         raise _error(Path(folder) / PACK_FILE, f'cell pack schema {version}, this taskweave reads schema '
                                                f'{CELL_SCHEMA}: update taskweave')
-
-
-def targets_format(folder: Path) -> bool:
-    """The cell pack is in the targets layout (cell schema 4 and up)."""
-    return cell_schema(folder) >= 4
 
 
 @functools.lru_cache(maxsize=1)
@@ -232,8 +227,9 @@ class RobotPack:
         return f'robot pack {self.name} ({self.location.origin}: {self.path})'
 
 
-def robot_pack(location: Location, robot: str) -> RobotPack | None:
-    """The robot's pack at a location, schema checked; None if the location has none for the robot."""
+def robot_pack(location: Location, robot: str, oldest: int = ROBOT_SCHEMA_OLDEST) -> RobotPack | None:
+    """The robot's pack at a location, schema checked (``oldest``: the oldest schema accepted; the migrations pass
+    MIGRATION_OLDEST); None if the location has none for the robot."""
     folder, pack = location.path, read_pack(location.path)
     if pack is None:
         folder = location.path / robot
@@ -248,16 +244,18 @@ def robot_pack(location: Location, robot: str) -> RobotPack | None:
         raise _error(folder / PACK_FILE, f'name is {pack["name"]!r}, expected {robot!r}', 'name')
     check_requires(pack, folder / PACK_FILE, f'robot pack {robot}')
     version = int(pack['schema_version'])
-    if not ROBOT_SCHEMA_OLDEST <= version <= ROBOT_SCHEMA:
-        hint = f'run taskweave config migrate {folder}' if version < ROBOT_SCHEMA_OLDEST else 'update taskweave'
+    if not oldest <= version <= ROBOT_SCHEMA:
+        hint = f'run taskweave config migrate {folder}' if version < oldest else 'update taskweave'
         raise _error(folder / PACK_FILE, f'robot pack schema {version}, this taskweave reads schema '
-                                         f'{ROBOT_SCHEMA_OLDEST} to {ROBOT_SCHEMA}: {hint}')
+                                         f'{oldest} to {ROBOT_SCHEMA}: {hint}')
     return RobotPack(folder, robot, location)
 
 
-def robot_packs(cell: Path, configured: list[str] | None, robot: str, first: tuple[Path, ...] = ()) -> list[RobotPack]:
+def robot_packs(cell: Path, configured: list[str] | None, robot: str, first: tuple[Path, ...] = (),
+                oldest: int = ROBOT_SCHEMA_OLDEST) -> list[RobotPack]:
     """Every pack of the robot, in search order."""
-    return [p for p in (robot_pack(loc, robot) for loc in locations(cell, configured, first=first)) if p is not None]
+    return [p for p in (robot_pack(loc, robot, oldest) for loc in locations(cell, configured, first=first))
+            if p is not None]
 
 
 def list_packs(cell: Path, configured: list[str] | None, first: tuple[Path, ...] = ()) -> list[dict]:

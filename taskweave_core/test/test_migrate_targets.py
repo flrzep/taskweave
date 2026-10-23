@@ -513,7 +513,7 @@ def test_handled_from_is_the_old_first_variant(old_cell):
     run(old_cell)
     assert data(old_cell / 'robots' / ROBOT / 'objects' / 'karakuri_hanger.yaml')['handled_from'] == 'staging'
     store = ConfigStore(old_cell)
-    near = ConfigStore(FIXTURES / 'targets_old')
+    near = load_dump_tool().OldLayoutStore(FIXTURES / 'targets_old', check_schema=False)
     from taskweave_core.config import Pose2D
 
     for spot in (Pose2D(7.0, 1.0, 0.0), Pose2D(9.0, 1.0, 3.1416), Pose2D(5.0, 3.0, 0.0)):
@@ -911,6 +911,7 @@ def test_init_cell_writes_a_cell_of_the_current_schema(tmp_path, monkeypatch):
     from taskweave_core.config.packfile import init_cell
 
     packs_dir = pack_dir(tmp_path / 'packs')
+    write(packs_dir / ROBOT / 'pack.yaml', f'name: {ROBOT}\nversion: 0.2.3\nschema_version: {packs.ROBOT_SCHEMA}\n')
     monkeypatch.setenv(packs.ROBOT_PACKS_ENV, str(packs_dir))
     cell = init_cell(tmp_path / 'new', ROBOT, 'fresh')
     assert packs.cell_schema(cell) == packs.CELL_SCHEMA == 4

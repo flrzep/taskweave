@@ -122,7 +122,7 @@ def test_import_keeps_group_and_mode(tmp_path):
 
 def make_archive(path: Path, members: dict, manifest: dict | None = None, extra=()) -> Path:
     """An archive of ``members`` {name: bytes} with a matching manifest, keys overridden by ``manifest``."""
-    base = {'name': 'x', 'schema_version': packs.CELL_SCHEMA_OLDEST, 'git_rev': None,
+    base = {'name': 'x', 'schema_version': packs.CELL_SCHEMA, 'git_rev': None,
             'files': [{'path': n, 'sha256': hashlib.sha256(b).hexdigest()} for n, b in members.items()]}
     base.update(manifest or {})
     with tarfile.open(path, 'w:gz') as archive:
@@ -143,7 +143,7 @@ def make_archive(path: Path, members: dict, manifest: dict | None = None, extra=
 def test_bad_archive_leaves_pack_untouched(tmp_path, case, message):
     init_cell(tmp_path / 'cell', ROBOT)
     before = tree(tmp_path / 'cell')
-    good = {'pack.yaml': b'name: x\nversion: 1\nschema_version: 3\n'}
+    good = {'pack.yaml': b'name: x\nversion: 1\nschema_version: 4\n'}
     archive = tmp_path / 'bad.tar.gz'
     if case == 'traversal':
         make_archive(archive, {'../evil.yaml': b'x: 1'})

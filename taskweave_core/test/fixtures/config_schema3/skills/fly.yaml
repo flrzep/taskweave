@@ -1,0 +1,2 @@
+implementations:
+  - {name: fly, type: script, class: "nowhere.fly:Fly", requires: {capabilities: [arms.bimanual]}}

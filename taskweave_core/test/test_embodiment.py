@@ -5,7 +5,7 @@ from taskweave_core.embodiment import check_grasp, check_profile, match, robot_c
 from taskweave_core.plan import Plan
 from taskweave_core.validation import validate_plan
 
-PICK_SCHEMA = {'type': 'object', 'properties': {'grasp': {'type': 'string', 'x-taskweave-point': 'object_point'}}}
+PICK_SCHEMA = {'type': 'object', 'properties': {'grasp': {'type': 'string', 'x-taskweave-point': 'target'}}}
 
 
 def test_embodiment_loads(config_dir):
@@ -55,14 +55,16 @@ def test_skill_without_fitting_implementation_is_rejected(config_dir):
 def test_grasp_checked_against_tools(config_dir):
     store = ConfigStore(config_dir)
     embodiment = store.embodiment('demo_bot')
-    points = store.object('box')['points']
+    points = store.object('box')['targets']
     assert check_grasp(points['top_grasp'], embodiment) == []
     assert check_grasp(points['wide_grasp'], embodiment) == ["grip width 0.2 m exceeds the 'left' stroke 0.08 m"]
     assert check_grasp(points['suction_top'], embodiment) == ["needs a suction on 'left', robot has parallel_gripper"]
+    with open(config_dir / 'cell' / 'objects.yaml', 'a') as f:
+        f.write('box_1: {object: box, frame: cell, x: 1.0, y: 2.0, yaw: 0.0}\n')
     plan = Plan.from_mission({'goal': 'g', 'robot': 'demo_bot', 'steps': [
-        {'instruction': 'pick', 'skill': 'pick', 'args': {'grasp': 'box.wide_grasp'}}]}, 'p')
-    problems = validate_plan(plan, {'pick': PICK_SCHEMA}, store)
-    assert len(problems) == 1 and 'box.wide_grasp does not fit robot' in problems[0]
+        {'instruction': 'pick', 'skill': 'pick', 'args': {'grasp': 'box_1/wide_grasp'}}]}, 'p')
+    problems = validate_plan(plan, {'pick': PICK_SCHEMA}, ConfigStore(config_dir))
+    assert len(problems) == 1 and 'box_1/wide_grasp does not fit robot' in problems[0]
 
 
 def test_profile_and_embodiment_must_agree(config_dir):

@@ -1,0 +1,4 @@
+# the move skill: one skill for every motion; its modules (base, straight, hand, object, posture, joints)
+# keep their parameters in skills/move/<module>.yaml (taskweave config migrate, schema 4)
+implementations:
+  - {name: dispatch, type: script, class: "taskweave_skills.move:Move"}
