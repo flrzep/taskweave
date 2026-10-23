@@ -5,3 +5,7 @@ beyond_limit: {moves: joints, joints: {left_arm: [2.5, null]}}      # the test s
 mid: {moves: joints, joints: {left_arm: [0.5, 0.5]}}
 arm_only: {moves: joints, joints: {left_arm: [0.8, -0.4]}}
 lift_only: {moves: joints, joints: {torso: 0.3}}
+reach:                       # a hand target: move_joints refuses it (move places tools)
+  moves: hand
+  joints: {torso: 0.1}
+  left_tool: {xyz: [0.3, 0.0, 0.2], rpy: [-1.5707963267948966, -0.0, -1.5707963267948966]}

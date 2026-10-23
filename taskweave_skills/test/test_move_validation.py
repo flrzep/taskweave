@@ -186,15 +186,6 @@ def test_gripper_keeps_its_message_and_grip_and_wait_are_fine(store, catalog):
     assert problems(store, catalog, ('wait', {'seconds': 1}), ('grip', {'action': 'open'})) == []
 
 
-def test_a_cell_before_schema_4_keeps_the_old_messages(tmp_path, catalog):
-    old = tmp_path / 'old'
-    shutil.copytree(Path(__file__).parent / 'fixtures' / 'config', old)
-    store = ConfigStore(old, check_schema=False)
-    assert not store.targets_format()
-    [text] = validate_plan(plan_of(('go_to_point', {'point': 'crate_1/rim'})), {}, store)
-    assert 'was removed, use move_gripper' in text
-
-
 # ---- kind and resources of the steps -----------------------------------------------------------------------------
 @pytest.mark.parametrize('args, kind, resources', [
     ({'to': 'home'}, 'base', ['base']),

@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import TIME_SCALE, RosRig, connect, copy_config, wait_ready, wait_until
+from conftest import TIME_SCALE, RosRig, connect, copy_config, serve, wait_ready, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 
@@ -59,9 +59,8 @@ def system(tmp_path):
         config = tmp_path / 'config'
         copy_config(FIXTURE, config)
         sim = ros.add(JointSim())
-        server = SkillServer(parameter_overrides=[
-            Parameter('config_dir', value=str(config)), Parameter('robot', value='arm_bot'),
-            Parameter('skills', value=['move_joints', 'grip'])])
+        server = SkillServer(skills=serve(config, 'move_joints', 'grip'), parameter_overrides=[
+            Parameter('config_dir', value=str(config)), Parameter('robot', value='arm_bot')])
         ros.add(server)
         client = ros.add(rclpy.create_node('test_client'))
         ros.spin(8)
@@ -163,7 +162,7 @@ def test_move_to_named_pose(system):
 def test_unknown_pose_is_rejected(system):
     sim, client = system
     result = run(client, 'move_joints', {'pose': 'dance'})
-    assert result.outcome == RunSkill.Result.REJECTED and "unknown pose 'dance'" in result.message
+    assert result.outcome == RunSkill.Result.REJECTED and "unknown target 'dance'" in result.message
     assert sim.position['j1'] == 0.0
 
 
@@ -176,7 +175,7 @@ def test_unreachable_pose_fails_and_names_the_joint(system):
 def test_a_pose_that_places_tools_is_refused_by_move_joints(system):
     sim, client = system
     result = run(client, 'move_joints', {'pose': 'reach'})     # arm_bot's reach has a tool target: move_gripper's
-    assert result.outcome == RunSkill.Result.REJECTED and 'places tools' in result.message
+    assert result.outcome == RunSkill.Result.REJECTED and 'moves a hand' in result.message
     assert sim.position['lift'] == 0.0
 
 

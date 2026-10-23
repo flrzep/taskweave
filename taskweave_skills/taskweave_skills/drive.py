@@ -38,7 +38,7 @@ class DriveStraight(NavigateTo):
         'oneOf': [{'required': ['distance_m']}, {'required': ['to']}],
         'properties': {
             'distance_m': {'type': 'number', 'description': 'forward (+) or backward (-), metres'},
-            'to': {'type': 'string', 'x-taskweave-point': 'base_target',
+            'to': {'type': 'string', 'x-taskweave-point': 'target', 'x-taskweave-target-kinds': ['base'],
                    'description': 'a stance or location straight ahead or behind (instead of distance_m)'},
             'sideways_m': {'type': 'number', 'description': 'left (+) or right (-), metres; holonomic bases only'},
         },

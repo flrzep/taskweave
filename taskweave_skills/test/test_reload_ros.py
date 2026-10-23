@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from conftest import TIME_SCALE, RosRig, connect, copy_config, wait_until
+from conftest import TIME_SCALE, RosRig, connect, copy_config, serve, wait_until
 from test_navigate_ros import BaseSim
 
 rclpy = pytest.importorskip('rclpy')
@@ -29,8 +29,8 @@ def system(tmp_path):
         copy_config(FIXTURE, config)
         params = [Parameter('config_dir', value=str(config)), Parameter('robot', value='omni_bot')]
         sim = ros.add(BaseSim('omni', True))
-        server = ros.add(SkillServer(parameter_overrides=params
-                                     + [Parameter('skills', value=['navigate_to', 'wait', 'drive_straight'])]))
+        server = ros.add(SkillServer(skills=serve(config, 'navigate_to', 'wait', 'drive_straight'),
+                                     parameter_overrides=params))
         client = ros.add(rclpy.create_node('test_client'))
         ros.spin(8)
         wait_until(lambda: server.skills['drive_straight']._current() is not None, what='the first odometry')
@@ -99,6 +99,9 @@ def test_base_limits_of_the_profile_apply_live_the_rest_of_it_needs_a_restart(sy
 
 def test_another_implementation_needs_a_restart(system):
     sim, server, client, config = system
+    # the test serves the class directly (conftest.serve): record the implementation the launch would have chosen
+    server._impl['drive_straight'] = yaml.safe_load(
+        (config / 'skills' / 'drive_straight.yaml').read_text())['implementations'][0]
     edit(config, 'skills/drive_straight.yaml', lambda d: d['implementations'][0].update(name='other'))
     answer = reload_call(client, server)
     assert [i.path for i in answer.needs_restart] == ['skills/drive_straight.yaml'] and not answer.reloaded

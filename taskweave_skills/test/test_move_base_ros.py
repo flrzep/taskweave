@@ -23,7 +23,7 @@ from taskweave_core.skill_server import SkillServer  # noqa: E402
 from taskweave_interfaces.action import RunSkill  # noqa: E402
 from taskweave_skills.hold import HoldState  # noqa: E402
 
-FIXTURE = Path(__file__).parent / 'fixtures' / 'config_new'
+FIXTURE = Path(__file__).parent / 'fixtures' / 'config'
 OK, FAILED, REJECTED = RunSkill.Result.SUCCEEDED, RunSkill.Result.FAILED, RunSkill.Result.REJECTED
 
 
@@ -177,17 +177,6 @@ def test_the_old_names_in_the_launch_serve_move(tmp_path):
             Parameter('config_dir', value=str(config)), Parameter('robot', value='diff_bot'),
             Parameter('skills', value=['navigate_to', 'wait', 'drive_straight'])]))
         assert list(server.skills) == ['move', 'wait']
-
-
-def test_an_older_cell_serves_its_old_skills_and_not_move(tmp_path):
-    with RosRig() as ros:
-        config = tmp_path / 'config'
-        copy_config(Path(__file__).parent / 'fixtures' / 'config', config)
-        ros.add(BaseSim('diff', False))
-        server = ros.add(SkillServer(parameter_overrides=[
-            Parameter('config_dir', value=str(config)), Parameter('robot', value='diff_bot'),
-            Parameter('skills', value=['move', 'navigate_to', 'wait'])]))
-        assert list(server.skills) == ['navigate_to', 'wait']
 
 
 # ---- the torso and the joints part ------------------------------------------------------------------------------

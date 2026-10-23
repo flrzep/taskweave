@@ -80,6 +80,8 @@ class Rig:
         monkeypatch.setattr(joints_module.time, 'sleep', self.clock.sleep)
         skill = MoveJoints.__new__(MoveJoints)
         skill.config, skill.robot, skill.name = store, store.robot(ROBOT), 'move_joints'
+        serve(config, 'move_joints')        # skills/move_joints.yaml: the part's parameters under the old name
+        store.reload()
         skill.p = Params.from_config(skill._joint_params(store.skill_params('move_joints')))
         skill.p.linear_joints = ('lift',)
         skill.base_p, skill._held, skill.ik, skill.planner = skill.p, {}, None, None
@@ -281,12 +283,12 @@ def test_schema_has_distinguishable_variants_and_checks_targets(rig):
     assert problems({'pose': '{start_pose}', 'only': ['{group}']}) == []   # placeholders
     assert problems({'joints': {'j1': '{angle}'}, 'motion': {'via': ['{p}', 'home', {'j2': 1}]}}) == []
     assert problems({'pose': 'home', 'only': ['torso', 'left_arm'], 'motion': {'speed': 0.5, 'via': ['mid']}}) == []
-    assert any('args.pose' in p and 'places tools' in p for p in problems({'pose': 'reach'}))
+    assert any('args.pose' in p and 'moves a hand' in p for p in problems({'pose': 'reach'}))
     assert any(p.startswith('args.pose') for p in problems({'pose': 'dance'}))
     assert any(p.startswith('args.only.0') and 'no joint group' in p for p in problems({'pose': 'home', 'only': ['x']}))
     assert any(p.startswith('args.motion.via.0') for p in problems({'pose': 'home', 'motion': {'via': ['nope']}}))
-    assert any(p.startswith('args.motion.via.0') and 'places tools' in p
-               for p in problems({'pose': 'home', 'motion': {'via': ['pose:reach']}}))
+    assert any(p.startswith('args.motion.via.0') and 'moves a hand' in p
+               for p in problems({'pose': 'home', 'motion': {'via': ['reach']}}))
     assert problems({'pose': 'home', 'joints': {'j1': 0}}) and problems({}) and problems({'pose': 'home', 'x': 1})
     assert problems({'pose': 'home', 'motion': {'mode': 'linear'}})   # not a move_joints option
     assert problems({'pose': 'home', 'motion': {'speed': 2}})
@@ -331,7 +333,7 @@ def test_a_speed_within_the_limits_reports_no_cap(rig):
 
 rclpy = pytest.importorskip('rclpy')
 
-from conftest import RosRig, copy_config  # noqa: E402
+from conftest import RosRig, copy_config, serve  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from test_joints_ros import JointSim, run  # noqa: E402
 
@@ -345,9 +347,8 @@ def system(tmp_path):
         config = tmp_path / 'config'
         copy_config(FIXTURE, config)
         sim = ros.add(JointSim())
-        server = SkillServer(parameter_overrides=[
-            Parameter('config_dir', value=str(config)), Parameter('robot', value=ROBOT),
-            Parameter('skills', value=['move_joints'])])
+        server = SkillServer(skills=serve(config, 'move_joints'), parameter_overrides=[
+            Parameter('config_dir', value=str(config)), Parameter('robot', value=ROBOT)])
         ros.add(server)
         client = ros.add(rclpy.create_node('test_client'))
         ros.spin(8)

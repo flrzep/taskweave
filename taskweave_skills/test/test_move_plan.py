@@ -1,5 +1,5 @@
 """move without a robot: what a step resolves to (the part, the kind, the calls it makes) with stub parts, over the
-schema-4 test cell (fixtures/config_new). Every row of the mapping table of the design (old args -> move), every
+schema-4 test cell (fixtures/config). Every row of the mapping table of the design (old args -> move), every
 REJECTED line, the torso order, the schema and the default timeouts. No ROS: the parts are stubs that remember what they
 were called with, so these tests show which targets the real parts are handed (test_move_*_ros run the motions)."""
 
@@ -18,7 +18,7 @@ from taskweave_core.validation import oneof_problems, validate_args
 from taskweave_skills.move import Move
 from taskweave_skills.parts import PARTS, RESOLVED
 
-FIXTURE = Path(__file__).parent / 'fixtures' / 'config_new'
+FIXTURE = Path(__file__).parent / 'fixtures' / 'config'
 
 
 class StubHold:

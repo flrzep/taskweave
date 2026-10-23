@@ -90,7 +90,7 @@ def test_the_schemas_pass_the_oneof_rule_and_carry_the_robots_hands(system):
     ok = {'to': {'pose': 'carry'}, 'object': 'crate_1'}
     assert validate_args(ok, skill.args_schema, store, robot) == []
     problems = validate_args({'to': {'pose': 'nope'}, 'object': 'nobody'}, skill.args_schema, store, robot)
-    assert any(p.startswith('args.to.pose') and 'no held pose' in p for p in problems)
+    assert any(p.startswith('args.to.pose') and "unknown target 'nope'" in p for p in problems)
     assert any(p.startswith('args.object') for p in problems)
     assert validate_args({'to': {'by': [0, 0, 1], 'at': [0, 0, 1]}}, skill.args_schema, store, robot)   # ambiguous
 
@@ -146,7 +146,7 @@ def test_every_target_in_linear_and_free(system):
         assert data['world_state'] == {'held_object': 'crate_1'} and data['mode'] == mode
     for to, text in (({'onto': 'pile_1/nope', 'contact': 'base'}, 'nope'),
                      ({'onto': 'pile_1/top', 'contact': 'nope'}, 'nope'),
-                     ({'pose': 'arm_pose'}, 'sets arm joints'), ({'pose': 'nope'}, 'no held pose')):
+                     ({'pose': 'arm_pose'}, 'sets arm joints'), ({'pose': 'nope'}, "unknown target 'nope'")):
         result, _ = move(system, to, REJECTED)
         assert text in result.message
 

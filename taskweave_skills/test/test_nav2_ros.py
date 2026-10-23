@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import TIME_SCALE, RosRig, connect, copy_config, scale_times, wait_ready, wait_until
+from conftest import TIME_SCALE, RosRig, connect, copy_config, scale_times, serve, wait_ready, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('nav2_msgs')
@@ -80,9 +80,8 @@ def system(tmp_path):
         sim = ros.add(BaseSim('omni', True))
         nav2 = ros.add(FakeNav2(sim))
         costmaps = [ros.add(FakeCostmap('global_costmap')), ros.add(FakeCostmap('local_costmap'))]
-        server = SkillServer(parameter_overrides=[
-            Parameter('config_dir', value=str(config)), Parameter('robot', value='omni_bot'),
-            Parameter('skills', value=['navigate_to'])])
+        server = SkillServer(skills=serve(config, 'navigate_to'), parameter_overrides=[
+            Parameter('config_dir', value=str(config)), Parameter('robot', value='omni_bot')])
         ros.add(server)
         client = ros.add(rclpy.create_node('test_client'))
         ros.spin(8)

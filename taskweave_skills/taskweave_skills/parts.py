@@ -1,8 +1,7 @@
 """The parts of the ``move`` skill: the modules that do one kind of motion (base, straight, hand, object, posture,
 joints). They are the classes of the old motion skills (navigate_to, drive_straight, move_gripper, move_object,
-set_posture, move_joints); in a cell in the targets layout (cell schema 4) ``Move`` builds them as ``move.<part>``,
-with the configuration of ``skills/move/<part>.yaml``, and calls them with what it resolved. In an older cell the
-same classes are the served skills under their old names and read their old arguments.
+set_posture, move_joints); ``Move`` builds them as ``move.<part>``, with the configuration of
+``skills/move/<part>.yaml``, and calls them with what it resolved.
 
 ``RESOLVED`` is the one extra key of the arguments of such a call: a dict of Python objects (resolved targets, joint
 values) that the module uses instead of looking a name up. It never comes from a mission step (it is in no args
@@ -28,10 +27,10 @@ def part_name(part: str) -> str:
     return f'move.{part}'
 
 
-def part_key(config, old_name: str) -> str:
-    """The skill config key (``select_implementation``, ``skill_params``) of a motion skill of the old layout: its
-    own name in an older cell, ``move.<part>`` in a cell in the targets layout."""
-    return part_name(PART_OF_OLD[old_name]) if config.targets_format() else old_name
+def part_key(old_name: str) -> str:
+    """The skill config key (``select_implementation``, ``skill_params``) of a motion skill of the old layout:
+    ``move.<part>``."""
+    return part_name(PART_OF_OLD[old_name])
 
 
 def in_move(module) -> bool:

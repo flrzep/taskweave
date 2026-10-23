@@ -8,7 +8,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 import yaml
-from conftest import TIME_SCALE, RosRig, connect, copy_config, wait_until
+from conftest import TIME_SCALE, RosRig, connect, copy_config, serve, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('sensor_msgs')
@@ -64,7 +64,7 @@ def build(tmp_path, ros, torso: str, height: float):
     config = tmp_path / 'config'
     copy_config(FIXTURE, config)
     robot = config / 'robots' / 'lift_bot'
-    robot.mkdir()
+    robot.mkdir(exist_ok=True)   # lift_bot of the fixture: this test writes its own profile and embodiment
     (robot / 'profile.yaml').write_text(PROFILE + torso)
     (robot / 'embodiment.yaml').write_text(
         'name: lift_bot\nsummary: Differential test base with a lift.\ncapabilities: [base.differential]\n'
@@ -72,8 +72,8 @@ def build(tmp_path, ros, torso: str, height: float):
     params = [Parameter('config_dir', value=str(config)), Parameter('robot', value='lift_bot')]
     base = ros.add(BaseSim('lb', False))
     lift = ros.add(LiftSim(base, height))
-    server = ros.add(SkillServer(parameter_overrides=params + [Parameter('skills', value=['navigate_to',
-                                                                                         'drive_straight'])]))
+    server = ros.add(SkillServer(skills=serve(config, 'navigate_to', 'drive_straight'),
+                                     parameter_overrides=params))
     client = ros.add(rclpy.create_node('test_client'))
     ros.spin(8)
     wait_until(lambda: lift.count_subscribers('/lb/joint_command') > 0, what='the skill server to command joints')

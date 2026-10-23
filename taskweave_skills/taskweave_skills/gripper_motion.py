@@ -91,6 +91,15 @@ def hands_arg(value, default='auto'):
     return list(value)
 
 
+def _hand_motion() -> dict:
+    """The motion argument of the hand skill: ``via`` entries are named poses (``pose:<name>``) or <instance>/<point>,
+    resolved by the skill itself (the schema kind of the old point model does not exist any more)."""
+    schema = motion_schema()
+    schema['properties']['via'] = {k: v for k, v in schema['properties']['via'].items() if k != 'items'}
+    schema['properties']['via']['items'] = {'type': 'string'}
+    return schema
+
+
 @dataclass
 class Target:
     """Where move_gripper goes: ``tools`` {hand: {tcp, approach, closing}} (base frame), plus what goes with them."""
@@ -128,7 +137,7 @@ class MoveGripper(_PointMotion):
             'to': {'description': 'Where the gripper goes.', 'oneOf': [
                 {'title': 'object point', 'type': 'object', 'required': ['point'], 'additionalProperties': False,
                  'properties': {
-                     'point': {'type': 'string', 'x-taskweave-point': 'instance_point',
+                     'point': {'type': 'string', 'x-taskweave-point': 'target', 'x-taskweave-target-kinds': ['hand'],
                                'description': '<instance>/<point>: a point taught on a placed object (e.g. the grasp '
                                               'point of a frame in a bin).'},
                      'offset_m': {'type': 'number', 'minimum': 0, 'x-taskweave-unit': 'm',
@@ -136,7 +145,7 @@ class MoveGripper(_PointMotion):
                                                  '(pre-grasp).'}}},
                 {'title': 'named tool pose', 'type': 'object', 'required': ['pose'], 'additionalProperties': False,
                  'properties': {
-                     'pose': {'type': 'string', 'x-taskweave-point': 'tool_pose',
+                     'pose': {'type': 'string', 'x-taskweave-point': 'target', 'x-taskweave-target-kinds': ['hand'],
                               'description': 'A named pose of this robot that places tools (robots/<robot>/poses.yaml: '
                                              'tools).'}}},
                 {'title': 'relative to now', 'type': 'object', 'required': ['by'], 'additionalProperties': False,
@@ -155,7 +164,7 @@ class MoveGripper(_PointMotion):
                      'rpy_deg': {**VEC3, 'description': 'Orientation (roll, pitch, yaw) in degrees, robot frame. '
                                                         'Default: keep.'}}}]},
             'hands': hands_schema(),
-            'motion': motion_schema(),
+            'motion': _hand_motion(),
         },
     }
     needs = ["the robot stands where the target is in reach (e.g. at the object's stance)",

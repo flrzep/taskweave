@@ -183,3 +183,35 @@ def one_ros_context():
     finally:
         rclpy.init, rclpy.shutdown = real_init, real_shutdown
         real_shutdown()
+
+
+OLD_PARTS = {'navigate_to': 'base', 'drive_straight': 'straight', 'move_gripper': 'hand', 'move_object': 'object',
+             'set_posture': 'posture', 'move_joints': 'joints'}
+
+
+def serve(config, *names):
+    """Skill instances to hand to ``SkillServer(skills=...)``: the classes of the old motion skills (the parts of
+    ``move``: navigate_to, drive_straight, move_gripper, move_object, set_posture, move_joints) served under their old
+    names, as the skills of the older layout were, plus ``grip`` and ``wait`` as they are. The launch serves ``move``
+    for these names now, so the tests that are about one part start the part directly. An old skill's parameters are
+    those of its part (skills/move/<part>.yaml), copied to skills/<name>.yaml in the test's own config copy, where the
+    server and its reloads look for them."""
+    import yaml
+
+    from taskweave_core.skill import load_skill_class
+
+    skills = []
+    for name in names:
+        source = config / 'skills' / ('move' if name in OLD_PARTS else '.') / f'{OLD_PARTS.get(name, name)}.yaml'
+        target = config / 'skills' / f'{name}.yaml'
+        base = yaml.safe_load(source.read_text())
+        own = yaml.safe_load(target.read_text()) if target.exists() and target != source else {}
+        data = own if 'implementations' in own else {**base, **own}    # a test may write part of the file itself
+        implementation = data['implementations'][0]
+        data = {**data, **implementation.get('params', {})}     # the implementation's parameters are the skill's
+        if target != source:
+            target.write_text(yaml.safe_dump(data, sort_keys=False))
+        skill = load_skill_class(implementation['class'])()
+        skill.implementation = f'{implementation["type"]}:{implementation["name"]}'
+        skills.append(skill)
+    return skills

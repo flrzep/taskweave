@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from conftest import TIME_SCALE, RosRig, connect, copy_config, wait_ready, wait_until
+from conftest import TIME_SCALE, RosRig, connect, copy_config, serve, wait_ready, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('tf2_ros')
@@ -124,9 +124,10 @@ def system(tmp_path, request):
         if getattr(request, 'param', None):
             (config / 'robots' / 'duo_bot' / 'skill_overrides.yaml').write_text(request.param)
         sim, ik, scene = ros.add(DuoSim()), ros.add(FakeIk()), ros.add(FakeScene())
-        server = SkillServer(parameter_overrides=[
-            Parameter('config_dir', value=str(config)), Parameter('robot', value='duo_bot'),
-            Parameter('skills', value=['move_gripper', 'grip', 'move_object', 'set_posture', 'move_joints'])])
+        server = SkillServer(
+            skills=serve(config, 'move_gripper', 'grip', 'move_object', 'set_posture', 'move_joints'),
+            parameter_overrides=[
+            Parameter('config_dir', value=str(config)), Parameter('robot', value='duo_bot')])
         ros.add(server)
         client = ros.add(rclpy.create_node('test_client'))
         tf, transforms = StaticTransformBroadcaster(client), []
@@ -213,7 +214,7 @@ def test_an_ambiguous_or_misplaced_target_is_rejected_with_the_nested_path(syste
     result = run(system, 'move_gripper', {'to': {'point': 'box_1/nope'}})
     assert result.outcome == REJECTED and 'args.to.point' in result.message
     result = run(system, 'move_gripper', {'to': {'pose': 'home'}})          # joint values only: that is move_joints
-    assert result.outcome == REJECTED and 'places no tools' in result.message
+    assert result.outcome == REJECTED and 'moves joints' in result.message
     assert run(system, 'move_gripper', {'to': {'by': [0, 0, 1]}, 'motion': {'mode': 'sideways'}}).outcome == REJECTED
     assert run(system, 'grip', {'action': 'opening'}).outcome == REJECTED         # opening_mm is required
     result = run(system, 'grip', {'action': 'close', 'hands': 'any_one'})      # no hand is at an object point

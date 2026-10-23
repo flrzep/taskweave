@@ -38,7 +38,7 @@ def _schema() -> dict:
     motion_options = motion_schema(MOTION_KEYS)
     motion_options['properties']['via'] = {   # joint poses and joint maps, passed in order
         'type': 'array',
-        'items': {'anyOf': [{'type': 'string', 'x-taskweave-point': 'joint_pose_only'},
+        'items': {'anyOf': [{'type': 'string', 'x-taskweave-point': 'target', 'x-taskweave-target-kinds': ['joints']},
                             {'type': 'object', 'minProperties': 1, 'additionalProperties': {'type': 'number'}}]},
         'description': 'Waypoints to pass, in order: a joint pose name (poses.yaml) or a {joint: value} map.'}
     return {
@@ -46,7 +46,7 @@ def _schema() -> dict:
         'oneOf': [{'title': 'Named pose', 'required': ['pose']}, {'title': 'Joint values', 'required': ['joints']}],
         'x-taskweave-resources': ['joints'],
         'properties': {
-            'pose': {'type': 'string', 'x-taskweave-point': 'joint_pose_only',
+            'pose': {'type': 'string', 'x-taskweave-point': 'target', 'x-taskweave-target-kinds': ['joints'],
                      'description': 'A named pose of this robot (robots/<robot>/poses.yaml) with joint values only '
                                     '(e.g. home, lift_high).'},
             'joints': {'type': 'object', 'minProperties': 1, 'additionalProperties': {'type': 'number'},

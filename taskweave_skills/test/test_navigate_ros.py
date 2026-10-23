@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from conftest import TIME_SCALE, RosRig, connect, copy_config, wait_until
+from conftest import TIME_SCALE, RosRig, connect, copy_config, serve, wait_until
 
 rclpy = pytest.importorskip('rclpy')
 
@@ -61,8 +61,8 @@ def system(request, tmp_path):
         params = [Parameter('config_dir', value=str(config)), Parameter('robot', value=robot)]
         sim = ros.add(BaseSim(prefix, holonomic))
         # production path: skill names resolved through config/skills/<name>.yaml implementations
-        server = ros.add(SkillServer(parameter_overrides=params
-                                     + [Parameter('skills', value=['navigate_to', 'wait', 'drive_straight'])]))
+        server = ros.add(SkillServer(skills=serve(config, 'navigate_to', 'wait', 'drive_straight'),
+                                     parameter_overrides=params))
         ros.add(Teach(parameter_overrides=params))
         client = ros.add(rclpy.create_node('test_client'))
         ros.spin(8)
@@ -97,7 +97,7 @@ def test_drives_to_location(system):
 def test_unknown_target_is_rejected_without_moving(system):
     sim, client, _ = system
     result = run_skill(client, 'navigate_to', {'target': 'mars'})
-    assert result.outcome == RunSkill.Result.REJECTED and "unknown location 'mars'" in result.message
+    assert result.outcome == RunSkill.Result.REJECTED and "unknown target 'mars'" in result.message
     assert sim.x == 0.0 and sim.y == 0.0
 
 
@@ -122,14 +122,14 @@ def test_teach_then_drive_back(system):
     future = teach.call_async(TeachPoint.Request(name='taught_dock', kind='location'))
     wait_until(future.done, what='the teach answer')
     assert future.result().success, future.result().message
-    assert 'taught_dock' in (config / 'cell' / 'locations.yaml').read_text()
-    assert run_skill(client, 'navigate_to', {'target': 'home'}).outcome == RunSkill.Result.SUCCEEDED
+    assert 'taught_dock' in (config / 'cell' / 'targets.yaml').read_text()
+    assert run_skill(client, 'navigate_to', {'target': 'start'}).outcome == RunSkill.Result.SUCCEEDED
     result = run_skill(client, 'navigate_to', {'target': 'taught_dock'})
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     # Back at the taught point, within the skill's own tolerance (0.03 m, plus a margin). The point itself was taught
     # where the first drive stopped, which is within that tolerance of the dock: the two errors add up against the
     # dock (up to 0.06 m), so the dock is no reference for the second drive.
-    taught = yaml.safe_load((config / 'cell' / 'locations.yaml').read_text())['taught_dock']
+    taught = yaml.safe_load((config / 'cell' / 'targets.yaml').read_text())['taught_dock']
     assert math.hypot(taught['x'] - 1.0, taught['y'] - 0.5) < 0.04
     assert math.hypot(sim.x - taught['x'], sim.y - taught['y']) < 0.04
 
@@ -166,8 +166,8 @@ def test_drive_straight_limits(system):
 
 def test_drive_straight_to_a_target_in_line(system):
     sim, client, config = system
-    with open(config / 'cell' / 'locations.yaml', 'a') as f:
-        f.write('ahead: {x: 0.5, y: 0.01, yaw: 0.02}\n')
+    with open(config / 'cell' / 'targets.yaml', 'a') as f:
+        f.write('ahead: {moves: base, x: 0.5, y: 0.01, yaw: 0.02}\n')
     result = run_skill(client, 'drive_straight', {'to': 'ahead'})
     assert result.outcome == RunSkill.Result.SUCCEEDED, result.message
     assert sim.x == pytest.approx(0.5, abs=0.04) and abs(sim.yaw) < 0.03   # the heading is kept, not turned
@@ -186,7 +186,7 @@ def fast_system(tmp_path):
             f.write('speed: 1.2\nmax_linear: 1.5\nmax_angular: 2.5\n')
         params = [Parameter('config_dir', value=str(config)), Parameter('robot', value='diff_bot')]
         sim = ros.add(BaseSim('diff', False))
-        server = ros.add(SkillServer(parameter_overrides=params + [Parameter('skills', value=['drive_straight'])]))
+        server = ros.add(SkillServer(skills=serve(config, 'drive_straight'), parameter_overrides=params))
         client = ros.add(rclpy.create_node('test_client'))
         ros.spin(8)
         wait_until(lambda: sim.pub.get_subscription_count() > 0, what='the skill server to subscribe to the odometry')

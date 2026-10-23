@@ -27,7 +27,7 @@ from taskweave_core.skill_server import SkillServer  # noqa: E402
 from taskweave_interfaces.action import RunSkill  # noqa: E402
 from taskweave_skills.hold import TOPIC, HoldState  # noqa: E402
 
-FIXTURE = Path(__file__).parent / 'fixtures' / 'config_new'
+FIXTURE = Path(__file__).parent / 'fixtures' / 'config'
 OK, FAILED, REJECTED = RunSkill.Result.SUCCEEDED, RunSkill.Result.FAILED, RunSkill.Result.REJECTED
 OVERRIDE = 'move.hand: {motion: {approach_m: 0.2}}\n'   # a robot override of the part's approach_m
 

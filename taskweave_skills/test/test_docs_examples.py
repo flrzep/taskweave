@@ -20,7 +20,7 @@ from taskweave_skills import shipped_skills  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO / 'docs' / 'examples'
-FIXTURE = Path(__file__).parent / 'fixtures' / 'config_new'    # cell schema 4, like the example cell
+FIXTURE = Path(__file__).parent / 'fixtures' / 'config'    # cell schema 4, like the example cell
 ROBOT = 'duo_bot'
 SKILLS = shipped_skills()    # every skill of the package: a new skill is in here without being registered
 

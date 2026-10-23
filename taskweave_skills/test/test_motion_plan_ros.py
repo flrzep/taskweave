@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from conftest import TIME_SCALE, RosRig, copy_config, wait_ready
+from conftest import TIME_SCALE, RosRig, copy_config, serve, wait_ready
 
 rclpy = pytest.importorskip('rclpy')
 pytest.importorskip('moveit_msgs')
@@ -91,9 +91,8 @@ def system(tmp_path):
         profile = config / 'robots' / 'arm_bot' / 'profile.yaml'
         profile.write_text(profile.read_text() + PLANNING)
         sim, planner = ros.add(TrackedSim()), ros.add(FakePlanner())
-        server = SkillServer(parameter_overrides=[
-            Parameter('config_dir', value=str(config)), Parameter('robot', value='arm_bot'),
-            Parameter('skills', value=['move_joints'])])
+        server = SkillServer(skills=serve(config, 'move_joints'), parameter_overrides=[
+            Parameter('config_dir', value=str(config)), Parameter('robot', value='arm_bot')])
         ros.add(server)
         client = ros.add(rclpy.create_node('test_client'))
         seen = sim.seen   # the simulator's own lowest j1: a subscriber drops messages when it is starved

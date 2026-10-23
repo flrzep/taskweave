@@ -106,13 +106,13 @@ class MoveObject(_HeldMotion):
                                                    'Orientation kept.'}}},
                 {'title': 'held pose', 'type': 'object', 'required': ['pose'], 'additionalProperties': False,
                  'properties': {
-                     'pose': {'type': 'string', 'x-taskweave-point': 'held_pose',
+                     'pose': {'type': 'string', 'x-taskweave-point': 'target', 'x-taskweave-target-kinds': ['object'],
                               'description': 'A held pose of this robot for the object type '
                                              '(robots/<robot>/held_poses.yaml), e.g. carry.'}}},
                 {'title': 'onto a contact', 'type': 'object', 'required': ['onto', 'contact'],
                  'additionalProperties': False,
                  'properties': {
-                     'onto': {'type': 'string', 'x-taskweave-point': 'instance_contact',
+                     'onto': {'type': 'string', 'x-taskweave-point': 'target', 'x-taskweave-target-kinds': ['object'],
                               'description': '<instance>/<contact>: where on a placed object the held object goes.'},
                      'contact': {'type': 'string', 'description': "The held object's contact that goes there."},
                      'offset_m': {'type': 'number', 'minimum': 0, 'x-taskweave-unit': 'm',

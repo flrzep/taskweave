@@ -1,2 +1,0 @@
-name: diff_bot
-base: {type: differential, cmd_vel: /diff/cmd_vel, odom: /diff/odom, frame: base_link, limits: {linear: 0.8, angular: 1.5}}

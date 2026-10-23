@@ -170,7 +170,7 @@ class NavigateTo(Skill):
         'type': 'object',
         'required': ['target'],
         'properties': {
-            'target': {'type': 'string', 'x-taskweave-point': 'base_target',
+            'target': {'type': 'string', 'x-taskweave-point': 'target', 'x-taskweave-target-kinds': ['base'],
                        'description': 'location name, "location:<name>" or "stance:<name>"'},
         },
         'additionalProperties': False,
@@ -201,9 +201,9 @@ class NavigateTo(Skill):
         self.cmd = node.create_publisher(Twist, self.base['cmd_vel'], 10)
         node.create_subscription(Odometry, self.base['odom'], self._odom, 10)
         self._lift = None   # the torso's move to torso.drive_m: a move_joints of its own, for robots with that key
-        if robot.data.get('joints') and ((robot.data.get('torso') or {}).get('joint') or config.targets_format()):
+        if robot.data.get('joints'):
             from .joint_motion import MoveJoints
-            key = part_key(config, 'move_joints')
+            key = part_key('move_joints')
             implementation, _ = config.select_implementation(key, robot.name)
             self._lift = MoveJoints()
             self._lift.name = key
