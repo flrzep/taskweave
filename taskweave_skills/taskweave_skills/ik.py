@@ -254,6 +254,7 @@ TORSO_WEIGHT = default(ROBOT_PROFILE, 'ik', 'torso', 'weights', 'torso')        
 REFINE = default(ROBOT_PROFILE, 'ik', 'torso', 'refine')                            # ik.torso.refine default
 GLOBAL_HEIGHTS = default(ROBOT_PROFILE, 'ik', 'torso', 'global_heights')           # ik.torso.global_heights default
 UNREACHABLE_MARGIN_M = 0.01    # slack on the arm-length bound of _unreachable
+BANDS_KEPT = 64                # held searches IkClient.bands remembers (the newest)
 GLOBAL_ONLY = 'no height solved with local IK: global search'
 WRIST_WEIGHT = default(ROBOT_PROFILE, 'ik', 'torso', 'weights', 'wrist')           # ik.torso.weights.wrist default
 LINE_SAMPLE_M = default(ROBOT_PROFILE, 'ik', 'torso', 'line_sample_m')             # ik.torso.line_sample_m default
@@ -318,6 +319,7 @@ class IkClient:
         from .chain import Chain
 
         self.chains = {}
+        self._spans.clear()        # the arm lengths of _unreachable come from these chains
         for tool, frame in self.tools.items():
             if tool not in self.groups:
                 continue
@@ -358,11 +360,12 @@ class IkClient:
 
     def solve(self, tools: dict, fixed: dict, should_stop=lambda: False, current: dict | None = None,
               allow_flip: bool = True, elbow=None, global_search: bool = True,
-              nearby: bool = False) -> dict[str, float]:
+              nearby: bool = False, global_only: bool = False) -> dict[str, float]:
         """Joint values for every tool target (plus nothing else); raises IkError. ``current``: the joints now, for
         the size-of-move cost when choosing. ``allow_flip`` False: solve the targets as given (no flipped grasp).
         ``elbow``: preferred elbow side for this solve (e.g. an object point's), else the profile's.
         ``global_search`` False: no fallback to the global solver (slow, and its answer is not repeatable).
+        ``global_only``: no local descents before the global solver (the torso search: they just found no IK).
         ``nearby``: descend only from the current arm and from it with its swivel joint turned (motion_tuning
         follow), no profile seeds: the solution stays close to the current configuration, the elbow clear when the
         nearest branch starts in collision (a hand following the torso: the grip must hold on the way)."""
@@ -416,9 +419,9 @@ class IkClient:
             fallback = [(self.fallback_groups[tool], {}, self.fallback_timeout_s)] if global_search and \
                 tool in self.fallback_groups else []
             candidates, response, searched = [], None, False
-            # the global search only if no local descent converged (the torso search says they just did not)
+            # the global search only if no local descent converged (``global_only``: they just did not)
             for attempts in (local, fallback):
-                if attempts is local and fallback and getattr(self, 'global_only', False):
+                if attempts is local and fallback and global_only:
                     continue
                 if attempts is fallback and fallback:
                     self.node.get_logger().warning(f'IK for {tool}: no local descent converged, global search '
@@ -454,7 +457,7 @@ class IkClient:
         return result
 
     def solve_with_torso(self, samples, fixed: dict, current: dict, should_stop=lambda: False, elbow=None,
-                         allow_flip: bool = True) -> TorsoChoice:
+                         allow_flip: bool = True, held: bool = False) -> TorsoChoice:
         """The torso height (profile ik.torso) that solves ``samples`` for every hand at once, with the least cost.
         ``samples``: a list of tool target sets {tool: target} (or a function of the height returning it: a line moves
         with the torso); the first is the main one (its arm cost counts), the others (the pre-grasp, points along a
@@ -479,26 +482,38 @@ class IkClient:
         Heights within half a grid step of the current one are the current one (0.494 and 0.5 are the same height).
         Above ``accept_cost`` the search goes outward in each direction only while the cost keeps falling (or the
         first height is feasible): a direction whose next height costs more than the last, or is out after one
-        that worked, is closed. So staying put costs one neighbour on each side at most."""
+        that worked, is closed. So staying put costs one neighbour on each side at most.
+
+        Heights no arm can reach (``_unreachable``) are rejected with no IK call. ``held``: the search is for a held
+        object's path (object_motion), the slow case the global pass serves. For it only:
+        - the global pass goes straight to the global solver at heights whose local solve found no IK (no second
+          round of local descents), and its ``global_heights`` slots skip unreachable heights (so further heights
+          get them);
+        - a height only the global pass found is remembered (``bands``) and tried next time the same search runs,
+          after the current height (``_remembered_band``).
+        Every other search runs as without these."""
         started = time.monotonic()
-        key = self._band_key(samples, fixed, elbow, allow_flip)
+        key = self._band_key(samples, fixed, elbow, allow_flip) if held else None
         choice = self._remembered_band(key, samples, fixed, current, should_stop, elbow, allow_flip)
         if choice is None:
-            choice = self._search_torso(samples, fixed, current, should_stop, elbow, allow_flip)
-            if key is not None and choice.skipped.startswith(GLOBAL_ONLY):
+            choice = self._search_torso(samples, fixed, current, should_stop, elbow, allow_flip, held)
+            if key is not None and choice.skipped == GLOBAL_ONLY:
+                self.bands.pop(key, None)                   # newest last: the oldest go beyond BANDS_KEPT
                 self.bands[key] = (choice.height, dict(choice.solution))
+                for old in list(self.bands)[:-BANDS_KEPT]:
+                    self.bands.pop(old, None)
         choice.elapsed_s = time.monotonic() - started
         return choice
 
     @property
     def bands(self) -> dict:
-        """Per search (``_band_key``): the height and arms of the last answer only the global search found."""
+        """Per held search (``_band_key``): the height and arms of the last answer only the global search found."""
         return self.__dict__.setdefault('_bands', {})
 
     def _band_key(self, samples, fixed, elbow, allow_flip) -> str | None:
         """Identifies a search whose answer may be reused: the same targets (rounded to a centimetre, so a grasp that
-        differs by a hair is the same), fixed joints, elbow side, flip rule and torso and choice spec. None for
-        samples that are a function of the height (a line: its targets move with the torso)."""
+        differs by a hair is the same), extra checks (verify, ahead), fixed joints, elbow side, flip rule and torso
+        and choice spec. None for samples that are a function of the height (a line: its targets move with it)."""
         if callable(samples):
             return None
 
@@ -509,32 +524,43 @@ class IkClient:
                 return [rounded(v) for v in value]
             return round(float(value), 2) if isinstance(value, float | int | np.floating) else value
         try:
-            return json.dumps([rounded(list(samples)), rounded(fixed), elbow, bool(allow_flip), self.torso,
+            checks = [getattr(samples, name, None) is not None for name in ('verify', 'ahead')]
+            return json.dumps([rounded(list(samples)), checks, rounded(fixed), elbow, bool(allow_flip), self.torso,
                                self.choose], sort_keys=True, default=str)
         except (TypeError, ValueError):
             return None
 
     def _remembered_band(self, key, samples, fixed, current, should_stop, elbow, allow_flip) -> TorsoChoice | None:
-        """The height this search found by the global pass last time, tried first (global search, seeded with the
-        arms it had): it solves and passes every check, or None and the whole search runs. A search the local pass
-        solved is never remembered, so only the slow case is short-cut."""
+        """A held search whose answer only the global pass found last time (``bands``). The current height comes
+        first, as in the search (local IK): feasible and within ``accept_cost`` it wins; feasible but dearer, the
+        whole search decides (None). Else the remembered height (global search, seeded with the arms it had): it
+        solves and passes every check, or the memory is dropped and the whole search runs (None)."""
         found = self.bands.get(key) if key is not None else None
-        if found is None or self.torso['joint'] not in current:
-            return None
-        height, arms = found
         joint = self.torso['joint']
-        weights = self.torso.get('weights') or {}
-        try:
-            choice = self._torso_height(samples, height, fixed, current, joint, float(current[joint]),
-                                        float(weights.get('torso', TORSO_WEIGHT)), should_stop, elbow, allow_flip,
-                                        global_search=True, hint=arms)
-        except TorsoError:
-            del self.bands[key]        # the scene changed: search again
+        if found is None or joint not in current:
             return None
-        choice.skipped = f'{GLOBAL_ONLY} (remembered band: tried first)'
+        now, weight = float(current[joint]), float((self.torso.get('weights') or {}).get('torso', TORSO_WEIGHT))
+        try:
+            here = self._torso_height(samples, now, fixed, current, joint, now, weight, should_stop, elbow, allow_flip)
+        except TorsoError:
+            here = None
+        if here is not None:
+            accept = self.torso.get('accept_cost')
+            if accept is not None and here.cost > float(accept):
+                return None
+            here.skipped = 'the current height is feasible and cheap enough'
+            return here
+        height, arms = found
+        try:
+            choice = self._torso_height(samples, height, fixed, current, joint, now, weight, should_stop, elbow,
+                                        allow_flip, global_search=True, hint=arms)
+        except TorsoError:
+            self.bands.pop(key, None)        # the scene changed: search again
+            return None
+        choice.skipped = f'{GLOBAL_ONLY} (remembered band, after the current height)'
         return choice
 
-    def _search_torso(self, samples, fixed, current, should_stop, elbow, allow_flip) -> TorsoChoice:
+    def _search_torso(self, samples, fixed, current, should_stop, elbow, allow_flip, held=False) -> TorsoChoice:
         spec = self.torso
         joint = spec['joint']
         if joint not in current:
@@ -618,7 +644,7 @@ class IkClient:
         best = refine(best, out, False)
         if best is None:     # local descents are timing dependent (or start far from the answer): global search
             best, found = self._global_pass(samples, heights, step, grid, rejected, fixed, current, joint, now, weight,
-                                            should_stop, elbow, allow_flip)
+                                            should_stop, elbow, allow_flip, held)
             if best is not None:
                 done.update(found)
                 seen |= set(found) | {r['height'] for r in rejected}
@@ -634,12 +660,13 @@ class IkClient:
         return best
 
     def _global_pass(self, samples, heights, step, grid, rejected, fixed, current, joint, now, weight, should_stop,
-                     elbow, allow_flip):
+                     elbow, allow_flip, held=False):
         """No height solved with local IK: (best, {height: choice}) from the global search, heights nearest first. The
         ``global_heights`` nearest are always tried (the move itself would do the same); beyond them only heights
         whose local solve found no IK at all (one that solved but collided is not helped by another solution this
         way, and the search stays short). The first height that works is the band's; its farther grid neighbour is
-        solved too, so the cost chooses, and refinement then looks at the band's edges. (None, {}) if none works."""
+        solved too, so the cost chooses, and refinement then looks at the band's edges. (None, {}) if none works.
+        ``held`` (see solve_with_torso): no local descents at no-IK heights, and unreachable heights take no slot."""
         count = int(self.torso.get('global_heights', GLOBAL_HEIGHTS))
         if count <= 0:
             return None, {}
@@ -651,15 +678,15 @@ class IkClient:
             try:
                 found[round(height, 4)] = self._torso_height(samples, height, fixed, current, joint, now, weight,
                                                              should_stop, elbow, allow_flip, global_search=True,
-                                                             global_only=round(height, 4) in no_ik)
+                                                             global_only=held and round(height, 4) in no_ik)
             except TorsoError as error:
                 rejected.append({'height': round(height, 4), 'reason': f'global search: {error}'})
             return round(height, 4) in found
 
         first, nearest = None, 0
         for height in heights:
-            if self._unreachable(samples(height) if callable(samples) else samples, height):
-                continue        # out of reach for any solver (already on record from the local pass)
+            if held and self._unreachable(samples(height) if callable(samples) else samples, height):
+                continue        # out of reach for any solver (on record from the local pass): no slot
             nearest += 1
             if nearest > count and round(height, 4) not in no_ik:
                 continue
@@ -693,17 +720,17 @@ class IkClient:
             raise TorsoError(beyond)
         for k, tools in enumerate(goals):
             where = f'sample {k}: ' if k else ''
-            self.seed_hint, self.global_only = hint, global_only
+            self.seed_hint = hint
             try:
                 arm = self.solve(tools, with_h, should_stop, current=current, allow_flip=allow_flip, elbow=elbow,
-                                 global_search=global_search)
+                                 global_search=global_search, global_only=global_only)
                 self._remember(tools, with_h, current, allow_flip, elbow, arm)
             except TorsoError:
                 raise
             except IkError as error:
                 raise TorsoError(f'{where}{str(error).split(":")[0]}') from error
             finally:
-                self.seed_hint = self.global_only = None
+                self.seed_hint = None
             if k == 0:
                 main = (arm, {t for t, info in self.last.items() if info.get('flipped')}, self._arm_cost(arm, current))
             # staying at the current height moves no torso and no idle arm, and IK already rejects a solution in
@@ -730,7 +757,10 @@ class IkClient:
         """Why no arm configuration can put a hand of ``goals`` on its target with the torso at ``height``, or None.
         Needs the URDF chains (attach_chains). The hand's flange is further from the first arm joint than the arm
         is long (the sum of the joint offsets after it: a bound, whatever the joint angles), so no solver, local or
-        global, can find a solution there and the IK calls (each a timeout) are skipped."""
+        global, can find a solution there and the IK calls (each a timeout) are skipped. The bound holds only on a
+        chain (URDF) whose first arm joint sits where the torso height alone puts it (no other movable joint before
+        it, e.g. a waist) and whose joints from it on are none prismatic (one would stretch the arm): any other
+        chain gets no bound."""
         chains = getattr(self, 'chains', None)
         joint = (self.torso or {}).get('joint')
         for tools in goals if chains else ():
@@ -738,11 +768,15 @@ class IkClient:
                 chain, arm = chains.get(tool) or (None, None)
                 if chain is None or not arm or joint not in chain.movable or tool not in self.tools:
                     continue
-                reach = self._spans.get(tool)
-                if reach is None:
+                if tool not in self._spans:
                     first = next(i for i, j in enumerate(chain.joints) if j.name == arm[0])
-                    reach = self._spans[tool] = sum(float(np.linalg.norm(j.origin[:3, 3])) for j in
-                                                    chain.joints[first + 1:])
+                    waist = any(j.kind != 'fixed' and j.name != joint for j in chain.joints[:first])
+                    stretch = any(j.kind == 'prismatic' for j in chain.joints[first:])
+                    self._spans[tool] = None if waist or stretch else sum(
+                        float(np.linalg.norm(j.origin[:3, 3])) for j in chain.joints[first + 1:])
+                reach = self._spans[tool]
+                if reach is None:
+                    continue
                 shoulder = chain.frames({joint: height})[0][chain.movable.index(arm[0])][:3, 3]
                 away = float(np.linalg.norm(flange_target(target, self.tools[tool])[:3, 3] - shoulder))
                 if away > reach + UNREACHABLE_MARGIN_M:
