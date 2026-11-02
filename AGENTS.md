@@ -15,7 +15,7 @@ taskweave runs robot tasks on ROS 2 Jazzy, driven entirely by YAML.
 |---|---|
 | `taskweave_interfaces/` | msgs, srvs, `RunSkill` action (CMake package) |
 | `taskweave_core/taskweave_core/` | `config/` (store, schemas, packs, overlay, catalogue, check, save, `targets` / `target_store` / `target_edit` (the target model, reading, writing), migrate*, slim, packfile), `planner.py`, `executive.py`, `task_handler.py`, `skill.py` (base class), `skill_server.py`, `clock_jump.py`, `validation.py`, `motion.py` (motion option resolution), `speed.py`, `speed_gate.py`, `smoke.py`, `teach.py`, `operator_joy.py`, `cli.py` |
-| `taskweave_skills/taskweave_skills/` | the generic skills: `basic` (wait), `move` (the one motion skill; it builds its parts from `parts.py`: `navigate`, `drive`, `joint_motion`, `gripper_motion`, `object_motion`), `gripper_motion` also has `grip`; helpers `joints`, `ik`, `chain`, `cartesian`, `motion_plan`, `hold`, `points`, `tcp_jog`, `nav2` |
+| `taskweave_skills/taskweave_skills/` | the generic skills: `basic` (wait), `move` (the one motion skill; it builds its parts from `parts.py`: `navigate`, `drive`, `joint_motion`, `gripper_motion`, `object_motion` (the carry)); the five kinds of a move step and their labels are `config/targets.py` `MOVE_KINDS` / `MOVE_LABELS`, `gripper_motion` also has `grip`; helpers `joints`, `ik`, `chain`, `cartesian`, `motion_plan`, `hold`, `points`, `tcp_jog`, `nav2` |
 | `taskweave_hmi/taskweave_hmi/` | web HMI (`server.py`, `web/*.js`): status, control, mission editor, teach, record |
 | `taskweave_bringup/` | launch files `taskweave_bringup.launch.py` (taskweave, HMI, optional Nav2/MoveIt), `taskweave_nav2.launch.py`, `taskweave_moveit.launch.py`; `taskweave_bringup/` (`nav2.py`, `moveit.py`, `hmi.py`, `clock_guard.py`, `robot_files.py`: the logic, testable without launching), `config/nav2_params.yaml` (default Nav2 tuning) |
 | `taskweave_robots/<robot>/` | robot packs (`pack.yaml`, `profile.yaml`, `embodiment.yaml`, `targets.yaml`, `moveit/` ...), installed to `share/taskweave_robots/` |
@@ -234,7 +234,7 @@ and settings on the cell's objects, `robots/<robot>/objects/<type>.yaml`, belong
    `ros2 service list | grep -E "compute_ik|check_state_validity"`, on the robot's own ROS domain.
 
 ### Add a cell pack (an application's config)
-1. `pack.yaml` with `name`, `version`, `schema_version: 4`; `system.yaml` with `robot_packs: [..]` if packs live outside
+1. `pack.yaml` with `name`, `version`, `schema_version: 5`; `system.yaml` with `robot_packs: [..]` if packs live outside
    the install.
 2. `cell/layout.yaml`, `cell/targets.yaml`, `cell/objects.yaml` (placed instances; `stack: {count, pitch}`).
 3. `objects/<type>.yaml`: `targets:` with hand points (taught tool poses, `taskweave teach hand <instance>/<name>`) and
@@ -248,8 +248,10 @@ and settings on the cell's objects, `robots/<robot>/objects/<type>.yaml`, belong
    between hosts: `taskweave config export <cell> f.tar.gz`, `taskweave config import f.tar.gz <cell> [--force]`
    (checked before anything changes; folder swap with `.bak-<time>`, or a commit when the target is a git work tree;
    `taskweave_core/taskweave_core/config/packfile.py`, which the HMI can call too).
-7. From an older layout: `taskweave config migrate <cell>` (runs every migration up to schema 4; `migrate-skills`
-   is the 2 to 3 step alone; 3 to 4 is [docs/migration_targets.md](docs/migration_targets.md)).
+7. From an older layout: `taskweave config migrate <cell>` (runs every migration up to schema 5; `migrate-skills`
+   is the 2 to 3 step alone; 3 to 4 is [docs/migration_targets.md](docs/migration_targets.md); 4 to 5,
+   `config/migrate_kinds.py`, writes `{hand: holding, ...}` for `{object: held, ...}` and renames
+   `skills/move/base.yaml` / `object.yaml` to `navigate.yaml` / `carry.yaml`).
    Check: `taskweave check <cell>`. Details: [docs/configuration.md](docs/configuration.md).
 
 ### Add a skill to a live cell

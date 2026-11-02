@@ -93,7 +93,7 @@ steps:
     args: {hands: all, action: close}
   - instruction: Lift it 20 cm
     skill: move
-    args: {object: held, by: [0, 0, 0.2], torso: keep}
+    args: {hand: holding, by: [0, 0, 0.2], torso: keep}
   - instruction: Drive to the bin
     skill: move
     args: {to: bin_1/place}
@@ -222,7 +222,7 @@ ros2 param set /task_handler speed_override_percent 50.0              # same pat
 ```
 
 Test mode at 10 % means arm motion at 10 % while Nav2 drives at 30 %: the Nav2 implementation of the base part of
-`move` floors the override for the Nav2 phase at its param `min_override` (default 0.3, `skills/move/base.yaml`; MPPI
+`move` floors the override for the Nav2 phase at its param `min_override` (default 0.3, `skills/move/navigate.yaml`; MPPI
 cannot do the fine final approach into a stance at 10 %). Arms, torso, grippers, straight drives and the direct
 controller after the handover follow the real override. The step result reports the value as `data.speed.nav2_override`
 (percent).
@@ -259,8 +259,8 @@ taskweave smoke compare config/tests/restock.reference.yaml run.yaml   # offline
 A step passes when it runs in the reference's order with outcome `SUCCEEDED`, its duration is within `--tolerance`
 (default ±10 %) plus `--slack` seconds (1.0) of the reference, and its max error is at most reference × (1 +
 tolerance) + `--error-slack` (0.002). Missing steps fail, and so do steps that are not in the reference unless
-`--allow-extra`. Duration tolerance is per kind of motion: a base drive (`move.base`) gets 25 % (Nav2 drives vary more than arm moves),
-overridable with `--skill-tolerance move.base=FRACTION` or `limits: {tolerance_by_skill: {...}}` in the reference. A
+`--allow-extra`. Duration tolerance is per kind of motion: a base drive (`move.navigate`) gets 25 % (Nav2 drives vary more than arm moves),
+overridable with `--skill-tolerance move.navigate=FRACTION` or `limits: {tolerance_by_skill: {...}}` in the reference. A
 reference recorded before `move` names the old skills (`navigate_to`, `move_gripper`, ...): they count as the kind of
 `move` that replaced them, so an old reference still compares. The
 command prints a table (step, instruction, ref s, now s, Δ%, error, result), writes a report (`<name>.report.yaml`

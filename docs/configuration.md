@@ -22,7 +22,7 @@ config/                  cell pack: everything about one cell
       targets.yaml       optional in the cell: overrides of the robot pack's base-frame and joint targets
   skills/
     <skill>.yaml         implementations of one skill (first match is served) and its parameters
-    move/<part>.yaml     the six parts of the skill move: base, straight, hand, object, posture, joints
+    move/<part>.yaml     the six parts of the skill move: navigate, straight, hand, carry, posture, joints
   missions/
     <mission>.yaml       goal, robot, loop mode, defaults, steps
 ```
@@ -503,7 +503,7 @@ object type. It keeps the target's other tools and metadata.
 ## Skill parameters
 
 ```yaml
-# skills/move/base.yaml: the base part of the skill move
+# skills/move/navigate.yaml: the navigate part of the skill move
 max_linear: 0.6
 max_angular: 1.0
 position_tolerance: 0.03
@@ -511,10 +511,11 @@ yaw_tolerance: 0.05
 stuck_timeout_s: 5.0
 ```
 
-The skill `move` hands each step to one of six parts (base, straight, hand, object, posture, joints). Each part is
+The skill `move` hands each step to one of six parts (navigate, straight, hand, carry, posture, joints; before cell
+schema 5 navigate and carry were `base.yaml` and `object.yaml`, which a schema 4 cell keeps until it is migrated). Each part is
 configured in its own file, `skills/move/<part>.yaml` (shipped files: `docs/examples/skills/move/`), and `skills/move.yaml`
 names the skill itself. The arm parts and `grip` use one layout: standard speeds in `speed`, option defaults in `motion`,
-accuracy and timeouts in `tolerances`. A robot's `skill_overrides.yaml` is keyed by part (`move.hand`, `move.base`, ...)
+accuracy and timeouts in `tolerances`. A robot's `skill_overrides.yaml` is keyed by part (`move.hand`, `move.navigate`, ...)
 and by skill (`grip`). The `joints` part moves the torso, head and arm joints to a joint target or to given group
 values; the group names come from the profile's `joints.groups`.
 

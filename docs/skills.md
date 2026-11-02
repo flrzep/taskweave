@@ -40,11 +40,12 @@ override applies on top.
 
 Move the robot. Forms: `to` a target (its kind says what moves: a base target drives the base, a hand target moves
 hands, an object target moves the held object, a joint target moves joints); `hand` + `by` / `at` moves hands relative
-to now; `object: held` + `by` / `at` moves the held object relative to now; `base: {by: [forward, left]}` drives
-straight; `elbow` swings the elbows to a side while the hands stay; `joints` moves joint groups to values. Options:
-hands, offset_m, reference, only, torso (auto / keep / a value), tolerance_deg, motion (mode, speed, accel, planner,
-via ...); which apply depends on the kind of motion. A hand that holds an object stays with it. dry_run resolves and
-solves without moving.
+to now (`hand: holding`: the hands that hold, with the held object); `base: {by: [forward, left]}` drives straight;
+`elbow` swings the elbows to a side while the hands stay; `joints` moves joint groups to values. A hand that holds an
+object carries it (both hands of a two-hand hold move as one); a hand target or a relative move of a holding hand
+needs the collision shape of the held object's type. Options: hands, offset_m, reference, only, torso (auto / keep / a
+value), tolerance_deg, motion (mode, speed, accel, planner, via ...); which apply depends on the kind of motion.
+dry_run resolves and solves without moving.
 
 - Class: `taskweave_skills.move:Move`
 - Default timeout: 120 s (sim time when `use_sim_time` is set; `timeout_s` of the step or mission defaults overrides it)
@@ -67,23 +68,23 @@ implementations:
 
 | Part | File | Implementations (first that fits the robot is served) |
 |---|---|---|
-| `move.base` | `skills/move/base.yaml` | `navigate_direct` (`NavigateTo`) |
+| `move.carry` | `skills/move/carry.yaml` | `ik_held` (`MoveObject`, requires arms.bimanual), `ik_held_single` (`MoveObject`, requires arms.single) |
 | `move.hand` | `skills/move/hand.yaml` | `ik_planned` (`MoveGripper`, requires arms.bimanual), `ik_single` (`MoveGripper`, requires arms.single) |
 | `move.joints` | `skills/move/joints.yaml` | `joint_targets` (`MoveJoints`) |
-| `move.object` | `skills/move/object.yaml` | `ik_held` (`MoveObject`, requires arms.bimanual), `ik_held_single` (`MoveObject`, requires arms.single) |
+| `move.navigate` | `skills/move/navigate.yaml` | `navigate_direct` (`NavigateTo`) |
 | `move.posture` | `skills/move/posture.yaml` | `null_space` (`SetPosture`, requires arms.bimanual), `null_space_single` (`SetPosture`, requires arms.single) |
 | `move.straight` | `skills/move/straight.yaml` | `drive_straight` (`DriveStraight`) |
 
 ### Arguments
 
 Give exactly one of: `to` or `hand` or `object` or `base` or `elbow` or `joints`.
-The forms: go to a target (`to`); move hands relative to now (`hand`); move a held object relative to now (`object`); drive the base straight (`base`); elbow side (`elbow`); joint values (`joints`).
+The forms: go to a target (`to`); move hands relative to now (`hand`); move a held object relative to now (cell schema 4; now hand: holding) (`object`); drive the base straight (`base`); elbow side (`elbow`); joint values (`joints`).
 
 | Argument | Type | Required | Default | Unit | Description |
 |---|---|---|---|---|---|
 | `to` | string | no | - | - | A target: &lt;name&gt; (a cell, base or joint target) or &lt;instance&gt;/&lt;name&gt; (a target of a placed object). What moves (base, hands, held object, joints) comes from the target. (point kind `target`) |
-| `hand` | hands | no | - | - | Which hands move relative to now (with by or at): a hand name, a list, or all. |
-| `object` | string | no | - | - | held: the held object moves relative to now (with by or at), or a placed-object name when several are held. With `to`: which held object. |
+| `hand` | hands | no | - | - | Which hands move relative to now (with by or at): a hand name, a list, all, or holding (the hands that hold, with the held object). A hand that holds carries what it holds. |
+| `object` | string | no | - | - | Which held object (a placed-object name) when several are held, with `to` or `hand: holding`. Cell schema 4 wrote `object: held` + by / at for `hand: holding` + by / at. |
 | `base` | object (table below) | no | - | - | Options, see the table below. |
 | `elbow` | one of `down`, `up`, `out`, `in`, `back`, `forward` or object | no | - | - | The elbows swing toward this side, the hands stay: one side for the hands of `hands` (default: the holding hands, else all), or {hand: side}. |
 | `joints` | object | no | - | - | Joint group values: a number, or a list in the group's joint order (null leaves that joint where it is). |
@@ -197,7 +198,7 @@ All optional (Motion (advanced)). Defaults are those of the skill yaml, the robo
 - instruction: Lift the held part 20 cm
   skill: move
   args:
-    object: held
+    hand: holding
     by: [0, 0, 0.2]
     torso: keep
 ```

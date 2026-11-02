@@ -276,7 +276,7 @@ effective override. At 10 % a step gets ten times as long; at 100 % it is exactl
 `max_replans` are not scaled. `wait` is not slowed by the override, so its seconds are real seconds.
 
 **Base floor for Nav2.** The Nav2 phase of a `move` to a base target never drives below a floor, because Nav2's controller
-cannot do the fine final approach into a stance at 10 %. The floor is `min_override` in `skills/move/base.yaml` (default
+cannot do the fine final approach into a stance at 10 %. The floor is `min_override` in `skills/move/navigate.yaml` (default
 0.3, that is 30 %; `0` switches the floor off). In test mode at 10 % the arms and torso move at 10 % while Nav2 drives at
 30 %. The direct controller that takes over for the last metres, a straight drive (`motion.mode: straight`), the arms, the
 torso and the grippers follow the real override. Each such `move` result carries the value used as
@@ -311,7 +311,7 @@ of it; an object with no hand left is released. While a hand holds:
 
 - That arm is locked to the object. A hand move for it and a joint move on its arm joints (also inside a `via` or a
   whole-body target) are `REJECTED`, with a message naming the holding hand. Open the hand first (`grip open`) or move the
-  object with a `move` of the held object (`object: held` or an object target), which keeps every holding hand locked to it.
+  object with a `move` of the held object (`hand: holding` or an object target), which keeps every holding hand locked to it.
 - The pad jogs the object, not the arm: a stick on a holding hand's tool moves the held object (the same axes as the
   arm jog; the object turns about its own origin) and every holding hand follows, keeping its grip. Two hands step
   together or not at all: if one hand reaches a limit or its reach, or the step would collide, neither moves (the HMI
@@ -398,7 +398,7 @@ taskweave smoke run restock --hmi http://<hmi>:8090 --reference tests/restock.re
 
   The table has one row per step: step, instruction, `ref s` (duration in the reference), `now s` (duration now, simulator
   time), `Δ%`, `error` (the largest position error the skill reported) and `result`. A row passes when the step ran in the
-  reference's order, ended `SUCCEEDED`, took no more than the reference plus 10 % plus 1 s (25 % for a base drive, `move.base`), and its
+  reference's order, ended `SUCCEEDED`, took no more than the reference plus 10 % plus 1 s (25 % for a base drive, `move.navigate`), and its
   error is at most the reference's plus 10 % plus 0.002. Missing steps and steps that are not in the reference fail.
   Exit code 0 passed, 1 failed, 2 could not run (HMI unreachable, recording refused). Read a failure from the first
   failing row: `FAILED`/`TIMEOUT` is a mission or robot problem, a `Δ%` far above the limits on every row means the
@@ -431,7 +431,7 @@ Read `taskweave status` first: the state and `last error` say which row below ap
 | After a simulator Stop/Play (or restart) the robot does not move, TF_OLD_DATA warnings, `no IK solution` with the target far ahead | Sim time went back. A TF buffer that still holds the old run's transforms drops the new ones as old data and answers with the old pose; Nav2 and MoveIt keep theirs too. taskweave's own nodes clear their buffers at the jump (log line `clock jumped by ... s: TF buffers cleared`), Nav2 and MoveIt do not. | Wait a few seconds, then retry. `teach` refuses to save for `after_jump_s` after a jump and when its TF or base pose is older than `max_tf_age_s` (the message says which): retry once the robot publishes again. Start the stack with `clock_guard:=true` (`taskweave_bringup` launch argument; node names and timing in a YAML given as `clock_guard_params:=`): it resets the Nav2 lifecycle nodes and restarts move_group after a jump. Without it, restart Nav2 and MoveIt (check `taskweave status` first), and abort a running mission: it cannot continue across a reset. |
 | The simulator was reset or restarted and the objects are not as before | A reset ends every hold (open hands) and clears the run-time object state, so stacks are full again and moved objects are back. The robot is back at its start pose. | Start the mission from the beginning (the robot must be where the first step expects it). Nothing to repair, but a mission that was interrupted halfway does not resume across a reset. The state file is `objects.yaml` in `$TASKWEAVE_STATE_DIR` (default: a `state/` folder next to the cell pack folder); `taskweave state show [CELL_DIR]` prints it, `taskweave state clear [CELL_DIR]` deletes it (the same as deleting the file). Running processes re-read the file on their next use (by modification time), so no reload or restart is needed; `state clear` does not end a hold, a sim reset does. |
 | A held object was lost (dropped, or the sim was reset), and `move` says `nothing is held: ...` | The hold registry says the hands are open. Reasons: the grip failed, the hand was opened, a sim reset. After a drop the robot does not know. | `taskweave abort`. Bring the robot to a safe pose (`move {to: home}` from a one-step mission), put the object back by hand or reset the cell, then start the mission from the beginning. `... where is the held object now?` means the position of the held object could not be read: same steps. |
-| `move` to a hand or joint target `REJECTED` naming a holding hand | That hand still holds an object. | `grip open` (with `place_as` if the object is put down) before moving that arm, or move the held object (`object: held`). |
+| `move` to a hand or joint target `REJECTED` naming a holding hand | That hand still holds an object. | `grip open` (with `place_as` if the object is put down) before moving that arm, or move the held object (`hand: holding`). A hand move of a holding hand carries the object only when its type has a collision shape (`collision:` in `objects/<type>.yaml`). |
 | Disk full, or the logs are huge, on the host that runs the containers | Container logs grow without limit by default (`docker logs` of a stack that prints status and warnings for days), plus recordings (bags, videos) and the smoke test's `--bag` / `--video`. | `df -h`, `docker system df`, then delete recordings you no longer need. Cap the logs: in the compose service `logging: {driver: json-file, options: {max-size: "50m", max-file: "3"}}`, or `docker run --log-opt max-size=50m --log-opt max-file=3`; it applies to a container when it is created again, not to a running one. Do not delete a running container's log file by hand. |
 | CI (or a slow machine) fails with timeouts but passes again on a rerun | The tests use real nodes and fixed deadlines; a slow runner misses them. | Set `TASKWEAVE_TEST_TIME_SCALE` to a number above 1 (CI uses 4), which stretches the skill tests' deadlines: `TASKWEAVE_TEST_TIME_SCALE=4 python3 -m pytest -q test`. A test that fails at 4 as well is a real failure. |
 

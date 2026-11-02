@@ -61,7 +61,7 @@ object, not the one that grasps it.
 
 The global speed override (README, "Speed override and test mode") scales every skill and, by 1/override, the step
 timeouts. One exception: the Nav2 phase of a `move` to a base target never drives slower than its param `min_override`
-(default 0.3, set it in `skills/move/base.yaml`), because Nav2's controller cannot do the fine final approach into a
+(default 0.3, set it in `skills/move/navigate.yaml`), because Nav2's controller cannot do the fine final approach into a
 stance at 10 %. So test mode at 10 % = arm motion 10 %, Nav2 drives 30 %. The direct controller after the handover, a
 straight drive (`motion.mode: straight`), arms, torso and grippers follow the real override. The step result shows the Nav2 value as `data.speed.nav2_override`.
 
@@ -119,7 +119,7 @@ What a target moves comes from the target itself (`moves`), and the same step fo
   without offset.
 - **Placing without a contact.** A `to` that is an object target needs a contact on the placed object (a target with
   `moves: object` in its `objects/<type>.yaml`). If it has none, put the object where you can name the spot:
-  `move {object: held, at: [x, y, z]}` (robot frame: where the object origin goes, orientation kept) or `{to: <carry
+  `move {hand: holding, at: [x, y, z]}` (robot frame: where the object origin goes, orientation kept) or `{to: <carry
   pose>}` (a named object target in the robot's base frame, for this type of object), or add a contact to the object
   type and use it as in [Example 4](#example-4-pick-up-a-bin-and-put-it-on-the-fixture).
 - Where an object is put down, `grip open` with `place_as: <name>` records it as a placed object of that name, whose
@@ -127,21 +127,32 @@ What a target moves comes from the target itself (`moves`), and the same step fo
 
 ## The `move` skill
 
-`move` is the one skill that moves the robot. A step takes one of six forms:
+`move` is the one skill that moves the robot. The operator sees five commands; what moves comes from the target or
+the step's form. The command is the step's kind (`data.kind` of the result, the plan graph's lanes):
 
-| Form | Required | Meaning |
+| Command | Kind | Step forms |
 |---|---|---|
-| target | `to` | go to a target; its kind says what moves |
-| hand relative | `hand` + `by` or `at` | move hands relative to now, or to a pose in the base frame |
-| object relative | `object` + `by` or `at` | move the held object (`held`, or a placed object's name) relative to now |
-| base straight | `base: {by: [forward, left]}` | drive straight, metres |
-| elbow | `elbow` | swing the elbows to a side, the hands stay |
-| joints | `joints` | joint group values, as in a target |
+| navigate to | `navigate` | a base target (`to`, planned path) |
+| move straight | `straight` | `base: {by: [forward, left]}` (metres), a base target with `motion: {mode: straight}` |
+| move to target | `hand` | a hand target or an object target (`to`); `hand` + `by` or `at` (relative to now, or a pose in the base frame) |
+| change posture | `posture` | `elbow`: swing the elbows to a side, the hands stay |
+| move to joint positions | `joints` | a joint target (`to`), `joints` (group values, as in a target) |
 
-Which options apply depends on the kind of motion. A step with an option that does not apply is rejected before it runs
-(`move base: option hands does not apply`). `taskweave check --missions` finds it offline.
+**Carrying.** A hand move whose hands hold something moves the held object with them; a two-hand hold moves as one
+(`hand: left, by` with both hands on a frame moves the frame), and the result says so (`data.carrying: <instance>`, the
+message "move to target · carrying frame_1 · ..."). `hand: holding` names the hands that hold: `{hand: holding, by / at}`
+moves the held object relative to now (`object: <instance>` picks one when several are held; `hands` checks the hands
+of the hold). An object target is where the held object goes: it needs a hold. A hand target, or a relative move that
+names a holding hand, takes the hand there and the object with its grasp; that is allowed only when the held object's
+type has a collision shape (`collision:` in `objects/<type>.yaml`), else the step is `REJECTED` with that reason.
+Cells of schema 4 wrote `{object: held, by / at}` for `{hand: holding, by / at}`: such a cell still runs it,
+`taskweave check` notes it, and `taskweave config migrate <cell>` rewrites it (a schema 5 cell rejects it).
 
-| Option | base | straight | hand | object | elbow | joints |
+Which options apply depends on the form. A step with an option that does not apply is rejected before it runs
+(`navigate to: option hands does not apply`). `taskweave check --missions` finds it offline. The carry column is the
+hand moves of a held object (object targets, `hand: holding`):
+
+| Option | navigate | straight | hand | carry | posture | joints |
 |---|---|---|---|---|---|---|
 | `hands` | - | - | yes | `auto`, `all` | yes | - |
 | `offset_m` | - | - | yes | yes | - | - |
@@ -231,7 +242,7 @@ stands, and `taskweave_skills/test/test_docs_examples.py` validates every exampl
 
 | File | Holds |
 |---|---|
-| `pack.yaml` | name, version, `schema_version: 4` |
+| `pack.yaml` | name, version, `schema_version: 5` |
 | `cell/targets.yaml`, `cell/objects.yaml` | base targets `home`, `staging`; placed objects: `part_stack_1`, `part_stack_2` (stacks of `part`), `bin_1`, `fixture_1` |
 | `objects/part.yaml` | hand target `grasp` (both hands, and `alone` for one), object target `base` |
 | `objects/bin.yaml` | hand target `grasp` (left hand), object targets `seat` (where a part sits) and `base` |
@@ -282,7 +293,7 @@ steps:
     args: {hands: all, action: close}
   - instruction: Lift the part 20 cm
     skill: move
-    args: {object: held, by: [0, 0, 0.2], torso: keep}
+    args: {hand: holding, by: [0, 0, 0.2], torso: keep}
   - instruction: Into the carry pose
     skill: move
     args: {to: carry, torso: keep}
@@ -335,7 +346,7 @@ steps:
     args: {hands: [left], action: close}
   - instruction: Pull 8 cm towards the robot
     skill: move
-    args: {object: held, by: [-0.08, 0, 0], motion: {speed: 0.3}, torso: keep}
+    args: {hand: holding, by: [-0.08, 0, 0], motion: {speed: 0.3}, torso: keep}
   - instruction: Let go
     skill: grip
     args: {hands: [left], action: open}
@@ -436,7 +447,7 @@ steps:
     args: {hands: [left], action: close}
   - instruction: Lift the bin 20 cm
     skill: move
-    args: {object: held, by: [0, 0, 0.2], hands: [left], torso: keep}
+    args: {hand: holding, by: [0, 0, 0.2], hands: [left], torso: keep}
   - instruction: Bin into the carry pose
     skill: move
     args: {to: carry, hands: [left], torso: keep}

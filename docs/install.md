@@ -149,6 +149,10 @@ From 0.3, schema 4: locations, stances, object points, poses and held poses are 
 the skill `move`: [migration_targets.md](migration_targets.md). Update taskweave and restart the stack **before**
 migrating a live cell: a running 0.2 rejects the new keys.
 
+Schema 5: the move commands of the operator (five kinds: navigate, straight, hand, posture, joints): `{object: held,
+by / at}` steps become `{hand: holding, ...}`, `skills/move/base.yaml` and `object.yaml` become `navigate.yaml` and
+`carry.yaml`. A cell of schema 4 still runs; deploy the new taskweave first, then migrate.
+
 Keep the pack in git so that you can review the diff. `taskweave config slim` turns whole-file overrides of robot
 pack files into per-key overrides. See [pack_switchover.md](pack_switchover.md) for moving from a plain config
 directory to cell pack + robot packs.

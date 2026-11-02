@@ -32,6 +32,10 @@ What each kind of target moves, and where the examples are:
 "Format only" means the files accept it and `taskweave check` validates it, but `move` answers `REJECTED` until it is
 built.
 
+A target's `moves` says what moves; the command of the step (`data.kind`, [missions.md](missions.md#the-move-skill)) is
+`navigate` for a base target (`straight` with `motion.mode: straight`), `hand` for a hand target and an object target
+(an object target moves what the hands hold: a hand move of a held object), `joints` for a joint target.
+
 ## The shape of a target
 
 ```yaml

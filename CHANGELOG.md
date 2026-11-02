@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **move from the operator's view: five commands, cell schema 5.** A move step's kind (`data.kind`, the plan's
+  `Step.kind`, smoke keys `move.<kind>`) is one of `navigate`, `straight`, `hand`, `posture`, `joints` (labels "navigate
+  to", "move straight", "move to target", "change posture", "move to joint positions": `targets.MOVE_LABELS`; result
+  messages start with them, "move to target · carrying frame_1 · hook ..."). Was: `base` -> `navigate`, `object` ->
+  `hand`, `elbow` (option table) -> `posture`. The held-object moves are hand moves done by the part `move.carry`
+  (`skills/move/carry.yaml`, was `object.yaml`); `move.base` is `move.navigate` (`navigate.yaml`); a carry adds
+  `data.carrying` (the held instance). The option table (`MOVE_OPTIONS`, `MOTION_OPTIONS`, `MOTION_MODES`,
+  `RELATIVE_KEYS`) is keyed `navigate, straight, hand, carry, posture, joints`.
+- **Carrying:** `hand: holding` names the holding hands: `{hand: holding, by / at}` is the old `{object: held, by / at}`
+  (`hands` may go with it, as before). A hand move whose hand holds (a hand target, or `hand: <hand>` with by / at) now
+  carries the held object, a two-hand hold as one, instead of REJECTED; allowed only when the held type has a collision
+  shape (`objects/<type>.yaml` `collision:`), else REJECTED naming the file. Object targets need a hold, as before.
+- **Cell schema 5, `taskweave config migrate` 4 -> 5** (`config/migrate_kinds.py`): mission and operator steps
+  `{object: <held | instance>, by / at}` -> `{hand: holding, ..., object: <instance>}` (comments and flow style kept),
+  `skills/move/base.yaml` -> `navigate.yaml`, `object.yaml` -> `carry.yaml`, robot `skill_overrides.yaml` keys and
+  smoke references (`tests/*.reference.yaml`) follow. Schema 4 stays readable: the old part files are read while the
+  new ones are missing, the old step form runs and `taskweave check` notes it (an error on schema 5). Smoke compares
+  old ids of a reference as the new kinds (`move.base` = `move.navigate`, `move.object` = `move.hand`).
+- HMI: the editor's option table and the plan graph lanes read the old ids (`base`, `object`, `elbow`) until the HMI
+  takes the five kinds.
 - **Cell packs of schema 3 and robot packs of schema 1 are no longer read at run time.** `CELL_SCHEMA_OLDEST` is 4 and
   `ROBOT_SCHEMA_OLDEST` is 2: loading an older pack says `run taskweave config migrate <dir>`. `taskweave config
   migrate` still takes a cell pack of schema 1, 2 or 3 (and robot packs of schema 1) up to the current schema, offline.
