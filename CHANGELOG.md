@@ -17,6 +17,12 @@
   `stances`, `object_points`, `joint_poses`, `held_poses`. `ConfigStore.targets_format()` stays and is always True.
 - `tools/dump_targets.py` is migration-only: it reads an unmigrated cell with its own `OldLayoutStore`.
 - The classes of the old motion skills stay as the parts of `move`; the smoke aliases for old skill names stay.
+- **First mission start after a restart (F19):** `taskweave_version()` scanned all installed distributions on every
+  call, and every robot file lookup calls it: seconds to minutes at the first start. A found version is now kept per
+  process; a distribution that cannot be read is skipped.
+- **Status while a plan is prepared:** `running` with goal, plan id, step count and `step_status` `planning` (no step,
+  no new state value). A second start meanwhile is refused; an abort or pause meanwhile is kept and applied when the
+  executive starts. An exception while the plan is prepared ends the mission FAILED.
 
 ## 0.3.1 — 2026-10-22
 

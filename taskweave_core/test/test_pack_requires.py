@@ -121,3 +121,64 @@ def test_a_folder_that_is_no_cell_says_so(tmp_path):
     (tmp_path / 'scripts').mkdir()
     with pytest.raises(ConfigError, match='no cell pack here'):
         ConfigStore(tmp_path)
+
+
+def installed_copy(monkeypatch, versions=('0.3.0',), broken=()):
+    """The real packs module with no package.xml (an installed copy) and these distributions installed; returns the
+    module and the list of metadata scans made."""
+    import importlib
+    from types import SimpleNamespace
+
+    real = importlib.reload(packs)   # the fixture replaced taskweave_version; also forgets a kept version
+    here = Path(real.__file__).resolve()
+    monkeypatch.setattr(Path, 'is_file', lambda self: False if self.name == 'package.xml' else Path.exists(self))
+
+    def odd(_):
+        raise OSError('broken egg-link')
+
+    dists = [SimpleNamespace(metadata={'Name': 'odd'}, version='9', locate_file=odd) for _ in broken]
+    dists += [SimpleNamespace(metadata={'Name': 'taskweave_core'}, version=v, locate_file=lambda _: here.parents[3])
+              for v in versions]
+    scans = []
+    monkeypatch.setattr('importlib.metadata.distributions', lambda: scans.append(1) or dists)
+    return real, scans
+
+
+def test_the_metadata_is_scanned_once_per_process_however_many_robot_files_are_read(tmp_path, monkeypatch):
+    """Every robot file lookup checks the robot pack's requires, which asks for the version: the first mission start
+    after a restart read hundreds of files and scanned the metadata of every installed distribution each time."""
+    real, scans = installed_copy(monkeypatch)
+    pack = tmp_path / ROBOT
+    pack.mkdir()
+    (pack / 'pack.yaml').write_text(f'name: {ROBOT}\nversion: 0.1.0\nschema_version: {real.ROBOT_SCHEMA}\n'
+                                    'requires:\n  taskweave: ">=0.3"\n')
+    location = real.Location(tmp_path, 'env', True)
+    for _ in range(50):
+        assert real.robot_pack(location, ROBOT) is not None
+    assert len(scans) == 1
+
+
+def test_a_distribution_that_cannot_be_tested_is_skipped(monkeypatch):
+    """One odd distribution on the path (a broken egg-link) must not make the version 'unknown': the robot packs'
+    requires check would then stop the launch."""
+    real, _ = installed_copy(monkeypatch, versions=('0.2.0', '0.3.0'), broken=(1, 2))
+    assert real.taskweave_version() == '0.3.0'
+
+
+def test_an_unknown_version_is_not_kept(monkeypatch):
+    """A metadata read that fails once must not make every later requires check fail until the next restart."""
+    real, _ = installed_copy(monkeypatch)
+    import importlib.metadata
+
+    good = importlib.metadata.distributions
+
+    def failing_then_fine():
+        monkeypatch.setattr('importlib.metadata.distributions', good)
+        raise OSError('metadata unreadable')
+
+    monkeypatch.setattr('importlib.metadata.distributions', failing_then_fine)
+    monkeypatch.setattr('importlib.metadata.version', failing_then_fine)
+    assert real.taskweave_version() == 'unknown'
+    assert real.taskweave_version() == '0.3.0'
+    monkeypatch.setattr('importlib.metadata.distributions', failing_then_fine)   # now kept: no second scan
+    assert real.taskweave_version() == '0.3.0'

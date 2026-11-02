@@ -17,7 +17,6 @@ When a fact finds nothing (every matching stack is empty), the mission is comple
 from __future__ import annotations
 
 import fnmatch
-import itertools
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from typing import Any
@@ -30,6 +29,11 @@ class Planner(ABC):
     @abstractmethod
     def make_plan(self, world: Mapping[str, Any], cycle: int) -> Plan | None:
         """Plan for the given cycle (1-based), or None when the goal is complete."""
+
+    def preview(self, cycle: int) -> tuple[str, int, str] | None:
+        """``(plan id, step count, goal)`` the plan of ``cycle`` will have, known before it is made (the status shows
+        it while the plan is prepared); None if the planner cannot tell."""
+        return None
 
     def replan(self, plan: Plan, failed_index: int, reason: str, world: Mapping[str, Any]) -> tuple[Plan, int] | None:
         """After a failure: a plan and the step index to continue from, or None if replanning is not possible."""
@@ -45,7 +49,7 @@ class MissionFilePlanner(Planner):
         if self.mission.get('params'):
             raise ConfigError(store.root / f'missions/{mission}.yaml', 'takes parameters '
                               f'({", ".join(self.mission["params"])}): a block for other missions to include, not run')
-        self._ids = itertools.count(1)
+        self._last_id = 0
 
     def make_plan(self, world: Mapping[str, Any], cycle: int) -> Plan | None:
         loop = self.mission.get('loop', 'once')
@@ -60,7 +64,15 @@ class MissionFilePlanner(Planner):
         if any(value is None for value in facts.values()):
             return None  # e.g. nothing left to pick
         mission = {**self.mission, 'steps': [_fill(step, facts) for step in self.mission['steps']]}
-        return Plan.from_mission(mission, f'{self.mission_name}-{next(self._ids):04d}', self.goal, self.robot)
+        self._last_id += 1
+        return Plan.from_mission(mission, self._plan_id(self._last_id), self.goal, self.robot)
+
+    def _plan_id(self, number: int) -> str:
+        return f'{self.mission_name}-{number:04d}'
+
+    def preview(self, cycle: int) -> tuple[str, int, str] | None:
+        # facts fill steps in, never add or remove one
+        return self._plan_id(self._last_id + 1), len(self.mission['steps']), self.goal or self.mission['goal']
 
     def facts(self) -> dict[str, Any]:
         """The mission's facts now: {name: value, or None if nothing fits}."""
