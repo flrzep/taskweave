@@ -17,7 +17,7 @@ pytest.importorskip('moveit_msgs')
 
 from geometry_msgs.msg import TransformStamped  # noqa: E402
 from moveit_msgs.msg import CollisionObject  # noqa: E402
-from moveit_msgs.srv import ApplyPlanningScene, GetPositionIK  # noqa: E402
+from moveit_msgs.srv import ApplyPlanningScene, GetPlanningScene, GetPositionIK  # noqa: E402
 from rclpy.node import Node  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from rclpy.qos import DurabilityPolicy, QoSProfile  # noqa: E402
@@ -98,17 +98,32 @@ class FakeIk(Node):
 
 
 class FakeScene(Node):
-    """/apply_planning_scene: keeps every diff it gets; ``success`` is its answer."""
+    """/apply_planning_scene: keeps every diff it gets; ``success`` is its answer. /get_planning_scene: the attached
+    objects of the diffs it applied (``forget()``: a respawned move_group, the scene starts empty)."""
 
     def __init__(self):
         super().__init__('fake_scene')
-        self.requests, self.success = [], True
+        self.requests, self.success, self.objects = [], True, {}
         self.service = self.create_service(ApplyPlanningScene, '/apply_planning_scene', self.apply)
+        self.get = self.create_service(GetPlanningScene, '/get_planning_scene', self.read)
 
     def apply(self, request, response):
         self.requests.append(request.scene)
         response.success = self.success
+        if self.success:
+            for item in request.scene.robot_state.attached_collision_objects:
+                if item.object.operation == CollisionObject.REMOVE:
+                    self.objects.pop(item.object.id, None)
+                else:
+                    self.objects[item.object.id] = item
         return response
+
+    def read(self, request, response):
+        response.scene.robot_state.attached_collision_objects = list(self.objects.values())
+        return response
+
+    def forget(self):
+        self.objects.clear()
 
     def attached(self):
         """[(operation, link, object id, touch links)] of every attached-object change received so far."""

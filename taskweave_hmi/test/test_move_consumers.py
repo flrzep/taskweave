@@ -130,8 +130,9 @@ def test_the_catalog_tells_the_editor_which_options_each_kind_of_move_takes():
     catalog = [{'name': 'move', 'args_schema': move_catalog()['move']}, {'name': 'wait', 'args_schema': {}}]
     annotated = targets.annotate_catalog(catalog)
     info = annotated[0]['args_schema']['x-taskweave-move']
-    assert info['options']['offset_m'] == ['hand', 'carry'] and info['options']['tolerance_deg'] == ['posture']
-    assert info['motion']['via'] == ['hand', 'joints'] and info['modes']['navigate'] == ['nav']
+    assert info['options']['offset_m'] == ['hand', 'carry', 'object']           # old ids answer until M3
+    assert info['options']['tolerance_deg'] == ['posture', 'elbow']
+    assert info['motion']['via'] == ['hand', 'joints'] and info['modes']['base'] == info['modes']['navigate'] == ['nav']
     assert info['forms']['to'] is None and info['forms']['base'] == ['straight']
     assert info['not_relative'] == ['offset_m', 'reference']
     assert set(info['hidden']) == {'dry_run', 'look_at'} and info['relative']['object'] == ['by', 'at', 'turn_deg',

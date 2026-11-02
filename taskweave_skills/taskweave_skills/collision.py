@@ -6,8 +6,12 @@ touch links (that may touch the object) are the grippers' ``links`` of the holdi
 else their tool frame link. An object type without ``collision`` sends nothing. A scene call that fails (no service,
 no answer, refused) only logs a warning: a grip never fails because of it.
 
-Profile ``planning`` keys: ``scene_service`` (default /apply_planning_scene), ``scene_timeout_s`` (default 2.0, the
-longest a scene call may take).
+``in_scene`` says whether a held object's shapes are attached in the scene now: attached at the grip, and still among
+the scene's attached objects (/get_planning_scene; a respawned move_group has lost them). ``move`` asks it before a
+hand of a hold moves to a hand target or relative to now.
+
+Profile ``planning`` keys: ``scene_service`` (default /apply_planning_scene), ``scene_get_service`` (default
+/get_planning_scene), ``scene_timeout_s`` (default 2.0, the longest a scene call may take).
 """
 
 from __future__ import annotations
@@ -21,7 +25,8 @@ from taskweave_core.node_cache import for_node
 from .ik import quaternion, rpy_matrix
 
 POLL_S = 0.02   # wait for a scene answer in steps of this
-DEFAULTS = {'scene_service': '/apply_planning_scene', 'scene_timeout_s': 2.0}
+DEFAULTS = {'scene_service': '/apply_planning_scene', 'scene_get_service': '/get_planning_scene',
+            'scene_timeout_s': 2.0}
 
 
 def shapes_of(collision) -> list[dict]:
@@ -59,7 +64,9 @@ class HoldCollision:
         self.node, self.robot, self.hold = node, robot, hold
         spec = {**DEFAULTS, **(robot.data.get('planning') or {})}
         self.service, self.timeout = spec['scene_service'], float(spec['scene_timeout_s'])
+        self.get_service = spec['scene_get_service']
         self.client = None                   # made at the first call: a robot without collision shapes never needs it
+        self.get_client = None
         self.attached: dict[str, str] = {}   # object -> link it hangs on
         self.shapes: dict[str, list[dict]] = {}   # object -> its shapes (the object may be gone from the cell by now)
         hold.on_reset.append(self.detach_all)
@@ -103,6 +110,28 @@ class HoldCollision:
         for name in list(self.attached):
             self.detach(name)
 
+    def in_scene(self, name: str) -> str | None:
+        """None if the shapes of held object ``name`` are attached in the planning scene now, else why not."""
+        if name not in self.attached:
+            return 'its shape was not attached at the grip'
+        from moveit_msgs.msg import PlanningSceneComponents
+        from moveit_msgs.srv import GetPlanningScene
+        try:
+            if self.get_client is None:
+                from rclpy.callback_groups import ReentrantCallbackGroup
+                self.get_client = self.node.create_client(GetPlanningScene, self.get_service,
+                                                          callback_group=ReentrantCallbackGroup())
+            request = GetPlanningScene.Request()
+            request.components.components = PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS
+            answer, why = self._call(self.get_client, self.get_service, request)
+        except Exception as error:  # noqa: BLE001 - a scene that cannot be read is not known to hold the shape
+            answer, why = None, str(error)
+        if answer is None:
+            return f'cannot read the planning scene: {why}'
+        if name not in {a.object.id for a in answer.scene.robot_state.attached_collision_objects}:
+            return 'the planning scene has lost it (move_group restarted?)'
+        return None
+
     # ---- messages -----------------------------------------------------------------
     @staticmethod
     def _attached(name, link, shapes, object_in_link, touch_links):
@@ -145,24 +174,30 @@ class HoldCollision:
                 from rclpy.callback_groups import ReentrantCallbackGroup
                 self.client = self.node.create_client(ApplyPlanningScene, self.service,
                                                       callback_group=ReentrantCallbackGroup())
-            if not self.client.wait_for_service(timeout_sec=self.timeout):
-                self._warn(f'cannot {what} in the planning scene: no service {self.service}')
+            answer, why = self._call(self.client, self.service, ApplyPlanningScene.Request(scene=scene))
+            if answer is None:
+                self._warn(f'cannot {what} in the planning scene: {why}')
                 return False
-            future = self.client.call_async(ApplyPlanningScene.Request(scene=scene))
-            deadline = time.monotonic() + self.timeout
-            while not future.done() and time.monotonic() < deadline:   # the executor's other threads run the reply
-                time.sleep(POLL_S)
-            if not future.done():
-                future.cancel()
-                self._warn(f'cannot {what} in the planning scene: no answer from {self.service} in {self.timeout:g} s')
-                return False
-            if not future.result().success:
+            if not answer.success:
                 self._warn(f'cannot {what} in the planning scene: {self.service} refused it')
                 return False
             return True
         except Exception as error:  # noqa: BLE001 - never fail a grip over the scene
             self._warn(f'cannot {what} in the planning scene: {error}')
             return False
+
+    def _call(self, client, service: str, request):
+        """(answer, None), or (None, why) when the service is missing or does not answer within the timeout."""
+        if not client.wait_for_service(timeout_sec=self.timeout):
+            return None, f'no service {service}'
+        future = client.call_async(request)
+        deadline = time.monotonic() + self.timeout
+        while not future.done() and time.monotonic() < deadline:   # the executor's other threads run the reply
+            time.sleep(POLL_S)
+        if not future.done():
+            future.cancel()
+            return None, f'no answer from {service} in {self.timeout:g} s'
+        return future.result(), None
 
     def _warn(self, text: str) -> None:
         self.node.get_logger().warning(text)

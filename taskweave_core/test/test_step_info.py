@@ -9,8 +9,8 @@ import pytest
 
 from taskweave_core.config import ConfigStore
 from taskweave_core.plan import Plan, Step
-from taskweave_core.step_info import move_problems, resolve_form, step_info
-from taskweave_core.validation import check_point, plan_step_info, validate_args, validate_plan
+from taskweave_core.step_info import move_notes, move_problems, resolve_form, step_info
+from taskweave_core.validation import check_point, plan_notes, plan_step_info, validate_args, validate_plan
 
 FIXTURES = Path(__file__).parent / 'fixtures'
 ROBOT = 'bot_two_arm'
@@ -121,11 +121,20 @@ def test_a_plan_of_move_steps(store):
 def test_the_held_object_form_of_schema_4_runs_on_schema_4_and_names_the_migration_on_schema_5(store):
     old = {'object': 'held', 'by': [0, 0, 0.1], 'hands': 'all'}
     assert move_problems(old, store, ROBOT) == []                       # targets_new is a cell of schema 4
+    [(path, note)] = move_notes(old, store)                             # ... where it runs, with a note
+    assert path == ['args', 'object'] and 'taskweave config migrate' in note
+    plan = Plan('p', 'g', ROBOT, [Step('lift', 'Lift', 'move', old), Step('w', 'Wait', 'wait', {})])
+    assert validate_plan(plan, {'move': SCHEMA, 'wait': {'type': 'object'}}, store) == []
+    assert plan.steps[0].notes == [f'args.object: {note}'] and plan.steps[1].notes == []
+    assert plan_notes(plan, store) == [f"step 'lift' (move): args.object: {note}"]
+    assert move_notes({'hand': 'holding', 'by': [0, 0, 0.1]}, store) == []
+    assert move_notes({'object': 'held'}, store) == []                  # no by / at: not the old form
     assert move_problems({'hand': 'holding', 'by': [0, 0, 0.1], 'hands': 'all'}, store, ROBOT) == []
     pack = store.root / 'pack.yaml'
     pack.write_text(pack.read_text().replace('schema_version: 4', 'schema_version: 5'))
     [(path, text)] = move_problems(old, ConfigStore(store.root), ROBOT)
     assert path == ['args', 'object'] and '{hand: holding, by / at}' in text and 'taskweave config migrate' in text
+    assert move_notes(old, ConfigStore(store.root)) == []               # schema 5: a problem, no note
     [(_, text)] = move_problems({'object': 'karakuri_hanger', 'at': [0, 0, 1]}, ConfigStore(store.root), ROBOT)
     assert 'object: karakuri_hanger' in text
     assert move_problems({'hand': 'holding', 'by': [0, 0, 0.1], 'object': 'x'}, ConfigStore(store.root), ROBOT) == []

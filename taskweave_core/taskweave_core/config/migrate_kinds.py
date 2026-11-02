@@ -98,6 +98,11 @@ def migrate_part_files(plan: Plan, say) -> None:
 
 def migrate_skill_overrides(plan: Plan, say) -> None:
     for path in sorted((plan.cell / 'robots').glob('*/skill_overrides.yaml')):
+        folder = path.parent
+        if folder.is_symlink() or not path.resolve().is_relative_to(plan.cell.resolve()):
+            _flag(plan, say, f'{plan.rel(folder)} is a link out of the cell pack: its skill_overrides.yaml was not '
+                             'touched (the old keys keep working); migrate it where it lives')
+            continue
         document, handler = _read(path)
         if not isinstance(document, Mapping):
             continue

@@ -149,7 +149,8 @@ def test_a_dry_run_of_an_object_move_solves_the_hands_and_moves_nothing(system):
 # ---- carrying: a hand move of a holding hand ----------------------------------------------------------------------
 
 def give_shape(system):
-    """The box type gets a collision shape (objects/box.yaml ``collision:``): a holding hand may move then."""
+    """The box type gets a collision shape (objects/box.yaml ``collision:``): the grip attaches it in the planning
+    scene, and a holding hand may move then."""
     path = system.config / 'objects' / 'box.yaml'
     path.write_text(path.read_text() + 'collision: {box: [0.4, 0.3, 0.2]}\n')
 
@@ -172,12 +173,10 @@ def moved_by(system, before: dict, hand: str, dx: float, dz: float) -> None:
 
 
 def test_a_relative_move_of_one_hand_of_a_two_hand_hold_moves_the_hold(system):
+    give_shape(system)
     hold_box(system)
     before = settle(system)
     origin = system.hold.held()['object_in_base'][:3, 3].copy()
-    result, _ = go(system, {'hand': 'left', 'by': [0.0, 0.0, 0.05]}, REJECTED)       # no collision shape yet
-    assert 'objects/box.yaml has no collision:' in result.message
-    give_shape(system)
     result, data = go(system, {'hand': 'left', 'by': [0.0, 0.0, 0.05]})
     assert data['kind'] == 'hand' and data['module'] == 'move.carry' and data['carrying'] == 'crate_1'
     assert data['hands'] == ['left', 'right']
@@ -197,8 +196,8 @@ def test_a_relative_move_of_one_hand_of_a_two_hand_hold_moves_the_hold(system):
 
 
 def test_a_one_hand_hold_moves_with_its_hand_and_the_free_hand_stays(system):
-    hold_box(system, ['left'])
     give_shape(system)
+    hold_box(system, ['left'])
     before = settle(system)
     right = {k: v for k, v in system.sim.position.items() if k.startswith('right')}
     _, data = go(system, {'hand': 'left', 'by': [0.1, 0.0, 0.0]})
@@ -212,8 +211,8 @@ def test_a_one_hand_hold_moves_with_its_hand_and_the_free_hand_stays(system):
 
 
 def test_a_hand_target_while_holding_takes_the_held_object_where_the_hands_go(system):
-    hold_box(system)
     give_shape(system)
+    hold_box(system)
     pile = system.server.config.object_instances()['pile_1']
     result, data = go(system, {'to': 'pile_1/rim'})          # the hands to pile_1's rim, crate_1 in them
     assert data['kind'] == 'hand' and data['module'] == 'move.carry' and data['target'] == 'pile_1/rim'
@@ -226,6 +225,46 @@ def test_a_hand_target_while_holding_takes_the_held_object_where_the_hands_go(sy
     assert data['dry_run'] is True and data['carrying'] == 'crate_1'
     result, _ = go(system, {'to': 'present_both'}, REJECTED)                  # a joints part: not while holding
     assert 'do not apply while the hands hold something' in result.message
+    targets = system.config / 'robots' / 'duo_bot' / 'targets.yaml'
+    targets.write_text(targets.read_text() + 'wide: {moves: hand, left_tool: {xyz: [0.6, 0.4, 0.5], rpy: [0.0, '
+                       '3.14159265, 0.0]}, right_tool: {xyz: [0.6, -0.4, 0.5], rpy: [0.0, 3.14159265, 0.0]}}\n')
+    before = dict(system.sim.position)
+    result, _ = go(system, {'to': 'wide'}, REJECTED)          # the hands 0.8 m apart: the frame would be torn apart
+    assert 'would put crate_1' in result.message and 'grip_drift_m' in result.message
+    result, _ = go(system, {'to': 'crate_1/rim', 'offset_m': 0.1}, REJECTED)    # its own grasp, e.g. a re-run step
+    assert result.message == ('move to target: the hands hold crate_1: a hand target on it cannot be reached while '
+                              'holding it; open the gripper first')
+    assert system.sim.position == before
+
+
+def test_the_new_carry_path_needs_the_shape_in_the_planning_scene(system):
+    hold_box(system)                                     # no collision shape: nothing attached at the grip
+    result, _ = go(system, {'hand': 'left', 'by': [0.0, 0.0, 0.05]}, REJECTED)
+    assert 'objects/box.yaml has no collision:' in result.message
+    give_shape(system)                                   # a shape now, but the grip did not attach one
+    result, _ = go(system, {'hand': 'left', 'by': [0.0, 0.0, 0.05]}, REJECTED)
+    assert "the held object's shape is not in the planning scene (its shape was not attached at the grip)" in (
+        result.message)
+    go(system, {'hand': 'holding', 'by': [0.0, 0.0, 0.05]})            # the old object move needs no shape
+
+
+def test_a_failed_attach_refuses_the_new_carry_path(system):
+    give_shape(system)
+    system.scene.success = False                         # MoveIt refuses the attach: the grip carries on
+    hold_box(system)
+    result, _ = go(system, {'to': 'pile_1/rim'}, REJECTED)
+    assert 'not in the planning scene (its shape was not attached at the grip)' in result.message
+
+
+def test_a_scene_that_lost_the_shape_refuses_the_new_carry_path(system):
+    give_shape(system)
+    hold_box(system)                                     # attached at the grip
+    go(system, {'hand': 'left', 'by': [0.0, 0.0, 0.02]})
+    system.scene.forget()                                # move_group restarted: the scene lost the shape
+    result, _ = go(system, {'hand': 'left', 'by': [0.0, 0.0, 0.02]}, REJECTED)
+    assert 'the planning scene has lost it (move_group restarted?)' in result.message
+    _, data = go(system, {'to': 'carry'})                # an object target: as before, no scene check
+    assert data['carrying'] == 'crate_1'
 
 
 # ---- posture ----------------------------------------------------------------------------------------------------

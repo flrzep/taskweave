@@ -26,7 +26,7 @@ from .config.migrate_move import replaced_by_move_message
 from .config.migrate_skills import removed_skill_message
 from .embodiment import check_grasp
 from .plan import Plan
-from .step_info import MOVE_SKILL, move_problems, step_info
+from .step_info import MOVE_SKILL, move_notes, move_problems, step_info
 
 POINT_KEYWORD = 'x-taskweave-point'
 KINDS_KEYWORD = 'x-taskweave-target-kinds'
@@ -111,6 +111,8 @@ def _plan_problems(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) 
         if step.skill == MOVE_SKILL:
             for path, message in move_problems(step.args, store, plan.robot):
                 add(message, here + path, label=f'{".".join(str(part) for part in path)}: ')
+            step.notes = [f'{".".join(str(part) for part in path)}: {message}'
+                          for path, message in move_notes(step.args, store)]
         if isinstance(step.args.get('place_as'), str):
             put_down.add(step.args['place_as'])
     return problems
@@ -123,6 +125,14 @@ def step_kind_resources(step, catalog: Mapping[str, dict], store: ConfigStore,
         return step_info(step.skill, step.args, catalog.get(step.skill), store, robot)
     except (KeyError, ConfigError, ValueError):
         return None, list((catalog.get(step.skill) or {}).get('x-taskweave-resources') or [])
+
+
+def plan_notes(plan: Plan, store: ConfigStore) -> list[str]:
+    """What the plan's steps are noted for without stopping it (e.g. the move form of cell schema 4), one line each
+    with the step: the task handler logs them at the start, ``taskweave check --missions`` prints them."""
+    return [f'step {step.id!r} ({step.skill}): {note}' for step in plan.steps if step.skill == MOVE_SKILL
+            for path, message in move_notes(step.args, store)
+            for note in [f'{".".join(str(part) for part in path)}: {message}']]
 
 
 def plan_step_info(plan: Plan, catalog: Mapping[str, dict], store: ConfigStore) -> list[dict]:

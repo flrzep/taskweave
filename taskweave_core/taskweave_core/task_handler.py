@@ -50,7 +50,7 @@ from .plan import Plan, Step
 from .planner import MissionFilePlanner
 from .skill_server import spin
 from .speed import MAX_PERCENT, MIN_PERCENT, OverrideState
-from .validation import step_kind_resources, validate_plan
+from .validation import plan_notes, step_kind_resources, validate_plan
 from .world_state import WorldState
 
 CATALOG_TIMEOUT_S = 2.0
@@ -250,7 +250,10 @@ class TaskHandler(Node):
         if plan.robot != self.robot:
             problems.append(f'plan is for robot {plan.robot!r}, this handler drives {self.robot!r}')
         schemas = {name: json.loads(info.args_schema_json or '{}') for name, info in self.catalog.items()}
-        return problems + validate_plan(plan, schemas, self.config)
+        problems += validate_plan(plan, schemas, self.config)
+        for note in plan_notes(plan, self.config):
+            self.get_logger().warning(f'plan {plan.plan_id}: {note}')
+        return problems
 
     def _annotate(self, step: Step) -> tuple[str | None, list[str]]:
         """Kind and resources of a step whose placeholders are filled in (validate_plan did the rest of the plan)."""

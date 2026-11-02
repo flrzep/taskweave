@@ -43,8 +43,9 @@ MIGRATE = 'taskweave config migrate'
 
 
 def old_object_form(args: Mapping) -> bool:
-    """The relative move of a held object as cell schema 4 wrote it: ``object`` with by / at, no ``to``, no ``hand``."""
-    return 'object' in args and 'to' not in args and 'hand' not in args
+    """The relative move of a held object as cell schema 4 wrote it: ``object`` with by / at, no ``to``, no ``hand``
+    (what ``taskweave config migrate`` rewrites)."""
+    return 'object' in args and 'to' not in args and 'hand' not in args and ('by' in args or 'at' in args)
 
 
 def old_object_text(args: Mapping, cell: str = '<cell dir>') -> str:
@@ -90,6 +91,15 @@ def resolve_form(args: Mapping, store: ConfigStore, robot: str):
         if key in args:
             return form, None, None
     return None, None, None
+
+
+def move_notes(args: Mapping, store: ConfigStore) -> list[tuple[list, str]]:
+    """Notes on a move step that do not stop it, as ``(path in the args, message)``: the old object form on a cell of
+    schema 4 (it runs; ``taskweave config migrate`` rewrites it). On schema 5 the form is a problem
+    (``move_problems``)."""
+    if old_object_form(args) and packs.cell_schema(store.root) < OBJECT_FORM_SCHEMA:
+        return [(['args', 'object'], old_object_text(args, str(store.root)))]
+    return []
 
 
 def _speed_abs_problem(form: str, options: Mapping) -> str | None:

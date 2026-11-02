@@ -20,8 +20,15 @@
   smoke references (`tests/*.reference.yaml`) follow. Schema 4 stays readable: the old part files are read while the
   new ones are missing, the old step form runs and `taskweave check` notes it (an error on schema 5). Smoke compares
   old ids of a reference as the new kinds (`move.base` = `move.navigate`, `move.object` = `move.hand`).
-- HMI: the editor's option table and the plan graph lanes read the old ids (`base`, `object`, `elbow`) until the HMI
-  takes the five kinds.
+- The new carry path also needs the held shape in MoveIt's planning scene now (attached at the grip and still there:
+  `/get_planning_scene`, profile `planning.scene_get_service`), and a hand target on the held instance itself (its
+  grasp, a re-run approach) is REJECTED while it is held. Plan validation notes the schema 4 form (`Step.notes`,
+  `validation.plan_notes`: logged by the task handler at the start, printed by `taskweave check --missions`).
+- HMI until it reads the new ids (M3): the option tables (`MOVE_OPTIONS`, `MOTION_OPTIONS`, `MOTION_MODES`,
+  `TORSO_VALUES`, `RELATIVE_KEYS`, `TARGET_HANDS_NOT`) also answer the old ids `base`, `object`, `elbow`
+  (`targets.HMI_OLD_IDS`, inert for core); the plan graph puts `navigate` steps in its lane `other`.
+- Robot pack `skill_overrides.yaml` keys `move.base` / `move.object` keep working (read for move.navigate /
+  move.carry, no check warning); smoke takes the tighter of two spellings of one kind in a layer.
 - **Cell packs of schema 3 and robot packs of schema 1 are no longer read at run time.** `CELL_SCHEMA_OLDEST` is 4 and
   `ROBOT_SCHEMA_OLDEST` is 2: loading an older pack says `run taskweave config migrate <dir>`. `taskweave config
   migrate` still takes a cell pack of schema 1, 2 or 3 (and robot packs of schema 1) up to the current schema, offline.

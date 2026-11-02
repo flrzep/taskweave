@@ -144,7 +144,14 @@ message "move to target · carrying frame_1 · ..."). `hand: holding` names the 
 moves the held object relative to now (`object: <instance>` picks one when several are held; `hands` checks the hands
 of the hold). An object target is where the held object goes: it needs a hold. A hand target, or a relative move that
 names a holding hand, takes the hand there and the object with its grasp; that is allowed only when the held object's
-type has a collision shape (`collision:` in `objects/<type>.yaml`), else the step is `REJECTED` with that reason.
+type has a collision shape (`collision:` in `objects/<type>.yaml`) and that shape is attached in MoveIt's planning
+scene now (attached at the grip; a restarted move_group has lost it: grip again), else the step is `REJECTED` with
+the reason. A hand target on the held object itself (its grasp, an approach step run again) is `REJECTED` while it is
+held: open the gripper first. On this path a turn or tilt (`turn_deg`, `tilt_deg`, `rpy_deg`) of a two-hand hold
+turns about the first named hand's TCP (`hand: [right, left]` turns about the right hand); a hand target's own
+`approach_m` is not used (the carry goes straight to the pose on the carry part's `motion.mode`, default linear), and a
+step's `motion.via` / `motion.approach_m` or a target with joint values (a joints part, a torso height) is
+`REJECTED`.
 Cells of schema 4 wrote `{object: held, by / at}` for `{hand: holding, by / at}`: such a cell still runs it,
 `taskweave check` notes it, and `taskweave config migrate <cell>` rewrites it (a schema 5 cell rejects it).
 
@@ -504,7 +511,7 @@ that only the left hand holds.
 | `unknown target 'bin_9/pick': no object 'bin_9' in cell/objects.yaml, instances: ...` | The instance is not in `cell/objects.yaml` (or it was removed from the run-time state). |
 | `object 'part' has no target 'grap' (it has: ...)` / `robot 'R' has no 'pick' target for T objects (robots/R/objects/T.yaml)` | The type has no such target, or this robot has no stance for it: teach one (`taskweave teach base <instance>/pick`). |
 | `target 'set_down' is in cell/targets.yaml and robots/R/targets.yaml: rename one` | A plain name has two meanings. Rename one of them. |
-| `'waiting' moves the base: ...` / `move base: option hands does not apply` | The option or the form does not fit the kind of target (the table in [The `move` skill](#the-move-skill)). |
+| `'waiting' moves the base: ...` / `navigate to: option hands does not apply` | The option or the form does not fit the kind of target (the table in [The `move` skill](#the-move-skill)). |
 | `move hand: left holds frame_1: move the object (...), or open the gripper first` | A hand target for a hand that holds something. Move the held object, or `grip open`. |
 | `'carry' is a base-frame object target for frame_type2: a held frame_type2 is needed, nothing is held` | A carry pose for an object that is not held. `grip close` on it first. |
 | `move: look_at is not implemented yet: set head through joints` | `look_at` is reserved. Use `joints: {head: [...]}`. |

@@ -160,6 +160,28 @@ def test_a_second_run_changes_nothing_and_a_dry_run_changes_nothing(cell):
     assert tree(cell) == after and said[-1].startswith('wrote 0 file(s), remove 0')
 
 
+def test_a_robot_folder_linked_out_of_the_cell_is_not_touched(cell, tmp_path):
+    shared = tmp_path / 'shared' / ROBOT
+    shared.parent.mkdir()
+    (cell / 'robots' / ROBOT).rename(shared)
+    try:
+        os.symlink(shared, cell / 'robots' / ROBOT, target_is_directory=True)
+    except OSError:
+        pytest.skip('no symbolic links here')
+    before = (shared / 'skill_overrides.yaml').read_text()
+    code, lines = run(cell)
+    assert code == 0 and (shared / 'skill_overrides.yaml').read_text() == before
+    assert any(line.startswith('FLAG') and 'link out of the cell pack' in line for line in lines)
+
+
+def test_check_takes_the_old_override_keys_as_the_parts_they_were(cell):
+    run(cell)
+    path = cell / 'robots' / ROBOT / 'skill_overrides.yaml'
+    path.write_text('move.base: {motion: {speed: 0.5}}\nmove.bogus: {}\n')   # e.g. a robot pack not migrated
+    found = [p['message'] for p in ConfigStore(cell).check_pack() if p['path'].endswith('skill_overrides.yaml')]
+    assert len(found) == 1 and "'move.bogus' does not exist" in found[0]
+
+
 def test_an_existing_new_part_file_is_kept_and_flagged(cell):
     write(cell / 'skills' / 'move' / 'navigate.yaml', 'implementations: [{name: c, type: script, class: "x:Y"}]\n')
     code, lines = run(cell)

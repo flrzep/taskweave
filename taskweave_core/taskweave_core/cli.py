@@ -134,7 +134,7 @@ def check_missions(config_dir: str) -> int:
     placeholders open."""
     from .config import ConfigError, ConfigStore
     from .plan import IncludeError, Plan
-    from .validation import validate_plan
+    from .validation import plan_notes, validate_plan
 
     store = ConfigStore(config_dir)
     default = store.system().get('robot') or next(iter(store.robot_names()), '')
@@ -146,7 +146,10 @@ def check_missions(config_dir: str) -> int:
             robot = mission.get('robot') or default
             if robot not in catalogs:
                 catalogs[robot] = offline_catalog(store, robot)
-            problems = validate_plan(Plan.from_mission(mission, name, robot=robot), catalogs[robot], store)
+            plan = Plan.from_mission(mission, name, robot=robot)
+            problems = validate_plan(plan, catalogs[robot], store)
+            for note in plan_notes(plan, store):
+                print(f'  note  plan {name}: {note}')
         except (ConfigError, IncludeError, ValueError, KeyError) as error:
             problems = [str(error.args[0]) if isinstance(error, KeyError) and error.args else str(error)]
         failed += bool(problems)

@@ -89,7 +89,7 @@ def _schema() -> dict:
              **exclusive},
             {'title': 'Move a held object relative to now (cell schema 4; now hand: holding)',
              'required': ['object'], 'not': {'anyOf': [{'required': ['to']}, {'required': ['hand']}]},
-             'anyOf': either, **exclusive},
+             'anyOf': either, **exclusive, 'x-taskweave-deprecated': 'hand: holding (cell schema 5)'},
             {'title': 'Drive the base straight', 'required': ['base']},
             {'title': 'Elbow side', 'required': ['elbow']},
             {'title': 'Joint values', 'required': ['joints']},
@@ -379,7 +379,8 @@ class Move(Skill):
         if part in self.modules:
             return self.modules[part]
         reasons = '; '.join(self.unavailable.get(part, [])) or 'not configured'
-        return self._reject(f'this robot cannot do {part} moves: {reasons}')
+        what = {'carry': 'carry held objects', 'navigate': 'navigate'}.get(part, f'do {part} moves')
+        return self._reject(f'this robot cannot {what}: {reasons}')
 
     def _options(self, form: str, options: dict, extra: list, ref: str | None = None, kind: str | None = None,
                  allowed_extra=(), relative: bool = False):
@@ -561,10 +562,13 @@ class Move(Skill):
         module = next((self.modules[p] for p in ('carry', 'hand') if p in self.modules), None)
         return getattr(module, 'hold', None)
 
-    def _carrying(self, hands: list[str], form: str):
+    def _carrying(self, hands: list[str], form: str, target=None):
         """What a hand move of ``hands`` carries: None (no hand holds anything: a hand move), the hold (every hand
-        holds the same object: the whole hold moves) or a REJECTED result. The held object's type must have a collision
-        shape (``objects/<type>.yaml`` ``collision:``): a hand moved while holding is planned around it."""
+        holds the same object: the whole hold moves) or a REJECTED result. Refused: a hand ``target`` on the held
+        object itself (its grasp, a re-run approach: the hands cannot get there while holding it), a held type without
+        a collision shape (``objects/<type>.yaml`` ``collision:``), a shape that is not attached in MoveIt's planning
+        scene now (the attach at the grip failed, move_group restarted): a hand moved while holding is planned around
+        that shape."""
         registry = self._registry()
         holding = dict(registry.hand_holds) if registry is not None else {}
         busy = [hand for hand in hands if hand in holding]
@@ -579,6 +583,10 @@ class Move(Skill):
         if len(objects) > 1:
             return self._reject(f'{text}: name the hands of one held object', form)
         hold = next(h for h in registry.held_all() if h['object'] == objects[0])
+        instance = getattr(target, 'instance', None) if getattr(target, 'frame', None) == 'object' else None
+        if instance is not None and instance.name == hold['object']:
+            return self._reject(f'the hands hold {hold["object"]}: a hand target on it cannot be reached while holding '
+                                'it; open the gripper first', form)
         kind = registry.type_of(hold, self.config.object_instances())
         if kind is None:
             return self._reject(f'{text}: its type is unknown, so is its collision shape (a hand moves while holding '
@@ -587,7 +595,18 @@ class Move(Skill):
             return self._reject(f'{text}: a hand moves while holding only when the held object has a collision shape: '
                                 f'objects/{kind}.yaml has no collision: (add one, or move it with hand: holding or an '
                                 'object target)', form)
+        missing = self._scene_problem(hold)
+        if missing:
+            return self._reject(f'{text}: the held object\'s shape is not in the planning scene ({missing}): grip it '
+                                'again, or move it with hand: holding or an object target', form)
         return hold
+
+    def _scene_problem(self, hold: dict) -> str | None:
+        """Why the shape of the held object is not attached in MoveIt's planning scene now, or None (collision.py:
+        the grip's attach, checked against the scene)."""
+        from .collision import HoldCollision
+
+        return HoldCollision.for_node(self.node, self.robot, self._registry()).in_scene(hold['object'])
 
     def _carry_options(self, options: dict, target_joints: dict | None = None):
         """A REJECTED result for what a hand move takes but a carry does not (via legs, a joints part), else None."""
@@ -613,7 +632,7 @@ class Move(Skill):
 
     def _target_hand(self, args: dict, options: dict, target):
         hands = self._target_hands(options, target)
-        hold = self._carrying(hands, 'hand') if hands else None
+        hold = self._carrying(hands, 'hand', target) if hands else None
         if isinstance(hold, SkillResult):
             return hold
         part = 'carry' if hold is not None else 'hand'

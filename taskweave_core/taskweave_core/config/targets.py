@@ -437,6 +437,21 @@ TORSO_VALUES = {
     'posture': ('keep',),
 }
 
+# Old ids for the HMI until it reads the new ones (M3): its editor looks rows up by base / object / elbow. Inert for
+# core: nothing resolves a step to an old id, so they only answer a lookup. Remove with M3.
+HMI_OLD_IDS = {'base': 'navigate', 'object': 'carry', 'elbow': 'posture'}
+
+
+def _with_old_ids() -> None:
+    for table in (MOVE_OPTIONS, MOTION_OPTIONS):
+        for key, forms in table.items():
+            table[key] = forms + tuple(old for old, new in HMI_OLD_IDS.items() if new in forms)
+    for table in (MOTION_MODES, TORSO_VALUES, RELATIVE_KEYS, TARGET_HANDS_NOT):
+        table.update({old: table[new] for old, new in HMI_OLD_IDS.items() if new in table})
+
+
+_with_old_ids()
+
 
 def kind_of(form: str) -> str:
     """The kind of motion (data.kind) of a form of the option table: carry is a hand move."""

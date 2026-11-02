@@ -489,7 +489,10 @@ box whose object frame is at its bottom centre needs `xyz: [0, 0, height / 2]`. 
 (also on a simulator reset). The links allowed to touch it are the holding hands' profile `grippers.<hand>.links` (a list;
 default the hand's tool frame link). Profile `planning.scene_service` (default `/apply_planning_scene`) and
 `planning.scene_timeout_s` (default 2.0) set the service and how long a call may take. If the service is missing or
-refuses, `grip` logs a warning and carries on. An object type without `collision` sends nothing.
+refuses, `grip` logs a warning and carries on. An object type without `collision` sends nothing. Before a hand of a
+hold moves to a hand target or relative to now (a carry by a hand, [missions.md](missions.md#the-move-skill)), `move`
+reads the scene back (`planning.scene_get_service`, default `/get_planning_scene`): if the shape was not attached or
+is gone (move_group restarted), the step is `REJECTED`; grip again (open, close).
 
 The tool poses of a hand target are canonical-TCP poses relative to the object, so they hold for any robot that can reach them.
 `<role>_tool` names the robot tool (`left_tool` is `tools.left`). Validation checks tool type and grip width against

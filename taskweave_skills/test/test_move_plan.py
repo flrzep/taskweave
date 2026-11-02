@@ -70,6 +70,7 @@ def make(tmp_path):
         move.modules = {part: StubPart(hold, pose, timeouts.get(part, 60.0)) for part in parts}
         move.unavailable = {part: ['needs arms.bimanual'] for part in PARTS if part not in parts}
         move.name = 'move'
+        move._scene_problem = lambda hold: None      # the held shape is attached in the planning scene
         return move
     return build
 
@@ -559,23 +560,23 @@ def test_a_one_hand_hold_is_carried_by_its_hand(make, tmp_path):
     move = make(held=ONE)
     result = plan(move, hand='left', by=[0, 0, 0.1])
     assert result.part == 'carry' and result.calls[0][RESOLVED] == {'hand': 'left'}
-    target = plan(move, to='box_1/rim', hands='left')
+    target = plan(move, to='pile_1/rim', hands='left')
     assert target.part == 'carry' and target.carrying == 'box_1' and target.kind == 'hand'
     [call] = target.calls
-    assert call['to'] == {'hand_target': 'box_1/rim'} and call['object'] == 'box_1'
-    assert call[RESOLVED]['hands'] == ['left'] and call[RESOLVED]['hand_target']['target'].reference == 'box_1/rim'
+    assert call['to'] == {'hand_target': 'pile_1/rim'} and call['object'] == 'box_1'
+    assert call[RESOLVED]['hands'] == ['left'] and call[RESOLVED]['hand_target']['target'].reference == 'pile_1/rim'
     assert plan(move, hand='right', by=[0, 0, 0.1]).part == 'hand'      # the free hand: a hand move
 
 
 def test_a_hand_target_of_a_two_hand_hold_carries_the_object_where_the_hands_go(make, tmp_path):
     with_shape(tmp_path)
     move = make(held=TWO)
-    result = plan(move, to='box_1/rim', offset_m=0.05, torso='keep')
-    assert result.part == 'carry' and result.desc == 'carrying box_1 · box_1/rim'
+    result = plan(move, to='pile_1/rim', offset_m=0.05, torso='keep')
+    assert result.part == 'carry' and result.desc == 'carrying box_1 · pile_1/rim'
     [call] = result.calls
     assert call[RESOLVED]['hands'] == ['left', 'right'] and call[RESOLVED]['hand_target']['offset_m'] == 0.05
     assert call['motion'] == {'torso': 'keep'} and call[RESOLVED]['hand_target']['data'] == {'approach_m': 0.1}
-    rejected(plan(move, to='box_1/rim', motion={'via': ['present_left']}), 'motion.via does not apply while')
+    rejected(plan(move, to='pile_1/rim', motion={'via': ['present_left']}), 'motion.via does not apply while')
     rejected(plan(move, to='present_both'), 'joint values', 'do not apply while the hands hold something')
     rejected(plan(move, hand='left', by=[0, 0, 0.1], motion={'approach_m': 0.1}), 'motion.approach_m does not apply')
 
@@ -585,7 +586,7 @@ def test_the_new_carry_path_needs_the_collision_shape_of_the_held_type(make):
     text = rejected(plan(move, hand='left', by=[0, 0, 0.1]), 'move to target: left holds box_1',
                     'objects/box.yaml has no collision:')
     assert 'hand: holding' in text
-    rejected(plan(move, to='box_1/rim'), 'objects/box.yaml has no collision:')
+    rejected(plan(move, to='pile_1/rim'), 'objects/box.yaml has no collision:')
     untyped = make(held=[{'object': 'thing', 'hands': ['left'], 'type': None}])
     rejected(plan(untyped, hand='left', by=[0, 0, 0.1]), 'its type is unknown')
     # the moves of a held object as before: no shape needed
@@ -602,3 +603,35 @@ def test_two_holds_or_a_free_hand_with_a_holding_one_are_refused(make, tmp_path)
              'name the hands of one held object')
     assert plan(two, hand='right', by=[0, 0, 0.1]).calls[0]['object'] == 'box_2'
     rejected(plan(make(), hand='left', hands='left', by=[0, 0, 0.1]), 'two spellings')
+
+
+def test_a_hand_target_on_the_held_object_itself_is_refused(make, tmp_path):
+    with_shape(tmp_path)
+    for held, hands in ((TWO, None), (ONE, 'left')):
+        move = make(held=held)
+        args = {'to': 'box_1/rim', 'offset_m': 0.1, **({'hands': hands} if hands else {})}
+        text = rejected(plan(move, **args), 'the hands hold box_1: a hand target on it cannot be reached while '
+                                            'holding it; open the gripper first')
+        assert text.startswith('move to target: ')
+        rejected(plan(move, to='box_1/knob', hands=hands or 'all'), 'the hands hold box_1')
+    assert plan(make(held=TWO), to='pile_1/rim').part == 'carry'          # another object: carried there
+
+
+def test_a_shape_that_is_not_in_the_planning_scene_refuses_the_new_carry_path(make, tmp_path):
+    with_shape(tmp_path)
+    move = make(held=TWO)
+    move._scene_problem = lambda hold: 'the planning scene has lost it (move_group restarted?)'
+    text = rejected(plan(move, hand='left', by=[0, 0, 0.1]), "the held object's shape is not in the planning scene",
+                    'move_group restarted')
+    assert 'hand: holding' in text
+    rejected(plan(move, to='pile_1/rim'), 'not in the planning scene')
+    # the moves of a held object as before: no scene check
+    assert plan(move, hand='holding', by=[0, 0, 0.1]).part == 'carry'
+    assert plan(move, object='held', by=[0, 0, 0.1]).part == 'carry'
+    assert plan(move, to='carry').part == 'carry'
+
+
+def test_a_robot_without_the_carry_part_says_it_cannot_carry(make, tmp_path):
+    with_shape(tmp_path)
+    move = make(parts=('hand', 'joints', 'posture'), held=TWO)
+    rejected(plan(move, hand='holding', by=[0, 0, 0.1]), 'this robot cannot carry held objects')

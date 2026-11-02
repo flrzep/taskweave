@@ -307,6 +307,7 @@ ROBOT_PROFILE = {
                 'direct': {'type': 'boolean'},  # a straight joint move when it is free (taskweave_skills.motion_plan)
                 'validity_service': {'type': 'string'},
                 'scene_service': {'type': 'string'},  # held objects' collision shapes (default /apply_planning_scene)
+                'scene_get_service': {'type': 'string'},  # read the scene back (default /get_planning_scene)
                 'scene_timeout_s': {'type': 'number', 'exclusiveMinimum': 0},   # a scene call gives up after this
                 **{k: {'type': 'number', 'exclusiveMinimum': 0}
                    for k in ('direct_step_rad', 'escape_max_rad', 'escape_speed', 'goal_tolerance_rad',

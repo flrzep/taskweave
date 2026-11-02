@@ -712,7 +712,19 @@ def test_the_kinds_are_the_five_commands_and_carry_is_a_hand_move():
     assert model.kind_of('carry') == 'hand' and model.FORM_OF_TARGET['object'] == 'carry'
     assert model.move_label('hand') == 'move to target' and model.move_label('base') == 'navigate to'
     assert model.move_label('object') == 'move to target' and model.move_label('elbow') == 'change posture'
-    assert set(model.MOVE_OPTIONS['motion']) == set(model.MOVE_FORMS)
+    assert set(model.MOVE_OPTIONS['motion']) >= set(model.MOVE_FORMS)
+
+
+def test_the_tables_the_hmi_reads_still_answer_the_old_ids_until_m3():
+    # the HMI's editor looks option rows up by base / object / elbow (FORM_KINDS, formKinds): inert aliases
+    assert model.MOVE_OPTIONS['offset_m'] == ('hand', 'carry', 'object')
+    assert model.MOVE_OPTIONS['tolerance_deg'] == ('posture', 'elbow') and 'base' in model.MOVE_OPTIONS['torso']
+    assert model.MOTION_OPTIONS['mode'] == ('navigate', 'straight', 'hand', 'carry', 'base', 'object')
+    assert model.MOTION_MODES['base'] == ('nav',) and model.MOTION_MODES['object'] == ('linear', 'free')
+    assert model.TORSO_VALUES['elbow'] == ('keep',) and model.RELATIVE_KEYS['object'] == model.RELATIVE_KEYS['carry']
+    assert model.TARGET_HANDS_NOT['object'] == ('any_one',)
+    assert model.move_option_problems('object', {'reference': 'x', 'offset_m': 0.1}) == []   # what the HMI asks
+    assert model.move_option_problems('navigate', {'hands': 'all'}) == ['move navigate: option hands does not apply']
 
 
 # ---- writing targets ------------------------------------------------------------------------------

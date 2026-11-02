@@ -136,12 +136,17 @@ def compare(reference: dict, run: dict, tolerance: float = 0.10, slack_s: float 
     A step's duration tolerance is its kind of motion's (see ``tolerance_key``): ``skill_tolerance`` (the command line)
     over the reference's ``limits.tolerance_by_skill`` over ``DEFAULT_SKILL_TOLERANCE``, else ``tolerance``. A limit
     may be written with an old skill name (navigate_to), an old kind (move.base) or the new key (move.navigate);
-    ``move`` alone is every kind of motion without a limit of its own. Errors use ``tolerance``."""
+    ``move`` alone is every kind of motion without a limit of its own; two spellings of one kind in the same layer
+    (move.object and move.hand) keep the tighter one. Errors use ``tolerance``."""
     ref_steps, run_steps = reference.get('steps') or [], run.get('steps') or []
-    overrides = {tolerance_key(skill): value for skill, value in
-                 {**DEFAULT_SKILL_TOLERANCE,
-                  **((reference.get('limits') or {}).get('tolerance_by_skill') or {}),
-                  **(skill_tolerance or {})}.items()}
+    overrides: dict = {}
+    for layer in (DEFAULT_SKILL_TOLERANCE, (reference.get('limits') or {}).get('tolerance_by_skill') or {},
+                  skill_tolerance or {}):
+        mapped: dict = {}
+        for skill, value in layer.items():
+            key = tolerance_key(skill)
+            mapped[key] = min(value, mapped[key]) if key in mapped else value
+        overrides.update(mapped)
 
     def duration_tolerance(label: str) -> float:
         key = tolerance_key(*label.partition('.')[::2])    # 'move.base' -> move.navigate; 'navigate_to' -> its alias

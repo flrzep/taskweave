@@ -89,6 +89,10 @@ def test_a_reference_with_the_kind_ids_of_schema_4_compares_with_a_run_of_the_fi
     step_of(run, drive['step_id'])['duration_s'] = round(drive['duration_s'] * 1.22, 3)
     reference['limits'] = {'tolerance_by_skill': {'move.base': 0.05}}     # an old key of the reference file
     assert results(smoke.compare(reference, run))[drive['step_id']] == 'FAIL'
+    both = {'move.object': 0.5, 'move.hand': 0.02}                      # two spellings of one kind: the tighter
+    assert smoke.compare(reference, run, skill_tolerance=both)['limits']['skill_tolerance']['move.hand'] == 0.02
+    both = {'move.hand': 0.02, 'move.object': 0.5}
+    assert smoke.compare(reference, run, skill_tolerance=both)['limits']['skill_tolerance']['move.hand'] == 0.02
 
 
 def test_a_non_drive_step_is_held_to_ten_percent_whatever_it_is_called(old):

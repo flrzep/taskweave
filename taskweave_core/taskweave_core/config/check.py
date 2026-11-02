@@ -161,8 +161,9 @@ def _cross_object_points(store, c):
 def _cross_skill_overrides(store, c):
     keys = catalogue.enum_values(store, 'skill_keys')    # a skill or a part of one: move.hand
     out = []
+    renamed = {before: part for part, before in PARTS_BEFORE.items()}    # move.base: read as move.navigate
     for name in c.data:
-        if name in keys:
+        if name in keys or renamed.get(name) in keys:
             continue
         head = name.partition('.')[0]
         parts = [k for k in keys if k.startswith(head + '.')]
