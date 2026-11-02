@@ -27,7 +27,7 @@ class FakeIk(IkClient):
         self.reach, self.collides, self.solved, self.checked = reach, collides, [], []
 
     def solve(self, tools, fixed, should_stop=lambda: False, current=None, allow_flip=True, elbow=None,
-              global_search=True):
+              global_search=True, global_only=False):
         result, self.last = {}, {}
         for tool, target in tools.items():
             value = self.reach(tool, target, fixed['lift'])
@@ -294,7 +294,7 @@ class GlobalOnly(FakeIk):
         self.works, self.global_calls = works, []
 
     def solve(self, tools, fixed, should_stop=lambda: False, current=None, allow_flip=True, elbow=None,
-              global_search=True):
+              global_search=True, global_only=False):
         if not global_search or fixed['lift'] not in self.works:
             raise IkError('no IK solution for left: local descent failed')
         self.global_calls.append(fixed['lift'])
@@ -463,7 +463,7 @@ class BandIk(GlobalOnly):
         self.band, self.hints = band, []
 
     def solve(self, tools, fixed, should_stop=lambda: False, current=None, allow_flip=True, elbow=None,
-              global_search=True):
+              global_search=True, global_only=False):
         self.hints.append((fixed['lift'], global_search, getattr(self, 'seed_hint', None)))
         if not global_search or not self.band[0] - 1e-9 <= fixed['lift'] <= self.band[1] + 1e-9:
             raise IkError('no IK solution for left: out of reach')
@@ -493,7 +493,7 @@ def test_a_fine_height_is_seeded_with_the_feasible_neighbours_arms():
 def test_beyond_the_nearest_heights_the_global_search_skips_heights_whose_local_solve_worked_but_collided():
     class Collides(BandIk):
         def solve(self, tools, fixed, should_stop=lambda: False, current=None, allow_flip=True, elbow=None,
-                  global_search=True):
+                  global_search=True, global_only=False):
             if not global_search and fixed['lift'] < 0.15:          # the local solve works at 0.0 and 0.1 ...
                 self.hints.append((fixed['lift'], False, None))
                 return FakeIk.solve(self, tools, fixed, should_stop, current, allow_flip, elbow, global_search)
@@ -502,3 +502,242 @@ def test_beyond_the_nearest_heights_the_global_search_skips_heights_whose_local_
     choice = ik.solve_with_torso([TOOLS], {}, now(0.6))
     assert choice.height <= 0.3 + 1e-9 and ik.global_calls and min(ik.global_calls) >= 0.25 - 1e-9
     assert 0.0 not in {h for h, g, _ in ik.hints if g} and 0.1 not in {h for h, g, _ in ik.hints if g}
+
+
+# ---- F17: the global-only band of a held search is remembered, and heights no arm can reach cost no IK call -------
+
+GRID_75 = [*GRID, 0.75]
+
+
+class Counting(GlobalOnly):
+    """GlobalOnly that counts every solve() call (``calls``: [(height, global_search)]) like a timeout each; the local
+    IK also solves at the heights in ``local``."""
+
+    local = ()
+
+    def solve(self, tools, fixed, should_stop=lambda: False, current=None, allow_flip=True, elbow=None,
+              global_search=True, global_only=False):
+        self.calls = getattr(self, 'calls', [])
+        self.calls.append((fixed['lift'], global_search))
+        if fixed['lift'] in self.local:
+            return FakeIk.solve(self, tools, fixed, should_stop, current, allow_flip, elbow, global_search)
+        return super().solve(tools, fixed, should_stop, current, allow_flip, elbow, global_search)
+
+
+def held_path():
+    from taskweave_skills.ik import Samples
+    return Samples([TOOLS, {'left': TOOLS['left']}])           # a held path: two waypoints
+
+
+def test_a_held_band_only_the_global_search_found_is_tried_after_the_current_height_and_re_verified():
+    samples = held_path()
+    ik = Counting(works=(0.3,), grid=GRID_75)
+    first = ik.solve_with_torso(samples, {}, now(0.5), held=True)
+    first_calls = len(ik.calls)
+    assert first.height == pytest.approx(0.3) and first.skipped.startswith('no height solved with local IK')
+    ik.calls.clear()
+    again = ik.solve_with_torso(samples, {}, now(0.5), held=True)
+    assert again.height == pytest.approx(0.3) and 'remembered band' in again.skipped
+    assert ik.calls == [(0.5, False), (0.3, True), (0.3, True)]     # the current height (local), then the band
+    assert len(ik.calls) * 4 < first_calls
+    ik.works = ()                                                  # the scene changed: the band is gone
+    ik.calls.clear()
+    with pytest.raises(TorsoError):
+        ik.solve_with_torso(samples, {}, now(0.5), held=True)
+    assert len(ik.calls) > 10 and not ik.bands                     # the full search ran, the memory was dropped
+    ik.works = (0.3,)
+    assert ik.solve_with_torso(samples, {}, now(0.5), held=True).height == pytest.approx(0.3)
+    other = held_path()
+    other[0] = {'left': {**TOOLS['left'], 'tcp': [0.9, 0.2, 0.0]}}                  # another target: its own search
+    ik.calls.clear()
+    assert 'remembered' not in ik.solve_with_torso(other, {}, now(0.5), held=True).skipped
+    assert len(ik.calls) > 3
+
+
+def test_a_held_search_with_a_remembered_band_keeps_a_feasible_current_height():
+    samples = held_path()
+    ik = Counting(works=(0.3,), grid=GRID_75)
+    ik.solve_with_torso(samples, {}, now(0.5), held=True)
+    assert ik.bands
+    ik.local, ik.calls = (0.6,), []                                # the torso now stands where local IK solves
+    choice = ik.solve_with_torso(samples, {}, now(0.6), held=True)
+    assert choice.height == pytest.approx(0.6) and choice.skipped == 'the current height is feasible and cheap enough'
+    assert {h for h, _ in ik.calls} == {0.6} and not [g for _, g in ik.calls if g]
+    fresh = Counting(works=(0.3,), grid=GRID_75, accept=-1)        # feasible but above accept_cost: the full search
+    fresh.local = (0.6,)
+    expected = fresh.solve_with_torso(samples, {}, now(0.6))
+    ik.torso['accept_cost'], ik.local = -1, ()
+    ik.bands.clear()
+    ik.solve_with_torso(samples, {}, now(0.5), held=True)         # remembered again, under accept -1
+    assert ik.bands
+    ik.local = (0.6,)
+    choice = ik.solve_with_torso(samples, {}, now(0.6), held=True)
+    assert choice.height == expected.height == pytest.approx(0.6) and choice.skipped == expected.skipped
+    assert 'remembered' not in choice.skipped
+
+
+def test_a_search_that_holds_nothing_never_consults_the_band_memory_and_runs_as_before():
+    samples = held_path()
+    plain = Counting(works=(0.3,), grid=GRID_75)
+    expected = plain.solve_with_torso(samples, {}, now(0.5))
+    assert not plain.bands
+    ik = Counting(works=(0.3,), grid=GRID_75)
+    ik.solve_with_torso(samples, {}, now(0.5), held=True)         # the held search of the same targets remembers
+    assert ik.bands
+    ik.calls = []
+    choice = ik.solve_with_torso(samples, {}, now(0.5))
+    assert ik.calls == plain.calls and choice.height == expected.height and choice.skipped == expected.skipped
+
+
+def test_the_band_memory_keeps_the_newest_searches(monkeypatch):
+    from taskweave_skills import ik as module
+    monkeypatch.setattr(module, 'BANDS_KEPT', 2)
+    ik = Counting(works=(0.3,), grid=GRID_75)
+    for x in (0.5, 0.6, 0.7):
+        ik.solve_with_torso([{'left': {**TOOLS['left'], 'tcp': [x, 0.2, 0.3]}}], {}, now(0.5), held=True)
+    assert len(ik.bands) == 2 and not any('"tcp": [0.5, 0.2' in key for key in ik.bands)     # the oldest went
+
+
+def test_a_search_the_local_pass_solves_is_not_remembered_and_runs_the_same_every_time():
+    ik = FakeIk(reach=lambda tool, target, h: 0.0 if h >= 0.3 else None)
+    first = ik.solve_with_torso([TOOLS], {}, now(0.1), held=True)
+    calls = list(ik.solved)
+    ik.solved.clear()
+    again = ik.solve_with_torso([TOOLS], {}, now(0.1), held=True)
+    assert not ik.bands and again.skipped == first.skipped and again.height == first.height == pytest.approx(0.3)
+    assert ik.solved == calls
+
+
+class Reach(Counting):
+    """Counting with the real S1 left arm chain, so heights no arm can reach are known without IK."""
+
+    def __init__(self, **kw):
+        import re
+        from pathlib import Path
+
+        import yaml
+
+        from taskweave_skills.chain import Chain
+        super().__init__(**kw)
+        root = Path(__file__).resolve().parents[2] / 'taskweave_robots' / 'galbot_s1'
+        if not (root / 'moveit' / 'robot.urdf').exists():
+            pytest.skip('the S1 robot pack is not next to the tests')
+        self.tools = yaml.safe_load((root / 'profile.yaml').read_text())['tool_frames']
+        chain = Chain.from_urdf(root / 'moveit' / 'robot.urdf', 'base_link', self.tools['left']['link'])
+        self.torso['joint'] = 'body_joint'
+        self.chains = {'left': (chain, [n for n in chain.movable if re.fullmatch('left_joint[1-7]', n)])}
+
+
+def test_heights_the_arm_cannot_reach_are_skipped_before_any_ik_call_and_the_band_is_found_with_far_fewer():
+    floor = {'left': {'tcp': [0.85, 0.25, -0.4], 'approach': [0, 0, -1], 'closing': [0, 1, 0]}}
+    current = {**now(0.5), 'body_joint': 0.5}
+
+    class Lift(Reach):                 # the fake's 'lift' is the S1's body_joint
+        def solve(self, tools, fixed, *args, **kw):
+            return super().solve(tools, {**fixed, 'lift': fixed['body_joint']}, *args, **kw)
+
+    for held in (False, True):
+        ik = Lift(works=(0.2,), grid=GRID_75)
+        choice = ik.solve_with_torso([floor], {}, current, held=held)
+        assert choice.height == pytest.approx(0.2)
+        assert {h for h, _ in ik.calls}.isdisjoint({0.3, 0.4, 0.5, 0.6, 0.7, 0.75})     # 0.97 m+ from the shoulder
+        out = {r['height'] for r in choice.rejected if r['reason'].startswith('out of reach: left target')}
+        assert {0.3, 0.5} <= out
+        assert ik._unreachable([floor], 0.2) is None and ik._unreachable([floor], 0.0) is None
+
+
+def test_the_reach_bound_never_prunes_a_pose_the_arm_reaches():
+    from taskweave_skills.ik import rpy_matrix
+    from taskweave_skills.points import target_of
+    ik = Reach(grid=GRID_75)
+    chain, arm = ik.chains['left']
+    frame = ik.tools['left']
+    flange_to_tcp = rpy_matrix(frame.get('xyz', [0, 0, 0]), frame.get('rpy', [0, 0, 0]))
+    rng = np.random.default_rng(17)
+    for _ in range(300):               # any joint angles (limits only shrink the set) at every grid height
+        height = float(rng.choice(GRID_75))
+        flange = chain.fk({'body_joint': height, **{n: float(rng.uniform(-np.pi, np.pi)) for n in arm}})
+        target = target_of(flange @ flange_to_tcp)
+        assert ik._unreachable([{'left': target}], height) is None, (height, target)
+    assert ik._unreachable([{'left': {'tcp': [3.0, 0.2, 0.3], 'approach': [1, 0, 0], 'closing': [0, 1, 0]}}],
+                           0.3)       # and it does prune: the bound is on for the S1 chain
+
+
+def toy_joint(name, kind, x=0.0, z=0.0, axis=(0, 0, 1)):
+    from taskweave_skills.chain import Joint
+    origin = np.eye(4)
+    origin[:3, 3] = [x, 0.0, z]
+    return Joint(name, kind, origin, np.array(axis, float), name)
+
+
+TOY_ARM = [toy_joint('j1', 'revolute', z=0.2), toy_joint('j2', 'revolute', x=0.3), toy_joint('tip', 'fixed', x=0.3)]
+
+
+def toy_ik(*joints, tool=None):
+    """FakeIk on a toy chain: lift (prismatic), then ``joints``; the shoulder (j1) at z = lift + 0.2, the arm 0.6 m."""
+    from taskweave_skills.chain import Chain
+    ik = FakeIk()
+    ik.tools = {'left': tool or {'link': 'tip'}}
+    ik.chains = {'left': (Chain([toy_joint('lift', 'prismatic'), *joints]), ['j1', 'j2'])}
+    return ik
+
+
+def test_the_reach_bound_is_off_for_a_chain_with_a_waist_or_a_prismatic_arm_joint():
+    far = [{'left': {'tcp': [3.0, 0.0, 0.5], 'approach': [1, 0, 0], 'closing': [0, 1, 0]}}]
+    assert toy_ik(*TOY_ARM)._unreachable(far, 0.3)                                        # the plain arm: pruned
+    assert toy_ik(toy_joint('waist', 'revolute'), *TOY_ARM)._unreachable(far, 0.3) is None      # a waist first
+    stretch = [TOY_ARM[0], toy_joint('j2', 'prismatic', x=0.3, axis=(1, 0, 0)), TOY_ARM[2]]
+    assert toy_ik(*stretch)._unreachable(far, 0.3) is None                                # a stretching arm
+
+
+def test_a_grasp_that_may_flip_is_out_of_reach_only_when_both_grasps_are():
+    # the TCP 0.5 m from the flange across the approach: the flipped grasp puts the flange 1 m elsewhere
+    tool = {'link': 'tip', 'xyz': [0.0, 0.5, 0.0], 'flip': True}
+    goal = [{'left': {'tcp': [0.0, 0.5, 0.5], 'approach': [1, 0, 0], 'closing': [0, -1, 0]}}]
+    ik = toy_ik(*TOY_ARM, tool=tool)
+    assert ik._unreachable(goal, 0.3)                                  # no ik.choose: solve() does not flip
+    ik.choose = {}
+    assert ik._unreachable(goal, 0.3) is None                         # flipped, the flange is on the shoulder
+    assert ik._unreachable(goal, 0.3, allow_flip=False)               # the grasp as given only: 1 m away
+    assert toy_ik(*TOY_ARM, tool={**tool, 'flip': False})._unreachable(goal, 0.3)
+
+
+def test_an_unreachable_height_is_a_band_edge_for_refinement_as_without_the_bound():
+    """Not held, nothing solves locally: 0.3 is out of reach, 0.2 solves locally but collides (the global search
+    finds a free arm there), 0.1 has no local IK. The result must be the one the search gets when IK simply fails
+    at 0.3 (main, before the reach bound): 0.3 is the band's edge, so 0.2 is refined toward it."""
+
+    class Edge(FakeIk):
+        def solve(self, tools, fixed, should_stop=lambda: False, current=None, allow_flip=True, elbow=None,
+                  global_search=True, global_only=False):
+            h = fixed['lift']
+            value = 0.0 if global_search and h <= 0.27 else 1.0 if abs(h - 0.2) < 1e-9 else None
+            self.reach = lambda tool, target, height: value
+            return super().solve(tools, fixed, should_stop, current, allow_flip, elbow, global_search)
+
+    def search(bound):
+        ik = Edge(collides=lambda joints: joints.get('left_j1') == 1.0)
+        ik.torso['refine'] = 2
+        if bound:
+            ik._unreachable = lambda goals, height, allow_flip=True: (
+                'out of reach: left' if round(height, 4) == 0.3 else None)
+        return ik.solve_with_torso([{'left': TOOLS['left']}], {}, now(0.5))
+    plain, bounded = search(False), search(True)
+    assert any(r['reason'].startswith('out of reach') for r in bounded.rejected)
+    assert bounded.height == plain.height and bounded.cost == plain.cost and bounded.skipped == plain.skipped
+    assert 0.2 < bounded.height < 0.3                                  # refined toward the edge at 0.3
+
+
+def test_only_a_held_global_pass_skips_the_local_descents_at_a_height_whose_local_solve_just_found_no_ik():
+    seen = []
+
+    class Watch(Counting):
+        def solve(self, tools, fixed, *args, **kw):
+            seen.append((fixed['lift'], kw.get('global_search', True), kw.get('global_only', False)))
+            return super().solve(tools, fixed, *args, **kw)
+    Watch(works=(0.3,), grid=GRID_75).solve_with_torso([TOOLS], {}, now(0.5), held=True)
+    assert (0.3, False, False) in seen and (0.3, True, True) in seen       # local first, then global alone
+    assert not [s for s in seen if s[2] and not s[1]]
+    seen.clear()
+    Watch(works=(0.3,), grid=GRID_75).solve_with_torso([TOOLS], {}, now(0.5))
+    assert (0.3, True, False) in seen and not [s for s in seen if s[2]]    # not held: local descents again, as before

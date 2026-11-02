@@ -6,8 +6,9 @@ The target is given in the robot's base frame: an object pose (``--object`` x y 
 the object frame (``--tool`` hand x y z roll pitch yaw, as in an object's points). ``--offset`` stops that far back
 along the approach; ``--approach`` adds the pre-grasp sample a free move to a point also checks. The probe prints what
 the search decided for all given hands at once (height, rejected heights, skipped note) and how long it took
-(``--repeat`` times, each from a cold memo). Run on the ROS domain of the live system, from a sourced workspace (the
-robot packs of the checkout in TASKWEAVE_ROBOT_PACKS):
+(``--repeat`` times, each from a cold memo; ``--held`` searches as for a held object, whose band memory the repeats
+keep). Run on the ROS domain of the live system, from a sourced workspace (the robot packs of the checkout in
+TASKWEAVE_ROBOT_PACKS):
 
     python3 probe_torso.py --config /workspace/frame-sim/config --robot <name> --object 1.0 0 0.38 0 \
         --tool left 0.1 0.25 0.07 -1.9 0 -1.5 --tool right 0.1 -0.25 0.07 -1.9 0 -1.5 --offset 0.15 --elbow up
@@ -50,6 +51,7 @@ def main() -> None:
     parser.add_argument('--elbow', default=None)
     parser.add_argument('--repeat', type=int, default=3)
     parser.add_argument('--accept', type=float, default=None, help='override ik.torso.accept_cost')
+    parser.add_argument('--held', action='store_true', help='search as for a held object (no flip, band memory)')
     args = parser.parse_args()
 
     store = ConfigStore(args.config)
@@ -90,7 +92,8 @@ def main() -> None:
         ik.memo = {}
         started = time.monotonic()
         try:
-            choice = ik.solve_with_torso(samples, {}, current, elbow=args.elbow)
+            choice = ik.solve_with_torso(samples, {}, current, elbow=args.elbow, allow_flip=not args.held,
+                                         held=args.held)
             mid = time.monotonic()
             ik.solve(samples[0], choice.fixed, current=current, elbow=args.elbow)   # the move's own solve: a memo hit
             again = time.monotonic() - mid

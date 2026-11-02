@@ -335,7 +335,7 @@ class MoveObject(_HeldMotion):
         ctx.feedback(0.0, 'choosing the torso height')
         try:
             return self.ik.solve_with_torso(samples, {}, current, lambda: ctx.should_stop, elbow=m.get('elbow'),
-                                            allow_flip=False)
+                                            allow_flip=False, held=True)
         except (LookupError, IkError) as error:
             return SkillResult.failed(f'{label}: {error}', torso=[{'leg': label, 'height': None,
                                                                    'rejected': getattr(error, 'rejected', [])}])
