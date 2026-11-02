@@ -40,15 +40,15 @@ def _schema() -> dict:
         'type': 'array',
         'items': {'anyOf': [{'type': 'string', 'x-taskweave-point': 'target', 'x-taskweave-target-kinds': ['joints']},
                             {'type': 'object', 'minProperties': 1, 'additionalProperties': {'type': 'number'}}]},
-        'description': 'Waypoints to pass, in order: a joint pose name (poses.yaml) or a {joint: value} map.'}
+        'description': 'Waypoints to pass, in order: a joint target or a {joint: value} map.'}
     return {
         'type': 'object', 'additionalProperties': False,
         'oneOf': [{'title': 'Named pose', 'required': ['pose']}, {'title': 'Joint values', 'required': ['joints']}],
         'x-taskweave-resources': ['joints'],
         'properties': {
             'pose': {'type': 'string', 'x-taskweave-point': 'target', 'x-taskweave-target-kinds': ['joints'],
-                     'description': 'A named pose of this robot (robots/<robot>/poses.yaml) with joint values only '
-                                    '(e.g. home, lift_high).'},
+                     'description': 'A joint target of this robot (robots/<robot>/targets.yaml, moves: joints; e.g. '
+                                    'home, lift_high).'},
             'joints': {'type': 'object', 'minProperties': 1, 'additionalProperties': {'type': 'number'},
                        'description': '{joint name: value} in rad (metres for prismatic joints).'},
             'only': {'type': 'array', 'minItems': 1, 'uniqueItems': True,

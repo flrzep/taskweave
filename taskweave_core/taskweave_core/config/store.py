@@ -573,6 +573,11 @@ class ConfigStore:
         """robots/<robot>/poses.yaml as stored: name -> joint map or tool pose (robot-specific by nature)."""
         return ts.legacy_joint_poses(self, robot)
 
+    def old_joint_poses(self, robot: str) -> dict[str, dict]:
+        """robots/<robot>/poses.yaml of a robot pack of schema 1 as the file has it ({} without one): for the
+        migrations, which read it before the targets exist."""
+        return self._load(f'robots/{robot}/poses.yaml', schemas.JOINT_POSES, required=False, default={})
+
     def named_pose(self, robot: str, name: str) -> dict:
         """A named pose as ``{'joints': {joint: value}, 'tools': {tool: {tcp, approach, closing}}, 'elbow': side}``.
         Joints are set directly; tool targets (TCP in the base frame) are solved by IK when the pose is used, with the

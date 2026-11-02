@@ -479,6 +479,27 @@ def test_a_schema_1_cell_is_sent_to_migrate_and_migrate_runs_the_whole_chain(cel
     assert not (cell / 'skills' / 'go_to_point.yaml').exists() and steps(cell)[0]['skill'] == 'move'
 
 
+def test_a_schema_2_cell_migrated_to_the_end_validates_against_the_served_skills(cell, tmp_path):
+    """Every old step form, through the chain (2 -> 3 -> 4), validates against the catalog the cell serves (move, grip,
+    wait as the skill classes describe them)."""
+    pytest.importorskip('taskweave_skills')
+    from taskweave_core import cli
+
+    (cell / 'missions' / 'block.yaml').write_text(MISSION.replace('stance:{frame}', 'stance:shelf_a'))
+    lines = []
+    assert migrate(cell, tmp_path / 'robot_packs', say=lines.append) == 0, '\n'.join(lines)
+    store = ConfigStore(cell)
+    catalog = cli.offline_catalog(store, ROBOT)
+    assert set(catalog) >= {'move', 'grip', 'wait'}
+    for name in store.mission_names():
+        plan = Plan.from_mission(store.expanded_mission(name), name, robot=ROBOT)
+        # the missions name objects (hanger, box_1) and a carry pose the demo cell does not have: only those may be
+        # unknown; every migrated step form must validate
+        problems = [p for p in validate_plan(plan, catalog, store)
+                    if not ('unknown target' in p and ("no object '" in p or "'carry'" in p))]
+        assert problems == [], name
+
+
 def test_the_store_refuses_schema_2_and_names_the_command(cell):
     (cell / 'pack.yaml').write_text('name: cell\nversion: 1\nschema_version: 2\n')
     with pytest.raises(ConfigError, match='run taskweave config migrate '):

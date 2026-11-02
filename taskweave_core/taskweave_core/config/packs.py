@@ -140,11 +140,19 @@ def cell_schema(folder: Path) -> int:
     return int(pack['schema_version']) if pack else 1
 
 
+CELL_PARTS = ('cell', 'objects', 'missions', 'robots')    # folders only a cell pack has (a robot pack has none)
+
+
+def is_cell_pack(folder: Path) -> bool:
+    """The folder holds a cell pack (or an old config directory): it has one of the cell's folders."""
+    return any((Path(folder) / part).exists() for part in CELL_PARTS)
+
+
 def check_cell_schema(folder: Path) -> None:
     pack = read_pack(folder)
     if pack:
         check_requires(pack, Path(folder) / PACK_FILE, f'cell pack {pack["name"]}')
-    elif not any((Path(folder) / part).exists() for part in ('cell', 'objects', 'missions', 'robots')):
+    elif not is_cell_pack(folder):
         # no pack.yaml and none of an old cell's folders: not a cell at all (not one to migrate)
         raise _error(Path(folder), 'no cell pack here: pass the cell pack folder (the one with pack.yaml, e.g. config)')
     version = cell_schema(folder)

@@ -171,7 +171,8 @@ class NavigateTo(Skill):
         'required': ['target'],
         'properties': {
             'target': {'type': 'string', 'x-taskweave-point': 'target', 'x-taskweave-target-kinds': ['base'],
-                       'description': 'location name, "location:<name>" or "stance:<name>"'},
+                       'description': 'a base target: <name> (cell/targets.yaml) or <instance>/<name> (a placed '
+                                      'object)'},
         },
         'additionalProperties': False,
     }

@@ -975,6 +975,29 @@ def test_a_tool_pose_frame_is_dropped_and_a_foreign_one_flagged(old_cell):
     assert len(set(flags)) == 1 and 'left_tool frame cell dropped' in flags[0]     # printed again at the end
 
 
+def test_an_approach_that_is_no_mapping_is_flagged(old_cell):
+    add_point(old_cell, TOOL, 'approach: 0.12')
+    code, lines = run(old_cell)
+    assert code == 0
+    assert 'approach' not in hanger(old_cell)['hold'] and 'approach_m' not in hanger(old_cell)['hold']
+    assert any(line.startswith('FLAG') and 'approach 0.12 dropped' in line for line in lines)
+
+
+def test_an_approach_distance_that_is_no_number_is_flagged(old_cell):
+    add_point(old_cell, TOOL, 'approach: {axis: z, distance: auto}')
+    code, lines = run(old_cell)
+    assert code == 0
+    assert 'approach_m' not in hanger(old_cell)['hold']
+    assert any(line.startswith('FLAG') and 'distance auto dropped: not a number' in line for line in lines)
+
+
+def test_a_joints_part_of_a_point_is_kept(old_cell):
+    add_point(old_cell, TOOL, 'joints: {torso: 0.3}')
+    _, lines = run(old_cell)
+    assert hanger(old_cell)['hold']['joints'] == {'torso': 0.3}
+    assert not any('key joints' in line for line in lines)
+
+
 def test_a_point_key_that_is_no_tool_pose_is_flagged(old_cell):
     add_point(old_cell, TOOL, 'left: {xyz: [0, 0, 0.1], rpy: [0, 0, 0]}')
     _, lines = run(old_cell)

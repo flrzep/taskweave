@@ -676,12 +676,17 @@ def migrate_locations(plan: Plan, book: Book, say) -> None:
     say(f'move    cell/locations.yaml -> cell/targets.yaml  ({len(document)} base target(s), moves: base)')
 
 
+def _number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def _clean_point(plan: Plan, say, type_name: str, name: str, entry) -> None:
     """The old point keys schema 4 rejects, in place. ``approach: {axis, distance}`` (the older point form; no reader
     ever used it, the straight part of an approach was ``approach_m`` and its direction the TCP z axis, which is
     what the target model defines): ``distance`` becomes ``approach_m`` (an ``approach_m`` already there wins), ``axis``
-    is dropped, flagged when it named something else than z. A tool pose's ``frame`` is dropped (a hand point is in
-    the object's frame), flagged when it named another frame. A key that is no ``<tool>_tool`` pose is flagged."""
+    is dropped, flagged when it named something else than z; any other ``approach`` value or a distance that is no
+    number is dropped and flagged. A tool pose's ``frame`` is dropped (a hand point is in the object's frame), flagged
+    when it named another frame. A key that is no ``<tool>_tool`` pose (nor a ``joints`` part) is flagged."""
     where = f'objects/{type_name}.yaml point {name}'
     if 'approach' in entry:
         old = entry['approach']
@@ -689,7 +694,10 @@ def _clean_point(plan: Plan, say, type_name: str, name: str, entry) -> None:
         item = entry.ca.items.get('approach')
         del entry['approach']
         entry.ca.items.pop('approach', None)
-        old = old if isinstance(old, Mapping) else {}
+        if not isinstance(old, Mapping):
+            _flag(plan, say, f'{where}: approach {old} dropped: not the {{axis, distance}} form, set approach_m by '
+                  'hand if it was a distance')
+            old = {}
         extra = sorted(str(key) for key in old if key not in ('axis', 'distance'))
         axis = old.get('axis')
         if axis is not None and str(axis).lower() not in ('z', '+z'):
@@ -697,9 +705,12 @@ def _clean_point(plan: Plan, say, type_name: str, name: str, entry) -> None:
                   '(no reader ever used the axis)')
         if extra:
             _flag(plan, say, f'{where}: approach keys {", ".join(extra)} dropped (no reader used them)')
-        if old.get('distance') is not None:
+        distance = old.get('distance')
+        if distance is not None and not _number(distance):
+            _flag(plan, say, f'{where}: approach distance {distance} dropped: not a number')
+        elif distance is not None:
             if 'approach_m' in entry:
-                if float(entry['approach_m']) != float(old['distance']):
+                if not _number(entry['approach_m']) or float(entry['approach_m']) != float(distance):
                     _flag(plan, say, f'{where}: approach distance {old["distance"]} dropped, approach_m '
                           f'{entry["approach_m"]} stays')
             else:
@@ -709,7 +720,7 @@ def _clean_point(plan: Plan, say, type_name: str, name: str, entry) -> None:
     poses = [entry.get('alone') or {}, entry]
     for table in poses:
         for key, pose in list(table.items()):
-            if not isinstance(pose, Mapping) or key in model.HAND_ATTRIBUTES:
+            if not isinstance(pose, Mapping) or key in model.HAND_ATTRIBUTES or key == 'joints':   # a joints part
                 continue
             if not model.is_tool_key(str(key)):
                 _flag(plan, say, f'{where}: key {key} is no <tool>_tool pose: schema 4 rejects it, rename or '

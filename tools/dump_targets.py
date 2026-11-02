@@ -56,8 +56,12 @@ class OldLayoutStore(ConfigStore):
     ``target()``). Only this tool needs it: the equivalence check compares what the old readers answer before the
     migration with what the migrated cell answers."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._targets = packs.cell_schema(self.root) >= 4     # read once: the schema does not change during a dump
+
     def targets_format(self) -> bool:
-        return packs.cell_schema(self.root) >= 4
+        return self._targets
 
     def locations(self):
         if self.targets_format():
@@ -101,7 +105,7 @@ class OldLayoutStore(ConfigStore):
     def joint_poses(self, robot):
         if self.targets_format():
             return super().joint_poses(robot)
-        return self._load(f'robots/{robot}/poses.yaml', schemas.JOINT_POSES, required=False, default={})
+        return self.old_joint_poses(robot)
 
     def named_pose(self, robot, name):
         if self.targets_format():
@@ -135,6 +139,8 @@ class OldLayoutStore(ConfigStore):
             objects += [f'{path.stem}.{name}' for name in self.object(path.stem).get('points', {})]
         placed, contacts = [], []     # <instance>/<point>, <instance>/<contact>
         for name, instance in sorted(self.object_instances().items()):
+            if instance.stack_count == 0:     # taken: no points, as the targets side lists none (all_targets)
+                continue
             try:
                 placed += [f'{name}/{point}' for point in self.object(instance.object).get('points', {})]
                 contacts += [f'{name}/{c}' for c in self.object(instance.object).get('contacts', {})]
@@ -189,7 +195,9 @@ class OldLayoutStore(ConfigStore):
         name, _, point = reference.partition('/')
         instances = self.object_instances()
         if name not in instances or not point:
-            raise KeyError(f'unknown object point {reference!r}')
+            raise self.missing_instance(name, f'unknown object point {reference!r}: expected <instance>/<point>')
+        if instances[name].stack_count == 0:     # a taken stack has no points (as the old reader had it)
+            raise self.missing_instance(name, '')
         instance = instances[name] if robot is None else self.handling_instance(instances[name], robot, near)
         return instance, self.object_point(instance.object, point, robot)
 
@@ -207,7 +215,7 @@ class OldLayoutStore(ConfigStore):
         name, _, contact = reference.partition('/')
         instances = self.object_instances()
         if name not in instances or not contact:
-            raise KeyError(f'unknown object contact {reference!r}')
+            raise self.missing_instance(name, f'unknown object contact {reference!r}: expected <instance>/<contact>')
         return instances[name], self.object_contact(instances[name].object, contact)
 
 
