@@ -256,6 +256,7 @@ GLOBAL_HEIGHTS = default(ROBOT_PROFILE, 'ik', 'torso', 'global_heights')        
 UNREACHABLE_MARGIN_M = 0.01    # slack on the arm-length bound of _unreachable
 BANDS_KEPT = 64                # held searches IkClient.bands remembers (the newest)
 GLOBAL_ONLY = 'no height solved with local IK: global search'
+OUT_OF_REACH = 'out of reach: '
 WRIST_WEIGHT = default(ROBOT_PROFILE, 'ik', 'torso', 'weights', 'wrist')           # ik.torso.weights.wrist default
 LINE_SAMPLE_M = default(ROBOT_PROFILE, 'ik', 'torso', 'line_sample_m')             # ik.torso.line_sample_m default
 
@@ -648,7 +649,8 @@ class IkClient:
             if best is not None:
                 done.update(found)
                 seen |= set(found) | {r['height'] for r in rejected}
-                out = {r['height'] for r in rejected if r['reason'].startswith('global search')}
+                out = {r['height'] for r in rejected if r['reason'].startswith('global search') or (
+                    held and OUT_OF_REACH in r['reason'])}
                 best.skipped = ''
                 best = refine(best, out, True)
                 best.skipped = GLOBAL_ONLY
@@ -666,11 +668,14 @@ class IkClient:
         whose local solve found no IK at all (one that solved but collided is not helped by another solution this
         way, and the search stays short). The first height that works is the band's; its farther grid neighbour is
         solved too, so the cost chooses, and refinement then looks at the band's edges. (None, {}) if none works.
-        ``held`` (see solve_with_torso): no local descents at no-IK heights, and unreachable heights take no slot."""
+        ``held`` (see solve_with_torso): no local descents at no-IK heights, and unreachable heights take no slot
+        (refinement still sees them as the band's edge)."""
         count = int(self.torso.get('global_heights', GLOBAL_HEIGHTS))
         if count <= 0:
             return None, {}
-        no_ik = {r['height'] for r in rejected if 'no IK solution' in r['reason']}
+        # not held: an unreachable height is a no-IK one as on main (its attempt raises at once, no IK call)
+        no_ik = {r['height'] for r in rejected if 'no IK solution' in r['reason'] or (
+            not held and OUT_OF_REACH in r['reason'])}
         found, tried = {}, set()
 
         def attempt(height):
@@ -685,7 +690,7 @@ class IkClient:
 
         first, nearest = None, 0
         for height in heights:
-            if held and self._unreachable(samples(height) if callable(samples) else samples, height):
+            if held and self._unreachable(samples(height) if callable(samples) else samples, height, allow_flip):
                 continue        # out of reach for any solver (on record from the local pass): no slot
             nearest += 1
             if nearest > count and round(height, 4) not in no_ik:
@@ -715,11 +720,11 @@ class IkClient:
         with_h = {**fixed, joint: height}
         goals = samples(height) if callable(samples) else samples
         main = None
-        beyond = self._unreachable(goals, height)     # no solver run can bring a hand there: no IK call, no timeout
-        if beyond:
-            raise TorsoError(beyond)
         for k, tools in enumerate(goals):
             where = f'sample {k}: ' if k else ''
+            beyond = self._unreachable([tools], height, allow_flip)    # sample by sample, where IK would fail
+            if beyond:                                                  # no solver can bring a hand there: no IK call
+                raise TorsoError(f'{where}{beyond}')
             self.seed_hint = hint
             try:
                 arm = self.solve(tools, with_h, should_stop, current=current, allow_flip=allow_flip, elbow=elbow,
@@ -753,14 +758,15 @@ class IkClient:
             cost += float((self.torso.get('weights') or {}).get('wrist', WRIST_WEIGHT)) * bend
         return TorsoChoice(height, with_h, arm, flips, cost + weight * abs(height - now), wrist=bend)
 
-    def _unreachable(self, goals, height) -> str | None:
+    def _unreachable(self, goals, height, allow_flip: bool = True) -> str | None:
         """Why no arm configuration can put a hand of ``goals`` on its target with the torso at ``height``, or None.
         Needs the URDF chains (attach_chains). The hand's flange is further from the first arm joint than the arm
         is long (the sum of the joint offsets after it: a bound, whatever the joint angles), so no solver, local or
         global, can find a solution there and the IK calls (each a timeout) are skipped. The bound holds only on a
         chain (URDF) whose first arm joint sits where the torso height alone puts it (no other movable joint before
         it, e.g. a waist) and whose joints from it on are none prismatic (one would stretch the arm): any other
-        chain gets no bound."""
+        chain gets no bound. A tool whose grasp solve() may flip (``allow_flip``, ik.choose set, tool_frames flip) is
+        out only when both grasps are."""
         chains = getattr(self, 'chains', None)
         joint = (self.torso or {}).get('joint')
         for tools in goals if chains else ():
@@ -778,9 +784,11 @@ class IkClient:
                 if reach is None:
                     continue
                 shoulder = chain.frames({joint: height})[0][chain.movable.index(arm[0])][:3, 3]
-                away = float(np.linalg.norm(flange_target(target, self.tools[tool])[:3, 3] - shoulder))
+                flip = allow_flip and self.choose is not None and self.tools[tool].get('flip')
+                away = min(float(np.linalg.norm(flange_target(t, self.tools[tool])[:3, 3] - shoulder))
+                           for t in ([target, flipped(target)] if flip else [target]))
                 if away > reach + UNREACHABLE_MARGIN_M:
-                    return f'out of reach: {tool} target {away:.2f} m from its shoulder, the arm spans {reach:.2f} m'
+                    return f'{OUT_OF_REACH}{tool} target {away:.2f} m from its shoulder, the arm spans {reach:.2f} m'
         return None
 
     @property

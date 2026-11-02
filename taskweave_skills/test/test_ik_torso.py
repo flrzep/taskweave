@@ -663,24 +663,69 @@ def test_the_reach_bound_never_prunes_a_pose_the_arm_reaches():
                            0.3)       # and it does prune: the bound is on for the S1 chain
 
 
+def toy_joint(name, kind, x=0.0, z=0.0, axis=(0, 0, 1)):
+    from taskweave_skills.chain import Joint
+    origin = np.eye(4)
+    origin[:3, 3] = [x, 0.0, z]
+    return Joint(name, kind, origin, np.array(axis, float), name)
+
+
+TOY_ARM = [toy_joint('j1', 'revolute', z=0.2), toy_joint('j2', 'revolute', x=0.3), toy_joint('tip', 'fixed', x=0.3)]
+
+
+def toy_ik(*joints, tool=None):
+    """FakeIk on a toy chain: lift (prismatic), then ``joints``; the shoulder (j1) at z = lift + 0.2, the arm 0.6 m."""
+    from taskweave_skills.chain import Chain
+    ik = FakeIk()
+    ik.tools = {'left': tool or {'link': 'tip'}}
+    ik.chains = {'left': (Chain([toy_joint('lift', 'prismatic'), *joints]), ['j1', 'j2'])}
+    return ik
+
+
 def test_the_reach_bound_is_off_for_a_chain_with_a_waist_or_a_prismatic_arm_joint():
-    from taskweave_skills.chain import Chain, Joint
-
-    def link(name, kind, x=0.0, z=0.0, axis=(0, 0, 1)):
-        origin = np.eye(4)
-        origin[:3, 3] = [x, 0.0, z]
-        return Joint(name, kind, origin, np.array(axis, float), name)
     far = [{'left': {'tcp': [3.0, 0.0, 0.5], 'approach': [1, 0, 0], 'closing': [0, 1, 0]}}]
+    assert toy_ik(*TOY_ARM)._unreachable(far, 0.3)                                        # the plain arm: pruned
+    assert toy_ik(toy_joint('waist', 'revolute'), *TOY_ARM)._unreachable(far, 0.3) is None      # a waist first
+    stretch = [TOY_ARM[0], toy_joint('j2', 'prismatic', x=0.3, axis=(1, 0, 0)), TOY_ARM[2]]
+    assert toy_ik(*stretch)._unreachable(far, 0.3) is None                                # a stretching arm
 
-    def bound(*joints):
-        ik = FakeIk()
-        ik.tools = {'left': {'link': 'tip'}}
-        ik.chains = {'left': (Chain([link('lift', 'prismatic'), *joints]), ['j1', 'j2'])}
-        return ik._unreachable(far, 0.3)
-    arm = [link('j1', 'revolute', z=0.2), link('j2', 'revolute', x=0.3), link('tip', 'fixed', x=0.3)]
-    assert bound(*arm)                                                           # the plain arm: pruned
-    assert bound(link('waist', 'revolute'), *arm) is None                        # a waist before the shoulder
-    assert bound(arm[0], link('j2', 'prismatic', x=0.3, axis=(1, 0, 0)), arm[2]) is None     # a stretching arm
+
+def test_a_grasp_that_may_flip_is_out_of_reach_only_when_both_grasps_are():
+    # the TCP 0.5 m from the flange across the approach: the flipped grasp puts the flange 1 m elsewhere
+    tool = {'link': 'tip', 'xyz': [0.0, 0.5, 0.0], 'flip': True}
+    goal = [{'left': {'tcp': [0.0, 0.5, 0.5], 'approach': [1, 0, 0], 'closing': [0, -1, 0]}}]
+    ik = toy_ik(*TOY_ARM, tool=tool)
+    assert ik._unreachable(goal, 0.3)                                  # no ik.choose: solve() does not flip
+    ik.choose = {}
+    assert ik._unreachable(goal, 0.3) is None                         # flipped, the flange is on the shoulder
+    assert ik._unreachable(goal, 0.3, allow_flip=False)               # the grasp as given only: 1 m away
+    assert toy_ik(*TOY_ARM, tool={**tool, 'flip': False})._unreachable(goal, 0.3)
+
+
+def test_an_unreachable_height_is_a_band_edge_for_refinement_as_without_the_bound():
+    """Not held, nothing solves locally: 0.3 is out of reach, 0.2 solves locally but collides (the global search
+    finds a free arm there), 0.1 has no local IK. The result must be the one the search gets when IK simply fails
+    at 0.3 (main, before the reach bound): 0.3 is the band's edge, so 0.2 is refined toward it."""
+
+    class Edge(FakeIk):
+        def solve(self, tools, fixed, should_stop=lambda: False, current=None, allow_flip=True, elbow=None,
+                  global_search=True, global_only=False):
+            h = fixed['lift']
+            value = 0.0 if global_search and h <= 0.27 else 1.0 if abs(h - 0.2) < 1e-9 else None
+            self.reach = lambda tool, target, height: value
+            return super().solve(tools, fixed, should_stop, current, allow_flip, elbow, global_search)
+
+    def search(bound):
+        ik = Edge(collides=lambda joints: joints.get('left_j1') == 1.0)
+        ik.torso['refine'] = 2
+        if bound:
+            ik._unreachable = lambda goals, height, allow_flip=True: (
+                'out of reach: left' if round(height, 4) == 0.3 else None)
+        return ik.solve_with_torso([{'left': TOOLS['left']}], {}, now(0.5))
+    plain, bounded = search(False), search(True)
+    assert any(r['reason'].startswith('out of reach') for r in bounded.rejected)
+    assert bounded.height == plain.height and bounded.cost == plain.cost and bounded.skipped == plain.skipped
+    assert 0.2 < bounded.height < 0.3                                  # refined toward the edge at 0.3
 
 
 def test_only_a_held_global_pass_skips_the_local_descents_at_a_height_whose_local_solve_just_found_no_ik():
