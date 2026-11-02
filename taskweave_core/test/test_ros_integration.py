@@ -137,7 +137,8 @@ def test_the_status_says_planning_while_the_plan_is_validated(system):
     try:
         wait_until(inside.is_set, what='the validation to begin')
         wait_until(lambda: any(s.step_status == 'planning' and s.plan_id == 'patrol-0001' and s.step_count > 0
-                               and s.state == TaskStatus.RUNNING for s in statuses), what='the planning status')
+                               and s.state == TaskStatus.RUNNING and s.goal for s in statuses),
+                   what='the planning status with the goal')
         assert not answer.done()
         refused = call(client, StartMission, names.START_MISSION, StartMission.Request(mission='patrol'))
         assert not refused.accepted and 'already active' in refused.message
@@ -146,6 +147,41 @@ def test_the_status_says_planning_while_the_plan_is_validated(system):
     wait_until(answer.done, what='the answer of start_mission')
     assert answer.result().accepted
     wait_for(handler, {'SUCCEEDED', 'FAILED'})
+
+
+def test_a_start_while_another_is_being_prepared_is_refused_and_an_abort_in_that_phase_is_kept(system):
+    """Before the executive exists (the catalog is being read) the status already says planning, a second start is
+    refused, and an abort is not dropped: the mission ends ABORTED before a step runs."""
+    import threading
+
+    handler, client, statuses, _ = system
+    inside, release = threading.Event(), threading.Event()
+    real = handler.refresh_catalog
+
+    def slow(*args, **kwargs):
+        inside.set()
+        release.wait(20)
+        return real(*args, **kwargs)
+
+    handler.refresh_catalog = slow
+    proxy = client.create_client(StartMission, names.START_MISSION)
+    assert proxy.wait_for_service(timeout_sec=30)
+    answer = proxy.call_async(StartMission.Request(mission='patrol'))
+    try:
+        wait_until(inside.is_set, what='the catalog read to begin')
+        wait_until(lambda: any(s.step_status == 'planning' and s.goal and s.state == TaskStatus.RUNNING
+                               for s in statuses), what='the planning status')
+        refused = call(client, StartMission, names.START_MISSION, StartMission.Request(mission='patrol'))
+        assert not refused.accepted and 'being started' in refused.message
+        stopped = call(client, Trigger, names.ABORT, Trigger.Request())
+        assert stopped.success, stopped.message
+    finally:
+        release.set()
+    wait_until(answer.done, what='the answer of start_mission')
+    assert not answer.result().accepted
+    status = wait_for(handler, {'ABORTED'})
+    assert status.last_error == 'aborted by operator' and status.step is None
+    wait_until(lambda: statuses[-1].state == TaskStatus.ABORTED, what='the ABORTED status')
 
 
 def test_invalid_mission_is_rejected_before_moving(system, config_dir):

@@ -111,9 +111,16 @@ def test_mission_planner_previews_the_plan_it_makes(config_dir):
     planner = MissionFilePlanner(ConfigStore(config_dir), 'patrol')
     for _ in range(2):   # the id counts up per plan made; a preview does not use one up
         assert planner.preview(1) == planner.preview(1)
-        plan_id, count = planner.preview(1)
+        plan_id, count, goal = planner.preview(1)
         plan = planner.make_plan({}, 1)
-        assert (plan.plan_id, len(plan.steps)) == (plan_id, count)
+        assert (plan.plan_id, len(plan.steps), plan.goal) == (plan_id, count, goal)
+
+
+def test_the_preview_goal_is_the_given_one_else_the_missions(config_dir):
+    store = ConfigStore(config_dir)
+    assert MissionFilePlanner(store, 'patrol', goal='custom goal').preview(1)[2] == 'custom goal'
+    planner = MissionFilePlanner(store, 'patrol')
+    assert planner.preview(1)[2] == planner.make_plan({}, 1).goal
 
 
 def test_mission_planner_replans_from_named_step(config_dir):

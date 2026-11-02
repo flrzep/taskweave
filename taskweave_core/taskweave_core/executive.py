@@ -101,25 +101,37 @@ class Executive:
         self._running = False          # a skill is executing for the current token
         self._interrupt: str | None = None  # 'pause' | 'abort' | 'timeout' while waiting for a CANCELED result
         self._replans: dict[str, int] = {}
-        self._preview: tuple[str, int] | None = None   # plan id and step count shown while the plan is prepared
+        self._preview: tuple[str, int, str] | None = None   # plan id, step count, goal shown while planning
 
     # ---- operator / node API -------------------------------------------------
-    def start(self, start_step: str = '') -> Status:
+    def start(self, start_step: str = '', early: Callable[[], str | None] | None = None) -> Status:
         """Plan cycle 1 and start it, at step ``start_step`` (an id) if given: the earlier steps are left out, the
         robot and objects are taken as they are. Later cycles start at their first step. Returns the status (FAILED
-        with a reason if the plan is invalid or has no such step)."""
+        with a reason if the plan is invalid, has no such step or cannot be made). ``early`` returns 'abort' or 'pause'
+        if the operator asked for it while the start was prepared: abort ends the mission before a step runs."""
         with self._lock:
             if self.status.state in ACTIVE:
                 raise RuntimeError('a mission is already active')
             self.status = Status(state=State.RUNNING)
             preview = getattr(self.planner, 'preview', None)
             self._preview = preview(1) if preview else None
+            wanted = early() if early else None
+            if wanted == 'abort':
+                self._finish(State.ABORTED, 'aborted by operator')
+                return self.status
             if self._preview:   # the plan is being prepared (loaded, validated): say what is coming meanwhile
-                self.status.plan_id, self.status.step_count = self._preview
+                self.status.plan_id, self.status.step_count, self.status.goal = self._preview
                 self.status.cycle, self.status.step_status = 1, PLANNING_STATUS
                 self._log(f'planning {self._preview[0]} ({self._preview[1]} steps)')
                 self.on_status(self.status)
-            self._begin_cycle(1, start_step)
+            try:
+                self._begin_cycle(1, start_step)
+            except Exception as error:   # e.g. the validation raised: not left running without a plan
+                self._running = False
+                self._finish(State.FAILED, f'{type(error).__name__}: {error}')
+                return self.status
+            if wanted == 'pause':
+                self.pause()
             return self.status
 
     def pause(self) -> bool:
@@ -286,7 +298,7 @@ class Executive:
     def _finish(self, state: State, message: str) -> None:
         if self._preview:   # no plan came of it: the id and count shown while planning are not a plan's
             self._preview = None
-            self.status.plan_id, self.status.step_count = '', 0
+            self.status.plan_id, self.status.step_count, self.status.goal = '', 0, ''
         if self.status.step_status == PLANNING_STATUS:
             self.status.step_status = ''
         if state in (State.FAILED, State.ABORTED):

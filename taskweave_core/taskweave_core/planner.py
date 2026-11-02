@@ -30,9 +30,9 @@ class Planner(ABC):
     def make_plan(self, world: Mapping[str, Any], cycle: int) -> Plan | None:
         """Plan for the given cycle (1-based), or None when the goal is complete."""
 
-    def preview(self, cycle: int) -> tuple[str, int] | None:
-        """``(plan id, step count)`` the plan of ``cycle`` will most likely have, known before it is made (the status
-        shows it while the plan is prepared); None if the planner cannot tell."""
+    def preview(self, cycle: int) -> tuple[str, int, str] | None:
+        """``(plan id, step count, goal)`` the plan of ``cycle`` will have, known before it is made (the status shows
+        it while the plan is prepared); None if the planner cannot tell."""
         return None
 
     def replan(self, plan: Plan, failed_index: int, reason: str, world: Mapping[str, Any]) -> tuple[Plan, int] | None:
@@ -70,10 +70,9 @@ class MissionFilePlanner(Planner):
     def _plan_id(self, number: int) -> str:
         return f'{self.mission_name}-{number:04d}'
 
-    def preview(self, cycle: int) -> tuple[str, int] | None:
-        """The next plan's id and its step count (the expanded mission's steps: facts fill steps in, never add or
-        remove one)."""
-        return self._plan_id(self._last_id + 1), len(self.mission['steps'])
+    def preview(self, cycle: int) -> tuple[str, int, str] | None:
+        # facts fill steps in, never add or remove one
+        return self._plan_id(self._last_id + 1), len(self.mission['steps']), self.goal or self.mission['goal']
 
     def facts(self) -> dict[str, Any]:
         """The mission's facts now: {name: value, or None if nothing fits}."""

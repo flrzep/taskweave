@@ -194,6 +194,8 @@ class TaskHandler(Node):
         self._published_plan: Plan | None = None
         self._starting: Status | None = None   # while a start is prepared (catalog, plan): what the status shows
         self._start_lock = threading.Lock()
+        self._early_lock = threading.Lock()
+        self._early: str | None = None   # 'abort' | 'pause' asked for while a start is prepared
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.status_pub = self.create_publisher(TaskStatus, names.STATUS, latched)
         self.plan_pub = self.create_publisher(PlanMsg, names.PLAN, latched)
@@ -366,7 +368,8 @@ class TaskHandler(Node):
         try:
             return self._start_locked(request, response)
         finally:
-            self._starting = None
+            with self._early_lock:
+                self._starting, self._early = None, None
             self._publish_status()   # the latched 'planning' status is replaced (a refused start leaves it otherwise)
             self._start_lock.release()
 
@@ -380,6 +383,8 @@ class TaskHandler(Node):
         except ConfigError as error:
             response.accepted, response.message = False, str(error)
             return response
+        self._starting.goal = planner.preview(1)[2]
+        self._publish_status()
         self.refresh_catalog()
         self.executive = Executive(planner, self.dispatcher, self.world, validate=self._validate, clock=self.now,
                                    on_status=self._on_status, on_episode=self._on_episode,
@@ -387,7 +392,7 @@ class TaskHandler(Node):
                                    speed=lambda: self.speed.percent / 100.0, annotate=self._annotate)
         self._starting = None   # the executive's status takes over (it shows the plan id and count while it plans)
         self._speed_run(True)
-        status = self.executive.start(request.start_step)
+        status = self.executive.start(request.start_step, early=self._take_early)
         response.accepted = status.state in ACTIVE or status.state.name == 'SUCCEEDED'
         response.message = status.last_error if not response.accepted else f'started {status.plan_id}'
         response.plan_id = status.plan_id
@@ -413,8 +418,18 @@ class TaskHandler(Node):
         self.get_logger().info(f'reload_config: {len(response.reloaded)} reloaded, {len(restart)} need a restart')
         return response
 
+    def _take_early(self) -> str | None:
+        with self._early_lock:
+            return self._early
+
     def _trigger(self, command: str):
         def handle(request, response):
+            with self._early_lock:   # abort or pause while a start is prepared: the executive applies it when it starts
+                if command in ('abort', 'pause') and self._start_lock.locked() and not (
+                        self.executive and self.executive.status.state in ACTIVE):
+                    self._early = 'abort' if 'abort' in (self._early, command) else command
+                    response.success, response.message = True, f'{command} requested: a mission is being started'
+                    return response
             if self.executive is None:
                 response.success, response.message = False, 'no mission'
                 return response

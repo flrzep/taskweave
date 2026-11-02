@@ -76,13 +76,24 @@ def read_pack(folder: Path) -> dict | None:
     return data
 
 
-@functools.cache
+_version: str | None = None   # a version that was found: it does not change while the process runs
+
+
 def taskweave_version() -> str:
     """The version of the taskweave_core that is running: the package.xml of its source tree, else the metadata of the
     installed copy this file belongs to (not just any installed taskweave_core: an older one may come first on the
-    path), else any installed one. Worked out once per process: it does not change while running, and the metadata
-    scan of an installed copy reads every distribution on the path (a ROS install has hundreds; this was run for
-    every robot file lookup, 100 s at the first mission start of a cell with many steps)."""
+    path), else any installed one. A found version is kept: every robot file lookup asks, and the metadata scan reads
+    all distributions. 'unknown' is not kept (a read error may pass)."""
+    global _version
+    if _version is None:
+        found = _find_version()
+        if found == 'unknown':
+            return found
+        _version = found
+    return _version
+
+
+def _find_version() -> str:
     import re
 
     here = Path(__file__).resolve()
@@ -95,15 +106,22 @@ def taskweave_version() -> str:
         from importlib.metadata import distributions, version
 
         # an install folder built over several releases keeps the metadata of each one: the newest is this copy's
-        # the cheap test (where the metadata lives) before the expensive one (parsing it for the name)
-        mine = [dist.version for dist in distributions()
-                if here.is_relative_to(Path(dist.locate_file('')).resolve())
-                and (dist.metadata['Name'] or '').replace('-', '_') == 'taskweave_core']
+        mine = [dist.version for dist in distributions() if _is_mine(dist, here)]
         if mine:
             return newest_version(mine)
         return version('taskweave_core')
     except Exception:  # metadata missing or unreadable
         return 'unknown'
+
+
+def _is_mine(dist, here: Path) -> bool:
+    """Is ``dist`` the taskweave_core installed where this file is? (the location test first: it is cheap, the name
+    needs the metadata parsed; a distribution that cannot be tested is not it)"""
+    try:
+        return (here.is_relative_to(Path(dist.locate_file('')).resolve())
+                and (dist.metadata['Name'] or '').replace('-', '_') == 'taskweave_core')
+    except Exception:
+        return False
 
 
 def newest_version(versions: list[str]) -> str:
