@@ -31,6 +31,28 @@ def test_the_store_reads_a_skill_part_by_either_spelling(tmp_path):
     assert store.skill_config('move/base') == {}
 
 
+def test_a_cell_of_schema_4_keeps_its_part_files_under_the_old_names(tmp_path):
+    from taskweave_core import motion
+
+    root = tmp_path / 'cell'
+    shutil.copytree(FIXTURES / 'targets_new', root)     # a cell of schema 4
+    (root / 'skills' / 'move').mkdir()
+    (root / 'skills' / 'move' / 'base.yaml').write_text('implementations: [{name: a, type: script, class: "x:Y"}]\n'
+                                                        'max_linear: 0.4\n')
+    (root / 'skills' / 'move' / 'object.yaml').write_text('implementations: [{name: b, type: script, class: "x:Y"}]\n'
+                                                          'motion: {mode: linear}\n')
+    overrides = root / 'robots' / 'bot_two_arm' / 'skill_overrides.yaml'
+    overrides.write_text('move.object: {motion: {planner: direct}}\n')
+    store = ConfigStore(root)
+    assert store.skill_params('move.navigate')['max_linear'] == 0.4          # read from base.yaml
+    assert store.skill_config('move/carry')['motion'] == {'mode': 'linear'}  # read from object.yaml
+    assert motion.values(motion.resolve(store, 'bot_two_arm', 'move.carry')) == {'mode': 'linear',
+                                                                                 'planner': 'direct'}
+    (root / 'skills' / 'move' / 'navigate.yaml').write_text('implementations: [{name: c, type: script, '
+                                                            'class: "x:Y"}]\n')
+    assert 'max_linear' not in ConfigStore(root).skill_params('move.navigate')   # the new name wins
+
+
 def test_the_catalogue_lists_a_part_file_as_a_skill_file_that_reloads_between_goals(tmp_path):
     kind = catalogue.kind_of('skills/move/hand.yaml')
     assert kind.kind == 'skill_part' and kind.reload == ('reload_service',) and kind.schema is not None

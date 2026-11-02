@@ -1,5 +1,5 @@
 # skills/move/straight.yaml. A short straight drive without obstacle avoidance; a fixed base rejects it. It takes the
-# keys of move/base.yaml (the controller) plus its own below, all optional; the values are the defaults.
+# keys of move/navigate.yaml (the controller) plus its own below, all optional; the values are the defaults.
 implementations:
   - name: drive_straight
     type: script

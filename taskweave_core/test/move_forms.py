@@ -27,7 +27,8 @@ def run_time_objects(store: ConfigStore) -> set[str]:
 def form_of(
     args: dict, store: ConfigStore | None = None, robot: str | None = None, runtime: frozenset | set = frozenset()
 ) -> tuple[str | None, list[str]]:
-    """``(form, problems)`` of one move step's args: base, straight, hand, object, elbow or joints."""
+    """``(form, problems)`` of one move step's args: a row of the option table (navigate, straight, hand, carry,
+    posture or joints)."""
     problems: list[str] = []
     if 'to' in args:
         target = args['to']
@@ -40,15 +41,16 @@ def form_of(
         except KeyError as error:
             return None, [f'to {target}: {error}']
         mode = (args.get('motion') or {}).get('mode')
-        return ('straight' if found.kind == 'base' and mode == 'straight' else found.kind), problems
+        return ('straight' if found.kind == 'base' and mode == 'straight' else model.FORM_OF_TARGET[found.kind]), \
+            problems
     if 'hand' in args:
-        return 'hand', problems
+        return ('carry' if args['hand'] == model.HOLDING else 'hand'), problems
     if 'object' in args:
-        return 'object', problems
+        return 'carry', problems
     if 'base' in args:
         return 'straight', problems
     if 'elbow' in args:
-        return 'elbow', problems
+        return 'posture', problems
     if 'joints' in args:
         return 'joints', problems
     return None, ['no form selector (to, hand, object, base, elbow, joints)']

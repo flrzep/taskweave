@@ -143,7 +143,7 @@ def make_archive(path: Path, members: dict, manifest: dict | None = None, extra=
 def test_bad_archive_leaves_pack_untouched(tmp_path, case, message):
     init_cell(tmp_path / 'cell', ROBOT)
     before = tree(tmp_path / 'cell')
-    good = {'pack.yaml': b'name: x\nversion: 1\nschema_version: 4\n'}
+    good = {'pack.yaml': f'name: x\nversion: 1\nschema_version: {packs.CELL_SCHEMA}\n'.encode()}
     archive = tmp_path / 'bad.tar.gz'
     if case == 'traversal':
         make_archive(archive, {'../evil.yaml': b'x: 1'})

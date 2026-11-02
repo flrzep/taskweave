@@ -252,7 +252,7 @@ class _JointSkill(Skill):
             return None
         text = '; '.join(f'{hand} holds {holding[hand]}' for hand in blocked)
         free = sorted(set(self.hold.tool_frames) - set(holding))
-        way = ('move the object (`object: held` or an object target), or open the gripper first' if in_move(self)
+        way = ('move the object (`hand: holding` or an object target), or open the gripper first' if in_move(self)
                else 'the hand and its arm stay with the object, move it with move_object, or open the gripper first')
         return SkillResult.rejected(f'{text}: {way}' + (f' (free: {", ".join(free)})' if free else ''))
 

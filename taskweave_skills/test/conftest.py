@@ -185,7 +185,7 @@ def one_ros_context():
         real_shutdown()
 
 
-OLD_PARTS = {'navigate_to': 'base', 'drive_straight': 'straight', 'move_gripper': 'hand', 'move_object': 'object',
+OLD_PARTS = {'navigate_to': 'navigate', 'drive_straight': 'straight', 'move_gripper': 'hand', 'move_object': 'carry',
              'set_posture': 'posture', 'move_joints': 'joints'}
 
 

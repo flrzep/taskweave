@@ -1,5 +1,5 @@
 """move without a robot: what a step resolves to (the part, the kind, the calls it makes) with stub parts, over the
-schema-4 test cell (fixtures/config). Every row of the mapping table of the design (old args -> move), every
+schema-5 test cell (fixtures/config). Every row of the mapping table of the design (old args -> move), every
 REJECTED line, the torso order, the schema and the default timeouts. No ROS: the parts are stubs that remember what they
 were called with, so these tests show which targets the real parts are handed (test_move_*_ros run the motions)."""
 
@@ -66,7 +66,7 @@ def make(tmp_path):
         move.config, move.robot, move._trial, move._used = store, store.robot(robot), False, []
         move.hands = list(move.robot.data.get('grippers', {}))
         hold = StubHold(held)
-        timeouts = {'base': 120.0}
+        timeouts = {'navigate': 120.0}
         move.modules = {part: StubPart(hold, pose, timeouts.get(part, 60.0)) for part in parts}
         move.unavailable = {part: ['needs arms.bimanual'] for part in PARTS if part not in parts}
         move.name = 'move'
@@ -95,6 +95,8 @@ def test_the_schema_passes_the_oneof_rule_and_every_form_of_the_design_validates
     schema = Move.schema_for(move.hands)
     steps = [{'to': 'dock'}, {'to': 'box_1/rim', 'offset_m': 0.15}, {'to': 'carry'}, {'to': 'home'},
              {'hand': 'left', 'by': [0, 0, 0.1]}, {'object': 'held', 'by': [0, 0, 0.3]},
+             {'hand': 'holding', 'by': [0, 0, 0.3]}, {'hand': 'holding', 'at': [0.5, 0, 1], 'object': 'box_1'},
+             {'hand': 'holding', 'by': [0, 0, 0.3], 'hands': 'all'},
              {'base': {'by': [-0.5, 0]}}, {'elbow': {'left': 'out'}}, {'joints': {'torso': 0.3}},
              {'to': 'box_1/top', 'object': 'box_1', 'reference': 'base'}, {'elbow': 'down', 'hands': 'left'}]
     for step in steps:
@@ -116,7 +118,7 @@ def test_a_step_with_no_form_or_two_forms_or_an_unknown_target_does_not_validate
 def test_the_hands_of_the_robot_fill_the_schema_enums(make):
     move = make()
     schema = Move.schema_for(move.hands)
-    assert schema['properties']['hand']['anyOf'][0]['enum'] == ['all', 'left', 'right']
+    assert schema['properties']['hand']['anyOf'][0]['enum'] == ['all', 'holding', 'left', 'right']
     assert schema['properties']['hands']['anyOf'][0]['enum'] == ['auto', 'any_one', 'all', 'left', 'right']
     props = Move.args_schema['properties']
     assert set(props) >= {'to', 'hand', 'object', 'base', 'elbow', 'joints', 'hands', 'offset_m', 'reference', 'by',
@@ -130,9 +132,10 @@ def test_the_hands_of_the_robot_fill_the_schema_enums(make):
 # ---- the mapping table: every old step as a move step ---------------------------------------------------------
 
 def test_navigate_to_a_location_or_stance_is_move_to_a_base_target(make):
-    move = make('diff_bot', ('base', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
+    move = make('diff_bot', ('navigate', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
     result = plan(move, to='dock')
-    assert result.part == 'base' and result.target == 'dock' and result.desc == 'base to dock'
+    assert result.part == 'navigate' and result.kind == 'navigate' and result.target == 'dock'
+    assert result.desc == 'dock'
     [call] = result.calls
     assert call['target'] == 'dock' and call[RESOLVED]['pose'] == Pose2D(1.0, 0.5, 1.5708, 'cell')
     assert call[RESOLVED]['torso'] is None            # the profile's drive_m applies
@@ -143,7 +146,7 @@ def test_a_stance_on_a_placed_object_is_composed_with_its_pose(make, tmp_path):
     (root / 'robots' / 'diff_bot' / 'objects').mkdir()
     (root / 'robots' / 'diff_bot' / 'objects' / 'box.yaml').write_text(
         'targets:\n  pick: {moves: base, x: -0.8, y: 0.0, yaw: 0.0}\n')
-    move = make('diff_bot', ('base', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
+    move = make('diff_bot', ('navigate', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
     result = plan(move, to='box_1/pick')
     [call] = result.calls
     assert call[RESOLVED]['pose'].x == pytest.approx(0.6 - 0.8) and call[RESOLVED]['pose'].y == pytest.approx(0.0)
@@ -151,7 +154,7 @@ def test_a_stance_on_a_placed_object_is_composed_with_its_pose(make, tmp_path):
 
 
 def test_drive_straight_rows(make):
-    move = make('diff_bot', ('base', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
+    move = make('diff_bot', ('navigate', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
     to = plan(move, to='dock', motion={'mode': 'straight'})            # drive_straight {to: T}
     assert to.part == 'straight' and to.calls[0]['to'] == 'dock'
     assert to.calls[0][RESOLVED]['pose'] == Pose2D(1.0, 0.5, 1.5708, 'cell')
@@ -196,11 +199,16 @@ def test_move_object_rows(make):
     held = [{'object': 'box_1', 'hands': ['left', 'right'], 'type': 'box'}]
     move = make(held=held)
     by = plan(move, object='held', by=[0, 0, 0.3], turn_deg=10, tilt_deg=3)        # move_object {to: {by, ...}}
-    assert by.part == 'object' and by.calls[0]['to'] == {'by': [0, 0, 0.3], 'turn_deg': 10, 'tilt_deg': 3}
+    assert by.part == 'carry' and by.kind == 'hand' and by.carrying == 'box_1'
+    assert by.calls[0]['to'] == {'by': [0, 0, 0.3], 'turn_deg': 10, 'tilt_deg': 3}
     assert 'object' not in by.calls[0]                                           # held: the only hold
+    holding = plan(move, hand='holding', by=[0, 0, 0.3], turn_deg=10, tilt_deg=3)    # schema 5: the same move
+    assert holding.part == 'carry' and holding.calls == by.calls and holding.desc == by.desc
     assert plan(move, object='box_1', at=[0.5, 0, 0.3]).calls[0]['object'] == 'box_1'    # {object: name}
     assert plan(move, object='held', at=[0.5, 0, 0.3]).calls[0]['to'] == {'at': [0.5, 0, 0.3]}
+    assert plan(move, hand='holding', at=[0.5, 0, 0.3], object='box_1').calls[0]['object'] == 'box_1'
     pose = plan(move, to='carry')                                              # move_object {to: {pose: N}}
+    assert pose.part == 'carry' and pose.kind == 'hand' and pose.carrying == 'box_1'
     [call] = pose.calls
     held_pose = call[RESOLVED]['held']
     assert call['to'] == {'pose': 'carry'} and held_pose['joints'] == {'lift': 0.1}
@@ -220,6 +228,8 @@ def test_move_object_hands_and_motion_pass_through(make):
     move = make(held=held)
     call = plan(move, object='held', by=[0, 0, 0.1], hands='all', torso='keep', motion={'mode': 'free'}).calls[0]
     assert call['hands'] == 'all' and call['motion'] == {'mode': 'free', 'torso': 'keep'}
+    assert plan(move, hand='holding', by=[0, 0, 0.1], hands='all', torso='keep',
+                motion={'mode': 'free'}).calls[0] == call
 
 
 def test_set_posture_rows(make):
@@ -278,14 +288,14 @@ def test_a_hand_target_with_a_path_keeps_its_waypoints(make):
 
 
 def test_a_base_target_with_a_path_makes_successive_goals(make):
-    move = make('lift_bot', ('base', 'straight', 'joints'), pose=Pose2D(0.0, 0.0, 0.0))
+    move = make('lift_bot', ('navigate', 'straight', 'joints'), pose=Pose2D(0.0, 0.0, 0.0))
     result = plan(move, to='dock_path')
     assert [call['target'] for call in result.calls] == ['dock_path (1/2)', 'dock_path']
     assert [call[RESOLVED]['pose'].x for call in result.calls] == [0.5, 1.0]
 
 
 def test_the_joints_part_of_a_base_target_moves_first_and_its_torso_replaces_the_drive_height(make):
-    move = make('lift_bot', ('base', 'straight', 'joints'), pose=Pose2D(0.0, 0.0, 0.0))
+    move = make('lift_bot', ('navigate', 'straight', 'joints'), pose=Pose2D(0.0, 0.0, 0.0))
     result = plan(move, to='dock_lifted')
     assert result.before['joints'] == {'head1': 0.2, 'lift': 0.4}
     assert result.calls[0][RESOLVED]['torso'] == 'keep'       # the joints leg set the height: drive_m does not apply
@@ -300,7 +310,7 @@ def test_the_joints_part_of_a_base_target_moves_first_and_its_torso_replaces_the
 
 
 def test_motion_speed_and_accel_reach_the_base_parts(make):
-    move = make('diff_bot', ('base', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
+    move = make('diff_bot', ('navigate', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
     call = plan(move, to='dock', motion={'speed': 0.5, 'accel': 0.25}).calls[0]
     assert call[RESOLVED]['speed'] == 0.5 and call[RESOLVED]['accel'] == 0.25
     assert plan(move, base={'by': [0.1, 0]}, motion={'speed': 0.5}).calls[0][RESOLVED]['speed'] == 0.5
@@ -310,7 +320,7 @@ def test_motion_speed_and_accel_reach_the_base_parts(make):
 # ---- every REJECTED line --------------------------------------------------------------------------------------
 
 def test_an_option_that_does_not_apply_to_the_kind_says_which_kind_and_which_option(make):
-    move = make('diff_bot', ('base', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
+    move = make('diff_bot', ('navigate', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
     assert rejected(plan(move, to='dock', hands='left')) == "move: 'dock' moves the base; option hands does not apply"
     rejected(plan(move, to='dock', offset_m=0.1), "'dock' moves the base", 'offset_m does not apply')
     rejected(plan(move, to='dock', only=['torso']), 'option only does not apply')
@@ -332,32 +342,33 @@ def test_the_options_of_the_other_kinds_are_checked_too(make):
     rejected(plan(move, to='box_1/rim', motion={'mode': 'nav'}), 'motion.mode', 'does not apply')
     rejected(plan(move, to='carry', motion={'via': ['home']}), 'motion.via does not apply')
     rejected(plan(move, to='carry', hands='any_one'), 'hands any_one does not apply')
-    rejected(plan(move, elbow='out', offset_m=0.1), 'move elbow: option offset_m does not apply')
-    rejected(plan(move, elbow='out', torso='auto'), 'move elbow: torso')
+    rejected(plan(move, elbow='out', offset_m=0.1), 'change posture: option offset_m does not apply')
+    rejected(plan(move, elbow='out', torso='auto'), 'change posture: torso')
     rejected(plan(move, elbow={'left': 'out'}, hands='left'), 'elbow names its hands')
     rejected(plan(move, joints={'torso': 0.1}, only=['torso']), 'option only applies to a joint target')
-    rejected(plan(move, joints={'torso': 0.1}, hands='left'), 'move joints: option hands does not apply')
+    rejected(plan(move, joints={'torso': 0.1}, hands='left'), 'move to joint positions: option hands does not apply')
 
 
 def test_cell_frame_hand_and_object_targets_are_rejected(make):
     move = make()
     assert rejected(plan(move, to='dock_tool'), 'cell-frame hand targets are not supported yet',
-                    "target 'dock_tool'").startswith('move hand: ')
-    assert rejected(plan(move, to='dock_object')).startswith('move object: cell-frame object targets')
+                    "target 'dock_tool'").startswith('move to target: ')
+    assert rejected(plan(move, to='dock_object')).startswith('move to target: cell-frame object targets')
 
 
 def test_a_base_frame_base_target_is_rejected_until_it_is_built(make, tmp_path):
     (tmp_path / 'config' / 'robots' / 'diff_bot' / 'targets.yaml').write_text(
         'back_off: {moves: base, x: -0.3, y: 0.0, yaw: 0.0}\n')
-    move = make('diff_bot', ('base', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
+    move = make('diff_bot', ('navigate', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
     rejected(plan(move, to='back_off'), 'base-frame base targets are not supported yet', 'base: {by: [...]}')
 
 
 def test_a_held_hand_or_nothing_held_is_a_rejection_naming_the_kind(make):
     nothing = make()
     assert rejected(plan(nothing, object='held', by=[0, 0, 0.1])) == (
-        'move object: nothing is held: move to a hand target, then grip close')
-    rejected(plan(nothing, to='carry'), 'move object: nothing is held')
+        'move to target: nothing is held: move to a hand target, then grip close')
+    rejected(plan(nothing, hand='holding', by=[0, 0, 0.1]), 'move to target: nothing is held')
+    rejected(plan(nothing, to='carry'), 'move to target: nothing is held')
     # a base-frame target of another type than the held one
     other = make(held=[{'object': 'crate_1', 'hands': ['left', 'right'], 'type': 'crate'}])
     rejected(plan(other, to='carry'), "'carry' is a base-frame object target for box", 'a crate is held')
@@ -365,10 +376,13 @@ def test_a_held_hand_or_nothing_held_is_a_rejection_naming_the_kind(make):
     rejected(plan(nothing_typed, to='carry'), 'nothing is held')
 
 
-def test_a_hand_that_holds_is_refused_by_the_part_not_the_plan(make):
-    # the holding check needs the registry the real part has: the plan resolves, the part rejects (test_move_hand_ros)
+def test_a_hand_move_of_a_holding_and_a_free_hand_is_refused(make):
     move = make(held=[{'object': 'box_1', 'hands': ['left'], 'type': 'box'}])
-    assert plan(move, to='box_1/rim').part == 'hand'
+    rejected(plan(move, to='box_1/rim'), 'move to target: left holds box_1, right holds nothing', 'two steps')
+    rejected(plan(move, hand='all', by=[0, 0, 0.1]), 'left holds box_1, right holds nothing')
+    assert plan(move, to='box_1/rim', hands='right').part == 'hand'      # the free hand moves alone, as before
+    assert plan(move, to='box_1/knob').part == 'hand'                    # a target of the free hand only
+    assert plan(move, hand='right', by=[0, 0, 0.1]).part == 'hand'
 
 
 def test_unknown_targets_and_wrong_kinds_say_so(make):
@@ -403,14 +417,14 @@ def test_relative_forms_check_their_keys(make):
 
 
 def test_a_robot_without_the_part_says_it_cannot_do_that_kind(make):
-    move = make('diff_bot', ('base', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
+    move = make('diff_bot', ('navigate', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
     rejected(plan(move, to='box_1/rim'), 'this robot cannot do hand moves', 'needs arms.bimanual')
     rejected(plan(move, elbow='out'), 'this robot cannot do posture moves')
 
 
 def test_a_group_value_that_does_not_fit_the_robot_is_rejected_with_the_group(make):
     move = make()
-    rejected(plan(move, joints={'wings': 0.1}), 'move joints:', "joint group 'wings'")
+    rejected(plan(move, joints={'wings': 0.1}), 'move to joint positions:', "joint group 'wings'")
     rejected(plan(move, joints={'left_arm': 0.1}), "joint group 'left_arm' has 2 joints")
     rejected(plan(move, joints={'torso': 'auto'}), 'torso auto needs a hand or object target')
     rejected(plan(move, joints={'torso': 'keep'}), 'names no joint to move')
@@ -444,7 +458,7 @@ def test_offset_m_does_not_apply_to_a_carry_pose_and_a_joints_part_is_refused_on
 # ---- timeouts --------------------------------------------------------------------------------------------------
 
 def test_the_default_timeout_comes_from_the_kind_of_motion(make):
-    move = make('lift_bot', ('base', 'straight', 'joints'), pose=Pose2D(0.0, 0.0, 0.0))
+    move = make('lift_bot', ('navigate', 'straight', 'joints'), pose=Pose2D(0.0, 0.0, 0.0))
     assert move.default_timeout({'to': 'dock'}) == 120.0                    # nav
     assert move.default_timeout({'to': 'dock', 'motion': {'mode': 'straight'}}) == 60.0
     assert move.default_timeout({'base': {'by': [0.1, 0]}}) == 60.0
@@ -461,13 +475,32 @@ def test_the_result_names_the_kind_the_module_and_the_target(make):
     move = make()
     found = plan(move, to='lift_up')
     result = move._finish(SkillResult.failed('no progress', max_error=1), found, move.modules['joints'])
-    assert result.message == 'move joints lift_up: no progress'
+    assert result.message == 'move to joint positions · lift_up: no progress'
     assert result.data == {'max_error': 1, 'kind': 'joints', 'module': 'move.joints', 'target': 'lift_up'}
     hand = plan(move, to='box_1/rim')
     done = move._finish(SkillResult.succeeded('at box_1/rim (max error 0.004)', hands=['left', 'right']), hand,
                         move.modules['hand'])
-    assert done.message == 'move hand box_1/rim (left, right): at box_1/rim (max error 0.004)'
-    assert done.data['kind'] == 'hand' and done.data['target'] == 'box_1/rim'
+    assert done.message == 'move to target · box_1/rim (left, right): at box_1/rim (max error 0.004)'
+    assert done.data['kind'] == 'hand' and done.data['target'] == 'box_1/rim' and 'carrying' not in done.data
+    refused = move._finish(SkillResult.rejected('no way'), hand, move.modules['hand'])
+    assert refused.message == 'move to target: no way'
+    held = make(held=[{'object': 'box_1', 'hands': ['left', 'right'], 'type': 'box'}])
+    carry = plan(held, to='carry')
+    moved = held._finish(SkillResult.succeeded('moved box_1 to carry (max error 0.003)', hands=['left', 'right']),
+                         carry, held.modules['carry'])
+    assert moved.message == ('move to target · carrying box_1 · carry (left, right): moved box_1 to carry '
+                             '(max error 0.003)')
+    assert moved.data == {'hands': ['left', 'right'], 'kind': 'hand', 'module': 'move.carry', 'target': 'carry',
+                          'carrying': 'box_1'}
+    drive = make('diff_bot', ('navigate', 'straight'), pose=Pose2D(0.0, 0.0, 0.0))
+    nav = drive._finish(SkillResult.succeeded('at dock'), plan(drive, to='dock'), drive.modules['navigate'])
+    assert nav.message == 'navigate to · dock (direct): at dock' and nav.data['module'] == 'move.navigate'
+    straight = plan(drive, base={'by': [0.4, 0]})
+    assert drive._finish(SkillResult.succeeded('done'), straight, drive.modules['straight']).message == (
+        'move straight · by +0.4 m: done')
+    posture = plan(make(), elbow='out')
+    assert move._finish(SkillResult.succeeded('swung'), posture, move.modules['posture']).message == (
+        'change posture · elbow out: swung')
 
 
 def test_the_editor_shapes_of_hand_torso_and_the_by_at_choice(make):
@@ -478,7 +511,8 @@ def test_the_editor_shapes_of_hand_torso_and_the_by_at_choice(make):
     assert props['torso']['anyOf'][0] == {'enum': ['auto', 'keep']} and props['torso']['anyOf'][1] == {'type': 'number'}
     move = make()
     narrowed = Move.schema_for(move.hands)['properties']['hand']
-    assert narrowed['anyOf'][0]['enum'] == ['all', 'left', 'right'] and narrowed['x-taskweave-widget'] == 'hands'
+    assert narrowed['anyOf'][0]['enum'] == ['all', 'holding', 'left', 'right']
+    assert narrowed['x-taskweave-widget'] == 'hands'
     forms = {variant['required'][0]: variant for variant in Move.args_schema['oneOf']}
     assert forms['hand']['x-taskweave-exclusive'] == forms['object']['x-taskweave-exclusive'] == ['by', 'at']
     assert Move.args_schema['not']['required'] == ['by', 'at']
@@ -490,3 +524,81 @@ def test_the_editor_shapes_of_hand_torso_and_the_by_at_choice(make):
     both = check({'hand': 'left', 'by': [0, 0, 0.1], 'at': [0.3, 0.1, 1.0]})
     assert len(both) == 1 and 'give by or at, not both' in both[0], both
     assert check({'object': 'held', 'by': [0, 0, 0.1], 'at': [0, 0, 0]})
+
+
+# ---- carrying: a hand move of a holding hand ---------------------------------------------------------------------
+
+def with_shape(tmp_path):
+    """The box type of the test cell with a collision shape (objects/box.yaml ``collision:``)."""
+    path = tmp_path / 'config' / 'objects' / 'box.yaml'
+    path.write_text(path.read_text() + 'collision: {box: [0.4, 0.3, 0.2]}\n')
+
+
+TWO = [{'object': 'box_1', 'hands': ['left', 'right'], 'type': 'box'}]
+ONE = [{'object': 'box_1', 'hands': ['left'], 'type': 'box'}]
+
+
+def test_a_relative_move_of_one_hand_of_a_two_hand_hold_carries_the_whole_hold(make, tmp_path):
+    with_shape(tmp_path)
+    move = make(held=TWO)
+    result = plan(move, hand='left', by=[0, 0, 0.1], frame='tool', turn_deg=5)
+    assert result.part == 'carry' and result.kind == 'hand' and result.carrying == 'box_1'
+    [call] = result.calls
+    assert call['object'] == 'box_1' and call[RESOLVED] == {'hand': 'left'} and 'hands' not in call
+    assert call['to'] == {'by': [0, 0, 0.1], 'frame': 'tool', 'turn_deg': 5}
+    assert result.desc == 'carrying box_1 · hand left by'
+    both = plan(move, hand='all', by=[0, 0, 0.1])                       # both hands of the hold: the same carry
+    assert both.part == 'carry' and both.calls[0][RESOLVED] == {'hand': 'left'}
+    at = plan(move, hand='right', at=[0.5, 0, 1.0], rpy_deg=[0, 90, 0])
+    assert at.calls[0]['to'] == {'at': [0.5, 0, 1.0], 'rpy_deg': [0, 90, 0]} and at.calls[0][RESOLVED] == {
+        'hand': 'right'}
+
+
+def test_a_one_hand_hold_is_carried_by_its_hand(make, tmp_path):
+    with_shape(tmp_path)
+    move = make(held=ONE)
+    result = plan(move, hand='left', by=[0, 0, 0.1])
+    assert result.part == 'carry' and result.calls[0][RESOLVED] == {'hand': 'left'}
+    target = plan(move, to='box_1/rim', hands='left')
+    assert target.part == 'carry' and target.carrying == 'box_1' and target.kind == 'hand'
+    [call] = target.calls
+    assert call['to'] == {'hand_target': 'box_1/rim'} and call['object'] == 'box_1'
+    assert call[RESOLVED]['hands'] == ['left'] and call[RESOLVED]['hand_target']['target'].reference == 'box_1/rim'
+    assert plan(move, hand='right', by=[0, 0, 0.1]).part == 'hand'      # the free hand: a hand move
+
+
+def test_a_hand_target_of_a_two_hand_hold_carries_the_object_where_the_hands_go(make, tmp_path):
+    with_shape(tmp_path)
+    move = make(held=TWO)
+    result = plan(move, to='box_1/rim', offset_m=0.05, torso='keep')
+    assert result.part == 'carry' and result.desc == 'carrying box_1 · box_1/rim'
+    [call] = result.calls
+    assert call[RESOLVED]['hands'] == ['left', 'right'] and call[RESOLVED]['hand_target']['offset_m'] == 0.05
+    assert call['motion'] == {'torso': 'keep'} and call[RESOLVED]['hand_target']['data'] == {'approach_m': 0.1}
+    rejected(plan(move, to='box_1/rim', motion={'via': ['present_left']}), 'motion.via does not apply while')
+    rejected(plan(move, to='present_both'), 'joint values', 'do not apply while the hands hold something')
+    rejected(plan(move, hand='left', by=[0, 0, 0.1], motion={'approach_m': 0.1}), 'motion.approach_m does not apply')
+
+
+def test_the_new_carry_path_needs_the_collision_shape_of_the_held_type(make):
+    move = make(held=TWO)                          # objects/box.yaml has no collision shape
+    text = rejected(plan(move, hand='left', by=[0, 0, 0.1]), 'move to target: left holds box_1',
+                    'objects/box.yaml has no collision:')
+    assert 'hand: holding' in text
+    rejected(plan(move, to='box_1/rim'), 'objects/box.yaml has no collision:')
+    untyped = make(held=[{'object': 'thing', 'hands': ['left'], 'type': None}])
+    rejected(plan(untyped, hand='left', by=[0, 0, 0.1]), 'its type is unknown')
+    # the moves of a held object as before: no shape needed
+    assert plan(move, hand='holding', by=[0, 0, 0.1]).part == 'carry'
+    assert plan(move, object='held', by=[0, 0, 0.1]).part == 'carry'
+    assert plan(move, to='carry').part == 'carry'
+
+
+def test_two_holds_or_a_free_hand_with_a_holding_one_are_refused(make, tmp_path):
+    with_shape(tmp_path)
+    two = make(held=[{'object': 'box_1', 'hands': ['left'], 'type': 'box'},
+                     {'object': 'box_2', 'hands': ['right'], 'type': 'box'}])
+    rejected(plan(two, hand='all', by=[0, 0, 0.1]), 'left holds box_1, right holds box_2',
+             'name the hands of one held object')
+    assert plan(two, hand='right', by=[0, 0, 0.1]).calls[0]['object'] == 'box_2'
+    rejected(plan(make(), hand='left', hands='left', by=[0, 0, 0.1]), 'two spellings')

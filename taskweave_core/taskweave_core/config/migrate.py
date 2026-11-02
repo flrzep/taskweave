@@ -24,6 +24,10 @@ move_gripper, grip, move_object (args ``to``) and set_posture (migrate_skills.py
 3 -> 4: targets: locations, stances, object points and contacts, poses and held poses become targets in four files, the
 six motion skills become the skill ``move``; writable robot packs are migrated too
 (migrate_targets.py, migrate_move.py).
+
+4 -> 5: move's five commands: the held-object step form ``{object: held, by / at}`` becomes ``{hand: holding, ...}``,
+the part files skills/move/base.yaml and object.yaml become navigate.yaml and carry.yaml, robot skill overrides and
+smoke references follow (migrate_kinds.py).
 """
 
 from __future__ import annotations
@@ -236,6 +240,12 @@ def target_model(cell: Path, robot_packs: Path | None, dry_run: bool, say) -> li
     return migrate_targets(cell, robot_packs, dry_run, say)     # RuntimeError: a name it cannot map, nothing changed
 
 
+def kind_model(cell: Path, robot_packs: Path | None, dry_run: bool, say) -> list[str]:
+    from .migrate_kinds import migrate_kinds
+
+    return migrate_kinds(cell, robot_packs, dry_run, say)     # RuntimeError: a file it cannot write, nothing changed
+
+
 def skill_model(cell: Path, robot_packs: Path | None, dry_run: bool, say) -> list[str]:
     from .migrate_skills import migrate_skills
 
@@ -244,7 +254,7 @@ def skill_model(cell: Path, robot_packs: Path | None, dry_run: bool, say) -> lis
 
 
 # from schema_version -> function(cell, robot_packs, dry_run, say) -> units it could not remove (pack.yaml waits)
-MIGRATIONS = {1: split_robot_packs, 2: skill_model, 3: target_model}
+MIGRATIONS = {1: split_robot_packs, 2: skill_model, 3: target_model, 4: kind_model}
 LATEST = max(MIGRATIONS) + 1    # the schema the chain ends at (packs.CELL_SCHEMA)
 
 

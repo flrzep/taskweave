@@ -24,7 +24,7 @@ steps:
     args: {hands: [left], action: close}
   - instruction: Lift the bin 20 cm
     skill: move
-    args: {object: held, by: [0, 0, 0.2], hands: [left], torso: keep}
+    args: {hand: holding, by: [0, 0, 0.2], hands: [left], torso: keep}
   - instruction: Bin into the carry pose
     skill: move
     args: {to: carry, hands: [left], torso: keep}

@@ -25,7 +25,7 @@ from . import catalogue, overlay, packs
 from . import target_store as ts
 from . import targets as model
 from .limits import joint_limits, joint_problems
-from .store import ConfigError, ConfigStore
+from .store import PARTS_BEFORE, ConfigError, ConfigStore, skill_file
 
 ERROR, WARNING = 'error', 'warning'
 
@@ -231,6 +231,7 @@ def _cross_mission(store, c):
             for i, s in enumerate(steps) if s.get('skill') and s['skill'] not in skills]
     if c.data.get('robot') and c.data['robot'] not in store.robot_names():
         out.append((['robot'], f'robot {c.data["robot"]!r} is not one of this cell\'s robots', WARNING))
+    out += _old_move_forms(store, steps)
     try:
         Plan.from_mission(expand_includes(c.data, lambda n: c.data if n == c.name else store.mission(n)), 'check')
     except (IncludeError, ValueError, KeyError, ConfigError) as error:
@@ -238,10 +239,30 @@ def _cross_mission(store, c):
     return out
 
 
+def _old_move_forms(store, steps) -> list:
+    """Move steps in the form of cell schema 4 (``{object: held, by / at}``): a note on a schema 4 cell (it still
+    runs), an error from schema 5 on; either names ``taskweave config migrate``."""
+    from ..step_info import MOVE_SKILL, OBJECT_FORM_SCHEMA, old_object_form, old_object_text
+
+    found = [(i, s['args']) for i, s in enumerate(steps) if isinstance(s, dict) and s.get('skill') == MOVE_SKILL
+             and isinstance(s.get('args'), dict) and old_object_form(s['args'])]
+    if not found:
+        return []
+    severity = ERROR if packs.cell_schema(store.root) >= OBJECT_FORM_SCHEMA else WARNING
+    return [(['steps', i, 'args', 'object'], old_object_text(args, str(store.root)), severity) for i, args in found]
+
+
 def _cross_skill(store, c):
     from ..skill import load_skill_class
 
     out = []
+    old = {skill_file(before): part for part, before in PARTS_BEFORE.items()}
+    if c.path in old:
+        from ..step_info import OBJECT_FORM_SCHEMA
+
+        if packs.cell_schema(store.root) >= OBJECT_FORM_SCHEMA:
+            out.append(([], f'the cell schema 4 name of {skill_file(old[c.path])}: read only while that is missing '
+                            '(`taskweave config migrate` renames it)', WARNING))
     for i, implementation in enumerate(c.data.get('implementations', [])):
         try:
             load_skill_class(implementation['class'])

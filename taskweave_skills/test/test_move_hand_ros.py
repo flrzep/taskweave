@@ -104,12 +104,13 @@ def at(system, hand, joint1, joint2, tolerance=0.03):
 def test_move_is_served_with_its_parts_and_the_robots_hands(system):
     skill = system.server.skills['move']
     assert list(system.server.skills) == ['move', 'grip']
-    assert sorted(skill.modules) == ['base', 'hand', 'joints', 'object', 'posture', 'straight']
+    assert sorted(skill.modules) == ['carry', 'hand', 'joints', 'navigate', 'posture', 'straight']
+    assert skill.modules['carry'].name == 'move.carry' and skill.modules['navigate'].name == 'move.navigate'
     assert 'hand' in skill.modules and skill.modules['hand'].name == 'move.hand'
     assert skill.modules['hand'].implementation == 'script:ik_planned'            # arms.bimanual comes first
     assert skill.args_schema['properties']['hands']['anyOf'][0]['enum'] == ['auto', 'any_one', 'all', 'left',
                                                                             'right']
-    assert skill.args_schema['properties']['hand']['anyOf'][0]['enum'] == ['all', 'left', 'right']
+    assert skill.args_schema['properties']['hand']['anyOf'][0]['enum'] == ['all', 'holding', 'left', 'right']
     assert motion.values(motion.resolve(system.server.config, 'duo_bot', 'move.hand'))['torso'] == 'auto'
     assert skill.modules['hand'].cell_frame == 'world'
     assert skill.default_timeout({'to': 'present_left'}) == 60.0
@@ -135,7 +136,7 @@ def test_a_base_frame_hand_target_free_moves_only_the_hands_it_places(system):
     assert data['world_state'] == {'arm_pose': 'present_left'}
     assert data['motion']['elbow'] == 'out'            # the target's own elbow side (target layer)
     assert data['kind'] == 'hand' and data['module'] == 'move.hand' and data['target'] == 'present_left'
-    assert result.message.startswith('move hand present_left (left): at present_left (max error')
+    assert result.message.startswith('move to target · present_left (left): at present_left (max error')
     assert 'max error' in result.message                # the smoke test parses it
     assert data['speed']['override_avg'] == pytest.approx(100.0, abs=1.0)
 
@@ -149,7 +150,7 @@ def test_a_target_with_joints_and_a_hands_subset(system):
     assert data['hands'] == ['left', 'right']
     at(system, 'left', 0.6, 0.4)
     result, _ = go(system, {'to': 'present_left', 'hands': ['right']}, REJECTED)
-    assert result.message == 'move hand: present_left has no tool poses for right'
+    assert result.message == 'move to target: present_left has no tool poses for right'
 
 
 def test_linear_goes_by_straight_lines_from_where_the_hand_is(system):
@@ -229,14 +230,18 @@ def test_at_places_one_hand_and_keeps_or_sets_the_orientation(system):
     w, x, y, z = system.ik.requests[-1]['q']
     assert (w, z) == pytest.approx((math.sqrt(0.5), math.sqrt(0.5)))
     result, _ = go(system, {'hand': 'all', 'at': [0.7, 0.1, 0.5]}, REJECTED)
-    assert result.message == 'move hand: at needs exactly one hand'
+    assert result.message == 'move to target: at needs exactly one hand'
 
 
 def test_a_hand_that_holds_something_is_refused_in_moves_words(system):
     go(system, {'to': 'box_1/rim'})
     assert run(system, 'grip', {'action': 'close'}).outcome == OK
     result, _ = go(system, {'hand': 'all', 'by': [0, 0, 0.1]}, REJECTED)
-    assert result.message == ('move hand: left holds box_1; right holds box_1: move the object (`object: held` or an '
+    assert result.message == ('move to target: left holds box_1, right holds box_1: a hand moves while holding only '
+                              'when the held object has a collision shape: objects/box.yaml has no collision: (add '
+                              'one, or move it with hand: holding or an object target)')
+    result, _ = go(system, {'joints': {'left_arm': [0.2, None]}}, REJECTED)
+    assert result.message == ('move to joint positions: left holds box_1: move the object (`hand: holding` or an '
                               'object target), or open the gripper first')
 
 
@@ -249,7 +254,7 @@ def test_the_free_arm_moves_while_the_other_hand_holds(system):
     _, data = go(system, {'to': 'present_right'})
     assert data['hands'] == ['right']
     result, _ = go(system, {'joints': {'right_arm': [0.3, 0.2]}})
-    assert result.message.startswith('move joints right_arm [0.3, 0.2]')
+    assert result.message.startswith('move to joint positions · right_arm [0.3, 0.2]')
     before = dict(system.sim.position)
     for args in ({'hand': 'left', 'by': [0, 0, 0.1]}, {'hand': 'all', 'by': [0, 0, 0.1]},
                  {'joints': {'left_arm': [0.2, None]}}, {'joints': {'left_arm': [0.2, None], 'torso': 0.1}}):
@@ -266,7 +271,7 @@ def test_the_torso_is_tried_at_other_heights_with_torso_auto_only(system):
     system.ik.need_lift = 0.2
     result, _ = go(system, {'to': 'present_left', 'torso': 'keep'}, FAILED)
     assert 'no IK solution' in result.message and system.sim.position['lift'] == 0.0
-    assert result.message.startswith('move hand present_left')
+    assert result.message.startswith('move to target · present_left')
     go(system, {'to': 'present_left'})                       # the part's torso: auto
     at(system, 'left', 0.6, 0.4)
     assert system.sim.position['lift'] == pytest.approx(0.2, abs=0.02)
@@ -310,7 +315,8 @@ def test_ik_torso_with_no_feasible_height_fails_with_every_height_and_its_reason
     with_ik_torso(system)
     system.ik.blocked = {'left'}
     result, data = go(system, {'to': 'present_left'}, FAILED)
-    assert 'no torso height works' in result.message and result.message.startswith('move hand present_left')
+    assert 'no torso height works' in result.message and result.message.startswith(
+        'move to target · present_left')
     assert {r['height'] for r in data['torso'][0]['rejected']} == {0.0, 0.1, 0.2, 0.3}
     assert system.sim.position['lift'] == 0.0
 
@@ -434,13 +440,13 @@ def test_hands_any_one_takes_the_one_hand_the_target_defines(system):
 def test_cell_frame_hand_targets_and_unknown_targets_are_rejected_before_anything_moves(system):
     before = dict(system.sim.position)
     result, _ = go(system, {'to': 'dock_tool'}, REJECTED)
-    assert result.message == "move hand: cell-frame hand targets are not supported yet (target 'dock_tool')"
+    assert result.message == "move to target: cell-frame hand targets are not supported yet (target 'dock_tool')"
     result, _ = go(system, {'to': 'box_1/rim_nope'}, REJECTED)
     assert result.message.startswith("args.to: object 'box' has no target 'rim_nope'")
     result, _ = go(system, {'to': 'present_left', 'hands': 'left', 'offset_m': 0.1, 'by': [0, 0, 0]}, REJECTED)
     assert 'option by does not apply' in result.message
     result, _ = go(system, {'to': 'dock'}, REJECTED)                    # a base move on a robot with a fixed base
-    assert result.message == 'move base: robot base is fixed'
+    assert result.message == 'navigate to: robot base is fixed'
     assert system.sim.position == before
 
 
@@ -473,7 +479,7 @@ def test_a_dry_run_lists_the_approach_and_the_waypoints_and_reports_an_unreachab
     assert [leg['label'] for leg in data['legs']][0] == 'box_1/rim_path (1/2)'
     system.ik.blocked = {'left'}
     result, _ = go(system, {'to': 'present_left', 'dry_run': True}, FAILED)
-    assert 'no IK solution' in result.message and result.message.startswith('move hand present_left')
+    assert 'no IK solution' in result.message and result.message.startswith('move to target · present_left')
     assert system.sim.position['left_joint1'] == 0.0
     result, _ = go(system, {'hand': 'all', 'by': [0, 0, 0.1], 'dry_run': True}, FAILED)    # relative: solved too
 

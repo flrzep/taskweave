@@ -7,10 +7,10 @@ With the profile's ``torso: {joint, drive_m, tolerance_m}`` the torso goes to ``
 move_joints step: planner, speed override, joint limits), unless it is within ``tolerance_m`` of it or a hand holds
 something (the carry height stays; the result says so). The result's ``data.torso_drive`` reports it; drive_straight
 and the Nav2 implementation do the same. Without ``drive_m`` the torso is never touched.
-In a cell in the targets layout this class is ``move.base`` (parameters ``skills/move/base.yaml``): ``Move`` gives it
-the resolved pose, the torso (``torso`` of the step: ``keep``, or the joint values to go to instead of ``drive_m``)
-and the step's ``motion.speed`` and ``motion.accel`` (fractions) in ``args[RESOLVED]`` (``pose``, ``torso``, ``speed``,
-``accel``).
+In a cell in the targets layout this class is ``move.navigate`` (parameters ``skills/move/navigate.yaml``): ``Move``
+gives it the resolved pose, the torso (``torso`` of the step: ``keep``, or the joint values to go to instead of
+``drive_m``) and the step's ``motion.speed`` and ``motion.accel`` (fractions) in ``args[RESOLVED]`` (``pose``,
+``torso``, ``speed``, ``accel``).
 Parameters (``skills/navigate_to.yaml``; values below are defaults, each capped by the robot's base limits):
 """
 

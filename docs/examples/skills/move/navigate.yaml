@@ -1,4 +1,4 @@
-# skills/move/base.yaml. The direct controller (no obstacle avoidance), served on every robot with a base.
+# skills/move/navigate.yaml. The direct controller (no obstacle avoidance), served on every robot with a base.
 # With Nav2 running, list a second implementation before it: class taskweave_skills.nav2:Nav2NavigateTo (it uses this
 # controller for the final approach and takes the same keys, plus the Nav2 ones of the nav2 module doc).
 # Every key below is optional; the values are the defaults, each capped by the robot's base limits (profile base.limits).

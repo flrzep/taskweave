@@ -49,7 +49,7 @@ def test_object_points_are_object_relative(config_dir):
 def test_optional_files_default_empty(config_dir):
     store = ConfigStore(config_dir)
     assert store.skill_params('wait') == {}
-    assert store.skill_params('move.base')['max_linear'] == 0.5
+    assert store.skill_params('move.navigate')['max_linear'] == 0.5
 
 
 def test_stance_is_object_pose_times_robot_offset(config_dir):

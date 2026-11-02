@@ -1,10 +1,14 @@
 """What a plan step is, from its arguments: the kind of motion of a ``move`` step, the resources it uses, and the
 per-kind option check (the rules of config/targets.py ``MOVE_OPTIONS``).
 
-A ``move`` step says what moves in one of six forms (``to`` a target, ``hand`` / ``object`` relative to now, ``base``
-straight, ``elbow``, ``joints``); a ``to`` step takes its kind from the target. The kind is what the result's
-``data.kind`` says afterwards (base, straight, hand, object, posture, joints). Every other skill has no kind and the
-resources its argument schema lists in ``x-taskweave-resources``.
+A ``move`` step says what moves in one of its forms (``to`` a target, ``hand`` relative to now, ``base`` straight,
+``elbow``, ``joints``); a ``to`` step takes its kind from the target. The kind is what the result's ``data.kind`` says
+afterwards, one of the operator's five commands (navigate, straight, hand, posture, joints). The option table has one
+more row, ``carry``: a hand move of a held object (an object target, ``hand: holding``), kind hand. Every other skill
+has no kind and the resources its argument schema lists in ``x-taskweave-resources``.
+
+The old form ``{object: <held | instance>, by / at}`` (cell schema 4) is ``{hand: holding, ...}`` since cell schema 5:
+a schema 4 cell still runs it (``taskweave check`` notes it), a schema 5 cell gets a problem naming the migration.
 
 ``validate_plan`` uses ``move_problems`` and fills ``Step.kind`` / ``Step.resources`` from ``step_info`` (the live plan
 graph lights the resources). Values with placeholders are unknown until the step starts: such a step keeps the
@@ -16,20 +20,39 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from . import placeholders
-from .config import ConfigError, ConfigStore
-from .config.targets import MOVES_WORD, RELATIVE_OPTIONS, TORSO, move_option_problems
+from .config import ConfigError, ConfigStore, packs
+from .config.targets import (
+    FORM_OF_TARGET,
+    HOLDING,
+    MOVES_WORD,
+    RELATIVE_OPTIONS,
+    TORSO,
+    kind_of,
+    move_label,
+    move_option_problems,
+)
 
 MOVE_SKILL = 'move'
 RESOURCES = 'x-taskweave-resources'
 ORDER = ('base', 'hands', 'torso', 'joints')    # the vocabulary of resources, in the order a step lists them
 OPTIONS = ('hands', 'offset_m', 'reference', 'only', 'torso', 'tolerance_deg', 'motion')
-RELATIVE_FORMS = ('hand', 'object')
-FORM_KEYS = (('hand', 'hand'), ('object', 'object'), ('base', 'straight'), ('elbow', 'elbow'), ('joints', 'joints'))
-KIND_OF_FORM = {'elbow': 'posture'}     # the option table says elbow, the result says posture
+RELATIVE_FORMS = ('hand', 'carry')
+FORM_KEYS = (('base', 'straight'), ('elbow', 'posture'), ('joints', 'joints'))
+OBJECT_FORM_SCHEMA = 5      # the cell schema from which ``{object: ..., by / at}`` is ``{hand: holding, ...}``
+MIGRATE = 'taskweave config migrate'
 
 
-def kind_of(form: str) -> str:
-    return KIND_OF_FORM.get(form, form)
+def old_object_form(args: Mapping) -> bool:
+    """The relative move of a held object as cell schema 4 wrote it: ``object`` with by / at, no ``to``, no ``hand``."""
+    return 'object' in args and 'to' not in args and 'hand' not in args
+
+
+def old_object_text(args: Mapping, cell: str = '<cell dir>') -> str:
+    """What the old object form is now, with the command that rewrites it."""
+    named = args.get('object')
+    which = f', object: {named}' if isinstance(named, str) and named != 'held' else ''
+    return (f'{{object: {named}, by / at}} is {{hand: holding, by / at{which}}} since cell schema 5 '
+            f'(`{MIGRATE} {cell}` rewrites it)')
 
 
 def _unknown(value) -> bool:
@@ -44,9 +67,9 @@ def _unknown(value) -> bool:
 
 
 def resolve_form(args: Mapping, store: ConfigStore, robot: str):
-    """``(form, target, problem)`` of a move step: ``form`` one of base, straight, hand, object, elbow, joints (None if
-    it cannot be told yet: a placeholder, no form key), ``target`` the resolved target of a ``to`` form (else None),
-    ``problem`` why the target cannot be resolved (a one-line text, else None)."""
+    """``(form, target, problem)`` of a move step: ``form`` one of MOVE_FORMS (navigate, straight, hand, carry, posture,
+    joints; None if it cannot be told yet: a placeholder, no form key), ``target`` the resolved target of a ``to`` form
+    (else None), ``problem`` why the target cannot be resolved (a one-line text, else None)."""
     if 'to' in args:
         reference = args['to']
         if not isinstance(reference, str) or _unknown(reference):
@@ -56,9 +79,13 @@ def resolve_form(args: Mapping, store: ConfigStore, robot: str):
         except (KeyError, ConfigError) as error:
             return None, None, str(error.args[0]) if isinstance(error, KeyError) and error.args else str(error)
         if target.kind != 'base':
-            return target.kind, target, None
+            return FORM_OF_TARGET[target.kind], target, None
         mode = (args.get('motion') or {}).get('mode') if isinstance(args.get('motion'), Mapping) else None
-        return ('straight' if mode == 'straight' else 'base'), target, None
+        return ('straight' if mode == 'straight' else 'navigate'), target, None
+    if 'hand' in args:
+        return ('carry' if args['hand'] == HOLDING else 'hand'), None, None
+    if 'object' in args:
+        return 'carry', None, None
     for key, form in FORM_KEYS:
         if key in args:
             return form, None, None
@@ -67,7 +94,7 @@ def resolve_form(args: Mapping, store: ConfigStore, robot: str):
 
 def _speed_abs_problem(form: str, options: Mapping) -> str | None:
     motion = options.get('motion')
-    if isinstance(motion, Mapping) and motion.get('speed_abs') is not None and form in ('base', 'straight'):
+    if isinstance(motion, Mapping) and motion.get('speed_abs') is not None and form in ('navigate', 'straight'):
         return 'motion.speed_abs does not apply (the base takes motion.speed)'
     return None
 
@@ -88,11 +115,13 @@ def move_problems(args: Mapping, store: ConfigStore, robot: str) -> list[tuple[l
         if ref is not None:
             message = f"{ref!r} moves {MOVES_WORD[target.kind]}; {text}"
         else:
-            message = f'move {form}: {text}'
+            message = f'{move_label(kind_of(form))}: {text}'
         problems.append((['args', *path], message))
 
     if target is not None and target.kind in ('hand', 'object') and target.frame == 'cell':
         add([], f'cell-frame {target.kind} targets are not supported yet')
+    if old_object_form(args) and packs.cell_schema(store.root) >= OBJECT_FORM_SCHEMA:
+        add(['object'], old_object_text(args, str(store.root)))
     options = {key: args[key] for key in OPTIONS if key in args}
     relative = form in RELATIVE_FORMS and target is None
     for option, value in options.items():
@@ -109,12 +138,12 @@ def move_problems(args: Mapping, store: ConfigStore, robot: str) -> list[tuple[l
                 add(['motion', 'speed_abs'], speed)
             continue
         for text in move_option_problems(form, {option: value}, relative, target is not None):
-            if option == 'torso' and form in ('base', 'straight') and value == 'auto':
+            if option == 'torso' and form in ('navigate', 'straight') and value == 'auto':
                 text = 'torso auto needs a hand or object target'
             add([option], text)
     extra = [key for key in RELATIVE_OPTIONS if key in args]
     if form in RELATIVE_FORMS and target is None:
-        if 'hand' in args and 'hands' in args:
+        if 'hand' in args and 'hands' in args and args['hand'] != HOLDING:   # holding: hands picks the hold
             add(['hands'], 'hand and hands are two spellings: give one (hand names the hands of a relative move, '
                            'hands filters the hands of a target)')
         torso = options.get('torso')
@@ -146,30 +175,30 @@ def _joint_groups_used(joints: Mapping, only, arm_groups: set[str]) -> set[str]:
 
 
 def move_resources(form: str, args: Mapping, target, arm_groups: set[str]) -> list[str]:
-    """The resources a move step uses: a base move the base (the torso too when it names a height), a hand or object
-    move the hands (the torso when it is auto or a value: the default for hands and objects is auto), a posture move
-    the hands, a joints move what its groups are (the torso, the arms as hands, the rest as joints)."""
+    """The resources a move step uses: a base move the base (the torso too when it names a height), a hand move or a
+    carry the hands (the torso when it is auto or a value: their default is auto), a posture move the hands, a joints
+    move what its groups are (the torso, the arms as hands, the rest as joints)."""
     used: set[str] = set()
     joints = dict(target.joints) if target is not None else {}
     step_torso = args.get('torso')
-    if form in ('base', 'straight'):
+    if form in ('navigate', 'straight'):
         used.add('base')
         word = step_torso if step_torso is not None else joints.get(TORSO)
         if _moving(word):
             used.add('torso')
-    elif form in ('hand', 'object'):
+    elif form in ('hand', 'carry'):
         used.add('hands')
         word = step_torso if step_torso is not None else joints.get(TORSO)
         if word is None or word == 'auto' or _moving(word):
             used.add('torso')
-    elif form == 'elbow':
+    elif form == 'posture':
         used.add('hands')
     elif form == 'joints':
         values = joints if target is not None else dict(args.get('joints') or {})
         only = args.get('only') if target is not None else None
         used |= _joint_groups_used(values, only if isinstance(only, list) else None, arm_groups)
         return [r for r in ORDER if r in used] or ['joints']
-    if form in ('base', 'straight', 'hand', 'object'):   # a joints part next to the pose: groups other than the torso
+    if form in ('navigate', 'straight', 'hand', 'carry'):   # a joints part next to the pose: the groups but the torso
         used |= _joint_groups_used({g: v for g, v in joints.items() if g != TORSO}, None, arm_groups)
     return [r for r in ORDER if r in used]
 

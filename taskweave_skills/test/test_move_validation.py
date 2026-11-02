@@ -1,6 +1,7 @@
-"""Plans with the move skill on a cell of schema 4: the plan validation (one point kind ``target`` with the kinds a
-field takes, the options of each kind of motion, the old skill names), the kind and resources every step gets, and the
-offline check of the migrated docs example cell (``taskweave check --missions``, ``taskweave describe``)."""
+"""Plans with the move skill on a cell of schema 4 (the migrated docs cell; schema 5 is docs/examples): the plan
+validation (one point kind ``target`` with the kinds a field takes, the options of each kind of motion, the old skill
+names), the kind and resources every step gets, and the offline check of the migrated docs example cell
+(``taskweave check --missions``, ``taskweave describe``)."""
 
 import copy
 import shutil
@@ -75,7 +76,7 @@ def test_every_mission_of_the_docs_cell_validates_with_kinds_and_resources(store
         assert validate_plan(plan, catalog, store) == [], name
         for step in plan.steps:
             if step.skill == 'move':
-                assert step.kind in ('base', 'straight', 'hand', 'object', 'posture', 'joints', None), (name, step.id)
+                assert step.kind in ('navigate', 'straight', 'hand', 'posture', 'joints', None), (name, step.id)
                 assert step.resources, (name, step.id)
 
 
@@ -130,11 +131,17 @@ def test_a_target_of_a_step_that_puts_the_object_down_is_not_checked_yet(store, 
     ({'hand': 'left', 'by': [0, 0, 0.1], 'torso': 0.3}, 'a relative move takes torso auto or keep'),
     ({'base': {'by': [0.5, 0]}, 'torso': 'auto'}, 'torso auto needs a hand or object target'),
     ({'base': {'by': [0.5, 0]}, 'hands': 'all'}, 'move straight: option hands does not apply'),
-    ({'elbow': 'out', 'offset_m': 0.1}, 'move elbow: option offset_m does not apply'),
+    ({'elbow': 'out', 'offset_m': 0.1}, 'change posture: option offset_m does not apply'),
+    ({'hand': 'holding', 'by': [0, 0, 0.1], 'frame': 'tool'}, None),        # checked by move itself
+    ({'hand': 'holding', 'by': [0, 0, 0.1], 'reference': 'x'}, 'move to target: option reference does not apply'),
+    ({'hand': 'left', 'by': [0, 0, 0.1], 'hands': 'left'}, 'hand and hands are two spellings'),
     ({'joints': {'torso': 0.3}, 'only': ['torso']}, 'option only applies to a joint target'),
 ])
 def test_an_option_a_kind_does_not_take_is_a_problem(store, catalog, args, fragment):
     found = problems(store, catalog, move(**args))
+    if fragment is None:
+        assert found == []
+        return
     assert found and any(fragment in text for text in found), found
 
 
@@ -145,6 +152,7 @@ def test_an_option_a_kind_does_not_take_is_a_problem(store, catalog, args, fragm
     {'to': 'bin_1/seat', 'reference': 'base', 'offset_m': 0.05, 'torso': 'keep'},
     {'to': 'home_pose', 'only': ['left_arm'], 'motion': {'planner': 'planned', 'via': ['home_pose']}},
     {'hand': 'left', 'by': [0, 0, 0.1], 'torso': 'keep'}, {'object': 'held', 'by': [0, 0, 0.1]},
+    {'hand': 'holding', 'by': [0, 0, 0.1]}, {'hand': 'holding', 'at': [0.5, 0, 1], 'object': 'bin_1', 'hands': 'all'},
     {'base': {'by': [0.5, 0]}}, {'elbow': 'out', 'tolerance_deg': 5}, {'joints': {'torso': 0.3}},
 ])
 def test_the_options_a_kind_takes_are_fine(store, catalog, args):
@@ -188,12 +196,12 @@ def test_gripper_keeps_its_message_and_grip_and_wait_are_fine(store, catalog):
 
 # ---- kind and resources of the steps -----------------------------------------------------------------------------
 @pytest.mark.parametrize('args, kind, resources', [
-    ({'to': 'home'}, 'base', ['base']),
-    ({'to': 'home', 'torso': 0.3}, 'base', ['base', 'torso']),
+    ({'to': 'home'}, 'navigate', ['base']),
+    ({'to': 'home', 'torso': 0.3}, 'navigate', ['base', 'torso']),
     ({'to': 'home', 'motion': {'mode': 'straight'}}, 'straight', ['base']),
     ({'base': {'by': [-0.5, 0]}}, 'straight', ['base']),
     ({'base': {'by': [-0.5, 0]}, 'torso': 0.2}, 'straight', ['base', 'torso']),
-    ({'to': 'bin_1/pick'}, 'base', ['base']),
+    ({'to': 'bin_1/pick'}, 'navigate', ['base']),
     ({'to': 'bin_1/grasp'}, 'hand', ['hands', 'torso']),                    # the torso search is the default
     ({'to': 'bin_1/grasp', 'torso': 'keep'}, 'hand', ['hands']),
     ({'to': 'present_left'}, 'hand', ['hands', 'torso']),
@@ -201,9 +209,10 @@ def test_gripper_keeps_its_message_and_grip_and_wait_are_fine(store, catalog):
     ({'to': 'present_both', 'torso': 'keep'}, 'hand', ['hands']),           # the step wins over the target
     ({'hand': 'left', 'by': [0, 0, 0.1]}, 'hand', ['hands', 'torso']),
     ({'hand': 'left', 'by': [0, 0, 0.1], 'torso': 'keep'}, 'hand', ['hands']),
-    ({'to': 'carry'}, 'object', ['hands', 'torso']),
-    ({'to': 'bin_1/seat', 'torso': 'keep'}, 'object', ['hands']),
-    ({'object': 'held', 'by': [0, 0, 0.1], 'torso': 'keep'}, 'object', ['hands']),
+    ({'to': 'carry'}, 'hand', ['hands', 'torso']),            # an object target
+    ({'to': 'bin_1/seat', 'torso': 'keep'}, 'hand', ['hands']),
+    ({'object': 'held', 'by': [0, 0, 0.1], 'torso': 'keep'}, 'hand', ['hands']),
+    ({'hand': 'holding', 'by': [0, 0, 0.1]}, 'hand', ['hands', 'torso']),
     ({'elbow': 'out'}, 'posture', ['hands']),
     ({'to': 'home_pose'}, 'joints', ['hands', 'torso']),                    # the arms are hands
     ({'to': 'home_pose', 'only': ['torso']}, 'joints', ['torso']),

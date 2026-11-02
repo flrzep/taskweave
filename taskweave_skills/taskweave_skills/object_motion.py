@@ -15,10 +15,14 @@ named held pose of the robot for this kind of object (``pose``), or a contact of
 toward a side along the arms' null space. A held object does not move. It fails before moving when the swing would stop
 further than ``tolerance_deg`` from the side.
 
-In a cell in the targets layout these classes are ``move.object`` and ``move.posture`` (``skills/move/object.yaml``,
+In a cell in the targets layout these classes are ``move.carry`` and ``move.posture`` (``skills/move/carry.yaml``,
 ``skills/move/posture.yaml``). ``Move`` resolves the targets and gives them in ``args[RESOLVED]``: ``held`` (a carry
 pose: its ``joints`` and ``path`` of Pose3D, ``args.to.pose`` names it) or ``onto`` (a contact: the placed ``instance``,
-its ``pose`` and the held object's own contact ``mine``; ``args.to.onto`` and ``to.contact`` name them).
+its ``pose`` and the held object's own contact ``mine``; ``args.to.onto`` and ``to.contact`` name them). A hand move of
+a holding hand is a carry too, where the hand goes decides where the object goes (its grasp kept): ``hand`` (a hand of
+the hold; ``args.to`` by / at as a hand move takes them: frame, turn, tilt, rpy_deg) or ``hand_target`` (a hand target
+as ``move.hand`` gets it) with ``hands`` (the hands of the hold the target has: their goals must agree within
+``grip_drift_m``); a target with waypoints is carried along them.
 
 Both reuse the helpers of the joint skills (_onto, _swing_plan, the linear and free move paths, joints.py) and
 the motion options of gripper_motion (skill yaml, robot override, step: ``taskweave_core.motion``). The old
@@ -140,8 +144,12 @@ class MoveObject(_HeldMotion):
         if unfit is not None:
             return unfit
         resolved = args.get(RESOLVED) or {}
-        goal = None
-        if 'pose' not in to:
+        goal, legs = None, None
+        if resolved.get('hand') or resolved.get('hand_target'):
+            legs = self._hand_goals(hold, to, resolved)
+            if isinstance(legs, SkillResult):
+                return legs
+        elif 'pose' not in to:
             goal = self._goal(hold, to, resolved.get('onto'))
             if isinstance(goal, SkillResult):
                 return goal
@@ -150,7 +158,9 @@ class MoveObject(_HeldMotion):
         saved = self.p, self.tcp_speed, self.tcp_turn, self.plan_scale
         self._speeds(m)
         try:
-            if goal is None:
+            if legs is not None:
+                result = self._carry_legs(ctx, hold, legs, m, mode, planner)
+            elif goal is None:
                 result = self._carry_pose(ctx, hold, to['pose'], m, mode, planner, resolved.get('held'))
             else:
                 result = self._carry(ctx, hold, goal[0], goal[1], m, mode, planner, ahead_pose=goal[2])
@@ -183,7 +193,12 @@ class MoveObject(_HeldMotion):
             return unfit
         resolved = args.get(RESOLVED) or {}
         joints: dict = {}
-        if 'pose' in to:
+        if resolved.get('hand') or resolved.get('hand_target'):
+            legs = self._hand_goals(hold, to, resolved)
+            if isinstance(legs, SkillResult):
+                return legs
+            moved, label = legs[-1]
+        elif 'pose' in to:
             held = resolved.get('held')
             if held is None:
                 return SkillResult.rejected(f'a dry run needs the resolved held pose {to["pose"]}')
@@ -250,6 +265,62 @@ class MoveObject(_HeldMotion):
                                         f'{hold["object"]}: hands must be the hands that hold it '
                                         f'({" and ".join(hold["hands"])})')
         return hold
+
+    def _hand_goals(self, hold: dict, to: dict, resolved: dict):
+        """[(the held object's pose in the base frame, a label) per leg] of a carry by a hand (see the module doc):
+        where the hand goes, the held object goes with its grasp kept. A REJECTED / FAILED result if the target has no
+        pose for the hands of the hold, or two hands of the hold would pull the object apart."""
+        from .cartesian import matching_flip, tcp_targets
+        from .ik import rpy_matrix
+        from .points import moved_tcp
+
+        grips = hold['tcp_in_object']
+        now = {hand: hold['object_in_base'] @ grip for hand, grip in grips.items()}
+        if resolved.get('hand'):
+            hand = resolved['hand']
+            if hand not in grips:
+                return SkillResult.rejected(f'{hand} does not hold {hold["object"]}')
+            if 'at' in to:
+                goal = now[hand].copy()
+                if to.get('rpy_deg') is not None:
+                    goal = rpy_matrix(to['at'], np.radians(to['rpy_deg']))
+                goal[:3, 3] = to['at']
+                label = f'{hold["object"]} with {hand} to {[round(float(v), 3) for v in to["at"]]}'
+            else:
+                goal = moved_tcp(now[hand], to['by'], to.get('frame', 'robot'), float(to.get('turn_deg', 0.0)),
+                                 float(to.get('tilt_deg', 0.0)))
+                label = f'{hold["object"]} with {hand} by {[round(float(v), 3) for v in to["by"]]}' + \
+                    (f', turn {to["turn_deg"]:g} deg' if to.get('turn_deg') else '') + \
+                    (f', tilt {to["tilt_deg"]:g} deg' if to.get('tilt_deg') else '')
+            return [(goal @ np.linalg.inv(grips[hand]), label)]
+        hands = [hand for hand in resolved.get('hands') or [] if hand in grips]
+        if not hands:
+            return SkillResult.rejected(f'the hand target has no pose for the hands that hold {hold["object"]} '
+                                        f'({" and ".join(hold["hands"])})')
+        target = self._store_target(resolved['hand_target'], hands)
+        if isinstance(target, SkillResult):
+            return target
+        legs = []
+        for leg in [*target.waypoints, target]:
+            goals = matching_flip(tcp_targets(leg.tools), now, self.hold.tool_frames)   # the grasp turned as it is
+            poses = [goals[hand] @ np.linalg.inv(grips[hand]) for hand in hands]
+            apart = max(float(np.linalg.norm(pose[:3, 3] - poses[0][:3, 3])) for pose in poses)
+            if apart > self.p.grip_drift_m:
+                return SkillResult.rejected(f'{leg.label}: the poses of {" and ".join(hands)} would put '
+                                            f'{hold["object"]} {apart:.3f} m apart (more than grip_drift_m '
+                                            f'{self.p.grip_drift_m:g}): name one hand with hands')
+            legs.append((poses[0], f'{hold["object"]} with {" and ".join(hands)} to {leg.label}'))
+        return legs
+
+    def _carry_legs(self, ctx, hold: dict, legs: list, m: dict, mode: str, planner: str):
+        """Carry the held object through ``legs`` [(4x4 base frame, label)], one move each: (label, worst, kind) of the
+        last or a failure result."""
+        hand, step = hold['hands'][0], None
+        for moved, label in legs:
+            step = self._carry(ctx, self.hold.hold_of(hand) or hold, moved, label, m, mode, planner)
+            if isinstance(step, SkillResult):
+                return step
+        return step
 
     def _goal(self, hold: dict, to: dict, onto: dict | None = None):
         """(the held object's pose in the base frame after the move, a label, the pose the move after it goes to

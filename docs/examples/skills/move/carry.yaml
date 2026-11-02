@@ -1,5 +1,6 @@
-# skills/move/object.yaml: the part of `move` that moves a held object (to an object target, or relative to now). The hands
-# that hold it move it, IK from where they are. Same speed, accel and tolerances keys as move/hand.yaml.
+# skills/move/carry.yaml: the part of `move` that carries a held object (to an object target, hand: holding relative to
+# now, a hand move of a holding hand). The hands that hold it move it, IK from where they are. Same speed, accel and
+# tolerances keys as move/hand.yaml.
 implementations:
   - name: ik_held               # the hands that hold the object move it, IK from where they are
     type: script

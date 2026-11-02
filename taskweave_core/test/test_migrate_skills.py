@@ -475,7 +475,7 @@ def test_a_schema_1_cell_is_sent_to_migrate_and_migrate_runs_the_whole_chain(cel
     assert packs.cell_schema(cell) == packs.CELL_SCHEMA
     assert [line for line in lines if line.startswith('write   pack.yaml')] == [
         'write   pack.yaml  (schema_version 2)', 'write   pack.yaml  (schema_version 3)',
-        'write   pack.yaml  (schema_version 4)']
+        'write   pack.yaml  (schema_version 4)', 'write   pack.yaml  (schema_version 5)']
     assert not (cell / 'skills' / 'go_to_point.yaml').exists() and steps(cell)[0]['skill'] == 'move'
 
 

@@ -29,9 +29,10 @@ from packaging.version import InvalidVersion, Version
 
 from . import schemas
 
-CELL_SCHEMA = 4         # cell pack layout this taskweave writes and reads (1: one config directory with whole robot
+CELL_SCHEMA = 5         # cell pack layout this taskweave writes and reads (1: one config directory with whole robot
                         # folders, 2: robot packs, 3: skills move_to_pose / go_to_point / gripper / old move_object
-                        # replaced, 4: targets: cell/targets.yaml, targets in objects/*.yaml, robots/<r>/objects/*.yaml)
+                        # replaced, 4: targets: cell/targets.yaml, targets in objects/*.yaml, robots/<r>/objects/*.yaml,
+                        # 5: move's five commands: {hand: holding, by / at}, skills/move/navigate.yaml, carry.yaml)
 CELL_SCHEMA_OLDEST = 4  # the oldest cell layout read at run time (older ones: taskweave config migrate)
 ROBOT_SCHEMA = 2        # robot pack layout this taskweave writes and reads (2: targets.yaml in place of poses.yaml)
 ROBOT_SCHEMA_OLDEST = 2  # the oldest robot pack layout read at run time (older ones: taskweave config migrate)

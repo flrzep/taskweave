@@ -1,7 +1,9 @@
-"""The parts of the ``move`` skill: the modules that do one kind of motion (base, straight, hand, object, posture,
+"""The parts of the ``move`` skill: the modules that do one kind of motion (navigate, straight, hand, carry, posture,
 joints). They are the classes of the old motion skills (navigate_to, drive_straight, move_gripper, move_object,
 set_posture, move_joints); ``Move`` builds them as ``move.<part>``, with the configuration of
-``skills/move/<part>.yaml``, and calls them with what it resolved.
+``skills/move/<part>.yaml``, and calls them with what it resolved. ``carry`` moves what the hands hold: it does the
+hand moves of a held object (kind hand). Before cell schema 5 navigate and carry were ``base`` and ``object``: a cell
+of schema 4 keeps skills/move/base.yaml and object.yaml until it is migrated (ConfigStore reads the old name).
 
 ``RESOLVED`` is the one extra key of the arguments of such a call: a dict of Python objects (resolved targets, joint
 values) that the module uses instead of looking a name up. It never comes from a mission step (it is in no args
@@ -12,10 +14,10 @@ from __future__ import annotations
 
 RESOLVED = '_resolved'
 PARTS = {   # part -> the skill of the old layout that was this kind of motion
-    'base': 'navigate_to',
+    'navigate': 'navigate_to',
     'straight': 'drive_straight',
     'hand': 'move_gripper',
-    'object': 'move_object',
+    'carry': 'move_object',
     'posture': 'set_posture',
     'joints': 'move_joints',
 }

@@ -388,49 +388,71 @@ def axes_from_rpy(rpy) -> tuple[tuple[float, float, float], tuple[float, float, 
 
 
 # ---- the move skill's options per kind of motion ------------------------------------------------------------------
-MOVE_FORMS = ('base', 'straight', 'hand', 'object', 'elbow', 'joints')  # what a move step resolves to
+# The kinds of motion of a move step (data.kind of its result; the operator's five commands) and their labels.
+MOVE_KINDS = ('navigate', 'straight', 'hand', 'posture', 'joints')
+MOVE_LABELS = {'navigate': 'navigate to', 'straight': 'move straight', 'hand': 'move to target',
+               'posture': 'change posture', 'joints': 'move to joint positions'}
+OLD_KINDS = {'base': 'navigate', 'object': 'hand', 'elbow': 'posture'}   # ids before cell schema 5 -> the kind now
+# What a move step resolves to, the rows of the option table: the kinds, and ``carry`` (a hand move of a held object:
+# an object target, ``hand: holding`` relative to now; its kind is hand, its module move.carry).
+MOVE_FORMS = ('navigate', 'straight', 'hand', 'carry', 'posture', 'joints')
+KIND_OF_FORM = {'carry': 'hand'}
+FORM_OF_TARGET = {'base': 'navigate', 'hand': 'hand', 'object': 'carry', 'joints': 'joints'}  # target moves -> form
+HOLDING = 'holding'     # ``hand: holding``: the hands that hold (a carry relative to now)
 ALL_FORMS = MOVE_FORMS
 MOVE_OPTIONS: dict[str, tuple[str, ...]] = {  # option -> the forms it applies to (an error on the others)
-    'hands': ('hand', 'object', 'elbow'),
-    'offset_m': ('hand', 'object'),
-    'reference': ('object',),
+    'hands': ('hand', 'carry', 'posture'),
+    'offset_m': ('hand', 'carry'),
+    'reference': ('carry',),
     'only': ('joints',),
-    'torso': ('base', 'straight', 'hand', 'object', 'elbow'),
-    'tolerance_deg': ('elbow',),
+    'torso': ('navigate', 'straight', 'hand', 'carry', 'posture'),
+    'tolerance_deg': ('posture',),
     'motion': ALL_FORMS,
 }
 MOTION_OPTIONS: dict[str, tuple[str, ...]] = {  # motion.<key> -> the forms it applies to
-    'mode': ('base', 'straight', 'hand', 'object'),
+    'mode': ('navigate', 'straight', 'hand', 'carry'),
     'speed': ALL_FORMS,
     'speed_abs': ALL_FORMS,
     'accel': ALL_FORMS,
-    'planner': ('hand', 'object', 'joints'),
+    'planner': ('hand', 'carry', 'joints'),
     'via': ('hand', 'joints'),
-    'tolerance': ('hand', 'object', 'elbow', 'joints'),
-    'elbow': ('hand', 'object'),
+    'tolerance': ('hand', 'carry', 'posture', 'joints'),
+    'elbow': ('hand', 'carry'),
     'approach_m': ('hand',),
 }
-RELATIVE_OPTIONS = ('by', 'at', 'rpy_deg', 'frame', 'turn_deg', 'tilt_deg')   # keys of a relative move (hand, object)
+RELATIVE_OPTIONS = ('by', 'at', 'rpy_deg', 'frame', 'turn_deg', 'tilt_deg')   # keys of a relative move (hand, carry)
 RELATIVE_KEYS = {   # relative form -> by / at -> the keys that go with it (every other relative key is an error)
     'hand': {'by': ('by', 'frame', 'turn_deg', 'tilt_deg'), 'at': ('at', 'rpy_deg')},
-    'object': {'by': ('by', 'turn_deg', 'tilt_deg'), 'at': ('at',)},
+    'carry': {'by': ('by', 'turn_deg', 'tilt_deg'), 'at': ('at',)},
 }
-RELATIVE_NOT = ('offset_m', 'reference')   # options that do not apply to a relative move (hand / object by / at)
-TARGET_HANDS_NOT = {'object': ('any_one',)}   # hands values that do not apply to a target of this form
-MOTION_MODES = {'base': ('nav',), 'straight': ('straight',), 'hand': ('free', 'linear'), 'object': ('linear', 'free')}
+RELATIVE_NOT = ('offset_m', 'reference')   # options that do not apply to a relative move (hand / carry by / at)
+TARGET_HANDS_NOT = {'carry': ('any_one',)}   # hands values that do not apply to a target of this form
+MOTION_MODES = {'navigate': ('nav',), 'straight': ('straight',), 'hand': ('free', 'linear'),
+                'carry': ('linear', 'free')}
 TORSO_VALUES = {
-    'base': ('keep', 'number'),
+    'navigate': ('keep', 'number'),
     'straight': ('keep', 'number'),
     'hand': ('auto', 'keep', 'number'),
-    'object': ('auto', 'keep', 'number'),
-    'elbow': ('keep',),
+    'carry': ('auto', 'keep', 'number'),
+    'posture': ('keep',),
 }
+
+
+def kind_of(form: str) -> str:
+    """The kind of motion (data.kind) of a form of the option table: carry is a hand move."""
+    return KIND_OF_FORM.get(form, form)
+
+
+def move_label(kind: str) -> str:
+    """The operator's name of a kind of motion (an old id is read as its kind now)."""
+    kind = OLD_KINDS.get(kind, kind)
+    return MOVE_LABELS.get(kind, f'move {kind}')
 
 
 def move_option_problems(form: str, options: dict, relative: bool = False, target: bool = False) -> list[str]:
     """What is wrong with the options of a move step that resolves to ``form`` (one of MOVE_FORMS): an option that
     does not apply to it, a ``motion`` key or ``mode`` or ``torso`` value it does not take. ``relative``: the step is
-    a relative move (``hand`` / ``object`` with by / at), RELATIVE_NOT do not apply; ``target``: it goes to a target
+    a relative move (``hand`` with by / at), RELATIVE_NOT do not apply; ``target``: it goes to a target
     (``to``), the ``hands`` values of TARGET_HANDS_NOT do not apply."""
     problems = []
     for option, value in options.items():

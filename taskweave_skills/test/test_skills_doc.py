@@ -42,7 +42,7 @@ def test_the_skills_of_the_docs_are_wait_move_grip(generator):
     replaced are its parts, not documented as skills."""
     assert {skill.name for skill in generator.load_skills()} == {'wait', 'move', 'grip'}
     text = generator.OUTPUT.read_text(encoding='utf-8')
-    for part in ('base', 'straight', 'hand', 'object', 'posture', 'joints'):
+    for part in ('navigate', 'straight', 'hand', 'carry', 'posture', 'joints'):
         assert f'`move.{part}`' in text and f'skills/move/{part}.yaml' in text
 
 
@@ -52,7 +52,7 @@ def test_every_shipped_skill_has_a_skill_yaml_in_the_example_cell(generator):
     names = {skill.name for skill in generator.load_skills()}
     for name in names:
         assert (REPO / 'docs' / 'examples' / 'skills' / f'{name}.yaml').is_file(), f'docs/examples/skills/{name}.yaml'
-    assert set(generator.parts('move')) == {'base', 'straight', 'hand', 'object', 'posture', 'joints'}
+    assert set(generator.parts('move')) == {'navigate', 'straight', 'hand', 'carry', 'posture', 'joints'}
 
 
 def test_the_launch_example_names_every_shipped_skill(generator):

@@ -92,8 +92,8 @@ def test_the_live_plan_json_has_each_steps_kind_and_resources():
     from taskweave_interfaces.msg import PlanStep
 
     step = step_dict(PlanStep(step_id='s1', instruction='Drive', skill='move', args_json='{"to": "waiting"}',
-                              kind='base', resources=['base', 'torso']))
-    assert step['kind'] == 'base' and step['resources'] == ['base', 'torso'] and step['args'] == {'to': 'waiting'}
+                              kind='navigate', resources=['base', 'torso']))
+    assert step['kind'] == 'navigate' and step['resources'] == ['base', 'torso'] and step['args'] == {'to': 'waiting'}
     assert step_dict(PlanStep(step_id='s2', skill='wait'))['kind'] == ''
 
 
@@ -104,7 +104,7 @@ def test_the_plan_preview_over_http_has_kind_and_resources(serve, config):  # no
     bridge = target_bridge(config, None)
     bridge.schemas = lambda: (_ for _ in ()).throw(TimeoutError('no skill server'))   # the kinds need none
     status, plan = serve(bridge)('GET', '/api/missions/drive/plan')
-    assert status == 200 and [(s['kind'], s['resources'][:1]) for s in plan['steps']] == [('base', ['base']),
+    assert status == 200 and [(s['kind'], s['resources'][:1]) for s in plan['steps']] == [('navigate', ['base']),
                                                                                            ('', [])]
 
 

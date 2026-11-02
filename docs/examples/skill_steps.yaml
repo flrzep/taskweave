@@ -28,7 +28,7 @@ move:
     args: {hand: all, by: [0, 0, 0.05]}
   - instruction: Lift the held part 20 cm
     skill: move
-    args: {object: held, by: [0, 0, 0.2], torso: keep}
+    args: {hand: holding, by: [0, 0, 0.2], torso: keep}
   - instruction: Into the carry pose
     skill: move
     args: {to: carry, torso: keep}

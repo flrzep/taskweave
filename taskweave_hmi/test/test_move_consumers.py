@@ -51,8 +51,8 @@ def test_the_plan_preview_has_each_steps_kind_and_resources(store):
     plan = missions.preview_plan(store, 'forms', ROBOT, move_catalog())
     steps = {step['id']: step for step in plan['steps']}
     assert {key: step['kind'] for key, step in steps.items()} == {
-        'drive': 'base', 'straight': 'straight', 'tuck': 'joints', 'lift': 'joints', 'hands': 'hand',
-        'back': 'straight', 'up': 'hand', 'carry': 'object', 'later': '', 'rest': ''}
+        'drive': 'navigate', 'straight': 'straight', 'tuck': 'joints', 'lift': 'joints', 'hands': 'hand',
+        'back': 'straight', 'up': 'hand', 'carry': 'hand', 'later': '', 'rest': ''}
     assert steps['drive']['resources'][0] == 'base' and steps['lift']['resources'] == ['torso']
     assert steps['up']['resources'] == ['hands'] and 'hands' in steps['carry']['resources']
     assert steps['later']['resources'] == ['base', 'hands', 'torso', 'joints']   # unknown yet: what the schema says
@@ -130,8 +130,8 @@ def test_the_catalog_tells_the_editor_which_options_each_kind_of_move_takes():
     catalog = [{'name': 'move', 'args_schema': move_catalog()['move']}, {'name': 'wait', 'args_schema': {}}]
     annotated = targets.annotate_catalog(catalog)
     info = annotated[0]['args_schema']['x-taskweave-move']
-    assert info['options']['offset_m'] == ['hand', 'object'] and info['options']['tolerance_deg'] == ['elbow']
-    assert info['motion']['via'] == ['hand', 'joints'] and info['modes']['base'] == ['nav']
+    assert info['options']['offset_m'] == ['hand', 'carry'] and info['options']['tolerance_deg'] == ['posture']
+    assert info['motion']['via'] == ['hand', 'joints'] and info['modes']['navigate'] == ['nav']
     assert info['forms']['to'] is None and info['forms']['base'] == ['straight']
     assert info['not_relative'] == ['offset_m', 'reference']
     assert set(info['hidden']) == {'dry_run', 'look_at'} and info['relative']['object'] == ['by', 'at', 'turn_deg',

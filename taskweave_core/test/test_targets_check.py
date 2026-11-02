@@ -305,7 +305,7 @@ def test_the_new_enums_have_values():
 
 # ---- the schema numbers ---------------------------------------------------------------------------
 def test_the_schema_numbers():
-    assert (packs.CELL_SCHEMA, packs.ROBOT_SCHEMA) == (4, 2)
+    assert (packs.CELL_SCHEMA, packs.ROBOT_SCHEMA) == (5, 2)
     assert (packs.CELL_SCHEMA_OLDEST, packs.ROBOT_SCHEMA_OLDEST) == (4, 2)  # older ones: taskweave config migrate
 
 
@@ -316,8 +316,9 @@ def write_pack(folder: Path, schema: int, name='cell') -> Path:
     return folder
 
 
-def test_cell_schema_four_is_read(tmp_path):
+def test_cell_schema_four_and_five_are_read(tmp_path):
     assert ConfigStore(write_pack(tmp_path / 'c', 4)).targets_format()
+    assert ConfigStore(write_pack(tmp_path / 'd', 5)).targets_format()
 
 
 @pytest.mark.parametrize('schema', [1, 2, 3])
@@ -326,8 +327,8 @@ def test_cell_schemas_below_and_above_are_refused(tmp_path, schema):
         ConfigError, match=f'cell pack schema {schema}, this taskweave needs 4: run taskweave config migrate '
     ):
         ConfigStore(write_pack(tmp_path / 'a', schema))
-    with pytest.raises(ConfigError, match='cell pack schema 5, this taskweave reads schema 4: update taskweave'):
-        ConfigStore(write_pack(tmp_path / 'b', 5))
+    with pytest.raises(ConfigError, match='cell pack schema 6, this taskweave reads schema 5: update taskweave'):
+        ConfigStore(write_pack(tmp_path / 'b', 6))
 
 
 def test_the_pack_check_accepts_the_cell_and_robot_schemas_that_are_read(tmp_path):
@@ -338,8 +339,8 @@ def test_the_pack_check_accepts_the_cell_and_robot_schemas_that_are_read(tmp_pat
         result = ConfigStore(cell).validate_file('pack.yaml', (pack / 'pack.yaml').read_text(), 'robot:bot')
         assert (result == []) == ok, (schema, result)
     assert (
-        'reads 4 to 4'
-        in ConfigStore(cell).validate_file('pack.yaml', 'name: c\nversion: 1\nschema_version: 5\n')[0]['message']
+        'reads 4 to 5'
+        in ConfigStore(cell).validate_file('pack.yaml', 'name: c\nversion: 1\nschema_version: 6\n')[0]['message']
     )
 
 
@@ -376,4 +377,4 @@ def test_the_migration_chain_ends_at_the_current_schema(tmp_path, capsys):
     from taskweave_core.config import migrate
 
     cell = write_pack(tmp_path / 'c', 3)
-    assert migrate.migrate(cell, say=lambda *a: None) == 0 and migrate.LATEST == packs.CELL_SCHEMA == 4
+    assert migrate.migrate(cell, say=lambda *a: None) == 0 and migrate.LATEST == packs.CELL_SCHEMA == 5

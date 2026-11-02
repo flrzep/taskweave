@@ -679,9 +679,9 @@ def test_the_design_numbers_for_the_grasp_pose():
 
 # ---- the move skill's options per kind ------------------------------------------------------------
 def test_move_options_per_kind():
-    assert model.move_option_problems('base', {'torso': 'keep', 'motion': {'mode': 'nav', 'speed': 0.5}}) == []
-    assert model.move_option_problems('base', {'hands': 'all'}) == ['move base: option hands does not apply']
-    assert model.move_option_problems('base', {'torso': 'auto'})[0].startswith('move base: torso')
+    assert model.move_option_problems('navigate', {'torso': 'keep', 'motion': {'mode': 'nav', 'speed': 0.5}}) == []
+    assert model.move_option_problems('navigate', {'hands': 'all'}) == ['move navigate: option hands does not apply']
+    assert model.move_option_problems('navigate', {'torso': 'auto'})[0].startswith('move navigate: torso')
     assert (
         model.move_option_problems(
             'hand',
@@ -694,16 +694,25 @@ def test_move_options_per_kind():
         )
         == []
     )
-    assert model.move_option_problems('object', {'motion': {'via': ['a']}}) == [
-        'move object: motion.via does not apply'
+    assert model.move_option_problems('carry', {'motion': {'via': ['a']}}) == [
+        'move carry: motion.via does not apply'
     ]
     assert model.move_option_problems('joints', {'only': ['head'], 'motion': {'planner': 'planned'}}) == []
     assert model.move_option_problems('joints', {'offset_m': 0.1}) == ['move joints: option offset_m does not apply']
     assert 'motion.mode' in model.move_option_problems('hand', {'motion': {'mode': 'nav'}})[0]
-    assert model.move_option_problems('elbow', {'tolerance_deg': 5, 'motion': {'tolerance': 0.1}}) == []
+    assert model.move_option_problems('posture', {'tolerance_deg': 5, 'motion': {'tolerance': 0.1}}) == []
     assert model.move_option_problems('straight', {'motion': {'mode': 'nav'}})[0].startswith(
         'move straight: motion.mode'
     )
+
+
+def test_the_kinds_are_the_five_commands_and_carry_is_a_hand_move():
+    assert model.MOVE_KINDS == ('navigate', 'straight', 'hand', 'posture', 'joints')
+    assert {model.kind_of(form) for form in model.MOVE_FORMS} == set(model.MOVE_KINDS)
+    assert model.kind_of('carry') == 'hand' and model.FORM_OF_TARGET['object'] == 'carry'
+    assert model.move_label('hand') == 'move to target' and model.move_label('base') == 'navigate to'
+    assert model.move_label('object') == 'move to target' and model.move_label('elbow') == 'change posture'
+    assert set(model.MOVE_OPTIONS['motion']) == set(model.MOVE_FORMS)
 
 
 # ---- writing targets ------------------------------------------------------------------------------
@@ -1236,16 +1245,16 @@ def test_the_delete_refusal_for_operators_does_not_name_the_code_argument(cell):
 
 
 def test_the_option_table_holds_the_relative_and_hands_rules():
-    assert model.RELATIVE_KEYS['hand']['at'] == ('at', 'rpy_deg') and model.RELATIVE_KEYS['object']['by'][0] == 'by'
+    assert model.RELATIVE_KEYS['hand']['at'] == ('at', 'rpy_deg') and model.RELATIVE_KEYS['carry']['by'][0] == 'by'
     assert model.move_option_problems('hand', {'offset_m': 0.1}, relative=True) == [
         'move hand: option offset_m does not apply to a relative move'
     ]
-    assert model.move_option_problems('object', {'reference': 'x', 'hands': 'all'}, relative=True) == [
-        'move object: option reference does not apply to a relative move'
+    assert model.move_option_problems('carry', {'reference': 'x', 'hands': 'all'}, relative=True) == [
+        'move carry: option reference does not apply to a relative move'
     ]
     assert model.move_option_problems('hand', {'offset_m': 0.1}) == []
-    assert model.move_option_problems('object', {'hands': 'any_one'}, target=True) == [
-        'move object: option hands any_one does not apply'
+    assert model.move_option_problems('carry', {'hands': 'any_one'}, target=True) == [
+        'move carry: option hands any_one does not apply'
     ]
     assert model.move_option_problems('hand', {'hands': 'any_one'}, target=True) == []
-    assert model.move_option_problems('object', {'hands': 'any_one'}) == []
+    assert model.move_option_problems('carry', {'hands': 'any_one'}) == []

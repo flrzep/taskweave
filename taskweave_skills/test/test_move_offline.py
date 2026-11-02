@@ -31,7 +31,7 @@ schema = cls.schema_for(['left', 'right'])
 print(json.dumps({'name': cls.name, 'server': 'taskweave_core.skill_server' in sys.modules,
                   'hand': schema['properties']['hand']['anyOf'][0]['enum']}))
 ''')
-    assert json.loads(out) == {'name': 'move', 'server': False, 'hand': ['all', 'left', 'right']}
+    assert json.loads(out) == {'name': 'move', 'server': False, 'hand': ['all', 'holding', 'left', 'right']}
 
 
 def test_check_missions_and_the_offline_catalog_run_without_rclpy(tmp_path):

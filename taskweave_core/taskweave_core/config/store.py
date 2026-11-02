@@ -57,6 +57,16 @@ def skill_file(skill: str) -> str:
     return 'skills/' + skill.replace('.', '/') + '.yaml'
 
 
+# parts of move renamed in cell schema 5 -> their name before: a schema 4 cell keeps its files (and robot overrides)
+# under the old name until ``taskweave config migrate`` renames them
+PARTS_BEFORE = {'move.navigate': 'move.base', 'move.carry': 'move.object'}
+
+
+def part_before(skill: str) -> str | None:
+    """The cell schema 4 name of a renamed part of move (``move.navigate`` -> ``move.base``), else None."""
+    return PARTS_BEFORE.get(skill.replace('/', '.'))
+
+
 class ConfigError(Exception):
     """A config file is missing, unreadable or invalid. The message names the file and the key."""
 
@@ -376,7 +386,11 @@ class ConfigStore:
         return RobotProfile(name, data)
 
     def skill_config(self, skill: str) -> dict:
-        """The whole skills/<skill>.yaml (implementations and shared parameters); {} if absent."""
+        """The whole skills/<skill>.yaml (implementations and shared parameters); {} if absent. A renamed part of move
+        reads its old file while the new one is missing (a cell of schema 4: skills/move/base.yaml, object.yaml)."""
+        old = part_before(skill)
+        if old and not (self.root / skill_file(skill)).is_file() and (self.root / skill_file(old)).is_file():
+            skill = old
         return dict(self._load(skill_file(skill), schemas.SKILL_PARAMS, required=False, default={}))
 
     def skill_params(self, skill: str, implementation: dict | None = None) -> dict:

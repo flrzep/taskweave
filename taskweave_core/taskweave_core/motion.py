@@ -23,6 +23,7 @@ from typing import Any
 
 from .config import ConfigError, ConfigStore
 from .config.schemas import MOTION_PROPERTIES, MOTION_SPEED_KEYS
+from .config.store import part_before
 
 SOURCES = ('skill', 'robot', 'target', 'step')
 TARGET_KEYS = ('approach_m', 'elbow')   # motion options an object point can carry
@@ -50,7 +51,8 @@ def resolve(store: ConfigStore, robot: str, skill: str, args: Mapping | None = N
 
     config = store.skill_config(skill)
     apply('skill', config.get('motion'), config.get('speed'), config.get('accel'))
-    override = store.skill_overrides(robot).get(skill, {})
+    overrides = store.skill_overrides(robot)
+    override = overrides.get(skill) or overrides.get(part_before(skill) or skill) or {}
     apply('robot', override.get('motion'), override.get('speed'), override.get('accel'))
     if target_data:
         apply('target', {**{key: target_data.get(key) for key in TARGET_KEYS}, **(target_data.get('motion') or {})})

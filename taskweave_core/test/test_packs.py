@@ -142,7 +142,7 @@ def test_schema_version_is_checked(tmp_path):
                                               'migrate '):
             ConfigStore(tmp_path / f'old{old}')
     shutil.copytree(tmp_path / 'cell', tmp_path / 'newer')
-    (tmp_path / 'newer' / 'pack.yaml').write_text('name: cell\nversion: 1\nschema_version: 5\n')
+    (tmp_path / 'newer' / 'pack.yaml').write_text('name: cell\nversion: 1\nschema_version: 6\n')
     with pytest.raises(ConfigError, match='update taskweave'):
         ConfigStore(tmp_path / 'newer')
 

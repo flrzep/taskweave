@@ -58,7 +58,7 @@ def system(request, tmp_path):
         wait_until(lambda: sim.pub.get_subscription_count() > 0, what='the skill server to subscribe to the odometry')
         wait_until(lambda: sim.count_publishers(sim.cmd_topic) > 0, what='the skill server to advertise cmd_vel')
         move = server.skills['move']
-        wait_until(lambda: all(move.modules[p]._current() is not None for p in ('base', 'straight')),
+        wait_until(lambda: all(move.modules[p]._current() is not None for p in ('navigate', 'straight')),
                    what='the first odometry at the parts')
         client.server, client.config = server, config
         yield sim, client
@@ -67,8 +67,8 @@ def system(request, tmp_path):
 def test_move_serves_only_the_parts_this_robot_can_do(system):
     _, client = system
     move = client.server.skills['move']
-    assert sorted(move.modules) == ['base', 'straight'] and sorted(move.unavailable) == [
-        'hand', 'joints', 'object', 'posture']
+    assert sorted(move.modules) == ['navigate', 'straight'] and sorted(move.unavailable) == [
+        'carry', 'hand', 'joints', 'posture']
     assert 'no role' in move.unavailable['joints'][0]
     assert 'bimanual' in move.unavailable['hand'][0] or 'arms.bimanual' in move.unavailable['hand'][0]
     assert move.default_timeout({'to': 'dock'}) == 120.0
@@ -79,8 +79,8 @@ def test_drives_to_a_cell_target(system):
     result, data = go(client, {'to': 'dock'})
     assert math.hypot(sim.x - 1.0, sim.y - 0.5) < 0.04 and abs(sim.yaw - 1.5708) < 0.04
     assert data['world_state'] == {'robot_location': 'dock'}
-    assert data['kind'] == 'base' and data['module'] == 'move.base' and data['target'] == 'dock'
-    assert result.message.startswith('move base to dock (direct): at dock (')
+    assert data['kind'] == 'navigate' and data['module'] == 'move.navigate' and data['target'] == 'dock'
+    assert result.message.startswith('navigate to · dock (direct): at dock (')
     assert sim.cmd.linear.x == 0.0 and sim.cmd.angular.z == 0.0
 
 
@@ -91,14 +91,15 @@ def test_an_unknown_target_is_rejected_without_moving(system):
     assert sim.x == 0.0 and sim.y == 0.0
     result, _ = go(client, {'to': 'dock_tool'}, REJECTED)
     # the argument check says the robot lacks the tool; a robot with tools but no hand module says it cannot move hands
-    assert ('does not fit robot' in result.message or result.message.startswith('move hand: ')
+    assert ('does not fit robot' in result.message or result.message.startswith('move to target: ')
             or 'this robot cannot do hand moves' in result.message)
 
 
 def test_a_blocked_path_fails_as_stuck_and_says_which_motion(system):
     sim, client = system
     result, data = go(client, {'to': 'behind_wall'}, FAILED)
-    assert result.message.startswith('move base to behind_wall (direct): no progress') and data['kind'] == 'base'
+    assert result.message.startswith('navigate to · behind_wall (direct): no progress')
+    assert data['kind'] == 'navigate'
     wait_until(lambda: sim.cmd.linear.x == 0.0, what='the base to be told to stop')
 
 
@@ -120,7 +121,7 @@ def test_drive_straight_forward_and_back_keeps_the_heading(system):
                what='the new heading at the part')
     result, data = go(client, {'base': {'by': [0.4, 0]}})
     assert sim.x == pytest.approx(0.4 * math.cos(0.5), abs=0.04) and sim.yaw == pytest.approx(0.5, abs=0.03)
-    assert data['kind'] == 'straight' and result.message.startswith('move straight by +0.4 m: drove +0.40 m')
+    assert data['kind'] == 'straight' and result.message.startswith('move straight · by +0.4 m: drove +0.40 m')
     go(client, {'base': {'by': [-0.4, 0]}})
     assert math.hypot(sim.x, sim.y) < 0.04 and sim.yaw == pytest.approx(0.5, abs=0.03)
 
@@ -156,7 +157,7 @@ def test_a_speed_fraction_slows_the_base(system):
     assert straight_peak <= 0.15 * 0.5 + 1e-6                        # the part's speed 0.15 m/s x 0.5
     peak.clear()
     go(client, {'to': 'dock', 'motion': {'speed': 0.5}})
-    assert max(peak) <= 0.6 * 0.5 + 1e-6                             # max_linear 0.6 of skills/move/base.yaml x 0.5
+    assert max(peak) <= 0.6 * 0.5 + 1e-6                             # max_linear 0.6 of skills/move/navigate.yaml x 0.5
 
 
 def test_a_dry_run_of_a_base_move_resolves_and_does_not_drive(system):
@@ -222,7 +223,8 @@ def lift(tmp_path):
         ros.spin(8)
         wait_until(lambda: joints.count_subscribers('/lb/joint_command') > 0, what='the skill server to command joints')
         move = server.skills['move']
-        wait_until(lambda: all(move.modules[p]._current() is not None for p in ('base', 'straight')), what='odometry')
+        wait_until(lambda: all(move.modules[p]._current() is not None for p in ('navigate', 'straight')),
+                   what='odometry')
         yield base, joints, server, client
 
 
@@ -264,7 +266,7 @@ def test_a_torso_that_cannot_get_there_fails_before_the_base_moves(lift):
     base, joints, _, client = lift
     joints.frozen = True
     result, _ = go(client, {'to': 'dock'}, FAILED, timeout_s=15.0)
-    assert 'torso' in result.message and result.message.startswith('move base to dock')
+    assert 'torso' in result.message and result.message.startswith('navigate to · dock')
     assert base.x == 0.0 and base.y == 0.0
 
 

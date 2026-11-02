@@ -1,13 +1,13 @@
 """Cell pack migration 3 -> 4 (config/migrate_targets.py, migrate_move.py): the old point files and the six motion
-skills become targets and ``move``. Golden tests on the fixture pair (targets_old -> targets_new) and on the docs
-example cell,
+skills become targets and ``move``; ``run`` stops at schema 4 (the next step, 4 -> 5, is test_migrate_kinds.py).
+Golden tests on the fixture pair (targets_old -> targets_new) and on the docs example cell,
 synthetic cells for every construct of the design (name clashes, run-time instance, partial group values, whole-file
 and keyed overrides, first-variant mismatch, contact references, every step form), the equivalence dump of
 tools/dump_targets.py, robot packs, idempotence and the stops.
 
 The input is fixtures/migrate_targets/docs_before (the docs example cell as it was in schema 3), the golden output is
-fixtures/migrate_targets/docs_cell, and docs/examples is that output with polished comments
-(test_the_docs_examples_are_the_golden_files).
+fixtures/migrate_targets/docs_cell, and docs/examples is that output taken on to schema 5 (migrate_kinds) with
+polished comments (test_the_docs_examples_are_the_golden_files).
 To make the golden output again after a change of the migration (read the diff before committing it), then bring the
 data of docs/examples up to date by hand (the test names what differs):
 
@@ -63,8 +63,9 @@ def write(path: Path, text: str) -> None:
 
 
 def run(cell: Path, *args, **kwargs):
+    """migrate up to schema 4 (``latest``: further)."""
     lines: list[str] = []
-    code = migrate(cell, *args, say=lines.append, **kwargs)
+    code = migrate(cell, *args, say=lines.append, **{'latest': 4, **kwargs})
     return code, lines
 
 
@@ -209,9 +210,13 @@ def test_the_docs_example_cell_is_migrated_to_the_golden_files(tmp_path):
     assert run(cell)[0] == 0 and tree(cell) == got
 
 
-def test_the_docs_examples_are_the_golden_files():
-    """docs/examples (cell, missions, skills) is the migrated docs cell (same data, the comments may be polished)."""
-    want = tree(GOLDEN)
+def test_the_docs_examples_are_the_golden_files(tmp_path):
+    """docs/examples (cell, missions, skills) is the migrated docs cell taken on to schema 5 (same data, the comments
+    may be polished)."""
+    cell = tmp_path / 'golden'
+    shutil.copytree(GOLDEN, cell)
+    assert run(cell, latest=packs.CELL_SCHEMA)[0] == 0
+    want = tree(cell)
     got = dict(tree(DOCS / 'cell'))
     for part in ('missions', 'skills'):
         got.update({f'{part}/{name}': text for name, text in tree(DOCS / part).items()})
@@ -914,7 +919,7 @@ def test_init_cell_writes_a_cell_of_the_current_schema(tmp_path, monkeypatch):
     write(packs_dir / ROBOT / 'pack.yaml', f'name: {ROBOT}\nversion: 0.2.3\nschema_version: {packs.ROBOT_SCHEMA}\n')
     monkeypatch.setenv(packs.ROBOT_PACKS_ENV, str(packs_dir))
     cell = init_cell(tmp_path / 'new', ROBOT, 'fresh')
-    assert packs.cell_schema(cell) == packs.CELL_SCHEMA == 4
+    assert packs.cell_schema(cell) == packs.CELL_SCHEMA == 5
     files = {p.relative_to(cell).as_posix() for p in cell.rglob('*') if p.is_file()}
     assert 'cell/targets.yaml' in files and 'cell/objects.yaml' in files and 'cell/locations.yaml' not in files
     assert not any(f.endswith(('stances.yaml', 'held_poses.yaml', 'object_points.yaml')) for f in files)

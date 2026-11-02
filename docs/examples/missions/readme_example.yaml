@@ -25,7 +25,7 @@ steps:
     args: {hands: all, action: close}
   - instruction: Lift it 20 cm
     skill: move
-    args: {object: held, by: [0, 0, 0.2], torso: keep}
+    args: {hand: holding, by: [0, 0, 0.2], torso: keep}
   - instruction: Drive to the bin
     skill: move
     args: {to: bin_1/place}
