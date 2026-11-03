@@ -74,6 +74,13 @@ def robot_layer(store: ConfigStore, robot: str, object_type: str, keys: Iterable
     return dict(node) if isinstance(node, Mapping) else {}
 
 
+def instance_entry(store: ConfigStore, robot: str, object_type: str, instance: str, name: str) -> dict:
+    """The placed object's own entries of target ``name`` (its ``instances`` entries in the type's file and the
+    robot's), merged; {} when it has no override of it."""
+    own = (ts.object_file(store, object_type).get('instances') or {}).get(instance) or {}
+    return {**dict(own.get(name) or {}), **robot_layer(store, robot, object_type, ['instances', instance, name])}
+
+
 def type_layer(store: ConfigStore, object_type: str, name: str) -> dict:
     """The type's own entry of target ``name`` (objects/<type>.yaml targets), as written ({} when absent)."""
     return dict(ts.object_file(store, object_type).get('targets', {}).get(name) or {})

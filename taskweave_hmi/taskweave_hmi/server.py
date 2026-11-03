@@ -46,7 +46,10 @@ HTTP API (JSON):
   POST /api/points/location/<name>/teach | /api/points/stance/<objects|instances>/<owner>/<variant>/teach
                                    {[at, create, rename]}  save where the robot stands now through the teach node
                                    (kind base, its stale and clock jump checks): a stance of the type measured at
-                                   placed object <at>; {file, message (the node's answer), at, distance_m, undo}
+                                   placed object <at>; {file, message (the node's answer), at, distance_m, undo}.
+                                   Refused after a rename was done: 422 with the undo of that rename
+  POST /api/points/location/<name>/preview | .../stance/.../preview {[at]}  what that teach would change, nothing
+                                   saved: {exists, at, old: {x, y, yaw} or null, new: the pose the node would take now}
   DELETE the same addresses;  422 with {problems} if refused, nothing written (on a targets cell: 404 with
                                    {problems} when the target, object type or instance is not there)
   Teach saves (points PUT and teach, arm PUT and capture, held PUT) answer with undo: {id, label, files} (null when
@@ -277,10 +280,32 @@ class Busy(Exception):
     """The request would change config while a mission runs."""
 
 
+class BadRequest(ValueError):
+    """A request body or argument of the wrong shape (400)."""
+
+
+def text_arg(body: dict, key: str) -> str | None:
+    """``body[key]`` as a name: a string, None when absent or empty; BadRequest for another type."""
+    value = body.get(key)
+    if value is None or value == '':
+        return None
+    if not isinstance(value, str):
+        raise BadRequest(f'{key}: a name (text)')
+    return value
+
+
+def names_arg(body: dict, key: str) -> list[str]:
+    """``body[key]`` as a list of names ([] when absent); BadRequest for another type."""
+    value = body.get(key) or []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise BadRequest(f'{key}: a list of names')
+    return list(value)
+
+
 class Bridge(Node):
     skills_client = None   # the task handler's skill list service (set in __init__)
     served_skills: list[str] | None = None   # the skill names of the catalog's last answer
-    undos: undo.Undo | None = None   # the latest Teach saves, to undo one (made on first use)
+    undos: undo.Undo | None = None   # the latest Teach saves, to undo one (set in __init__)
 
     def __init__(self, **kwargs):
         super().__init__(kwargs.pop('node_name', 'hmi_server'), **kwargs)
@@ -344,6 +369,7 @@ class Bridge(Node):
         self.reach_lock = threading.Lock()
         # teaching: the arm position open in the HMI receives pad teach presses (operator_joy)
         self.teach_client = self.create_client(TeachPoint, names.TEACH_POINT, callback_group=self.group)
+        self.undos = undo.Undo()   # one per process: the HTTP threads and the pad's teach press share it
         self.teach_target: dict | None = None
         self.teach_target_pub = self.create_publisher(String, names.TEACH_TARGET, latched)
         self.teach_target_pub.publish(String(data=''))
@@ -793,22 +819,26 @@ class Bridge(Node):
             file, saved = self.undoable(None, lambda: arm.capture_pose(self.config, self.robot, name, body, joints,
                                                                        tool_targets), f'pose {name}')
             return {'file': file, 'message': '', 'at': None, 'distance_m': None, 'undo': saved}
-        at = body.get('at') or self.nearest_placed(scope)
+        tools = names_arg(body, 'tools')
+        at = text_arg(body, 'at') or self.nearest_placed(scope)
+        override = bool(body.get('instance_override'))
         instance = self.config.object_instances().get(at)
         if instance is None or instance.object != scope:
             raise arm.ArmError(f'{at} is not a placed {scope}')
+        notes = []
 
         def write():
-            response = self.teach('hand', f'{at}/{name}', list(body.get('tools') or []),
-                                  bool(body.get('instance_override')))
-            grip = arm.closed_grips(self.config, self.robot, list(body.get('tools') or []), self.joint_positions())
-            if grip:  # grippers closed on the part when taught: they close that far at this point
+            response = self.teach('hand', f'{at}/{name}', tools, override)
+            grip = arm.closed_grips(self.config, self.robot, tools, self.joint_positions())
+            if grip and override:  # the grip is a setting of the type's point: it would change every placed one
+                notes.append(f'grip opening not saved: it is set on the {scope} point for every placed {scope}')
+            elif grip:  # grippers closed on the part when taught: they close that far at this point
                 points.save_object_point(self.config, scope, name, {'grip_m': grip}, self.robot)
             return response
-        override = ' (this one only)' if body.get('instance_override') else ''
-        response, saved = self.undoable(scope, write, f'{scope} point {name} at {at}{override}')
+        label = f'{scope} point {name} at {at}' + (' (this one only)' if override else '')
+        response, saved = self.undoable(scope, write, label)
         return {'file': self.relative(response.file), 'message': response.message, 'at': at,
-                'distance_m': self.distance_to(at), 'undo': saved}
+                'distance_m': self.distance_to(at), 'undo': saved, 'notes': notes}
 
     def capture_preview(self, scope: str, name: str, body: dict) -> dict:
         """What a capture of ``scope``/``name`` would change (arm.capture_changes), nothing saved: for a robot pose
@@ -828,12 +858,15 @@ class Bridge(Node):
             hands = {tool: targets.hand_from_axes(target) for tool, target in (request.get('tools') or {}).items()}
             return {'exists': True, 'at': None, **arm.capture_changes(existing['hands'], hands, existing['joints'],
                                                                       request['joints'], linear)}
-        at = body.get('at') or self.nearest_placed(scope)
+        tools = names_arg(body, 'tools')
+        at = text_arg(body, 'at') or self.nearest_placed(scope)
         instance = self.config.object_instances().get(at)
         if instance is None or instance.object != scope:
             raise arm.ArmError(f'{at} is not a placed {scope}')
         if targets.type_kinds(self.config, self.robot, scope).get(name) != 'hand':
             return {'exists': False, 'at': at}
+        if body.get('instance_override') and not targets.instance_entry(self.config, self.robot, scope, at, name):
+            return {'exists': False, 'at': at}   # a new override: nothing of its own to overwrite
         old = (self.config.target(f'{at}/{name}', self.robot) if body.get('instance_override')
                else self.config.type_target(scope, name, self.robot))
         old_hands = {key[:-len(targets.TOOL_SUFFIX)]: {'xyz': list(pose.xyz), 'rpy': list(pose.rpy)}
@@ -841,7 +874,9 @@ class Bridge(Node):
         frames = self.config.robot(self.robot).data.get('tool_frames', {})
         handled = self.config.handling_instance(instance, self.robot, self.robot_pose())
         hands = {}
-        for tool in list(body.get('tools') or []) or list(frames):
+        for tool in tools or list(frames):
+            if tool not in frames:
+                raise arm.ArmError(f'no tool_frames.{tool} in the robot profile')
             position, quaternion = self.tcp_in_cell(frames[tool])
             pose = handled.relative_pose(position, quaternion)
             hands[tool] = {'xyz': list(pose.xyz), 'rpy': list(pose.rpy)}
@@ -866,24 +901,45 @@ class Bridge(Node):
         browser read earlier. ``at``: the placed object a stance of the type is measured at; ``create``: refuse an
         existing one; ``rename``: renamed first (as a save with its stored pose), then taught under the new name."""
         self.check_idle()
-        reference, override, at = points.teach_reference(self.config, self.robot, kind, address, body.get('at'),
-                                                         bool(body.get('create')))
-        rename = body.get('rename') or None
+        reference, override, at = points.teach_reference(self.config, self.robot, kind, address,
+                                                         text_arg(body, 'at'), bool(body.get('create')))
+        rename = text_arg(body, 'rename')
         if rename == address[-1]:
             rename = None
 
         def write():
             nonlocal reference
-            if rename:
-                points.save(self.config, self.robot, kind, address,
-                            {**points.stored_pose(self.config, self.robot, kind, address), 'rename': rename})
-                head, separator, _ = reference.rpartition('/')
-                reference = f'{head}{separator}{rename}'
-            return self.teach('base', reference, instance_override=override)
+            if not rename:
+                return self.teach('base', reference, instance_override=override)
+            points.save(self.config, self.robot, kind, address,
+                        {**points.stored_pose(self.config, self.robot, kind, address), 'rename': rename})
+            head, separator, _ = reference.rpartition('/')
+            reference = f'{head}{separator}{rename}'
+            try:
+                return self.teach('base', reference, instance_override=override)
+            except (arm.ArmError, TimeoutError) as error:
+                raise arm.ArmError(f'{address[-1]} was renamed to {rename}, but not taught: {error} '
+                                   '(Undo puts the old name back)') from error
         label = f'{kind} {"/".join(address)}' + (f' at {at}' if at and not override else '')
         response, saved = self.undoable(self.point_type(kind, address), write, label)
         return {'file': self.relative(response.file), 'message': response.message, 'at': at,
                 'distance_m': self.distance_to(at) if at else None, 'undo': saved}
+
+    def base_preview(self, kind: str, address: list[str], body: dict) -> dict:
+        """What teach_base would change, nothing saved: the stored pose of the location or stance (``old``, None for
+        a new one) and the one the teach node would take now (``new``: the base pose, for a stance relative to placed
+        object ``at`` as handled). Read from the HMI's own odometry: the node reads again, with its checks, when it
+        saves."""
+        _reference, _override, at = points.teach_reference(self.config, self.robot, kind, address, text_arg(body, 'at'))
+        pose = self.robot_pose()
+        if at is not None:
+            handled = self.config.handling_instance(self.config.object_instances()[at], self.robot, pose)
+            pose = pose.relative_to(handled.pose, handled.object)
+        try:
+            old = points.stored_pose(self.config, self.robot, kind, address)
+        except points.PointError:
+            old = None
+        return {'exists': old is not None, 'at': at, 'old': old, 'new': points.pose_dict(pose)}
 
     def point_type(self, kind: str, address: list[str]) -> str | None:
         """The object type of a location or stance address (None for a location or an unknown instance)."""
@@ -895,9 +951,8 @@ class Bridge(Node):
         return instance.object if instance else None
 
     def undoable(self, object_type: str | None, write, label: str):
-        """``write()`` as a Teach save that can be undone (undo.py): (its result, the undo entry or None)."""
-        if self.undos is None:
-            self.undos = undo.Undo()
+        """``write()`` as a Teach save that can be undone (undo.py): (its result, the undo entry or None). One at a
+        time; a write that fails after changing files raises with the undo entry as the exception's ``undo``."""
         return self.undos.run(self.config, undo.teach_files(self.robot, object_type), write, label)
 
     def undo(self, key: str) -> dict:
@@ -1099,7 +1154,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def _body(self) -> dict:
         length = int(self.headers.get('Content-Length') or 0)
-        return json.loads(self.rfile.read(length) or b'{}')
+        body = json.loads(self.rfile.read(length) or b'{}')
+        if not isinstance(body, dict):
+            raise BadRequest('the request body must be a JSON object')
+        return body
+
+    def _refused(self, error: Exception, status: int) -> None:
+        """A refusal as {problems}; with the undo of what a failed save had already written (undo.Undo.run)."""
+        answer = {'problems': [str(error)]}
+        if getattr(error, 'undo', None):
+            answer['undo'] = error.undo
+            self.bridge.points_changed()
+        return self._json(answer, status)
 
     def _file(self, file: Path) -> None:
         """A file, streamed, with byte ranges (a video player seeks with them)."""
@@ -1278,6 +1344,9 @@ class Handler(BaseHTTPRequestHandler):
                 bridge.points_changed()
                 answer = {'saved' if method == 'PUT' else 'deleted': '/'.join(address), 'file': file}
                 return self._json({**answer, 'undo': saved} if method == 'PUT' else answer)
+            if method == 'POST' and len(route) >= 4 and route[0] == 'points' and route[-1] == 'preview':
+                kind, address = route[1], [unquote(p) for p in route[2:-1]]
+                return self._json(bridge.base_preview(kind, address, self._body()))
             if method == 'POST' and len(route) >= 4 and route[0] == 'points' and route[-1] == 'teach':
                 kind, address = route[1], [unquote(p) for p in route[2:-1]]
                 result = bridge.teach_base(kind, address, self._body())
@@ -1285,7 +1354,7 @@ class Handler(BaseHTTPRequestHandler):
                 bridge.points_changed()
                 return self._json(result)
             if method == 'POST' and route == ['teach', 'undo']:
-                return self._json(bridge.undo(str(self._body().get('id') or '')))
+                return self._json(bridge.undo(text_arg(self._body(), 'id') or ''))
             if method == 'GET' and route == ['robot_pose']:
                 return self._json(points.relative_poses(bridge.config, bridge.robot_pose()))
             if method == 'GET' and route == ['robot']:
@@ -1411,13 +1480,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'problems': error.problems, 'places': error.places}, HTTPStatus.UNPROCESSABLE_ENTITY)
         except (points.PointError, robot.RobotSettingsError, arm.ArmError, held.HeldError,
                 recording.RecordingError) as error:
-            return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)
+            return self._refused(error, HTTPStatus.UNPROCESSABLE_ENTITY)
         except (Busy, undo.UndoError) as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.CONFLICT)
         except ConfigError as error:
-            return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)
+            return self._refused(error, HTTPStatus.UNPROCESSABLE_ENTITY)
         except TargetError as error:  # a target, object type or instance a Teach edit names is not there
-            return self._json({'problems': [str(error)]}, HTTPStatus.NOT_FOUND)
+            return self._refused(error, HTTPStatus.NOT_FOUND)
+        except BadRequest as error:
+            return self._json({'error': str(error)}, HTTPStatus.BAD_REQUEST)
         except (TimeoutError, KeyError, json.JSONDecodeError) as error:
             return self._json({'error': str(error)}, HTTPStatus.SERVICE_UNAVAILABLE
                               if isinstance(error, TimeoutError) else HTTPStatus.BAD_REQUEST)

@@ -12,7 +12,7 @@ pytest.importorskip('rclpy')
 from test_speed import FakeLogger, serve  # noqa: E402, F401 - serve: the fixture
 
 from taskweave_core.config import ConfigStore  # noqa: E402
-from taskweave_hmi import arm  # noqa: E402
+from taskweave_hmi import arm, undo  # noqa: E402
 from taskweave_hmi.server import Bridge  # noqa: E402
 
 FIXTURE = Path(__file__).resolve().parents[2] / 'taskweave_core' / 'test' / 'fixtures' / 'targets_new'
@@ -30,6 +30,7 @@ def target_bridge(config, served):
     bridge = Bridge.__new__(Bridge)  # no node
     bridge.lock, bridge.listeners, bridge.sent, bridge.runs = threading.Lock(), [], [], []
     bridge.config, bridge.robot, bridge.manual, bridge.served_skills = config, ROBOT, None, served
+    bridge.undos = undo.Undo()
     bridge.check_idle = lambda: None
     logger = FakeLogger()
     bridge.get_logger = lambda: logger
@@ -163,9 +164,10 @@ def test_a_capture_on_a_targets_cell_teaches_a_hand_target_and_shows_the_answer(
     request = bridge.sent_requests[0]
     assert (request.name, request.kind, list(request.tools), request.instance_override) == (
         'bay_1_stack_1_front/rails_top', 'hand', ['left'], False)
+    # the node here writes nothing: no undo
     assert result == {'file': 'objects/frame_type2.yaml',
                       'message': "hand 'bay_1_stack_1_front/rails_top': left_tool saved",
-                      'at': 'bay_1_stack_1_front', 'distance_m': None, 'undo': None}   # the node here writes nothing
+                      'at': 'bay_1_stack_1_front', 'distance_m': None, 'undo': None, 'notes': []}
 
 
 def test_a_held_pose_capture_shows_the_cores_cannot_be_taught_yet(serve, config):  # noqa: F811

@@ -248,7 +248,10 @@ def _written(store: ConfigStore, paths) -> str:
 def _target_address(store: ConfigStore, robot: str, kind: str, path: list[str]) -> tuple[str, bool, str | None, str]:
     """(reference, instance override, ``type=`` of the store's target calls, frame) of a point address: a location is
     its name, a stance of the type the bare variant with ``type=<type>`` (nothing needs to be placed), an override
-    ``<instance>/<variant>``."""
+    ``<instance>/<variant>``. A name with a ``/`` (an encoded one in the URL) is refused: the teach node would read
+    ``<instance>/<name>``."""
+    if any('/' in part for part in path):
+        raise PointError(f'{"/".join(path)!r}: a name has no "/"')
     frame = _frame(store, kind, path)
     if kind == 'location':
         moves = targets.plain_kind(store, robot, path[0])

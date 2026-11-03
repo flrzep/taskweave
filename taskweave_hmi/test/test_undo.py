@@ -94,3 +94,77 @@ def test_a_capture_shows_how_far_each_hand_moves_and_turns_and_each_joint_change
         ('torso', 'm', 0.05), ('j1', 'deg', 3.0)]
     added = arm.capture_changes({}, {'left': old['left']}, {}, {})['hands'][0]
     assert added['old'] is None and added['moved_mm'] is None
+
+
+def test_saves_run_one_at_a_time_so_an_undo_never_drops_a_save_it_does_not_know(config):
+    import threading
+
+    history, order, results = undo.Undo(), [], {}
+
+    def first():
+        started.set()
+        second_thread.start()
+        second_thread.join(0.3)          # the second save waits for this one to end
+        order.append('A')
+        return points.save(config, ROBOT, 'location', ['waiting'], {'x': 2.5, 'y': 0.0, 'yaw': 0.0})
+
+    def second():
+        results['B'] = history.run(config, undo.teach_files(ROBOT), lambda: order.append('B') or points.save(
+            config, ROBOT, 'location', ['spawn'], {'x': 1.0, 'y': 0.0, 'yaw': 0.0}), 'location spawn')
+    started, second_thread = threading.Event(), threading.Thread(target=second)
+    history.run(config, undo.teach_files(ROBOT), first, 'location waiting')
+    second_thread.join()
+    assert order == ['A', 'B']
+    history.undo(config, results['B'][1]['id'])          # undoes spawn only: waiting keeps the first save
+    config.reload()
+    assert config.locations()['waiting'].x == pytest.approx(2.5) and config.locations()['spawn'].x == 2.0
+
+
+def test_a_write_that_fails_after_changing_files_is_held_for_undo(config):
+    history = undo.Undo()
+
+    def write():
+        points.save(config, ROBOT, 'location', ['waiting'], {'x': 2.5, 'y': 0.0, 'yaw': 0.0})
+        raise points.PointError('the second step was refused')
+    with pytest.raises(points.PointError) as refused:
+        history.run(config, undo.teach_files(ROBOT), write, 'location waiting')
+    assert refused.value.undo['files'] == ['cell/targets.yaml']
+    history.undo(config, refused.value.undo['id'])
+    assert config.locations()['waiting'].x == 2.0
+
+
+def test_an_undo_that_stops_half_way_can_be_tried_again_for_the_rest(config, monkeypatch):
+    from taskweave_core.config import SaveError
+
+    history = undo.Undo()
+    files = undo.teach_files(ROBOT, 'frame_type2')
+
+    def write():
+        points.save(config, ROBOT, 'location', ['waiting'], {'x': 2.5, 'y': 0.0, 'yaw': 0.0})
+        points.save(config, ROBOT, 'stance', ['objects', 'frame_type2', 'pick'], {'x': -1.2, 'y': 0.0, 'yaw': 0.0})
+    _, saved = history.run(config, files, write, 'two files')
+    real, calls = config.save, []
+
+    def flaky(path, *args, **kwargs):
+        calls.append(path)
+        if path == 'cell/targets.yaml' and calls.count(path) == 1:
+            raise SaveError([{'path': path, 'pack': 'cell', 'where': '', 'line': None, 'col': None,
+                              'message': 'refused once', 'severity': 'error'}])
+        return real(path, *args, **kwargs)
+    monkeypatch.setattr(config, 'save', flaky)
+    with pytest.raises(undo.UndoError, match='refused once.*undone already; Undo again for the rest'):
+        history.undo(config, saved['id'])                  # the robot's file first: done, then the cell's fails
+    assert history.undo(config, saved['id'])['label'] == 'two files'
+    config.reload()
+    assert config.locations()['waiting'].x == 2.0
+
+
+def test_a_name_with_a_slash_is_no_location_and_an_instance_entry_is_its_own(config):
+    from taskweave_hmi import targets
+
+    with pytest.raises(points.PointError, match='a name has no "/"'):
+        points.teach_reference(config, ROBOT, 'location', ['bay_2_stack_2_front/pick'], None)
+    with pytest.raises(points.PointError, match='unknown point address'):
+        points.teach_reference(config, ROBOT, 'location', ['spawn', 'x'], None)
+    assert targets.instance_entry(config, ROBOT, 'frame_type2', 'bay_1_stack_1_back', 'pick')['x'] == -1.528
+    assert targets.instance_entry(config, ROBOT, 'frame_type2', 'bay_1_stack_1_front', 'pick') == {}

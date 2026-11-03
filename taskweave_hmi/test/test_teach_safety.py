@@ -169,3 +169,72 @@ def test_the_pads_teach_target_carries_the_instance_override_to_the_capture(serv
     bridge.capture = lambda scope, name, body: captured.append(body) or {'file': 'f', 'message': '', 'undo': None}
     bridge._teach_request(SimpleNamespace(data='{}'))
     assert captured[0]['instance_override'] is True and captured[0]['at'] == 'bay_1_stack_1_front'
+
+
+def test_a_refused_teach_after_a_rename_says_so_and_can_be_undone(serve, config):  # noqa: F811
+    from taskweave_interfaces.srv import TeachPoint
+
+    bridge = teach_bridge(config, lambda request: TeachPoint.Response(success=False, message=STALE))
+    request = serve(bridge)
+    status, data = request('POST', '/api/points/location/spawn/teach', {'rename': 'start'})
+    assert status == 422 and data['problems'][0].startswith('spawn was renamed to start, but not taught: ')
+    config.reload()
+    assert 'start' in config.locations() and data['undo']['files'] == ['cell/targets.yaml']
+    assert request('POST', '/api/teach/undo', {'id': data['undo']['id']})[0] == 200
+    config.reload()
+    assert 'spawn' in config.locations() and 'start' not in config.locations()
+
+
+def test_a_capture_for_one_object_leaves_the_types_grip_and_a_failed_grip_write_is_undoable(  # noqa: F811
+        serve, config, monkeypatch):
+    from taskweave_hmi import arm, points
+
+    def node(request):
+        from taskweave_interfaces.srv import TeachPoint
+
+        paths = config.save_target(request.name, {'moves': 'hand', 'left_tool': {'xyz': [0.0, 0.1, 0.1],
+                                                                                 'rpy': [0.0, 0.0, 0.0]}},
+                                   ROBOT, instance_override=request.instance_override)
+        return TeachPoint.Response(success=True, message='ok', file=', '.join(str(p) for p in paths))
+    bridge = teach_bridge(config, node)
+    monkeypatch.setattr(arm, 'closed_grips', lambda *_: {'left': 0.02})
+    grips = []
+    monkeypatch.setattr(points, 'save_object_point', lambda *args: grips.append(args) or 'objects/frame_type2.yaml')
+    request = serve(bridge)
+    status, data = request('POST', '/api/teach/arm/frame_type2/rails_top/capture',
+                           {'at': 'bay_1_stack_1_front', 'instance_override': True})
+    assert status == 200 and grips == [] and 'grip opening not saved' in data['notes'][0]
+
+    def refused(*_):
+        raise points.PointError('grip left: outside 0..80 mm')
+    monkeypatch.setattr(points, 'save_object_point', refused)
+    status, data = request('POST', '/api/teach/arm/frame_type2/rails_top/capture', {'at': 'bay_1_stack_1_front'})
+    assert status == 422 and data['problems'] == ['grip left: outside 0..80 mm'] and data['undo']['files']
+    assert request('POST', '/api/teach/undo', {'id': data['undo']['id']})[0] == 200
+
+
+def test_a_base_preview_has_the_stored_pose_and_the_one_the_node_would_take_now(serve, config):  # noqa: F811
+    bridge = teach_bridge(config, None)
+    bridge.robot_pose = lambda: Pose2D(2.2, -0.45, 0.1)
+    request = serve(bridge)
+    status, data = request('POST', '/api/points/location/spawn/preview', {})
+    assert status == 200 and data == {'exists': True, 'at': None, 'old': {'x': 2.0, 'y': -0.45, 'yaw': 0.0},
+                                      'new': {'x': 2.2, 'y': -0.45, 'yaw': 0.1}}
+    assert request('POST', '/api/points/location/dock_2/preview', {})[1]['exists'] is False
+    bridge.robot_pose = lambda: Pose2D(7.0, 1.0, 0.0)
+    status, data = request('POST', '/api/points/stance/objects/frame_type2/pick/preview', {'at': 'bay_2_stack_2_front'})
+    assert status == 200 and data['at'] == 'bay_2_stack_2_front' and data['old'] == {'x': -1.0, 'y': 0.0, 'yaw': 0.0}
+    assert data['new']['x'] == pytest.approx(-1.0) and data['new']['y'] == pytest.approx(0.0, abs=1e-4)
+
+
+def test_bodies_and_names_of_the_wrong_shape_are_refused(serve, config):  # noqa: F811
+    bridge = teach_bridge(config, node_writes(config))
+    request = serve(bridge)
+    assert request('POST', '/api/points/location/spawn/teach', [1, 2])[0] == 400
+    assert request('POST', '/api/teach/undo', 'x')[0] == 400
+    assert request('POST', '/api/points/stance/objects/frame_type2/pick/teach', {'at': 3})[0] == 400
+    assert request('POST', '/api/teach/arm/frame_type2/rails_top/capture', {'tools': 'left'})[0] == 400
+    status, data = request('POST', '/api/points/location/bay_2_stack_2_front%2Fpick/teach', {})
+    assert status == 422 and 'a name has no "/"' in data['problems'][0]
+    assert request('POST', '/api/points/location/spawn/x/teach', {})[0] == 422
+    assert bridge.sent_requests == []

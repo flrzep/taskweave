@@ -12,6 +12,7 @@ pytest.importorskip('rclpy')
 from test_speed import FakeLogger, serve  # noqa: E402, F401 - serve: the fixture
 
 from taskweave_core.config import ConfigStore  # noqa: E402
+from taskweave_hmi import undo  # noqa: E402
 from taskweave_hmi.server import Bridge  # noqa: E402
 
 FIXTURE = Path(__file__).resolve().parents[2] / 'taskweave_core' / 'test' / 'fixtures' / 'config'
@@ -22,6 +23,7 @@ def points_bridge(config):
     bridge = Bridge.__new__(Bridge)  # no node
     bridge.lock, bridge.listeners, bridge.sent = threading.Lock(), [], []
     bridge.config, bridge.robot, bridge.manual = config, 'demo_bot', None
+    bridge.undos = undo.Undo()
     bridge.check_idle = lambda: None
     logger = FakeLogger()
     bridge.get_logger = lambda: logger
