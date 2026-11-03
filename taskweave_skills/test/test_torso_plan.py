@@ -462,3 +462,68 @@ def test_plan_rejects_nothing_on_an_empty_window():
 def test_a_keep_or_a_pin_at_the_current_height_is_no_change(rule):
     plan = TorsoPlan(GRID).plan(window({'s1_s7': rule}), LIVE, start(), Fake(TOP))
     assert plan.heights['s1_s7'] == LIVE and plan.changes == [{'at': 's2_s5', 'from': LIVE, 'to': 0.3}]
+
+
+# ---- fix round 3: certain only when proven (T4 stops a mission on it)
+
+def _keep_keep():
+    return [WindowStep('a', torso=KEEP), WindowStep('b', torso=KEEP)]
+
+
+def test_a_cap_inside_the_last_rescue_is_capped_not_certain():
+    """Review C1 (probe A): b passes only with the rescue; the cap falls in it."""
+    works = {'a': band((0.0, 0.7)), 'b': band()}
+    plan = TorsoPlan(GRID, max_checks=2).plan(_keep_keep(), LIVE, start(), Fake(works, lasting=False,
+                                                                              rescue={'b': band((0.0, 0.7))}))
+    assert plan.outcome == 'capped' and not plan.certain
+    plan = TorsoPlan(GRID, max_checks=3).plan(_keep_keep(), LIVE, start(), Fake(works, lasting=False,
+                                                                              rescue={'b': band((0.0, 0.7))}))
+    assert plan.ok and plan.rescued == [{'at': 'b', 'height': LIVE}]
+
+
+@pytest.mark.parametrize('polls', range(6))
+def test_a_stop_inside_the_last_rescue_is_stopped_not_certain(polls):
+    """Review C1 (probe B)."""
+    works = {'a': band((0.0, 0.7)), 'b': band()}
+    count = iter(range(1000))
+    plan = TorsoPlan(GRID).plan(_keep_keep(), LIVE, start(), Fake(works, lasting=False, rescue={'b': band((0.0, 0.7))}),
+                                should_stop=lambda: next(count) > polls)
+    assert plan.outcome in ('stopped', 'planned') and not plan.certain
+
+
+def test_an_exhausted_local_search_is_not_certain():
+    """Review C2 (probe C, C2): the rescue passes only from a plan other than the first that reaches the step, so the
+    search finds nothing although a plan exists: infeasible, but not certain."""
+    works = {'a': band((0.3, 0.3), (LIVE, LIVE)), 'b': band()}
+    fake = Fake(works, lasting=False, rescue={'b': lambda h, st: ('a', 0.3) in st['trail']})
+    plan = TorsoPlan(GRID).plan(window(works=works), LIVE, start(), fake)
+    assert not plan.ok and plan.outcome == 'infeasible' and not plan.certain
+    works = {'c': band((0.6, 0.75), (0.4, 0.4)), 'set_down': band()}
+    fake = Fake(works, rides=lambda step, a, b: 'ride collides' if a >= 0.6 and b <= 0.35 else None, lasting=False,
+                rescue={'set_down': band((0.3, 0.3))})
+    plan = TorsoPlan(GRID_S1).plan(window(works=works), 0.7, start(0.7), fake)
+    assert not plan.certain
+    plan = TorsoPlan(GRID, rescue=False).plan(window(works={**TOP, 's2_s6': band()}), LIVE, start(),
+                                              Fake({**TOP, 's2_s6': band()}, lasting=False))
+    assert not plan.certain
+
+
+def test_branches_cut_at_push_time_are_not_certain():
+    """Review C3 (probe 4): the I1 case with one branch."""
+    works = {**TOP, 's2_s6': lambda h, st: abs(h - 0.3) < 1e-6 and ('s2_s3', 0.3) in st['trail']}
+    plan = TorsoPlan(GRID, branches=1, max_checks=None).plan(window(works=works), LIVE, start(),
+                                                             Fake(works, lasting=False))
+    assert not plan.ok and not plan.certain
+
+
+def test_a_step_after_an_off_grid_pin_is_not_hopeless_while_the_pin_height_may_work():
+    """Probe D: every grid height of x is out of reach, the pinned 0.33 is not."""
+    works = {'pin': band((0.0, 0.75)), 'x': band((0.33, 0.33))}
+    steps = [WindowStep('pin', torso=0.33), WindowStep('x')]
+    fake = Fake(works, bound=lambda i, h: 'out of reach' if i == 'x' and abs(h - 0.33) > 1e-6 else None)
+    plan = TorsoPlan(GRID).plan(steps, LIVE, start(), fake)
+    assert plan.ok and plan.heights == {'pin': 0.33, 'x': 0.33}
+    works = {'pin': band((0.0, 0.75)), 'x': band()}
+    out = Fake(works, bound=lambda i, h: 'out of reach' if i == 'x' else None)
+    plan = TorsoPlan(GRID).plan(steps, LIVE, start(), out)
+    assert not plan.ok and plan.certain                  # every height, the pin's too, out of reach: proven

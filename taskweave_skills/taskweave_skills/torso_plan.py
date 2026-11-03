@@ -31,8 +31,10 @@ the global IK search), the local checks already made not repeated; a height that
 in ``Plan.rescued``. The rescue keeps ``max_changes``.
 
 ``Plan.outcome``: planned, cut, infeasible (the search finished and found nothing), capped (``max_checks``) or stopped
-(``should_stop``). ``Plan.certain``: infeasible with nothing left out by ``branches`` or ``max_changes``, so only then
-is the hold known to be impossible; a capped or stopped plan says nothing about the hold.
+(``should_stop``). ``Plan.certain``: infeasible because a step has every height ruled out by lasting failures (the
+reach bound: geometric, whatever the arm state); only then is the hold known to be impossible. A search that ran out
+of local options is infeasible but not certain (local IK depends on the seeds, the rescue runs from one plan per
+step, ``branches`` / ``max_changes`` cut it); a capped or stopped plan says nothing about the hold.
 
 No sequence works: the plan fails naming the blocking step (the furthest the search got), the heights it works at and
 the constraint that kept the torso off them, with a table per step (heights that worked, reasons for the others). The
@@ -148,7 +150,7 @@ class Plan:
 
     @property
     def certain(self) -> bool:
-        """The hold is impossible (not just unplanned): the search finished, nothing left out."""
+        """The hold is impossible (not just unplanned): a step no height can serve whatever the state."""
         return self.outcome == 'infeasible' and self.exhaustive
 
     def report(self) -> dict:
@@ -256,6 +258,10 @@ class _Search:
             if self.hopeless is not None:                  # a step no height can serve whatever the state
                 return self._done(self._failure(first, self.hopeless))
             if not heap and not self.pending and not self._rescue(first[max(first)], heap, order):
+                if self.should_stop():                     # cut short in the last rescue: nothing is proven
+                    return self._done(Plan(False, 'stopped', message='torso plan stopped'))
+                if self._spent():
+                    return self._done(self._failure(first, gave_up=True))
                 return self._done(self._failure(first))
             if self.should_stop():
                 return self._done(Plan(False, 'stopped', message='torso plan stopped'))
@@ -279,7 +285,9 @@ class _Search:
                     return self._done(self._success(node))
                 pushed = 0
                 for h in self._allowed(node, record=True):
-                    if (node.k, h) not in self.dead and not self._full(closed, node.k + 1, h):
+                    if self._full(closed, node.k + 1, h):
+                        self.pruned.append('branches')
+                    elif (node.k, h) not in self.dead:
                         heapq.heappush(heap, (self._edge_key(node, h), next(order), node, h))
                         pushed += 1
                 if first.setdefault(node.k, node) is node:     # the first plan that reaches the step
@@ -318,7 +326,10 @@ class _Search:
         for h in sorted(self._allowed(node), key=lambda h: self._edge_key(node, h)):
             if self._spent() or self.should_stop():
                 return
-            if (node.k, h) in self.dead or self._full(closed, node.k + 1, h):
+            if self._full(closed, node.k + 1, h):
+                self.pruned.append('branches')
+                continue
+            if (node.k, h) in self.dead:
                 continue
             check = self._try(node, h)
             if check is not None:
@@ -340,17 +351,17 @@ class _Search:
         d = node.k
         if not self.o.rescue or d >= len(self.steps) or d in self.rescued or not self.steps[d].certain:
             return False
-        self.rescued.add(d)
         passed = False
         for h in self._allowed(node):
             if (d, h) in self.dead:
                 continue
             if self._spent() or self.should_stop():
-                break
+                return passed                              # cut short: not rescued (the caller sees why)
             check = self._try(node, h, rescue=True)
             if check is not None:
                 passed = True
                 self._push(heap, order, node, h, self._edge_key(node, h), check)
+        self.rescued.add(d)
         return passed
 
     def _spent(self) -> bool:
@@ -488,7 +499,9 @@ class _Search:
         self.dead[(k, h)] = reason
         step = self.steps[k]
         pinned = isinstance(step.torso, int | float) and (k, round(float(step.torso), 6)) in self.dead
-        if self.hopeless is None and (pinned or all((k, x) in self.dead for x in self.all)):
+        # an earlier pin off the grid may be kept to this step: its height counts as one of the step's
+        held = {round(float(s.torso), 6) for s in self.steps[:k] if isinstance(s.torso, int | float)}
+        if self.hopeless is None and (pinned or all((k, x) in self.dead for x in set(self.all) | held)):
             self.hopeless = k
 
     def _failure(self, first: dict, blocking: int | None = None, gave_up: bool = False) -> Plan:
@@ -527,7 +540,9 @@ class _Search:
         why = f'gave up after {self.calls} checks (max_checks), got to ' if gave_up else 'no heights work: '
         if 'max_changes' in self.pruned and not gave_up:
             text += f' (plans with more than {self.o.max_changes} torso changes were not searched: max_changes)'
-        exhaustive = blocking is not None or not self.pruned
+        # proof only from the reach bound (geometric, whatever the state): local failures are not proof (the
+        # rescue ran from one plan per step), neither is a search branches / max_changes cut
+        exhaustive = blocking is not None
         return Plan(False, 'capped' if gave_up else 'infeasible', exhaustive and not gave_up,
                     message=self._head() + why + text, table=self._table())
 
