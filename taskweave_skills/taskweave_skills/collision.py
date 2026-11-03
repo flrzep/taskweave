@@ -153,8 +153,8 @@ class HoldCollision:
         joints = answer.scene.robot_state.multi_dof_joint_state if answer is not None else None
         if joints is None or len(joints.joint_names) != 1:
             return None
-        t = joints.transforms[0]
-        return joints.joint_names[0], joints.header.frame_id, pose_matrix(t.translation, t.rotation)
+        (name,), (t,) = joints.joint_names, joints.transforms     # the one virtual joint
+        return name, joints.header.frame_id, pose_matrix(t.translation, t.rotation)
 
     # ---- messages -----------------------------------------------------------------
     @staticmethod
