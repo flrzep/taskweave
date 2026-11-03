@@ -141,6 +141,10 @@ def teach_bridge(config, answer):
     bridge.teach_client, bridge.sent_requests = object(), []
     bridge.joint_positions = lambda: {}
 
+    def no_pose():
+        raise TimeoutError('no current robot pose on /odom')
+    bridge.robot_pose = no_pose
+
     def call(_client, request):
         bridge.sent_requests.append(request)
         return answer(request)
@@ -160,7 +164,8 @@ def test_a_capture_on_a_targets_cell_teaches_a_hand_target_and_shows_the_answer(
     assert (request.name, request.kind, list(request.tools), request.instance_override) == (
         'bay_1_stack_1_front/rails_top', 'hand', ['left'], False)
     assert result == {'file': 'objects/frame_type2.yaml',
-                      'message': "hand 'bay_1_stack_1_front/rails_top': left_tool saved"}
+                      'message': "hand 'bay_1_stack_1_front/rails_top': left_tool saved",
+                      'at': 'bay_1_stack_1_front', 'distance_m': None, 'undo': None}   # the node here writes nothing
 
 
 def test_a_held_pose_capture_shows_the_cores_cannot_be_taught_yet(serve, config):  # noqa: F811

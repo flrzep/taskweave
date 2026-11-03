@@ -43,8 +43,16 @@ HTTP API (JSON):
   GET  /api/points/all             locations, stance offsets and placed objects, with the missions using each point
   PUT  /api/points/location/<name>                          {x, y, yaw[, rename]}  create, update or rename
   PUT  /api/points/stance/<objects|instances>/<owner>/<variant>  {x, y, yaw[, rename]}  (offset in the object frame)
+  POST /api/points/location/<name>/teach | /api/points/stance/<objects|instances>/<owner>/<variant>/teach
+                                   {[at, create, rename]}  save where the robot stands now through the teach node
+                                   (kind base, its stale and clock jump checks): a stance of the type measured at
+                                   placed object <at>; {file, message (the node's answer), at, distance_m, undo}
   DELETE the same addresses;  422 with {problems} if refused, nothing written (on a targets cell: 404 with
                                    {problems} when the target, object type or instance is not there)
+  Teach saves (points PUT and teach, arm PUT and capture, held PUT) answer with undo: {id, label, files} (null when
+                                   nothing changed); POST /api/teach/undo {id} puts those files back as they were
+                                   before that save: {label, files}; 409 {problems} when it is not held any more or a
+                                   file changed since (nothing written; undo.py)
   GET  /api/robot_pose             current base pose in the cell and relative to every placed object
   POST /api/points/drive {target}  run navigate_to now (no mission running): location name or stance:<object>/<variant>
                                    (when the skill catalog has move: move {to: <name> or <object>/<variant>})
@@ -82,7 +90,11 @@ HTTP API (JSON):
   GET  /api/teach/arm               arm positions: robot poses and object points as one list (arm.py)
   PUT  /api/teach/arm/<robot|type>/<name>      {hands, joints, elbow, approach_m[, rename]};  DELETE the same
   POST /api/teach/arm/<robot|type>/<name>/capture {at, tools, form[, instance_override]}  save the robot's current arm
-                                   there (also creates): {file, message} (the teach node's answer for a point)
+                                   there (also creates): {file, message (the teach node's answer for a point), at,
+                                   distance_m (of the robot from <at>), undo}
+  POST /api/teach/arm/<robot|type>/<name>/preview {at, tools[, instance_override]}  what a capture would change on an
+                                   existing position, nothing saved: {exists, at, hands: [{tool, old, new, moved_mm,
+                                   turned_deg}], joints: [{joint, old, new, unit, change}]} (arm.capture_changes)
   POST /api/teach/arm/<robot|type>/<name>/test {at}  move there now (a robot pose as /api/robot/move; an object point:
                                    move_gripper to <at>/<name>, at the placed object <at>)
   PUT  /api/teach/target {scope, name, at, form} or {}   the position a pad teach press saves into
@@ -103,6 +115,7 @@ Missions and points are edited between runs (409 while a mission runs) and are u
 from __future__ import annotations
 
 import json
+import math
 import queue
 import shutil
 import tarfile
@@ -140,7 +153,7 @@ from taskweave_interfaces.srv import ListSkills, SetSpeedOverride, StartMission,
 from taskweave_skills.ik import pose_matrix, tool_target
 from taskweave_skills.nav2 import nav2_parameters
 
-from . import arm, held, missions, points, recording, robot, scene, targets
+from . import arm, held, missions, points, recording, robot, scene, targets, undo
 
 WEB = Path(__file__).parent / 'web'
 STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
@@ -267,6 +280,7 @@ class Busy(Exception):
 class Bridge(Node):
     skills_client = None   # the task handler's skill list service (set in __init__)
     served_skills: list[str] | None = None   # the skill names of the catalog's last answer
+    undos: undo.Undo | None = None   # the latest Teach saves, to undo one (made on first use)
 
     def __init__(self, **kwargs):
         super().__init__(kwargs.pop('node_name', 'hmi_server'), **kwargs)
@@ -752,7 +766,7 @@ class Bridge(Node):
             result = self.capture(target['scope'], target['name'], {'at': target.get('at'), 'tools': tools,
                                                                     'form': target.get('form')})
             notice = {'text': f'taught {result["message"] or label} -> {result["file"]}', 'ok': True,
-                      'taught': target}
+                      'taught': target, 'undo': result.get('undo')}
             self.points_changed()
         except (arm.ArmError, Busy, TimeoutError, KeyError, ConfigError) as error:
             notice = {'text': f'teach {label} failed: {error}', 'ok': False}
@@ -774,18 +788,135 @@ class Bridge(Node):
                 tool_targets = self.tool_targets()
             except TimeoutError:
                 tool_targets = None
-            return {'file': arm.capture_pose(self.config, self.robot, name, body, self.joint_positions(),
-                                             tool_targets), 'message': ''}
+            joints = self.joint_positions()
+            file, saved = self.undoable(None, lambda: arm.capture_pose(self.config, self.robot, name, body, joints,
+                                                                       tool_targets), f'pose {name}')
+            return {'file': file, 'message': '', 'at': None, 'distance_m': None, 'undo': saved}
         at = body.get('at') or self.nearest_placed(scope)
         instance = self.config.object_instances().get(at)
         if instance is None or instance.object != scope:
             raise arm.ArmError(f'{at} is not a placed {scope}')
-        response = self.teach('hand', f'{at}/{name}', list(body.get('tools') or []),
-                              bool(body.get('instance_override')))
-        grip = arm.closed_grips(self.config, self.robot, list(body.get('tools') or []), self.joint_positions())
-        if grip:  # grippers closed on the part when taught: they close that far at this point
-            points.save_object_point(self.config, scope, name, {'grip_m': grip}, self.robot)
-        return {'file': self.relative(response.file), 'message': response.message}
+
+        def write():
+            response = self.teach('hand', f'{at}/{name}', list(body.get('tools') or []),
+                                  bool(body.get('instance_override')))
+            grip = arm.closed_grips(self.config, self.robot, list(body.get('tools') or []), self.joint_positions())
+            if grip:  # grippers closed on the part when taught: they close that far at this point
+                points.save_object_point(self.config, scope, name, {'grip_m': grip}, self.robot)
+            return response
+        override = ' (this one only)' if body.get('instance_override') else ''
+        response, saved = self.undoable(scope, write, f'{scope} point {name} at {at}{override}')
+        return {'file': self.relative(response.file), 'message': response.message, 'at': at,
+                'distance_m': self.distance_to(at), 'undo': saved}
+
+    def capture_preview(self, scope: str, name: str, body: dict) -> dict:
+        """What a capture of ``scope``/``name`` would change (arm.capture_changes), nothing saved: for a robot pose
+        what capture_pose would write; for a point on an object each tool's TCP relative to placed object ``at``
+        (default the nearest) as the teach node computes it from TF. ``exists`` false: a new position, nothing to
+        compare."""
+        linear = self.config.robot(self.robot).data.get('joints', {}).get('linear', [])
+        if scope == arm.ROBOT:
+            existing = targets.robot_poses(self.config, self.robot).get(name)
+            if existing is None:
+                return {'exists': False, 'at': None}
+            try:
+                tool_targets = self.tool_targets()
+            except TimeoutError:
+                tool_targets = None
+            request = arm.pose_request(self.config, self.robot, name, body, self.joint_positions(), tool_targets)
+            hands = {tool: targets.hand_from_axes(target) for tool, target in (request.get('tools') or {}).items()}
+            return {'exists': True, 'at': None, **arm.capture_changes(existing['hands'], hands, existing['joints'],
+                                                                      request['joints'], linear)}
+        at = body.get('at') or self.nearest_placed(scope)
+        instance = self.config.object_instances().get(at)
+        if instance is None or instance.object != scope:
+            raise arm.ArmError(f'{at} is not a placed {scope}')
+        if targets.type_kinds(self.config, self.robot, scope).get(name) != 'hand':
+            return {'exists': False, 'at': at}
+        old = (self.config.target(f'{at}/{name}', self.robot) if body.get('instance_override')
+               else self.config.type_target(scope, name, self.robot))
+        old_hands = {key[:-len(targets.TOOL_SUFFIX)]: {'xyz': list(pose.xyz), 'rpy': list(pose.rpy)}
+                     for key, pose in old.tools.items()}
+        frames = self.config.robot(self.robot).data.get('tool_frames', {})
+        handled = self.config.handling_instance(instance, self.robot, self.robot_pose())
+        hands = {}
+        for tool in list(body.get('tools') or []) or list(frames):
+            position, quaternion = self.tcp_in_cell(frames[tool])
+            pose = handled.relative_pose(position, quaternion)
+            hands[tool] = {'xyz': list(pose.xyz), 'rpy': list(pose.rpy)}
+        return {'exists': True, 'at': at, **arm.capture_changes(old_hands, hands, {}, {}, linear)}
+
+    def tcp_in_cell(self, tool_frame: dict) -> scene.Transform:
+        """A tool's canonical TCP in the cell frame from TF (flange link + the profile's offset), as the teach node
+        takes it."""
+        from taskweave_core.config.poses import quaternion_from_rpy, quaternion_multiply, rotate
+
+        found = self.frame_pose(tool_frame['link'])
+        if found is None:
+            raise TimeoutError(f'no transform {self.cell_frame} -> {tool_frame["link"]}: is the robot publishing TF?')
+        (x, y, z), flange = found
+        offset = rotate(flange, tool_frame.get('xyz', [0.0, 0.0, 0.0]))
+        return ((x + offset[0], y + offset[1], z + offset[2]),
+                quaternion_multiply(flange, quaternion_from_rpy(tool_frame.get('rpy', [0.0, 0.0, 0.0]))))
+
+    def teach_base(self, kind: str, address: list[str], body: dict) -> dict:
+        """Save where the robot stands now as location or stance ``address`` (points.save's addresses) through the
+        teach node (kind base: its stale and clock jump checks, the pose read when it saves), not from numbers the
+        browser read earlier. ``at``: the placed object a stance of the type is measured at; ``create``: refuse an
+        existing one; ``rename``: renamed first (as a save with its stored pose), then taught under the new name."""
+        self.check_idle()
+        reference, override, at = points.teach_reference(self.config, self.robot, kind, address, body.get('at'),
+                                                         bool(body.get('create')))
+        rename = body.get('rename') or None
+        if rename == address[-1]:
+            rename = None
+
+        def write():
+            nonlocal reference
+            if rename:
+                points.save(self.config, self.robot, kind, address,
+                            {**points.stored_pose(self.config, self.robot, kind, address), 'rename': rename})
+                head, separator, _ = reference.rpartition('/')
+                reference = f'{head}{separator}{rename}'
+            return self.teach('base', reference, instance_override=override)
+        label = f'{kind} {"/".join(address)}' + (f' at {at}' if at and not override else '')
+        response, saved = self.undoable(self.point_type(kind, address), write, label)
+        return {'file': self.relative(response.file), 'message': response.message, 'at': at,
+                'distance_m': self.distance_to(at) if at else None, 'undo': saved}
+
+    def point_type(self, kind: str, address: list[str]) -> str | None:
+        """The object type of a location or stance address (None for a location or an unknown instance)."""
+        if kind != 'stance' or len(address) != 3:
+            return None
+        if address[0] == 'objects':
+            return address[1]
+        instance = self.config.object_instances().get(address[1])
+        return instance.object if instance else None
+
+    def undoable(self, object_type: str | None, write, label: str):
+        """``write()`` as a Teach save that can be undone (undo.py): (its result, the undo entry or None)."""
+        if self.undos is None:
+            self.undos = undo.Undo()
+        return self.undos.run(self.config, undo.teach_files(self.robot, object_type), write, label)
+
+    def undo(self, key: str) -> dict:
+        """Undo the Teach save ``key`` (POST /api/teach/undo)."""
+        self.check_idle()
+        if self.undos is None:
+            raise undo.UndoError('nothing to undo: no save was made since the HMI started')
+        result = self.undos.undo(self.config, key)
+        self.get_logger().info(f'HMI undid {result["label"]} ({", ".join(result["files"])})')
+        self.points_changed()
+        return result
+
+    def distance_to(self, instance: str) -> float | None:
+        """How far the robot base is from a placed object now (m), None without a current pose."""
+        placed = self.config.object_instances().get(instance)
+        try:
+            pose = self.robot_pose()
+        except TimeoutError:
+            return None
+        return None if placed is None else round(math.hypot(placed.pose.x - pose.x, placed.pose.y - pose.y), 2)
 
     def capture_held(self, name: str) -> dict:
         """Teach a held pose (an object target in the base frame) from where the held object is now: the teach
@@ -798,11 +929,14 @@ class Bridge(Node):
         return {'file': self.relative(response.file), 'message': response.message}
 
     def relative(self, file: str) -> str:
-        """A file the teach node wrote, relative to the config folder when it is in it."""
-        try:
-            return Path(file).relative_to(self.config.root).as_posix()
-        except ValueError:
-            return file
+        """The files the teach node wrote (``a, b``), relative to the config folder when they are in it."""
+        result = []
+        for one in filter(None, file.split(', ')):
+            try:
+                result.append(Path(one).relative_to(self.config.root).as_posix())
+            except ValueError:
+                result.append(one)
+        return ', '.join(result)
 
     def nearest_placed(self, object_type: str) -> str:
         return arm.nearest_placed(self.config, object_type,
@@ -1131,14 +1265,26 @@ class Handler(BaseHTTPRequestHandler):
             if method in ('PUT', 'DELETE') and len(route) >= 3 and route[0] == 'points':
                 bridge.check_idle()
                 kind, address = route[1], [unquote(p) for p in route[2:]]
+                saved = None
                 if method == 'PUT':
-                    file = points.save(bridge.config, bridge.robot, kind, address, self._body())
+                    body = self._body()
+                    file, saved = bridge.undoable(bridge.point_type(kind, address), lambda: points.save(
+                        bridge.config, bridge.robot, kind, address, body), f'{kind} {"/".join(address)}')
                 else:
                     file = points.delete(bridge.config, bridge.robot, kind, address)
                 bridge.get_logger().info(f'HMI {"saved" if method == "PUT" else "deleted"} {kind} '
                                          f'{"/".join(address)} -> {file}')
                 bridge.points_changed()
-                return self._json({'saved' if method == 'PUT' else 'deleted': '/'.join(address), 'file': file})
+                answer = {'saved' if method == 'PUT' else 'deleted': '/'.join(address), 'file': file}
+                return self._json({**answer, 'undo': saved} if method == 'PUT' else answer)
+            if method == 'POST' and len(route) >= 4 and route[0] == 'points' and route[-1] == 'teach':
+                kind, address = route[1], [unquote(p) for p in route[2:-1]]
+                result = bridge.teach_base(kind, address, self._body())
+                bridge.get_logger().info(f'HMI taught {kind} {"/".join(address)} -> {result["file"]}')
+                bridge.points_changed()
+                return self._json(result)
+            if method == 'POST' and route == ['teach', 'undo']:
+                return self._json(bridge.undo(str(self._body().get('id') or '')))
             if method == 'GET' and route == ['robot_pose']:
                 return self._json(points.relative_poses(bridge.config, bridge.robot_pose()))
             if method == 'GET' and route == ['robot']:
@@ -1215,14 +1361,17 @@ class Handler(BaseHTTPRequestHandler):
                 scope, name = unquote(route[2]), unquote(route[3])
                 if len(route) == 4 and method in ('PUT', 'DELETE'):
                     bridge.check_idle()
+                    saved = None
                     if method == 'PUT':
-                        file = arm.save(bridge.config, bridge.robot, scope, name, self._body())
+                        body = self._body()
+                        file, saved = bridge.undoable(None if scope == arm.ROBOT else scope, lambda: arm.save(
+                            bridge.config, bridge.robot, scope, name, body), f'{scope} {name}')
                     else:
                         file = arm.delete(bridge.config, bridge.robot, scope, name)
                     bridge.get_logger().info(f'HMI {"saved" if method == "PUT" else "deleted"} arm position '
                                              f'{scope}/{name} -> {file}')
                     bridge.points_changed()
-                    return self._json({'file': file})
+                    return self._json({'file': file, 'undo': saved})
                 if len(route) == 5 and method == 'POST' and route[4] == 'capture':
                     result = bridge.capture(scope, name, self._body())
                     bridge.get_logger().info(f'HMI captured arm position {scope}/{name} -> {result["file"]}')
@@ -1230,18 +1379,23 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(result)
                 if len(route) == 5 and method == 'POST' and route[4] == 'test':
                     return self._json(bridge.test_position(scope, name, self._body()))
+                if len(route) == 5 and method == 'POST' and route[4] == 'preview':
+                    return self._json(bridge.capture_preview(scope, name, self._body()))
             if len(route) >= 4 and route[:2] == ['teach', 'held']:
                 obj, name = unquote(route[2]), unquote(route[3])
                 if len(route) == 4 and method in ('PUT', 'DELETE'):
                     bridge.check_idle()
+                    saved = None
                     if method == 'PUT':
-                        file = held.save(bridge.config, bridge.robot, obj, name, self._body())
+                        body = self._body()
+                        file, saved = bridge.undoable(None, lambda: held.save(bridge.config, bridge.robot, obj, name,
+                                                                              body), f'carry pose {obj} {name}')
                     else:
                         file = held.delete(bridge.config, bridge.robot, obj, name)
                     bridge.get_logger().info(f'HMI {"saved" if method == "PUT" else "deleted"} held pose '
                                              f'{obj}/{name} -> {file}')
                     bridge.points_changed()
-                    return self._json({'file': file})
+                    return self._json({'file': file, 'undo': saved})
                 if len(route) == 5 and method == 'POST' and route[4] == 'test':
                     return self._json(bridge.test_held(obj, name))
                 if len(route) == 5 and method == 'POST' and route[4] == 'capture':
@@ -1256,7 +1410,7 @@ class Handler(BaseHTTPRequestHandler):
         except (points.PointError, robot.RobotSettingsError, arm.ArmError, held.HeldError,
                 recording.RecordingError) as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)
-        except Busy as error:
+        except (Busy, undo.UndoError) as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.CONFLICT)
         except ConfigError as error:
             return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)
