@@ -142,6 +142,7 @@ document.querySelectorAll('.tabs button').forEach((button) => button.addEventLis
   });
   document.querySelectorAll('.view').forEach((view) => show(view, view.id === `view-${button.dataset.view}`));
   document.body.classList.toggle('on-run', button.dataset.view === 'run');  // the board shows the run: the bar keeps its controls
+  document.body.dataset.view = button.dataset.view;  // style.css: the wide layouts of Run and Missions
   if (button.dataset.view === 'missions') { if (state.editing) refreshCatalog(); else loadMissions(); }
   pointsVisible = button.dataset.view === 'points';
   robotVisible = button.dataset.view === 'robot';
@@ -638,13 +639,48 @@ async function loadMissions() {
   select.replaceChildren(...data.filter((m) => m.valid && !block(m)).map((m) => el('option', { value: m.name, text: `${m.name} — ${m.goal}` })));
   if (current) select.value = current;
   $('mission-list').replaceChildren(...data.map((m) => {
-    const item = el('li', { tabindex: '0' }, el('b', { text: m.name }),
+    const item = el('li', { tabindex: '0', 'data-name': m.name, 'data-find': `${m.name} ${m.goal || ''}`.toLowerCase() },
+      el('b', { text: m.name }),
       el('span', { class: 'muted', text: m.valid ? `${m.goal} · ${m.steps} steps${block(m) ? ' · block (include it)' : ''}` : '' }),
       m.valid ? '' : el('span', { class: 'bad', text: m.error }));
-    item.addEventListener('click', () => openEditor(m.name));
-    item.addEventListener('keydown', (e) => { if (e.key === 'Enter') openEditor(m.name); });
+    item.addEventListener('click', () => pickMission(item, m.name));
+    item.addEventListener('keydown', (e) => { if (e.key === 'Enter') pickMission(item, m.name); });
     return item;
   }));
+  markOpen();
+  filterMissions();
+}
+// The open mission is marked in the list (beside the editor from 1180px). Another one with unsaved edits open: the first
+// tap asks ("tap again to drop them", 3 s), the second opens it.
+function markOpen() {
+  $('mission-list').querySelectorAll('li').forEach((li) => {
+    const open = !!state.editing && li.dataset.name === state.editing.name;
+    li.classList.toggle('open', open);
+    if (open) li.setAttribute('aria-current', 'true'); else li.removeAttribute('aria-current');
+  });
+}
+function pickMission(item, name) {
+  if (state.editing?.name === name) return;
+  if (state.dirty && !item._armed) {
+    const note = el('span', { class: 'warn-note', text: `Unsaved changes in ${state.editing.name || 'the new mission'}: tap again to drop them` });
+    item.append(note);
+    item._armed = setTimeout(() => { note.remove(); item._armed = null; }, 3000);
+    return;
+  }
+  clearTimeout(item._armed); item._armed = null;
+  openEditor(name);
+}
+function filterMissions() {
+  const words = $('mission-search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  $('mission-list').querySelectorAll('li').forEach((li) => { li.hidden = !words.every((w) => li.dataset.find.includes(w)); });
+}
+$('mission-search').addEventListener('input', filterMissions);
+// the list or the editor (narrow) / both (wide): .editing on the view; nothing open: the empty side says what to do
+function showEditor(open) {
+  show($('editor'), open);
+  show($('editor-empty'), !open);
+  $('view-missions').classList.toggle('editing', open);
+  markOpen();
 }
 
 // ---------- mission editor ----------
@@ -680,8 +716,7 @@ async function openEditor(name) {
   state.editing = { name, isNew, mission: data };
   state.dirty = false;
   show($('editor-dirty'), false);
-  show($('mission-list-card'), false);
-  show($('editor'), true);
+  showEditor(true);
   message($('save-msg'), ''); show($('problems'), false);
   $('m-name').value = name || '';
   disarmDelete();
@@ -1707,7 +1742,7 @@ $('btn-delete').addEventListener('click', async () => {
   const { ok, data } = await api('DELETE', `/api/missions/${encodeURIComponent(name)}`);
   if (!ok) { showProblems(data.problems || [data.error || 'not deleted']); return; }
   state.editing = null; state.dirty = false;
-  show($('editor'), false); show($('mission-list-card'), true);
+  showEditor(false);
   loadMissions();
 });
 $('btn-new').addEventListener('click', () => openEditor(null));
@@ -1719,7 +1754,7 @@ $('btn-back').addEventListener('click', () => {
   }
   $('btn-back').classList.remove('confirm'); $('btn-back').textContent = '← Missions';
   state.editing = null; state.dirty = false;
-  show($('editor'), false); show($('mission-list-card'), true);
+  showEditor(false);
   loadMissions();
 });
 ['m-name', 'm-goal', 'm-loop', 'm-max', 'm-stop', 'd-timeout', 'd-retries', 'd-fail', 'd-replans'].forEach((id) => $(id).addEventListener('input', markDirty));

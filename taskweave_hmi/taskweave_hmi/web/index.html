@@ -131,16 +131,22 @@
   </section>
 
   <!-- MISSIONS -->
-  <section id="view-missions" class="view" hidden>
+  <!-- from 1180px the list beside the open mission; narrower, the list or the editor -->
+  <section id="view-missions" class="view missions-md" hidden>
     <div id="mission-list-card" class="card">
-      <div class="row between"><div class="label">Missions</div><button id="btn-new" class="btn small">New mission</button></div>
+      <div class="row between"><h2 class="label">Missions</h2><button id="btn-new" class="btn small">New mission</button></div>
+      <div class="field"><label for="mission-search">Search</label>
+        <input id="mission-search" type="search" autocomplete="off" spellcheck="false" placeholder="Name or goal"></div>
       <ul id="mission-list" class="list"></ul>
+    </div>
+
+    <div id="editor-empty" class="card editor-empty">
+      <p>Pick a mission to edit it, or make a new one.</p>
     </div>
 
     <div id="editor" class="card" hidden>
       <div class="row between">
         <button id="btn-back" class="btn small ghost">← Missions</button>
-        <span id="editor-dirty" class="muted" hidden>unsaved changes</span>
       </div>
       <div class="field"><label for="m-name">Name</label><input id="m-name" autocomplete="off" spellcheck="false"></div>
       <div class="field"><label for="m-goal">Goal</label><textarea id="m-goal" rows="2"></textarea></div>
@@ -165,6 +171,7 @@
       <div id="problems" class="error" hidden></div>
       <div id="save-msg" class="msg" hidden></div>
       <div class="row gap sticky-actions">
+        <span id="editor-dirty" class="editor-dirty" hidden>Unsaved changes</span>
         <button id="btn-delete" class="btn danger">Delete</button>
         <button id="btn-validate" class="btn">Check</button>
         <button id="btn-save" class="btn primary">Save</button>
