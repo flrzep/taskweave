@@ -37,16 +37,20 @@ def store(tmp_path):
     return cell(tmp_path)
 
 
-def test_the_frame_cycle_window_ends_at_the_grip_that_opens(store):
+def test_the_frame_cycle_window_ends_at_the_grip_that_opens_and_its_plan_at_the_posture_move(store):
     window, ahead = window_of(store, CYCLE)
-    assert window.ids == ['s1_s7', 's1_s8', 's1_s9', 's1_s10', 's1_s11', 's2_s1', 's2_s2', 's2_s3', 's2_s4', 's2_s5',
-                          's2_s6']
+    assert window.ids == ['s1_s7', 's1_s8'] and window.cut.startswith('s1_s8: a posture move')
+    assert [s.id for s in window.later] == ['s1_s9', 's1_s10', 's1_s11', 's2_s1', 's2_s2', 's2_s3', 's2_s4', 's2_s5',
+                                            's2_s6']
     assert window.end == 's2_s7: a grip open' and ahead[-1] == {'id': 's2_s7', 'end': 'a grip open'}
+    tilt, _ = window_of(store, CYCLE, k=2)          # the first carry after it: the rest of the hold
+    assert tilt.ids == ['s1_s9', 's1_s10', 's1_s11', 's2_s1', 's2_s2', 's2_s3', 's2_s4', 's2_s5', 's2_s6']
+    assert tilt.later == [] and tilt.cut == '' and all(step.certain for step in tilt.steps)
 
 
 def test_the_frame_cycle_window_predicts_the_poses_of_section_2(store):
     window, _ = window_of(store, CYCLE)
-    steps = {step.id: step for step in window.steps}
+    steps = {step.id: step for step in window.steps + window.later}
     origin = lambda sid: window.objects[sid][:3, 3]          # noqa: E731  (the object before the step)
     lift = moved_object(TOP, [0, 0, 0.3])
     assert close(origin('s1_s8'), [1.0, 0.0, 0.097])         # after the lift, section 2: (1.0, 0, 0.097)
@@ -69,7 +73,7 @@ def test_the_frame_cycle_window_predicts_the_poses_of_section_2(store):
 
 def test_base_moves_keep_the_torso_and_move_the_later_steps(store):
     window, _ = window_of(store, CYCLE)
-    steps = {step.id: step for step in window.steps}
+    steps = {step.id: step for step in window.steps + window.later}
     assert steps['s1_s10'].drive and close(steps['s1_s10'].base, planar(-0.5, 0, 0))
     hang = flat(base_matrix(PICK)) @ steps['s2_s5'].base                 # the base in the cell at the hook
     assert close(hang, planar(1.1, 0.0, 3.1416)) and steps['s2_s4'].drive
@@ -77,11 +81,11 @@ def test_base_moves_keep_the_torso_and_move_the_later_steps(store):
     assert steps['s2_s1'].key is None and steps['s2_s5'].key != steps['s2_s6'].key
 
 
-def test_a_posture_move_keeps_the_torso_and_makes_the_later_steps_uncertain(store):
+def test_a_posture_move_keeps_the_torso_and_the_steps_after_it_are_not_planned(store):
     window, _ = window_of(store, CYCLE)
-    steps = {step.id: step for step in window.steps}
+    steps = {step.id: step for step in window.steps + window.later}
     assert steps['s1_s8'].torso == KEEP and steps['s1_s8'].certain and steps['s1_s7'].certain
-    assert not steps['s1_s9'].certain and 's1_s9' in window.loose and 's1_s7' not in window.loose
+    assert not steps['s1_s9'].certain and steps['s1_s9'] in window.later and steps['s1_s7'] in window.steps
     assert steps['s1_s7'].torso == AUTO and steps['s2_s2'].torso == AUTO
 
 
@@ -116,7 +120,7 @@ def test_the_window_ends_at_a_step_it_cannot_predict(store, ahead, end):
 
 def test_the_window_ends_at_a_placeholder_with_no_value(store):
     window, _ = window_of(store, CYCLE, resolved={'s1_s11': False})
-    assert window.ids[-1] == 's1_s10' and window.end == 's1_s11: a placeholder has no value yet'
+    assert window.later[-1].id == 's1_s10' and window.end == 's1_s11: a placeholder has no value yet'
 
 
 def test_a_navigate_ahead_resolves_the_later_steps_at_its_pose_and_asks_no_scene(store):

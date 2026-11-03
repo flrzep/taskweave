@@ -291,6 +291,10 @@ class MoveGripper(_PointMotion):
                 [leg.tools, *([leg.before(approach)] if approach > 0 else [])])
             flips = mode != 'linear' if flip is None else flip
 
+            if height is not None and mode == 'linear':        # planned: walked as the move will go
+                from .cartesian import tcp_targets
+                return self._walked([tcp_targets(leg.tools)], current, height, label, ahead)
+
             def search():
                 if height is not None:
                     return self.ik.check_height(samples, height, current, leg.joints, elbow=m.get('elbow'),
@@ -315,6 +319,27 @@ class MoveGripper(_PointMotion):
         except IkError as error:
             return SkillResult.failed(f'{label}: {error}', torso=[{'leg': leg.label, 'height': None,
                                                                    'rejected': getattr(error, 'rejected', [])}])
+
+    def _walked(self, legs: list, current: dict, height: float, label: str, ahead=None):
+        """A TorsoChoice at ``height`` (planned by the torso look-ahead) when the straight lines to ``legs``
+        ([{tool: 4x4}]) walk from ``current`` with the torso there first (held hands following, ``_walk_lines``) and
+        the line after them to ``ahead`` too; a FAILED result otherwise. As the move goes: no IK of the goals."""
+        import re
+
+        from .ik import TorsoChoice
+
+        problem, end = self._walk_lines(legs, current, height)
+        if problem is None and end is not None and ahead is not None:
+            arms = [re.compile(self.ik.joint_pattern.format(tool=t)) for t in ahead]
+            problem = self._ahead_check(ahead, end)(height, {n: v for n, v in end.items()
+                                                             if any(a.fullmatch(n) for a in arms)})
+            problem = problem and f'next move: {problem}'
+        if problem is not None or end is None:
+            return SkillResult.failed(f'{label}: at the planned torso {height:g}: {problem or "no URDF chain"}')
+        arms = [re.compile(self.ik.joint_pattern.format(tool=t)) for t in legs[-1]]
+        joint = self.ik.torso['joint']
+        return TorsoChoice(height, {joint: height}, {n: v for n, v in end.items() if any(a.fullmatch(n) for a in arms)},
+                           set(), 0.0, skipped='planned: the lines walked')
 
     def _line_samples(self, tools: dict, current: dict):
         """A function of the torso height: the target sets along the straight line the TCPs would move on from where

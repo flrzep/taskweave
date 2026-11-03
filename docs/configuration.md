@@ -332,6 +332,25 @@ then every other height whose local solve found no IK, nearest first; the first 
 (walked on the URDF chains from the arms' joints), not only IK at the samples. Without `ik.torso`, `auto` keeps the skill's `torso_fallback` list
 (the first height that solves) and linear moves keep the lift.
 
+`ik.torso.lookahead: {enabled, budget_s, max_checks, torso_m, object_m, branch_rad}` (all optional; defaults true, 10,
+150, 0.01, 0.02, 0.3) is the torso look-ahead over a hold. A held move (`move.carry`) with `torso: auto` that the task
+handler runs (it sends the steps that follow, `RunSkill.context_json`) plans the heights of its whole hold window before
+it moves: this step and the following ones up to the grip that opens the hold (or a step it cannot predict: another
+skill, a placeholder with no value yet, a move of free hands). It keeps the current height while that works, changes
+it as late as possible and as few times as possible, and checks each step at its predicted base pose (after a navigate
+or straight move). The plan has `budget_s` (wall clock) and `max_checks` IK and collision checks; a plan stopped or
+capped by them, or one that cannot prove the hold impossible, leaves every step to the per-step search above. Only a
+hold no height can serve (a step out of the arms' reach at every height) is refused before anything moves, naming
+the blocking steps. Later steps of the window take their planned height while the torso is within `torso_m`, each
+holding hand within `object_m` and the held arms' joints within `branch_rad` of the plan, re-checked at that height
+(straight lines walked as the move will); otherwise (a retry, a jog, a start mid-plan) the window is planned again from
+there. A posture move (elbows to a side) ends the plan, as the arms after it are not predicted: the first held move
+after it plans again from the real arms; a later step out of reach at every height still refuses the first step. A
+change step refines its height when it runs (`refine` halvings toward the height before). `data.torso_plan` reports
+it (`source` planned / kept / replanned / per step, `heights`, `changes`, `outcome`, `checks`, `planned_s`; on a
+refusal `message`, `table`, `certain`); a planned leg has `planned: true` in `data.torso`. HMI, joy and older task
+handlers send no context: the per-step search as before.
+
 `torso: {joint, drive_m, tolerance_m}` is optional and separate from `ik.torso` (it is the height for driving, not a
 search). With `drive_m`, `move` to a base target (nav, straight, Nav2) first moves the torso `joint`
 to it, as a joints move (planner, speed override), when it is further off than `tolerance_m` (default 0.02),

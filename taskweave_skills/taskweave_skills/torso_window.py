@@ -13,8 +13,11 @@ The window is this step and the steps after it up to the one that ends the hold 
                 leg first (as the per-step search samples them).
     navigate,   a base move: the torso stays while holding, the object stays in the base frame; the later steps stand
     straight    at the target's pose, or forward / sideways of the pose before.
-    posture     the torso stays, the arms swing: the arm state after it is not predicted, so the steps after it are
-                uncertain (a failure there cuts the plan instead of failing the hold) and ``loose`` (no arm check).
+    posture     the torso stays, the arms swing (elbows to a side, hands still): the arm state after it is not
+                predicted, so the plan ends with it (``cut``): the first carry after it plans again from the real arms
+                (measured: from the elbows-up grasp the tilt after "elbows down" fails at heights it works at from the
+                swung arms). The steps after it are still predicted (``later``): a step out of the arms' reach at every
+                height there fails the hold at its first step, as within the plan (the reach bound needs no arms).
 
 A step's ``base`` is the base motion since now (4x4 in the base frame now) or None; ``World`` turns it into the value of
 MoveIt's virtual joint for the IK and validity requests (IkClient.at_base).
@@ -42,8 +45,9 @@ from .torso_plan import AUTO, KEEP, WindowStep
 class Window:
     steps: list = field(default_factory=list)       # [WindowStep], this step first
     objects: dict = field(default_factory=dict)     # step id -> the held object (4x4, base frame) before the step
-    loose: set = field(default_factory=set)         # step ids whose arm state is not predicted (after a posture move)
+    later: list = field(default_factory=list)       # [WindowStep] after a posture move: not planned, bound only
     end: str = ''                                   # why the window ends ('': with the cycle)
+    cut: str = ''                                   # why the plan ends before the window (a posture move)
 
     @property
     def ids(self) -> list[str]:
@@ -88,7 +92,7 @@ def predict(skill, hold: dict, first: dict, ahead: list, base_now: np.ndarray | 
     """The window from this step (``first``: {id, label, call}, the carry call it runs) and ``ahead`` (Move._ahead).
     ``skill``: the carry part (MoveObject); ``base_now``: the base in the cell now (4x4), None if not known (a base
     move then ends the window)."""
-    window, obj, moved, loose = Window(), hold['object_in_base'], None, False
+    window, obj, moved, loose = Window(), hold['object_in_base'], None, False     # loose: after a posture move
     items = [{'id': first['id'], 'label': first.get('label', ''), 'part': 'carry', 'calls': [first['call']],
               'carrying': hold['object']}]
     items += [entry if 'end' in entry else {'id': entry['id'], 'label': entry['plan'].desc, 'part': entry['plan'].part,
@@ -120,9 +124,9 @@ def predict(skill, hold: dict, first: dict, ahead: list, base_now: np.ndarray | 
         else:
             window.end = f'{sid}: not a move of {hold["object"]}'
             break
-        if not step.certain:
-            window.loose.add(sid)
-        window.steps.append(step)
+        (window.later if window.cut else window.steps).append(step)
+        if item['part'] == 'posture' and not window.cut:
+            window.cut = f'{sid}: a posture move (the arms after it are not predicted)'
     return window
 
 
@@ -210,8 +214,7 @@ class Kept:
 
     def mismatch(self, sid: str, current: dict, hold: dict, joint: str, pattern: str, tolerances: dict) -> str | None:
         """Why the state now is not the one the plan expects before step ``sid`` (torso within ``torso_m``, every
-        holding hand's TCP within ``object_m``, the held arms' joints within ``branch_rad`` unless the step is
-        ``loose``), or None."""
+        holding hand's TCP within ``object_m``, the held arms' joints within ``branch_rad``), or None."""
         expected = self.before(sid)
         if expected is None:
             return 'the plan has no state before it'
@@ -225,10 +228,9 @@ class Kept:
                       for g in grips.values())
             if off > tolerances['object_m']:
                 return f'the held object is {off:.3f} m off the plan'
-        if sid not in self.window.loose:
-            arms = [re.compile(pattern.format(tool=hand)) for hand in hold['hands']]
-            names = [n for n in expected if any(a.fullmatch(n) for a in arms)]
-            off = max((abs(float(current.get(n, math.inf)) - float(expected[n])) for n in names), default=0.0)
-            if off > tolerances['branch_rad']:
-                return f'the arms are {off:.2f} rad off the plan'
+        arms = [re.compile(pattern.format(tool=hand)) for hand in hold['hands']]
+        names = [n for n in expected if any(a.fullmatch(n) for a in arms)]
+        off = max((abs(float(current.get(n, math.inf)) - float(expected[n])) for n in names), default=0.0)
+        if off > tolerances['branch_rad']:
+            return f'the arms are {off:.2f} rad off the plan'
         return None

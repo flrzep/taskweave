@@ -45,13 +45,15 @@ blocking step is uncertain (``WindowStep.certain`` False): the plan covers the s
 the torso; not the wheels); a check from a state within ``match`` of a remembered one is answered from it: a later
 cycle with the same steps makes no calls for them.
 
-``SkillChecks`` gives the real checks from a carry skill: the reach bound (``IkClient._unreachable``), a step as
-solve_with_torso checks one height (``IkClient.check_height``: IK of every target, collisions, lines walked with
-``_walk_lines``, the line after an offset), a ride with ``_state_at`` (held hands re-solved at sampled heights, each
-state collision checked).
+``SkillChecks`` gives the real checks from a carry skill: the reach bound (``IkClient._unreachable``), a step of
+straight lines walked as the move will (``_walk_lines`` from the state, every step collision checked, then the line
+after an offset), any other step as solve_with_torso checks one height (``IkClient.check_height``: IK of every target,
+collisions), a ride with ``_state_at`` (held hands re-solved at sampled heights, each state collision checked); a
+step's predicted base pose goes into the checks (``world``, IkClient.at_base).
 
-Left to the integration (T4): refining the height between grid heights at a change step (F17 ``refine``) and seeding
-from F17's band memory: both fit in ``Checks.step(rescue=True)`` or as extra ``grid`` heights.
+``refine`` (F17's refine at a change step, run when that step runs: object_motion) tries heights between a change's
+height and its grid neighbour toward the height before the change. F17's band memory seeds the rescue (``SkillChecks``:
+the arms of a remembered band as the first IK start) and adds its heights to the grid (object_motion).
 """
 
 from __future__ import annotations
@@ -202,6 +204,69 @@ class TorsoPlan:
              should_stop: Callable[[], bool] = lambda: False) -> Plan:
         """The heights for ``steps`` from the torso at ``start`` and the joints ``state`` (module doc)."""
         return _Search(self, steps, round(float(start), 6), checks, name, should_stop).run(state)
+
+    def refine(self, steps: list[WindowStep], height: float, state: dict, checks: Checks, toward: float,
+               halvings: int, should_stop: Callable[[], bool] = lambda: False):
+        """F17's refine at a change step, on the side of less travel: ``steps`` are the change step and the steps
+        after it that keep its ``height``; ``state`` the joints now (the torso at ``toward``, the height before the
+        change). While the grid neighbour toward ``toward`` (or the last height tried that way) is out, the step to it
+        is halved (``halvings`` times); a height passes when the ride from ``state`` and every step at it pass,
+        chained. Returns (height, {step id: joints after it}) of the passing height nearest ``toward`` (at the very
+        edge of the band: its tried inner neighbour, as F17), or None (nothing better than ``height``)."""
+        side = 1 if toward > height else -1
+        beyond = [h for h in self.grid if (h - height) * side > self.tolerance and (toward - h) * side >= 0]
+        if not steps or not beyond:
+            return None
+        search = _Search(self, steps, height, checks, '', should_stop)
+        begin = round(float(toward), 6)
+
+        def run(h):
+            first, states = steps[0], {}
+            done = search._call('ride', first, begin, h, state, lambda: checks.ride(first, state, h))
+            now = done.state
+            for step in steps if done.ok else ():
+                done = search._call('step', step, h, h, now, lambda s=step, st=now: checks.step(s, h, st))
+                if not done.ok:
+                    break
+                now = states[step.id] = done.state
+            return states if done.ok else None
+
+        best, span, done = round(float(height), 6), abs(min(beyond, key=lambda h: abs(h - height)) - height), {}
+        out = {round(best + side * span, 6)}
+        for _ in range(max(0, int(halvings))):
+            if round(best + side * span, 6) not in out or should_stop():
+                break
+            span /= 2
+            h = round(best + side * span, 6)
+            states = run(h)
+            if states is None:
+                out.add(h)
+            else:
+                best, done[h] = h, states
+        if best == round(float(height), 6):
+            return None
+        inner = round(best - side * span, 6)
+        if round(best + side * span, 6) in out and inner in done:
+            return inner, done[inner]
+        return best, done[best]
+
+    def hopeless(self, steps: list[WindowStep], start: float, checks: Checks, name: str = '') -> Plan | None:
+        """The first of ``steps`` no arm can reach at any height it may take (``checks.bound`` at every height a plan
+        could give it: a pinned step its pin and the heights within ``tolerance`` of it), as the certain failure a plan
+        of them would end in, or None. No IK call: for steps whose arms are not predicted (after a posture move)."""
+        search = _Search(self, steps, round(float(start), 6), checks, name, lambda: False)
+        for k, step in enumerate(steps):
+            pin = round(float(step.torso), 6) if isinstance(step.torso, int | float) else None
+            for h in sorted(set(search.all) | {x for s in steps[:k + 1] if isinstance(s.torso, int | float)
+                                               for x in [round(float(s.torso), 6)]}):
+                if pin is None or abs(h - pin) <= self.tolerance:
+                    search._bound(k, h)
+            if search.hopeless is not None:
+                d = search.hopeless
+                text = f'{steps[d].id} {steps[d].label}'.strip() + f' works at no height ({search._reasons(d)})'
+                return search._done(Plan(False, 'infeasible', True, message=search._head() + 'no heights work: '
+                                         + text, table=search._table()))
+        return None
 
     def recall(self, key: str, state: dict) -> Check | None:
         """The remembered check of ``key`` made from a state within ``match`` of ``state``, or None."""
@@ -457,7 +522,7 @@ class _Search:
             return Check(hit.ok, after, hit.cost, hit.reason, hit.lasting)
         self.calls += 1
         check = call()
-        if key is not None:
+        if key is not None and not self.should_stop():   # a check cut short by a stop proves nothing: not kept
             self.o.remember(key, relevant, check)
         return check
 
@@ -595,10 +660,14 @@ class SkillChecks:
     (default: ik.torso.line_sample_m, at most half the grid's usual step, so a collision between grid heights is
     seen)."""
 
-    def __init__(self, skill, should_stop: Callable[[], bool] = lambda: False, ride_sample_m: float | None = None):
+    def __init__(self, skill, should_stop: Callable[[], bool] = lambda: False, ride_sample_m: float | None = None,
+                 world: Callable | None = None, progress: Callable | None = None):
+        """``world``: a step's ``base`` (the predicted base motion) -> IkClient.at_base's value (torso_window.World),
+        None: every check where the base stands now; ``progress(step)``: called before each step check."""
         from .ik import LINE_SAMPLE_M
 
         self.skill, self.ik, self.should_stop = skill, skill.ik, should_stop
+        self.world, self.progress = world, progress
         self.joint = self.ik.torso['joint']
         grid = sorted({round(float(v), 6) for v in self.ik.torso.get('candidates', ())})
         gaps = [round(b - a, 6) for a, b in zip(grid, grid[1:], strict=False)]
@@ -620,6 +689,23 @@ class SkillChecks:
         targets = self._targets(step)
         return self.ik._unreachable(targets, height, allow_flip=False) if targets else None
 
+    def _at(self, step: WindowStep):
+        """IK and collision checks where the step's base stands (IkClient.at_base)."""
+        return self.ik.at_base(self.world(step.base) if self.world is not None and step.base is not None else None)
+
+    def band(self, step: WindowStep):
+        """F17's remembered band of the step's per-step search ((height, arms) only the global search found), or
+        None: the same samples, checks, fixed joints and elbow as a held pose's search (IkClient._band_key)."""
+        from .ik import Samples
+
+        targets = self._targets(step)
+        if not targets:
+            return None
+        samples = Samples(targets)
+        samples.verify, samples.ahead = (True if step.lines else None), (True if step.ahead else None)
+        key = self.ik._band_key(samples, dict(step.fixed or {}), step.elbow, False)
+        return self.ik.bands.get(key) if key is not None else None
+
     @staticmethod
     def _targets(step: WindowStep) -> list:
         """The IK targets: the step's, else the end of its last line ({tool: 4x4} -> tool targets)."""
@@ -636,6 +722,11 @@ class SkillChecks:
         targets = self._targets(step)
         if not targets:                          # nothing to reach (a base move): the arms stay
             return Check(True, state)
+        if self.progress is not None:
+            self.progress(step)
+        if step.lines and not rescue:            # a straight line gets to its goal by itself, as the move will
+            return self._walk(step, height, state)
+        band = self.band(step) if rescue else None
         samples, end = Samples(targets), {}
         if step.lines:
             def verify(h):
@@ -645,16 +736,52 @@ class SkillChecks:
         if step.ahead:
             samples.ahead = self.skill._ahead_check(step.ahead, state)
         try:
-            choice = self.ik.check_height(samples, height, state, fixed=step.fixed, elbow=step.elbow,
-                                          global_search=rescue, should_stop=self.should_stop)
+            with self._at(step):
+                choice = self.ik.check_height(samples, height, state, fixed=step.fixed, elbow=step.elbow,
+                                              global_search=rescue, should_stop=self.should_stop,
+                                              hint=band[1] if band else None)
         except TorsoError as error:      # local no-IK depends on the seeds (the state): only the reach bound lasts
             return Check(False, reason=str(error), lasting=OUT_OF_REACH in str(error))
         after = end.get('state') or {**state, **choice.solution}
         return Check(True, after, choice.cost)
 
+    def _walk(self, step: WindowStep, height: float, state: dict) -> Check:
+        """A step of straight lines at ``height``: walked from ``state`` on the URDF chains, every step collision
+        checked (``_walk_lines``), then the line after it (``ahead``) from where they end; no IK of the goals (the move
+        walks the same lines, it does not solve them: measured, local IK of a 30 cm lift's goal fails at heights its
+        line walks). Cost: the wrist bend at the end (ik.torso.weights.wrist)."""
+        import re
+
+        from .ik import WRIST_WEIGHT
+
+        beyond = self.bound(step, height)       # as check_height: out of the arms' reach, whatever the state
+        if beyond:
+            return Check(False, reason=beyond, lasting=True)
+        with self._at(step):
+            problem, end = self.skill._walk_lines(step.lines, state, height)
+            end = state if problem is None and end is None else end
+            if problem is None and step.ahead:
+                arms = [re.compile(self.ik.joint_pattern.format(tool=t)) for t in step.ahead]
+                arm = {n: v for n, v in end.items() if any(a.fullmatch(n) for a in arms)}
+                problem = self.skill._ahead_check(step.ahead, end)(height, arm)
+                problem = problem and f'next move: {problem}'
+            elif problem is not None:
+                problem = f'line: {problem}'
+        if problem is not None:
+            return Check(False, reason=problem)
+        arms = [re.compile(self.ik.joint_pattern.format(tool=t)) for t in step.lines[-1]]
+        bend = self.ik._wrist_bend({n: v for n, v in end.items() if any(a.fullmatch(n) for a in arms)},
+                                   step.lines[-1]) if self.ik.torso.get('wrist_joints') else None
+        weight = float((self.ik.torso.get('weights') or {}).get('wrist', WRIST_WEIGHT))
+        return Check(True, end, weight * bend if bend else 0.0)
+
     def ride(self, step: WindowStep, state: dict, height: float, rescue: bool = False) -> Check:
         """The column moves in samples ``ride_sample`` apart; at each the held hands follow (``_state_at``, local IK
         unless ``rescue``, from the hands where the last sample left them) and the state is collision checked."""
+        with self._at(step):
+            return self._ride(step, state, height, rescue)
+
+    def _ride(self, step: WindowStep, state: dict, height: float, rescue: bool) -> Check:
         import re
 
         hands = self._hands(step)
@@ -662,6 +789,8 @@ class SkillChecks:
         parts = max(1, math.ceil(abs(height - begin) / self.ride_sample - 1e-9))
         patterns = [re.compile(self.ik.joint_pattern.format(tool=t)) for t in hands]
         for i in range(1, parts + 1):
+            if self.should_stop():
+                return Check(False, reason='stopped')
             h = begin + (height - begin) * i / parts
             poses = self.ik.tcps_at(hands, state)
             if len(poses) < len(hands):
