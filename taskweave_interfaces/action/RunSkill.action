@@ -7,6 +7,12 @@ string skill            # skill name from the catalog, e.g. "navigate_to"
 string instruction      # natural-language description of the step; used by language-conditioned policies
 string args_json        # skill arguments as a JSON object, already resolved (no placeholders left)
 float32 timeout_s       # 0 = use the skill's configured default
+string context_json     # optional, "" = none (HMI jog/teach and the operator joy send none). What follows this step in its
+                        # cycle: {"plan_id": str, "cycle": int, "step_index": int, "ahead": [{"id": str, "skill": str,
+                        # "kind": str|null, "args": {...}, "resolved": bool}, ...]}. ahead = the steps after this one to
+                        # the end of the cycle; args have their placeholders filled from the world as it is at dispatch
+                        # (a value may still change when an earlier step finishes). A step with a placeholder that has
+                        # no value: resolved is false and all its args are as written. A retry gets the same context.
 ---
 # --- Result ---
 uint8 SUCCEEDED = 0

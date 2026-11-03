@@ -55,6 +55,8 @@ ALGORITHM = {
     'FOLLOW_M': 'jog target follow tolerance (m)',
     'FOLLOW_RAD': 'jog target follow tolerance (rad)',
     'SWIVEL_SIGN': 'direction convention of the jog swivel axis',
+    'UNREACHABLE_MARGIN_M': 'numerical slack on the arm-length bound of the torso reach check (F17)',
+    'BANDS_KEPT': 'size cap of the held-search band memory (F17)',
 }
 
 ROOT = Path(__file__).resolve().parents[2]

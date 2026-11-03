@@ -267,13 +267,20 @@ class SkillServer(Node):
             problems = [str(error)]
         if problems:
             return SkillResult.rejected('; '.join(problems))
+        try:
+            context = json.loads(goal.context_json or '{}')
+        except json.JSONDecodeError:
+            context = None   # a look-ahead aid, never a reason to refuse the step
+        if not isinstance(context, dict):
+            self.get_logger().warning(f'{skill.name} [{goal.step_id}]: context_json ignored (not a JSON object)')
+            context = {}
         timeout = goal.timeout_s if goal.timeout_s > 0 else _default_timeout(skill, args)
 
         def publish(progress: float, status: str) -> None:
             handle.publish_feedback(RunSkill.Feedback(progress=float(progress), status=status))
 
         ctx = SkillContext(self.now, timeout, lambda: handle.is_cancel_requested, publish, goal.instruction,
-                           self.get_logger(), speed=self.speed)
+                           self.get_logger(), speed=self.speed, context=context)
         try:
             result = skill.execute(ctx, args)
         except Exception as error:  # a crashing skill is a failed step, not a dead server

@@ -148,3 +148,14 @@ PICK3 = {'goal': 'pick', 'params': {'frame': {}}, 'defaults': {'max_replans': 3}
 
 def load_nested(name):
     return {'mid': MID, 'pick': PICK3}[name]
+
+
+def test_the_step_message_carries_the_validation_notes():
+    pytest.importorskip('taskweave_interfaces.msg')
+    from taskweave_core.conversions import step_to_msg
+    from taskweave_core.plan import Step
+    msg = step_to_msg(Step(id='a', instruction='i', skill='wait', notes=['note one', 'note two']))
+    if not hasattr(msg, 'notes'):
+        pytest.skip('taskweave_interfaces without notes')
+    assert list(msg.notes) == ['note one', 'note two']
+    assert list(step_to_msg(Step(id='b', instruction='i', skill='wait')).notes) == []
