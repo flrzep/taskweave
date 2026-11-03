@@ -383,7 +383,7 @@ const lanesOf = (plan) => [...new Set([...LANES, ...plan.steps.flatMap((s) => s.
 // the operator's drags, per mission: {node or group key: [dx, dy]} on top of the drawn layout (a group's key moves
 // all of its nodes); kept here too, so private mode keeps them until the page reloads
 function storedLayout(mission) {
-  if (!Object.hasOwn(layouts, mission)) {
+  if (!Object.prototype.hasOwnProperty.call(layouts, mission)) {
     try { layouts[mission] = (JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') || {})[mission] || {}; } catch (_) { layouts[mission] = {}; }
   }
   return layouts[mission];
@@ -771,6 +771,7 @@ function nodeGraph(bands, ctx, end) {
     let on = false;
     let shift = [0, 0];
     const move = (ev) => {
+      if (ev.buttons === 0) { stop(); return; }  // released where no pointerup reached us
       const dx = ev.clientX - e.clientX;
       const dy = ev.clientY - e.clientY;
       if (!on && Math.hypot(dx, dy) < 5) return;
@@ -780,10 +781,18 @@ function nodeGraph(bands, ctx, end) {
       moving.forEach((m) => { m.n.x = m.x + shift[0]; m.n.y = m.y + shift[1]; });
       paint();
     };
-    const up = () => {  // pointerup or pointercancel, once
+    // the press ends: pointerup or pointercancel, or (no pointerup will come) a context menu, the window losing the
+    // focus or the page hidden; once
+    const ends = [['pointerup', window], ['pointercancel', window], ['contextmenu', window], ['blur', window],
+      ['visibilitychange', document]];
+    const stop = () => {  // ended without a pointerup: no click follows, so redraw what the press held off
+      const was = on;
+      up();
+      if (!was) renderGraph();
+    };
+    const up = () => {
       window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
+      ends.forEach(([type, target]) => target.removeEventListener(type, type === 'pointerup' ? up : stop));
       if (!on) { drag.active = false; return; }  // a press, no drag: its click (if any) redraws
       const was = offsets[key] || [0, 0];
       storeLayout(ctx.missionName, { ...offsets, [key]: [was[0] + shift[0], was[1] + shift[1]] }, valid);
@@ -792,8 +801,7 @@ function nodeGraph(bands, ctx, end) {
       setTimeout(() => { drag.active = false; renderGraph(); }, 0);
     };
     window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
+    ends.forEach(([type, target]) => target.addEventListener(type, type === 'pointerup' ? up : stop));
   });
   nodes.forEach((n) => grab(n.el, n.moves[n.moves.length - 1], () => [n.key]));
   outlines.forEach((o) => grab(o.head, o.moves[o.moves.length - 1], () => o.keys));

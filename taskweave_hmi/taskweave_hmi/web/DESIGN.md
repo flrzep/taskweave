@@ -279,7 +279,7 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   a dashed red arrow to the step it replans from, labelled; other rule exceptions are badges on the node's top edge.
   A ring's opening is wide enough that its first and last node stay apart; where the box is too narrow for a ring
   (a phone, mostly from 8 steps) the phase is a snake. The operator can drag a node or a phase (by its header or
-  stack) with a mouse or pen, kept per mission (`tw-plan-layout`, offsets of steps or phases no longer in the plan
+  stack) with a mouse (a pen may pan instead: a finger must scroll the page from a node, also on a touch laptop), kept per mission (`tw-plan-layout`, offsets of steps or phases no longer in the plan
   dropped) and kept inside the box with its outline; ↺ bottom right puts the drawn layout back. The layout is
   optional, so it has no keyboard path; the nodes and headers are buttons in run order, each header before its
   steps. The resources a step locks are in its pop-up and its tooltip, a phase's in its header's tooltip. A click on a step opens its details in a 320px pop-up
