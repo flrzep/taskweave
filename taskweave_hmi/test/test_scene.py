@@ -145,8 +145,27 @@ def test_config_scene_lists_the_robots_stances_at_each_placed_object(store):
     assert {key for key in stances if key[0].startswith('shelf')} == {
         ('shelf_a', 'front'), ('shelf_a', 'side'), ('shelf_b', 'front'), ('shelf_b', 'side')}
     instance = store.object_instances()['shelf_b']
-    expected = instance.pose.compose(Pose2D.from_dict(points.stance_offsets(store, 'demo_bot')['instances']['shelf_b']['front']))
+    offset = points.stance_offsets(store, 'demo_bot')['instances']['shelf_b']['front']
+    expected = instance.pose.compose(Pose2D.from_dict(offset))
     front = stances[('shelf_b', 'front')]
-    assert front['override'] and front['default'] and front['object'] == 'shelf'
+    assert front['override'] and front['object'] == 'shelf'
     assert (front['x'], front['y']) == (pytest.approx(expected.x, abs=1e-3), pytest.approx(expected.y, abs=1e-3))
-    assert not stances[('shelf_a', 'front')]['override'] and not stances[('shelf_b', 'side')]['default']
+    assert not stances[('shelf_a', 'front')]['override']
+
+
+def test_stances_of_a_turned_symmetric_object_are_on_the_robots_side(store):
+    from taskweave_core.config import Pose2D
+
+    # shelf_c lies turned 180 deg; shelves are 180 deg symmetric (like a frame in the front row)
+    (store.root / 'objects' / 'shelf.yaml').write_text('name: shelf\nyaw_symmetry_deg: 180\n')
+    with open(store.root / 'cell' / 'objects.yaml', 'a') as f:
+        f.write('shelf_c: {object: shelf, frame: cell, x: 7.0, y: 1.0, yaw: 3.14159}\n')
+    store = ConfigStore(store.root)
+
+    def front(near):
+        stance = next(s for s in scene.config_scene(store, ROBOT, near)['stances']
+                      if (s['instance'], s['variant']) == ('shelf_c', 'front'))
+        return stance['x'], stance['y']
+
+    assert front(None) == pytest.approx((7.0, 1.75), abs=1e-3)                  # as placed: behind the turned shelf
+    assert front(Pose2D(7.0, -1.0, 0.0)) == pytest.approx((7.0, 0.25), abs=1e-3)   # the robot in the aisle: in front

@@ -164,8 +164,8 @@ CALL_TIMEOUT_S = 5.0
 ACTIVE = ('running', 'paused')  # a run is under way (also planning: running without a step)
 AFTER_JUMP_S = 2.0  # the teach node's default after_jump_s: it refuses a teach this long after a sim clock jump
 START_TIMEOUT_S = 30.0  # start_mission answers once the plan is checked: seconds on a large cell (0.3.1 took minutes)
-STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'icons.js', 'graph.js', 'record.js', 'viewer3d.js', 'teach3d.js',
-                'style.css', 'viewer3d-demo.html')  # the 3D viewer alone, full window: for testing it
+STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'icons.js', 'graph.js', 'record.js', 'viewer3d.js',
+                'teach3d.js', 'style.css', 'viewer3d-demo.html')  # the 3D viewer alone, full window: for testing it
 VENDOR = WEB / 'vendor'  # the 3D view's libraries, served below /vendor/
 MANUAL_SKILL_TIMEOUT_S = 120.0  # work time (sim time x speed override), as the skill's own timeout
 DRIVE_TIMEOUT_S = 300.0  # a drive across the cell
@@ -589,11 +589,16 @@ class Bridge(Node):
 
     def scene_view(self) -> dict:
         """The 3D view's scene: the last fetched collision objects and the config's points (scene.py). Asking for it
-        keeps the copy current (_fetch_scene); the first answer of a newly opened view may still be the old copy."""
+        keeps the copy current (_fetch_scene); the first answer of a newly opened view may still be the old copy.
+        Stances as the robot where it is now would drive to them (the side of a symmetric object, as a teach saves)."""
         self._fetch_scene()
         collision = self.collision
+        try:
+            near = self.robot_pose()
+        except TimeoutError:   # no pose: the objects as placed
+            near = None
         return {'frame': self.cell_frame, 'objects': collision['objects'], 'skipped': collision['skipped'],
-                **scene.config_scene(self.config, self.robot), 'updated': collision['updated']}
+                **scene.config_scene(self.config, self.robot, near), 'updated': collision['updated']}
 
     def check_idle(self, what: str = 'change settings') -> None:
         with self.lock:

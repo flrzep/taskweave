@@ -12,16 +12,18 @@
 let teachViewer = null;
 function startTeachViewer() {
   if (teachViewer || !window.Viewer3D || $('view-points').hidden) return;
-  teachViewer = new window.Viewer3D($('viewer3d-teach'));
+  teachViewer = new window.Viewer3D($('viewer3d-teach'), { stances: true });
   teachViewer.load();
   teachViewer.onPick(picked);
 }
 window.addEventListener('viewer3d-ready', () => { if (pointsVisible) startTeachViewer(); });
 
-// points changed somewhere (app.js, the 'points' event): both cell views draw their markers again
-function reloadScenes() {
-  teachViewer?.reloadScene();
-  if (typeof runViewer === 'object' && runViewer) runViewer.reloadScene();
+// points changed somewhere (app.js, the 'points' event): both cell views draw their markers again, and an open
+// object menu lists what the object has now
+async function reloadScenes() {
+  runViewer?.reloadScene();
+  await teachViewer?.reloadScene();
+  if (!$('teach-pick').hidden && pickedObject) showPick(pickedObject, false);
 }
 
 // ---------- 3D -> the lists ----------
@@ -40,28 +42,39 @@ const fileOf = {
   point: (type) => (teach.data?.files.objects || 'objects/<type>.yaml').replace('<type>', type),
 };
 
-// The entry opened from 3D says where it saves: the object (for a stance or point) and the file.
-function noteWhere(item, at, file) {
+// The entry opened from 3D says where it saves: the object (for a stance or point) and the file. Another object
+// chosen in its picker (the stance's "Measure at", the type's "at") takes the note away: it would name the old one.
+function noteWhere(item, at, file, picker = null) {
   item.querySelector('.pick-where')?.remove();
   const text = `${at ? `At ${at} · ` : ''}saves to ${file}`;
   const note = el('p', { class: 'pick-where', text });
-  item.querySelector('.point-edit')?.prepend(note);
+  (item.classList.contains('point-edit') ? item : item.querySelector('.point-edit'))?.prepend(note);
+  picker?.addEventListener('change', () => note.remove(), { once: true });
+}
+// a type's "at" choice (teach.js atPicker) set as the operator would: its hint, teach.at and the pad's target follow
+function setTeachAt(type, placed) {
+  const picker = document.querySelector(`#point-list select[aria-label="${CSS.escape(`Teach ${type} at`)}"]`);
+  if (!picker) { teach.at[type] = placed; return null; }
+  if (picker.value !== placed) { picker.value = placed; picker.dispatchEvent(new Event('change')); }
+  return picker;
 }
 function reveal(item) {
   item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   item.querySelector('.point-head')?.focus({ preventScroll: true });
 }
-// opens a list entry (app.js pointItem) if it is closed
-function openItem(item) {
+// opens a list entry (app.js pointItem) if it is closed (its head highlights the marker and turns the view to it);
+// an open one: the same for its marker here
+function openItem(item, target) {
   const edit = item.querySelector('.point-edit');
   if (edit?.hidden) item.querySelector('.point-head').click();
+  else teach3dShow(target);
 }
 
 function openLocation(name) {
   selectTeachPane('locations');
   const item = document.querySelector(`#location-list li[data-address="${CSS.escape(`location/${name}`)}"]`);
   if (!item) return;
-  openItem(item);
+  openItem(item, { kind: 'location', name });
   noteWhere(item, '', fileOf.location());
   reveal(item);
 }
@@ -76,31 +89,38 @@ function openStance({ name, placed, object, override }) {
   item.closest('.card')?._select?.('stances');
   const picker = item.querySelector('select[data-measure-at]');
   if (picker && picker.value !== placed) { picker.value = placed; picker.dispatchEvent(new Event('change')); }
-  openItem(item);
-  noteWhere(item, placed, fileOf.stance(object));
+  openItem(item, { kind: 'stance', name, placed });
+  noteWhere(item, placed, fileOf.stance(object), override ? null : picker);
   reveal(item);
 }
 
-// a grasp point at a placed object: the point of the type, taught (and tested) at that object
+// a grasp point at a placed object: the point of the type, taught (and tested) at that object. The type's "at"
+// choice is set first, then the entry opened as by its head (the pad's target and the highlight follow); nothing
+// else in the lists is drawn again, so values typed elsewhere stay.
 function openPoint(type, name, placed) {
+  if (!teach.data) return;  // /api/teach/arm not answered yet
   selectTeachPane('points');
-  if (placed) teach.at[type] = placed;
-  teach.open = keyOf({ scope: type, name });
-  renderArm();  // opens it (teach.open) with the "at" choice set; the pad's target follows
-  const item = document.querySelector(`#point-list li[data-key="${CSS.escape(teach.open)}"]`);
+  const picker = placed ? setTeachAt(type, placed) : null;
+  const item = document.querySelector(`#point-list li[data-key="${CSS.escape(keyOf({ scope: type, name }))}"]`);
   if (!item) return;
-  noteWhere(item, placed, fileOf.point(type));
+  if (teach.open !== keyOf({ scope: type, name })) item.querySelector('.point-head').click();
+  else teach3dShow({ kind: 'point', name, object_type: type, ...(placed ? { placed } : {}) });
+  noteWhere(item, placed, fileOf.point(type), picker);
   reveal(item);
-  setTeachTarget({ scope: type, name, at: placed || null, instance_override: !!item._override?.() });
 }
 
 // ---------- a placed object: what it has, and teach new here ----------
-function showPick({ name, object }) {
+let pickedObject = null;  // the object whose menu is open: listed again after a save
+function showPick(info, focus = true) {
+  const { name, object } = info;
+  pickedObject = info;
   const scene = teachViewer?.sceneData || {};
   const stances = (scene.stances || []).filter((s) => s.instance === name);
   const pointsOf = (scene.points || []).filter((p) => p.object_type === object);
-  const button = (text, onClick, cls = 'btn small') => {
-    const node = el('button', { type: 'button', class: cls, text });
+  const button = (text, onClick, cls = 'btn small', edits = false) => {
+    // the teach-new buttons are off while a mission runs, as + Point and + Variant (setPointsBusy, data-edit)
+    const node = el('button', { type: 'button', class: cls, text, ...(edits ? { 'data-edit': '' } : {}) });
+    node.disabled = edits && !!pointsBusy;
     node.addEventListener('click', () => { hidePick(); onClick(); });
     return node;
   };
@@ -114,13 +134,14 @@ function showPick({ name, object }) {
       () => openStance({ name: s.variant, placed: name, object, override: s.override }))), 'No stance yet.'),
     group('Where a hand grasps', pointsOf.map((p) => button(p.name, () => openPoint(object, p.name, name))), 'No grasp point yet.'),
     el('div', { class: 'row wrap' },
-      button('Teach a stance here', () => newStanceAt(object, name), 'btn small primary'),
-      button('Teach a grasp point here', () => newPointAt(object, name), 'btn small primary')));
+      button('Teach a stance here', () => newStanceAt(object, name), 'btn small primary', true),
+      button('Teach a grasp point here', () => newPointAt(object, name), 'btn small primary', true)));
   show($('teach-pick'), true);
+  if (!focus) return;
   teachViewer?.setHighlight({ kind: 'placed', name });
   close.focus();
 }
-function hidePick() { show($('teach-pick'), false); }
+function hidePick() { show($('teach-pick'), false); pickedObject = null; }
 
 // a new stance variant of the type, measured at this object (the stance card's + Variant, its picker set to it)
 function newStanceAt(object, placed) {
@@ -129,25 +150,31 @@ function newStanceAt(object, placed) {
   if (!card) return;
   card._select?.('stances');
   card.querySelector('[data-add-variant]')?.click();
-  const item = [...card.querySelectorAll('li.point')].at(-1);
+  const item = card.querySelector('ul[data-variants]')?.lastElementChild;  // the variant + Variant just added
   if (!item) return;
   const picker = item.querySelector('select[data-measure-at]');
   if (picker) { picker.value = placed; picker.dispatchEvent(new Event('change')); }
-  noteWhere(item, placed, fileOf.stance(object));
+  noteWhere(item, placed, fileOf.stance(object), picker);
   reveal(item);
   item.querySelector('input')?.focus();
 }
 
-// a new grasp point on the type, taught at this object (teach.js newPosition, its type set)
+// a new grasp point on the type, taught at this object (teach.js newPosition, its type set; the type's "at" choice set
+// as its picker would). A + Pose box still open (the Poses pane) is cancelled; an open + Point box is reused.
 function newPointAt(object, placed) {
+  if (!teach.data || pointsBusy) return;
   selectTeachPane('points');
-  teach.at[object] = placed;
+  const picker = setTeachAt(object, placed);
+  const open = $('arm-new');
+  if (open?.querySelector('select[aria-label="On object type"]')?.closest('.field')?.hidden) {  // a + Pose box
+    open.querySelector('[data-cancel]')?.click();
+  }
   newPosition('point');
   const box = $('arm-new');
   if (!box) return;
   const scope = box.querySelector('select[aria-label="On object type"]');
   if (scope) { scope.value = object; scope.dispatchEvent(new Event('input')); }
-  box.prepend(el('p', { class: 'pick-where', text: `At ${placed} · saves to ${fileOf.point(object)}` }));
+  noteWhere(box, placed, fileOf.point(object), picker);
   box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 

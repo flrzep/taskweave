@@ -67,7 +67,10 @@ function atPicker(scope) {
     hint._update();
     if (teach.open?.startsWith(`${scope}/`)) {
       const item = document.querySelector(OPEN_ITEMS);
-      setTeachTarget({ scope, name: teach.open.slice(scope.length + 1), at: select.value || null, instance_override: !!item?._override?.() });
+      const name = teach.open.slice(scope.length + 1);
+      setTeachTarget({ scope, name, at: select.value || null, instance_override: !!item?._override?.() });
+      // the 3D view's highlight follows (teach3d.js): the point at the object now chosen
+      teach3dShow({ kind: 'point', name, object_type: scope, ...(select.value ? { placed: select.value } : {}) });
     }
   });
   return el('div', { class: 'at-picker' }, el('label', { class: 'row gap-s muted small-text' }, 'at', select), hint);
@@ -297,7 +300,7 @@ function newPosition(kind) {
   formField.hidden = !isPose;
   const msg = el('div', { class: 'msg', hidden: '' });
   const capture = el('button', { class: 'btn primary', text: 'Capture from robot', 'data-edit': '' });
-  const cancel = el('button', { class: 'btn', text: 'Cancel' });
+  const cancel = el('button', { class: 'btn', text: 'Cancel', 'data-cancel': '' });
   const target = () => ({ scope: scope.value, name: name.value.trim(), at: isPose ? null : teach.at[scope.value] || null,
     form: isPose ? form.value : null });
   const update = () => {

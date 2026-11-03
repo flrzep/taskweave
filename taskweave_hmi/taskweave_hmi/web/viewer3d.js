@@ -81,9 +81,10 @@ const BOX_EDGES = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)).getAtt
 
 export class Viewer3D {
   constructor(container, { fetchJSON = (path) => fetch(path).then((r) => (r.ok ? r.json() : Promise.reject(r))), pollMs = 200,
-    mode = 'cell' } = {}) {
+    mode = 'cell', stances = false } = {}) {
     this.container = container;
     this.mode = mode;
+    this.stances = stances;   // draw the robot's stances (the Teach tab's view; the Run view leaves them out)
     this.fetchJSON = fetchJSON;
     this.pollMs = pollMs;
     this.model = null;        // /api/robot/model
@@ -470,7 +471,7 @@ export class Viewer3D {
     });
 
     // the robot's stances at each placed object (base poses in the cell frame, /api/scene stances)
-    (data.stances || []).forEach((stance) => {
+    (this.stances ? data.stances || [] : []).forEach((stance) => {
       const root = new THREE.Group();
       root.position.set(stance.x, stance.y, 0.002);
       root.quaternion.copy(quatYaw(stance.yaw));
@@ -480,7 +481,7 @@ export class Viewer3D {
       root.add(ring, body);
       const info = { kind: 'stance', name: stance.variant, placed: stance.instance, object: stance.object,
         override: !!stance.override };
-      this._addMarker(info, root, body, body, stance.variant);
+      this._addMarker(info, root, body, body, `${stance.instance} · ${stance.variant}`);
       bounds.expandByPoint(root.position);
     });
 

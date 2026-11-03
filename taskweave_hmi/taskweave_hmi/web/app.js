@@ -1943,11 +1943,16 @@ function stanceCard(obj, data) {
     fillSelect(picker, instances, instances[0]);
     const hint = atHint(() => picker.value, obj.object);
     picker.addEventListener('change', hint._update);
-    return pointItem({
+    const item = pointItem({
       title: v.variant, pose: v.offset, usedBy: v.used_by, name: v.variant, isNew, nameLabel: 'Variant',
       address: ['stance', 'objects', obj.object, v.variant], instancePicker: instances.length ? picker : null,
       fromRobot: fromInstance(() => picker.value), at: () => picker.value, atHintNode: instances.length ? hint : null,
     });
+    // an open variant measured at another object: the 3D view's highlight moves there (teach3d.js)
+    picker.addEventListener('change', () => {
+      if (!isNew && !item.querySelector('.point-edit').hidden) teach3dShow({ kind: 'stance', name: v.variant, placed: picker.value });
+    });
+    return item;
   };
   const overrideItem = (instance, o, isNew = false) => pointItem({
     title: `${instance} / ${o.variant}`, pose: o.offset, usedBy: o.used_by, name: o.variant, isNew, nameLabel: 'Variant',
@@ -1955,7 +1960,7 @@ function stanceCard(obj, data) {
     at: () => instance, atHintNode: atHint(() => instance, obj.object),
     note: o.fallback ? `Without the override, ${instance} uses the ${obj.object} ${o.variant} stance.` : '',
   });
-  const variants = el('ul', { class: 'points' }, obj.variants.map((v) => variantItem(v)));
+  const variants = el('ul', { class: 'points', 'data-variants': '' }, obj.variants.map((v) => variantItem(v)));
   const overrides = el('ul', { class: 'points' }, obj.instances.flatMap((i) => i.overrides.map((o) => overrideItem(i.name, o))));
   const addVariant = el('button', { class: 'btn small', text: '+ Variant', 'data-add-variant': '' });
   addVariant.addEventListener('click', () => variants.append(variantItem(
