@@ -111,3 +111,33 @@ steps:
         store.take_object(plan.steps[0].args['target'].removeprefix('stance:'))
     assert picked == ['stance:b_front', 'stance:a_front', 'stance:b_front']   # fullest first, ties by name
     assert plan is None and cycle == 4                                           # all front stacks empty: done
+
+
+def test_the_plan_message_carries_origin_replan_from_and_max_replans():
+    pytest.importorskip('taskweave_interfaces.msg')
+    import json
+
+    from taskweave_core.conversions import plan_to_msg
+    msg = plan_to_msg(Plan.from_mission(expand_includes(NESTED, load_nested), 'p'))
+    if not hasattr(msg.steps[0], 'origin_json'):
+        pytest.skip('taskweave_interfaces without origin_json')
+    assert [s.step_id for s in msg.steps] == ['s1', 's2_s1', 's2_s2_s1', 's2_s2_g', 's3']
+    assert [json.loads(s.origin_json) for s in msg.steps] == [
+        {'include': [], 'step': 0}, {'include': ['mid'], 'step': 0}, {'include': ['mid', 'pick'], 'step': 0},
+        {'include': ['mid', 'pick'], 'step': 1}, {'include': [], 'step': 2}]
+    assert [s.replan_from for s in msg.steps] == ['', '', '', 's2_s2_g', '']
+    assert [s.max_replans for s in msg.steps] == [1, 1, 3, 3, 1]
+
+
+NESTED = {'goal': 'outer', 'steps': [
+    {'instruction': 'wait', 'skill': 'wait'},
+    {'instruction': 'mid', 'include': 'mid', 'with': {'frame': 'f'}},
+    {'instruction': 'wait', 'skill': 'wait'}]}
+MID = {'goal': 'mid', 'params': {'frame': {}}, 'steps': [
+    {'instruction': 'wait', 'skill': 'wait'}, {'instruction': 'pick', 'include': 'pick', 'with': {'frame': '{frame}'}}]}
+PICK3 = {'goal': 'pick', 'params': {'frame': {}}, 'defaults': {'max_replans': 3}, 'steps': [
+    {'instruction': 'to', 'skill': 'wait'}, {'id': 'g', 'instruction': 'grasp', 'skill': 'wait', 'replan_from': 'g'}]}
+
+
+def load_nested(name):
+    return {'mid': MID, 'pick': PICK3}[name]

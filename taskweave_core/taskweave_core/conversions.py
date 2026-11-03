@@ -20,6 +20,10 @@ def step_to_msg(step: Step | None) -> PlanStep:
     msg.timeout_s, msg.retries, msg.on_failure = float(step.timeout_s), int(step.retries), step.on_failure
     if hasattr(msg, 'resources'):   # taskweave_interfaces of this version (older installs lack the two fields)
         msg.kind, msg.resources = step.kind or '', list(step.resources)
+    if hasattr(msg, 'origin_json'):   # the three plan-graph fields (older installs lack them)
+        origin = step.origin
+        msg.origin_json = json.dumps({'include': origin['include'], 'step': origin['inner_step']}) if origin else ''
+        msg.replan_from, msg.max_replans = step.replan_from or '', int(step.max_replans)
     return msg
 
 
