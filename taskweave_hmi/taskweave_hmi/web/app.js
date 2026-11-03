@@ -245,6 +245,7 @@ function renderRun() {
       el('div', { class: 'step-text' },
         el('div', { text: step.instruction }),
         el('div', { class: 'muted mono', text: `${step.skill} ${argsText(step.args)}` }),
+        ...(step.notes || []).map((text) => el('div', { class: 'step-note', text })),  // a preview's (a live plan has none)
         note ? el('div', { class: 'muted', text: note }) : ''));
     if (pickable) { item.title = 'Start the mission at this step'; item.addEventListener('click', () => pickStart(step)); }
     list.append(item);
@@ -646,25 +647,61 @@ const cm = (m) => +(m * 100).toFixed(1);
 function argsSummary(args) {
   return Object.entries(args || {}).map(([key, value]) => argSummary(key, value)).filter(Boolean).join(' · ');
 }
-// A move step by its form: "to tray_1/place", "hand left by 0 / 0 / +6 cm", "base by −0.3 m", then its options.
-function moveSummary(args) {
+// The move skill's commands: the operator's names of the kinds of motion (core config/targets.py MOVE_LABELS; the
+// catalog's x-taskweave-move labels win), the form a target's kind gives (FORM_OF_TARGET), the forms of the option
+// table (MOVE_FORMS) and the hand value of a carry relative to now (HOLDING), for a catalog without them.
+const MOVE_LABELS = { navigate: 'navigate to', straight: 'move straight', hand: 'move to target', posture: 'change posture',
+  joints: 'move to joint positions' };
+const TARGET_FORMS = { base: 'navigate', hand: 'hand', object: 'carry', joints: 'joints' };
+const MOVE_FORMS = ['navigate', 'straight', 'hand', 'carry', 'posture', 'joints'];
+const moveMeta = () => state.skills.find((s) => s.name === 'move')?.args_schema?.['x-taskweave-move'];
+const holdingWord = () => moveMeta()?.holding?.value || 'holding';
+// a kind's (or form's: carry is a hand move) label
+const moveLabel = (kind) => (moveMeta()?.labels || MOVE_LABELS)[kind === 'carry' ? 'hand' : kind] || `move ${kind}`;
+// the form of a "to" step from its target's kind (a base target driven straight: straight); null: not known here
+function targetForm(args) {
+  const form = (moveMeta()?.target_forms || TARGET_FORMS)[targetKind(args?.to)];
+  return form === 'navigate' && args?.motion?.mode === 'straight' ? 'straight' : form || null;
+}
+// a move step that carries a held object, by its arguments: hand: holding, the old object form, a "to" an object target
+const carriesByArgs = (args) => !!args && (args.hand === holdingWord() || targetForm(args) === 'carry'
+  || (args.object !== undefined && args.to === undefined && args.hand === undefined));
+// A move step in parts: its form (null: a "to" whose target is not known here), the head (what it goes to or by) and
+// the rest (its options). moveSummary puts the command before them; the plan graph has it in the node's title.
+function moveParts(args) {
   const rest = { ...(args || {}) };
   const take = (key) => { const value = rest[key]; delete rest[key]; return value; };
   const relative = () => ['by', 'at'].map((key) => (rest[key] === undefined ? '' : argSummary(key, take(key)))).filter(Boolean).join(' ');
   const pairs = (value) => (isPlain(value) ? Object.entries(value).map(([k, v]) => `${k} ${Array.isArray(v) ? v.map((n) => n ?? '–').join(' / ') : v}`).join(', ') : String(value));
-  let head = '';
-  if (rest.to !== undefined) head = `to ${take('to')}`;
-  else if (rest.hand !== undefined) head = `hand ${[].concat(take('hand')).join(' + ')} ${relative()}`;
-  else if (rest.object !== undefined) head = `object ${take('object')} ${relative()}`;
+  const carrying = () => `carrying${rest.object === undefined ? '' : ` ${take('object')}`}`;
+  let form = null, head = '';
+  if (rest.to !== undefined) {
+    form = targetForm(rest);
+    head = `${take('to')}${form === 'carry' ? ` · ${carrying()}` : ''}`;
+  } else if (rest.hand !== undefined) {
+    const hand = take('hand');
+    form = hand === holdingWord() ? 'carry' : 'hand';
+    head = `${form === 'carry' && rest.object !== undefined ? carrying() : `hand ${[].concat(hand).join(' + ')}`} ${relative()}`;
+  } else if (rest.object !== undefined) [form, head] = ['carry', `carrying ${take('object')} ${relative()}`];  // cell schema 4
   else if (rest.base !== undefined) {
     const by = take('base')?.by;
     const metres = (n) => signed(+Number(n).toFixed(3));
-    head = Array.isArray(by) ? `base by ${by[1] ? `${metres(by[0])} / ${metres(by[1])}` : metres(by[0])} m` : 'base';
-  } else if (rest.elbow !== undefined) head = `elbow ${pairs(take('elbow'))}`;
-  else if (rest.joints !== undefined) head = `joints ${pairs(take('joints'))}`;
+    [form, head] = ['straight', Array.isArray(by) ? `by ${by[1] ? `${metres(by[0])} / ${metres(by[1])}` : metres(by[0])} m` : ''];
+  } else if (rest.elbow !== undefined) [form, head] = ['posture', `elbow ${pairs(take('elbow'))}`];
+  else if (rest.joints !== undefined) [form, head] = ['joints', pairs(take('joints'))];
   delete rest.dry_run;
   const torso = take('torso');
-  return [head.trim(), argsSummary(rest), torso === undefined ? '' : `torso ${[].concat(torso).join(' / ')}`].filter(Boolean).join(' · ');
+  return { form, head: head.trim(), rest: [argsSummary(rest), torso === undefined ? '' : `torso ${[].concat(torso).join(' / ')}`].filter(Boolean).join(' · ') };
+}
+// A move step by its command and form: "navigate to tray_1/place", "move straight by −0.3 m", "move to target · hand
+// left by 0 / 0 / +6 cm", "move to target · carrying frame_1 by …", "change posture · elbow left", then its options;
+// "to tray_1/place" while the target's kind is not known here.
+function moveSummary(args) {
+  const { form, head, rest } = moveParts(args);
+  const label = form ? moveLabel(form) : '';
+  const lead = !label ? `${args?.to !== undefined ? 'to ' : ''}${head}`
+    : !head ? label : label.endsWith(' to') || head.startsWith('by ') ? `${label} ${head}` : `${label} · ${head}`;
+  return [lead, rest].filter(Boolean).join(' · ');
 }
 function argSummary(key, value) {
   if (value === undefined || value === null) return '';
@@ -967,14 +1004,15 @@ function variantsEditor(spec, value) {
 // ---------- a skill of several forms (move) ----------
 // A skill whose args schema is a oneOf of forms (each only its required keys, the properties shared), as move: a
 // chooser of the forms (their titles), then the chosen form's own keys and the options that apply to it. Which apply
-// comes from the catalog (x-taskweave-move: the options per kind of motion, core's MOVE_OPTIONS); for a form "to" a
-// target it depends on the target's kind (state.points groups), so the options of the other kinds hide while they
-// have no value. A key the step has is always shown (nothing is dropped unseen) but dry_run (never saved in a mission)
-// and the reserved look_at hide. Switching the form keeps the options the new form also takes, and going back to a
-// form brings its values back (while the step is open in the editor).
+// comes from the catalog (x-taskweave-move: the options per form of the move, core's MOVE_OPTIONS on navigate,
+// straight, hand, carry, posture, joints); for a form "to" a target it depends on the target's kind (state.points
+// groups, x-taskweave-move target_forms), for "hand" on the hand (hand: holding is a carry), so the options of the
+// other forms hide while they have no value. A key the step has is always shown (nothing is dropped unseen) but
+// dry_run (never saved in a mission) and the reserved look_at hide. Switching the form keeps the options the new form
+// also takes, and going back to a form brings its values back (while the step is open in the editor). A deprecated
+// form (x-taskweave-deprecated: the held object relative to now of cell schema 4) still opens and edits, marked.
 const HIDDEN_ARGS = { dry_run: 'never saved in a mission (it is for trying a move by hand)', look_at: 'reserved, not implemented yet' };
 const NEVER_SAVED = ['dry_run'];
-const MOVE_KINDS = ['base', 'straight', 'hand', 'object', 'joints'];  // what a target can move (to)
 function formsOf(schema) {
   const forms = schema?.oneOf;
   return Array.isArray(forms) && forms.length > 1 && schema.properties
@@ -986,29 +1024,40 @@ function targetKind(name) {
   const found = Object.entries(TARGET_GROUPS).find(([, group]) => (state.points[group] || []).includes(name));
   return found ? found[0] : null;
 }
-// the kinds whose options a form takes: the form's own (hand, straight, ...), for "to" the target's (all while unknown)
-function formKinds(schema, form, args) {
+// the forms whose options a step of this form takes: the selector's (base: straight, elbow: posture, ...), hand:
+// holding a carry, for "to" the target's (a base target: navigate, and straight unless it already drives straight;
+// every form while the target is not known)
+function optionForms(schema, form, args) {
   const meta = schema['x-taskweave-move'];
   const selector = form.required[0];
+  if (selector === 'hand' && args?.hand === holdingWord()) return meta?.holding?.forms || ['carry'];
   if (meta?.forms?.[selector]) return meta.forms[selector];
   if (selector !== 'to') return [selector];
-  const kind = targetKind(args?.to);
-  if (kind === 'base') return args?.motion?.mode === 'straight' ? ['straight'] : ['base', 'straight'];
-  return kind ? [kind] : MOVE_KINDS;
+  const target = (meta?.target_forms || TARGET_FORMS)[targetKind(args?.to)];
+  if (target === 'navigate') return args?.motion?.mode === 'straight' ? ['straight'] : ['navigate', 'straight'];
+  return target ? [target] : MOVE_FORMS;
 }
-// the keys a form shows for these kinds, in the schema's order: its selector, its relative keys, the options
+// every form a step of this form can take, what its fields are drawn for (the others hide while empty): every form
+// for "to", hand and carry for "hand"
+function allForms(schema, form) {
+  if (form.required[0] === 'to') return MOVE_FORMS;
+  const holding = form.required[0] === 'hand' ? optionForms(schema, form, { hand: holdingWord() }) : [];
+  return [...new Set([...optionForms(schema, form, {}), ...holding])];
+}
+// the keys a form shows for these forms, in the schema's order: its selector, its relative keys, the options
 function formKeys(schema, form, kinds) {
   const meta = schema['x-taskweave-move'];
   const selectors = new Set(formsOf(schema).flatMap((f) => f.required));
   const hidden = meta?.hidden || HIDDEN_ARGS;
+  const selector = form.required[0];
+  const relative = selector === 'to' ? [] : kinds.flatMap((kind) => meta?.relative?.[kind] || []);
   return Object.keys(schema.properties).filter((key) => {
     if (key in hidden) return false;
     if (form.required.includes(key)) return true;
     if (!meta) return !selectors.has(key);  // no table: every option
-    const relative = meta.relative?.[form.required[0]];
-    if ((relative || []).includes(key)) return true;
-    if (relative && (meta.not_relative || []).includes(key)) return false;  // offset_m, reference: a target's
-    if (key === 'object') return form.required[0] === 'to' && kinds.includes('object');  // which held object goes
+    if (relative.includes(key)) return true;
+    if (relative.length && (meta.not_relative || []).includes(key)) return false;  // offset_m, reference: a target's
+    if (key === 'object') return ['to', 'hand'].includes(selector) && kinds.includes('carry');  // which held object goes
     return !selectors.has(key) && (meta.options?.[key] || []).some((k) => kinds.includes(k));
   });
 }
@@ -1022,34 +1071,43 @@ function formArgs(argsBox, schema, args, strays) {
   const head = el('div', { class: 'field wide arg-forms' }, chooser);
   const dropped = NEVER_SAVED.filter((key) => key in (args || {}));
   if (dropped.length) head.append(el('div', { class: 'msg warn', text: `${dropped.join(', ')} is left out: ${HIDDEN_ARGS.dry_run}.` }));
+  const note = el('div', { class: 'msg warn', hidden: '' });  // the deprecated form: what it is now
+  head.append(note);
   const fields = () => [...argsBox.querySelectorAll(':scope > [data-arg]')];
   const current = () => Object.fromEntries(fields().map((f) => [f.dataset.arg, f._value()]).filter(([, v]) => v !== undefined));
   const draw = (values) => {
     chooser.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-pressed', String(i === chosen)));
     const form = forms[chosen];
-    const all = form ? formKeys(schema, form, form.required[0] === 'to' ? MOVE_KINDS : formKinds(schema, form, values)) : [];
+    const all = form ? formKeys(schema, form, allForms(schema, form)) : [];
     const shown = Object.keys(values).filter((key) => key in props && !all.includes(key) && !NEVER_SAVED.includes(key));
     argsBox.replaceChildren(head, ...[...all, ...shown].map((key) => argField(key, props[key], !!form?.required.includes(key), values[key])),
       ...strays(props));
     hideOptions();
   };
-  // a "to" form: the options of the kinds the target is not, while they have no value
+  // a "to" or "hand" form: the options of the forms the step does not take (the target's, hand: holding), while they
+  // have no value; the deprecated form's note
   const hideOptions = () => {
     const form = forms[chosen];
-    if (!form || form.required[0] !== 'to') return;
+    if (!form) return;
+    const deprecated = form['x-taskweave-deprecated'];
+    note.textContent = deprecated ? `The form of cell schema 4; now ${deprecated}.` : '';
+    show(note, !!deprecated);
+    if (!['to', 'hand'].includes(form.required[0])) return;
     const values = current();
-    const keys = formKeys(schema, form, formKinds(schema, form, values));
+    const keys = formKeys(schema, form, optionForms(schema, form, values));
     fields().forEach((f) => show(f, keys.includes(f.dataset.arg) || f._value() !== undefined || !(f.dataset.arg in props)));
   };
   chooser.append(...forms.map((form, index) => {
+    const deprecated = form['x-taskweave-deprecated'];
     const button = el('button', { type: 'button', text: form.title || form.required.join(' + '), 'aria-pressed': 'false' });
-    if (form.description) button.title = form.description;
+    if (deprecated) button.classList.add('deprecated');
+    button.title = [form.description, deprecated ? `cell schema 4; now ${deprecated}` : ''].filter(Boolean).join('\n');
     button.addEventListener('click', () => {
       if (index === chosen) return;
       const values = current();
       if (chosen >= 0) memory[chosen] = values;
       chosen = index;
-      const keys = formKeys(schema, forms[index], MOVE_KINDS);
+      const keys = formKeys(schema, forms[index], allForms(schema, forms[index]));
       const others = new Set(forms.flatMap((f) => f.required).filter((key) => !forms[index].required.includes(key)));
       draw(Object.fromEntries(Object.entries({ ...memory[index], ...values }).filter(([key]) => keys.includes(key) && !others.has(key))));
       changed(chooser);
@@ -1302,6 +1360,15 @@ function markField(card, path, text) {
   const clear = () => unmarkField(field);
   ['input', 'change'].forEach((type) => field.addEventListener(type, clear, { once: true }));
 }
+// The notes of a Check ({step, path, include, message}: what runs but is noted, e.g. a form of cell schema 4): a
+// warning line on the step, above its arguments, until the next Check
+function showNotes(notes) {
+  [...$('step-editor').children].forEach((card, i) => {
+    card.querySelectorAll('.step-note').forEach((node) => node.remove());
+    notes.filter((n) => n.step === i).forEach((n) => card.querySelector('.args')?.before(el('div', { class: 'msg step-note',
+      text: `${n.include ? `${n.include}: ` : ''}${n.message}` })));
+  });
+}
 function unmarkField(field) {
   field.classList.remove('has-problem');
   field.querySelectorAll(':scope > .problem-note').forEach((note) => note.remove());
@@ -1317,7 +1384,9 @@ $('btn-validate').addEventListener('click', async () => {
   const { ok, data } = await api('POST', `/api/missions/${encodeURIComponent(name)}/validate`, readMission());
   if (!ok) { alertInline(data); return; }
   showProblems(data.problems, data.places);
-  message($('save-msg'), data.problems.length ? '' : 'Mission is valid.');
+  showNotes(data.notes || []);
+  const noted = (data.notes || []).length;
+  message($('save-msg'), data.problems.length ? '' : `Mission is valid${noted ? ` (${noted} note${noted > 1 ? 's' : ''} on its steps)` : ''}.`);
 });
 $('btn-save').addEventListener('click', async () => {
   const name = $('m-name').value.trim();

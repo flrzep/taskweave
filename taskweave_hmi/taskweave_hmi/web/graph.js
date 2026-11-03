@@ -1,13 +1,15 @@
 'use strict';
 // taskweave HMI, Run tab: the running plan as a graph. Steps top to bottom, coloured by what moves (a move step's kind:
-// base and straight drive, hand, object, posture and joints are the arm; other skills by name); edges for the decision
-// rules (retry, replan, skip, abort, loop); the active step lights up. Rules not in the live plan message (mission
-// defaults, replan_from, stop_when) come from the mission file. Uses $, el, api, state from app.js.
+// navigate and straight drive, hand, posture and joints are the arm; other skills by name), a move step titled by its
+// command (moveLabel: "navigate to", "move to target", ...) and marked "carrying" when it carries a held object;
+// edges for the decision rules (retry, replan, skip, abort, loop); the active step lights up. Rules not in the live
+// plan message (mission defaults, replan_from, stop_when) come from the mission file. Uses $, el, api, state,
+// moveLabel, moveParts, carriesByArgs from app.js.
 
 const SVG = 'http://www.w3.org/2000/svg';
 // the lane of a step: its kind of motion (step.kind, filled when the plan is validated: the live plan, the preview), else
 // its skill (cell schema 3, and a step whose kind a placeholder hides)
-const MOVE_LANES = { base: 'drive', straight: 'drive', hand: 'arm', object: 'arm', posture: 'arm', joints: 'arm' };
+const MOVE_LANES = { navigate: 'drive', straight: 'drive', hand: 'arm', posture: 'arm', joints: 'arm' };
 const SKILL_KINDS = { navigate_to: 'drive', drive_straight: 'drive', move_joints: 'arm', move_gripper: 'arm',
   move_object: 'arm', set_posture: 'arm', grip: 'grip', wait: 'wait' };
 const laneOf = (step) => MOVE_LANES[step.kind] || SKILL_KINDS[step.skill] || 'other';
@@ -24,7 +26,10 @@ function svg(tag, attrs = {}, text) {
 
 function mainArg(step) {
   const a = step.args || {};
-  if (step.skill === 'move' && typeof moveSummary === 'function') return moveSummary(a);  // app.js: "to tray_1/place"
+  if (step.skill === 'move') {  // app.js: "tray_1/place", "hand left by 0 / 0 / +6 cm" (the command is the title)
+    const { head, rest } = moveParts(a);
+    return [head, rest].filter(Boolean).join(' · ');
+  }
   if (a.target) return String(a.target);
   if (a.pose) return String(a.pose);
   if (a.to && typeof a.to === 'object') {  // move_gripper / move_object: the target variant's main value
@@ -64,6 +69,21 @@ function rules(plan, mission) {
       replanTo: replanFrom,
     };
   });
+}
+
+// a step's title: a move step's command (its kind's label; "move" while a placeholder hides it), else the skill
+const stepTitle = (step) => (step.skill === 'move' ? (step.kind ? moveLabel(step.kind) : 'move')
+  : `${step.skill}${step.kind ? ` ${step.kind}` : ''}`);
+const fit = (text, n) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
+// what a move step carries: from its result (data.carrying, the message "· carrying <instance> ·"), else true when its
+// arguments carry (hand: holding, the old object form, to an object target); a hand move of a hand that holds
+// becomes a carry only at run time
+function carrying(step, event) {
+  if (step.skill !== 'move') return null;
+  const done = event?.event === 'step_finished' ? event : null;
+  const found = done?.data?.carrying || done?.message?.match(/· carrying ([^\s·]+)/)?.[1];
+  if (found) return found;
+  return done?.data?.module === 'move.carry' || carriesByArgs(step.args) ? true : null;
 }
 
 function stepState(snap, plan, live, step, index) {
@@ -119,16 +139,25 @@ function renderGraph() {
       + `${pickable && step.id === state.startStep ? ' start-here' : ''}` });
     if (pickable) group.addEventListener('click', () => pickStart(step));  // app.js
     const uses = step.resources?.length ? `\nuses ${step.resources.join(', ')}` : '';
-    const title = svg('title', {}, `${i + 1}. ${step.instruction}\n${step.skill}${step.kind ? ` ${step.kind}` : ''} `
-      + `${JSON.stringify(step.args)}${uses}`);
+    const noted = (step.notes || []).map((note) => `\nnote: ${note}`).join('');  // a preview's (a live plan has none)
+    const title = svg('title', {}, `${i + 1}. ${step.instruction}\n${stepTitle(step)} `
+      + `${JSON.stringify(step.args)}${uses}${noted}`);
     const nodeBox = svg('rect', { x: G.nodeX, y, width: G.nodeW, height: G.nodeH, rx: 14, class: 'node-box' });
     // the graph is rebuilt on every status update: start the breathing at the phase of a page-wide clock, so it
     // runs on (in and out) instead of restarting with every update
     if (status === 'running') nodeBox.style.animationDelay = `-${(performance.now() % BREATHE_MS) / 1000}s`;
     group.append(title, nodeBox,
       svg('rect', { x: G.nodeX + 9, y: y + 11, width: 5, height: G.nodeH - 22, rx: 2.5, class: 'node-kind' }),
-      svg('text', { x: G.nodeX + 24, y: y + 22, class: 'node-title' }, `${i + 1} · ${step.skill}${step.kind ? ` ${step.kind}` : ''}`),
+      svg('text', { x: G.nodeX + 24, y: y + 22, class: 'node-title' }, fit(`${i + 1} · ${stepTitle(step)}`, status === 'pending' ? 28 : 22)),
       svg('text', { x: G.nodeX + 24, y: y + 39, class: 'node-arg' }, mainArg(step).slice(0, 28)));
+    const held = carrying(step, live ? snap.outcomes[step.id] : null);
+    if (held) {  // a pill on the node's top edge
+      const pill = svg('g', { class: 'node-carry' });
+      pill.append(svg('rect', { x: right - 82, y: y - 8, width: 70, height: 16, rx: 8 }),
+        svg('text', { x: right - 47, y: y + 4, 'text-anchor': 'middle' }, 'carrying'),
+        svg('title', {}, held === true ? 'carries a held object' : `carrying ${held}`));
+      group.append(pill);
+    }
     if (status === 'running' || status === 'paused') {
       group.append(svg('text', { x: right - 12, y: y + 22, class: 'node-state', 'text-anchor': 'end' }, status));
     } else if (status !== 'pending') {  // finished: a round badge

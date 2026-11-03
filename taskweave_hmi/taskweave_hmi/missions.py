@@ -9,6 +9,8 @@ when its file is renamed or deleted.
 A refused check names the places of its problems too (``places``: the step of the mission's own steps and the path in
 it, from ``validate_plan_structured``), so the editor marks the step and the field. ``preview_plan`` is the plan a
 start would run now, with each step's kind of motion and resources (``plan_step_info``) for the plan graph.
+Both carry the notes of the steps too (what validation notes without stopping it, e.g. the move form of cell schema
+4): ``notes`` for a check, ``notes`` on each step of a preview.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from jsonschema import Draft202012Validator
 from taskweave_core.config import ConfigError, ConfigStore, schemas
 from taskweave_core.plan import IncludeError, Plan, expand_includes
 from taskweave_core.planner import MissionFilePlanner
+from taskweave_core.step_info import MOVE_SKILL, move_notes
 from taskweave_core.validation import plan_step_info, validate_plan, validate_plan_structured
 
 NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_\-]*$')
@@ -111,11 +114,42 @@ def places_of(structured: list[dict], offset: int = 0) -> list[dict]:
     return places
 
 
+def step_notes(skill: str, args: Mapping, store: ConfigStore) -> list[str]:
+    """The notes of a step as ``validate_plan`` puts them on ``Step.notes`` ('args.object: ...')."""
+    if skill != MOVE_SKILL:
+        return []
+    return [f'{".".join(str(part) for part in path)}: {message}' for path, message in move_notes(args, store)]
+
+
+def notes(mission: Mapping, store: ConfigStore, robot: str) -> list[dict]:
+    """The notes of a mission dict's steps, placed as ``check`` places a problem: ``{'step': index into the
+    mission's own steps (an include step for a step it brings in), 'path': the path in that step ([] for a step from
+    an include), 'include': None or the included mission, 'message'}``; none for a mission that does not expand
+    (``check`` says why)."""
+    if not Draft202012Validator(schemas.MISSION).is_valid(mission):
+        return []
+    try:
+        plan = Plan.from_mission(expand_includes(dict(mission), store.mission), 'hmi-check', robot=robot)
+    except (IncludeError, ConfigError, ValueError):
+        return []
+    result = []
+    for step in plan.steps:
+        if step.skill != MOVE_SKILL:
+            continue
+        origin = step.origin or {}
+        include = (origin.get('include') or [None])[0]
+        for path, message in move_notes(step.args, store):
+            where = '.'.join(str(part) for part in path)
+            result.append({'step': origin.get('step'), 'path': [] if include else list(path), 'include': include,
+                           'message': f'{where}: {message}' if include else message})
+    return result
+
+
 def preview_plan(store: ConfigStore, mission: str, robot: str, catalog: Mapping[str, dict] | None = None) -> dict:
     """The plan a start of ``mission`` would run now, shaped like the live plan (``plan_id`` ``<mission>-preview``);
     no steps when there is nothing to do (e.g. every stack is empty). Each step has ``kind`` (the kind of motion of a
-    move step, '' when there is none or a placeholder hides it) and ``resources``; ``catalog`` (skill -> args schema,
-    may be empty) gives the resources of the other skills."""
+    move step, '' when there is none or a placeholder hides it), ``resources`` and ``notes`` (``step_notes``);
+    ``catalog`` (skill -> args schema, may be empty) gives the resources of the other skills."""
     plan = MissionFilePlanner(store, mission, None, robot).make_plan({}, 1)
     if plan is None:
         return {'plan_id': f'{mission}-preview', 'goal': '', 'robot': robot, 'loop': '', 'steps': [],
@@ -124,7 +158,8 @@ def preview_plan(store: ConfigStore, mission: str, robot: str, catalog: Mapping[
     return {'plan_id': f'{mission}-preview', 'goal': plan.goal, 'robot': plan.robot, 'loop': plan.loop,
             'steps': [{'id': step.id, 'instruction': step.instruction, 'skill': step.skill, 'args': step.args,
                        'timeout_s': step.timeout_s, 'retries': step.retries, 'on_failure': step.on_failure,
-                       'kind': each['kind'] or '', 'resources': list(each['resources'])}
+                       'kind': each['kind'] or '', 'resources': list(each['resources']),
+                       'notes': step_notes(step.skill, step.args, store)}
                       for step, each in zip(plan.steps, info, strict=True)]}
 
 

@@ -19,7 +19,19 @@ from collections.abc import Iterable, Iterator, Mapping
 
 from taskweave_core.config import ConfigError, ConfigStore, TargetWriteError
 from taskweave_core.config import target_store as ts
-from taskweave_core.config.targets import MOTION_MODES, MOTION_OPTIONS, MOVE_OPTIONS, TOOL_SUFFIX, rpy_from_axes
+from taskweave_core.config.targets import (
+    FORM_OF_TARGET,
+    HOLDING,
+    MOTION_MODES,
+    MOTION_OPTIONS,
+    MOVE_FORMS,
+    MOVE_LABELS,
+    MOVE_OPTIONS,
+    RELATIVE_KEYS,
+    RELATIVE_NOT,
+    TOOL_SUFFIX,
+    rpy_from_axes,
+)
 
 MOVE = 'move'
 KIND_GROUPS = {'base': 'base targets', 'hand': 'hand targets', 'object': 'object targets', 'joints': 'joint targets'}
@@ -267,31 +279,39 @@ def teach_request(store: ConfigStore, fields: Iterable[str], kind: str, name: st
 
 
 # ---- the move skill in the catalog ---------------------------------------------------------------------------------
-FORM_KINDS = {'to': None, 'hand': ['hand'], 'object': ['object'], 'base': ['straight'], 'elbow': ['elbow'],
-              'joints': ['joints']}    # a form's selector -> the kinds whose options apply (to: the target's kind)
-RELATIVE_KEYS = {'hand': ['by', 'at', 'rpy_deg', 'frame', 'turn_deg', 'tilt_deg'],
-                 'object': ['by', 'at', 'turn_deg', 'tilt_deg']}   # as taskweave_skills.move RELATIVE_KEYS
-NOT_RELATIVE = ['offset_m', 'reference']   # options of a target only (step_info.move_problems: not on a relative move)
+SELECTOR_FORMS = {'to': None, 'hand': ['hand'], 'object': ['carry'], 'base': ['straight'], 'elbow': ['posture'],
+                  'joints': ['joints']}   # a form's selector -> the forms whose options apply (to: the target's)
+HOLDING_FORMS = ['carry']                 # ``hand: holding`` (a carry relative to now) instead of the hand selector's
 HIDDEN_ARGS = {'dry_run': 'never saved in a mission (a manual try-out of the move)',
                'look_at': 'reserved, not implemented yet'}
 
 
+def move_meta() -> dict:
+    """``x-taskweave-move``: what the editor needs to show a move step's form, all from core's tables of the forms
+    (MOVE_FORMS: navigate, straight, hand, carry, posture, joints; core's old ids, laid over its tables for a while,
+    are left out). ``forms``: per form selector the forms whose options apply (None: the target's, by
+    ``target_forms``); ``holding``: the hand value that makes a hand move a carry; ``options``, ``motion``,
+    ``modes``: MOVE_OPTIONS, MOTION_OPTIONS, MOTION_MODES; ``relative``: per relative form the keys of by and at
+    (RELATIVE_KEYS); ``not_relative``: the options a relative move does not take; ``labels``: the operator's names
+    of the kinds (MOVE_LABELS); ``hidden``: the arguments the editor hides."""
+    return {'forms': SELECTOR_FORMS, 'holding': {'value': HOLDING, 'forms': HOLDING_FORMS},
+            'target_forms': dict(FORM_OF_TARGET), 'labels': dict(MOVE_LABELS),
+            'options': {k: [f for f in v if f in MOVE_FORMS] for k, v in MOVE_OPTIONS.items()},
+            'motion': {k: [f for f in v if f in MOVE_FORMS] for k, v in MOTION_OPTIONS.items()},
+            'modes': {k: list(v) for k, v in MOTION_MODES.items() if k in MOVE_FORMS},
+            'relative': {form: list(dict.fromkeys(key for keys in by_at.values() for key in keys))
+                         for form, by_at in RELATIVE_KEYS.items() if form in MOVE_FORMS},
+            'not_relative': list(RELATIVE_NOT), 'hidden': HIDDEN_ARGS}
+
+
 def annotate_catalog(catalog: list[dict]) -> list[dict]:
-    """The skill catalog for the mission editor: the ``move`` skill's args schema gets ``x-taskweave-move``, what the
-    editor needs to show a step's form: per form selector the kinds whose options apply (``forms``, None: the
-    target's kind), the options and motion keys each kind takes (core's MOVE_OPTIONS, MOTION_OPTIONS,
-    MOTION_MODES; base, straight, hand, object, elbow, joints), the relative keys per form, the options a relative
-    move does not take and the arguments the editor hides. Other skills and a catalog without move are unchanged."""
+    """The skill catalog for the mission editor: the ``move`` skill's args schema gets ``x-taskweave-move``
+    (``move_meta``). Other skills and a catalog without move are unchanged."""
     result = []
     for skill in catalog:
         schema = skill.get('args_schema') or {}
         if skill.get('name') == MOVE and schema.get('oneOf'):
-            schema = {**schema, 'x-taskweave-move': {
-                'forms': FORM_KINDS, 'options': {k: list(v) for k, v in MOVE_OPTIONS.items()},
-                'motion': {k: list(v) for k, v in MOTION_OPTIONS.items()},
-                'modes': {k: list(v) for k, v in MOTION_MODES.items()}, 'relative': RELATIVE_KEYS,
-                'not_relative': NOT_RELATIVE, 'hidden': HIDDEN_ARGS}}
-            skill = {**skill, 'args_schema': schema}
+            skill = {**skill, 'args_schema': {**schema, 'x-taskweave-move': move_meta()}}
         result.append(skill)
     return result
 

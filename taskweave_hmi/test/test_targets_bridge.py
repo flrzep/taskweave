@@ -94,6 +94,7 @@ def test_the_live_plan_json_has_each_steps_kind_and_resources():
     step = step_dict(PlanStep(step_id='s1', instruction='Drive', skill='move', args_json='{"to": "waiting"}',
                               kind='navigate', resources=['base', 'torso']))
     assert step['kind'] == 'navigate' and step['resources'] == ['base', 'torso'] and step['args'] == {'to': 'waiting'}
+    assert step['notes'] == []                                     # PlanStep carries none
     assert step_dict(PlanStep(step_id='s2', skill='wait'))['kind'] == ''
 
 
@@ -106,6 +107,16 @@ def test_the_plan_preview_over_http_has_kind_and_resources(serve, config):  # no
     status, plan = serve(bridge)('GET', '/api/missions/drive/plan')
     assert status == 200 and [(s['kind'], s['resources'][:1]) for s in plan['steps']] == [('navigate', ['base']),
                                                                                            ('', [])]
+    assert [s['notes'] for s in plan['steps']] == [[], []]
+
+
+def test_a_check_over_http_has_the_notes(serve, config):  # noqa: F811
+    bridge = target_bridge(config, None)
+    bridge.schemas = lambda: {}
+    up = {'object': 'held', 'by': [0, 0, 1]}
+    mission = {'goal': 'g', 'steps': [{'instruction': 'up', 'skill': 'move', 'args': up}]}
+    status, data = serve(bridge)('POST', '/api/missions/up/validate', mission)
+    assert status == 200 and [(n['step'], n['path']) for n in data['notes']] == [(0, ['args', 'object'])]
 
 
 def teach_bridge(config, answer):

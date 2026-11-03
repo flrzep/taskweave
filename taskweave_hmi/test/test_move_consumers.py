@@ -26,6 +26,7 @@ steps:
 - {id: carry, instruction: Carry, skill: move, args: {to: carry}}
 - {id: later, instruction: Later, skill: move, args: {to: '{spot}'}}
 - {id: rest, instruction: Rest, skill: wait, args: {seconds: 1}}
+- {id: lift_old, instruction: Lift it (schema 4), skill: move, args: {object: held, by: [0, 0, 0.05]}}
 """
 
 
@@ -52,7 +53,7 @@ def test_the_plan_preview_has_each_steps_kind_and_resources(store):
     steps = {step['id']: step for step in plan['steps']}
     assert {key: step['kind'] for key, step in steps.items()} == {
         'drive': 'navigate', 'straight': 'straight', 'tuck': 'joints', 'lift': 'joints', 'hands': 'hand',
-        'back': 'straight', 'up': 'hand', 'carry': 'hand', 'later': '', 'rest': ''}
+        'back': 'straight', 'up': 'hand', 'carry': 'hand', 'later': '', 'rest': '', 'lift_old': 'hand'}
     assert steps['drive']['resources'][0] == 'base' and steps['lift']['resources'] == ['torso']
     assert steps['up']['resources'] == ['hands'] and 'hands' in steps['carry']['resources']
     assert steps['later']['resources'] == ['base', 'hands', 'torso', 'joints']   # unknown yet: what the schema says
@@ -60,12 +61,37 @@ def test_the_plan_preview_has_each_steps_kind_and_resources(store):
     assert plan['steps'][0].keys() >= {'id', 'instruction', 'skill', 'args', 'timeout_s', 'retries', 'on_failure'}
 
 
+def test_the_plan_preview_has_the_notes_of_each_step(store):
+    steps = {step['id']: step for step in missions.preview_plan(store, 'forms', ROBOT, move_catalog())['steps']}
+    assert [note.split(': ', 1)[0] for note in steps['lift_old']['notes']] == ['args.object']
+    assert 'hand: holding' in steps['lift_old']['notes'][0]       # the schema 4 form runs, noted
+    assert all(step['notes'] == [] for key, step in steps.items() if key != 'lift_old')
+
+
 def test_the_plan_preview_without_a_catalog_still_knows_the_move_kinds(store):
     steps = {step['id']: step for step in missions.preview_plan(store, 'forms', ROBOT)['steps']}
     assert steps['hands']['kind'] == 'hand' and steps['rest'] == {**steps['rest'], 'kind': '', 'resources': []}
 
 
-# ---- the places of a check's problems ------------------------------------------------------------------------------
+# ---- the places of a check's problems, the notes ------------------------------------------------------------------
+def test_a_check_places_the_notes_of_the_steps(store):
+    (store.root / 'missions' / 'block.yaml').write_text(
+        'goal: b\nsteps:\n- {instruction: b, skill: move, args: {object: held, at: [0.5, 0, 0.8]}}\n')
+    store.reload()
+    up = {'object': 'held', 'by': [0, 0, 1]}
+    mission = {'goal': 'g', 'steps': [{'instruction': 'w', 'skill': 'wait', 'args': {'seconds': 1}},
+                                      {'instruction': 'up', 'skill': 'move', 'args': up},
+                                      {'id': 'inc', 'instruction': 'block', 'include': 'block'}]}
+    problems, _ = missions.check(mission, store, move_catalog(), ROBOT)
+    assert problems == []                                          # schema 4: it runs
+    notes = missions.notes(mission, store, ROBOT)
+    assert [{k: v for k, v in note.items() if k != 'message'} for note in notes] == [
+        {'step': 1, 'path': ['args', 'object'], 'include': None}, {'step': 2, 'path': [], 'include': 'block'}]
+    assert 'hand: holding' in notes[0]['message'] and notes[1]['message'].startswith('args.object: ')
+    assert missions.notes({'goal': 'g', 'steps': 'none'}, store, ROBOT) == []          # a schema error: check says it
+    assert missions.step_notes('wait', {'object': 'held', 'by': [0, 0, 1]}, store) == []
+
+
 def test_a_check_names_the_step_and_the_field_of_each_problem(store):
     mission = {'goal': 'g', 'steps': [
         {'instruction': 'ok', 'skill': 'wait', 'args': {'seconds': 1}},
@@ -126,20 +152,36 @@ def test_a_teach_on_a_targets_cell_sends_the_kind_and_the_target(store):
 
 
 # ---- the move skill in the catalog ---------------------------------------------------------------------------------
-def test_the_catalog_tells_the_editor_which_options_each_kind_of_move_takes():
+def test_the_catalog_tells_the_editor_which_options_each_form_of_move_takes():
     catalog = [{'name': 'move', 'args_schema': move_catalog()['move']}, {'name': 'wait', 'args_schema': {}}]
     annotated = targets.annotate_catalog(catalog)
     info = annotated[0]['args_schema']['x-taskweave-move']
-    assert info['options']['offset_m'] == ['hand', 'carry', 'object']           # old ids answer until M3
-    assert info['options']['tolerance_deg'] == ['posture', 'elbow']
-    assert info['motion']['via'] == ['hand', 'joints'] and info['modes']['base'] == info['modes']['navigate'] == ['nav']
-    assert info['forms']['to'] is None and info['forms']['base'] == ['straight']
+    assert info['options']['offset_m'] == ['hand', 'carry'] and info['options']['tolerance_deg'] == ['posture']
+    assert info['motion']['via'] == ['hand', 'joints'] and info['modes']['navigate'] == ['nav']
+    assert info['forms'] == {'to': None, 'hand': ['hand'], 'object': ['carry'], 'base': ['straight'],
+                             'elbow': ['posture'], 'joints': ['joints']}
+    assert info['holding'] == {'value': 'holding', 'forms': ['carry']}          # hand: holding is a carry
+    assert info['target_forms'] == {'base': 'navigate', 'hand': 'hand', 'object': 'carry', 'joints': 'joints'}
+    assert info['labels']['navigate'] == 'navigate to' and info['labels']['hand'] == 'move to target'
     assert info['not_relative'] == ['offset_m', 'reference']
-    assert set(info['hidden']) == {'dry_run', 'look_at'} and info['relative']['object'] == ['by', 'at', 'turn_deg',
-                                                                                             'tilt_deg']
+    assert info['relative'] == {'hand': ['by', 'frame', 'turn_deg', 'tilt_deg', 'at', 'rpy_deg'],
+                                'carry': ['by', 'turn_deg', 'tilt_deg', 'at']}   # core's RELATIVE_KEYS, by and at
+    assert set(info['hidden']) == {'dry_run', 'look_at'}
     assert annotated[1] == catalog[1] and 'x-taskweave-move' not in catalog[0]['args_schema']   # not changed in place
     assert targets.annotate_catalog([{'name': 'move', 'args_schema': {'properties': {}}}])[0]['args_schema'] == \
         {'properties': {}}
+
+
+def test_the_catalog_has_no_old_ids_of_the_move_forms():
+    from taskweave_core.config.targets import MOVE_FORMS
+
+    info = targets.move_meta()
+    keyed = [info['modes'], info['relative']]                  # tables keyed by form
+    listed = [*info['options'].values(), *info['motion'].values(), *(v for v in info['forms'].values() if v),
+              info['holding']['forms'], list(info['target_forms'].values())]
+    assert all(set(table) <= set(MOVE_FORMS) for table in keyed)
+    assert all(set(forms) <= set(MOVE_FORMS) for forms in listed)
+    assert set(info['labels']) <= set(MOVE_FORMS)
 
 
 # ---- held poses the store cannot read ------------------------------------------------------------------------------

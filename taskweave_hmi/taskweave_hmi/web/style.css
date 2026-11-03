@@ -179,6 +179,9 @@ h2 { margin: 0; font: 600 var(--fs-xl)/1.2 var(--sans); letter-spacing: -.01em; 
 .msg { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 9%, var(--surface-card)); }
 .msg.bad { border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 9%, var(--surface-card)); }
 .msg.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, var(--surface-card)); }
+/* a step's note (runs, but noted: a form of cell schema 4): muted, in the warning colour */
+.step-note { color: var(--warn); font-size: var(--fs-sm); }
+.msg.step-note { border-left-color: var(--warn); background: none; color: var(--text-muted); margin: var(--sp-2) 0; }
 
 /* buttons: secondary by default, the primary one in brand blue, danger red (solid once it asks to confirm) */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: var(--tap);
@@ -236,6 +239,7 @@ input.num:invalid { border-color: var(--bad); background-color: color-mix(in srg
                     box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-1); }
 .segmented.teach-panes, .segmented.choice { display: flex; flex-wrap: wrap; }
 .segmented.teach-panes button, .segmented.choice button { flex: 1 1 auto; }
+.segmented.choice button.deprecated { color: var(--text-muted); font-style: italic; }  /* a form of cell schema 4 */
 
 /* details: a brand-coloured summary; settings cards open from their title */
 details summary { cursor: pointer; color: var(--brand-text); font: 600 var(--fs-s) var(--sans); padding: var(--sp-2) 0;
@@ -429,6 +433,8 @@ li.empty { list-style: none; padding: 6px 2px; }
 .plan-graph .node-title { font: 600 14px var(--sans); fill: var(--g-ink); }
 .plan-graph .node-arg { font: 12px var(--mono); fill: var(--g-sub); }
 .plan-graph .node-state { font: 600 11.5px var(--cond); fill: var(--k); }
+.plan-graph .node-carry rect { fill: var(--g-card); stroke: var(--k); stroke-width: 1.2; }
+.plan-graph .node-carry text { font: 600 10.5px var(--cond); fill: var(--k); letter-spacing: .02em; }
 .plan-graph .node-badge { stroke: none; }
 .plan-graph .node-badge-text { font: 700 12px var(--sans); fill: var(--on-fill); }
 .plan-graph .state-succeeded .node-badge { fill: var(--g-ok); }

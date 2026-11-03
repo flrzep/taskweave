@@ -22,19 +22,20 @@ HTTP API (JSON):
   PUT  /api/missions/<name>        validate and save; 422 with {problems} if invalid, nothing written;
                                    ?rename_from=<old> saves mission <old> as <name> (old file removed)
   DELETE /api/missions/<name>      remove the mission file (a running mission keeps its plan)
-  POST /api/missions/<name>/validate  {problems, places}; places (also in a 422 of PUT): per problem of a step
+  POST /api/missions/<name>/validate  {problems, places, notes}; places (also in a 422 of PUT): per problem of a step
                                    {problem, step, path, include}: the step of the mission's own steps and the path in
-                                   it (['args', 'to'], ['skill']), so the editor marks the step and the field
+                                   it (['args', 'to'], ['skill']), so the editor marks the step and the field; notes:
+                                   {step, path, include, message} of what runs but is noted (a cell schema 4 form)
   GET  /api/missions/<name>/plan   the plan a start would run now (includes expanded, facts filled): step ids to
                                    start at; each step with kind (a move step's kind of motion, '') and resources,
-                                   as the live plan's steps
+                                   as the live plan's steps, and notes (the live plan's are [])
   GET  /api/speed                  the global speed override {percent, test_mode, test_percent, cap_percent, presets,
                                    min, max, available}; also in /api/state (speed) and as the live event speed
   POST /api/speed {percent, test_mode, test_percent}  set it through the task handler (each key optional; also while
                                    a mission runs): {ok, message, percent}, 422 when refused (e.g. out of range)
   POST /api/start {mission[, start_step]}  start a mission (at a step id: the first cycle begins there, robot and
                                    objects as they are); POST /api/pause | /api/resume | /api/abort
-  GET  /api/skills                 skill catalog (move: x-taskweave-move, the options per kind of motion)
+  GET  /api/skills                 skill catalog (move: x-taskweave-move, the options per form, the labels)
   GET  /api/points                 named points for argument pickers (the store's
                                    lists plus 'held poses' and 'via targets'; on a cell pack in the targets layout
                                    also 'base targets', 'hand targets', 'object targets', 'joint targets')
@@ -162,11 +163,13 @@ CHUNK = 1 << 20
 
 def step_dict(step) -> dict:
     """A PlanStep message as the HMI's plan JSON; ``kind`` (a move step's kind of motion, '' for none) and
-    ``resources`` are filled when the task handler validated the plan (a message without them: '' and [])."""
+    ``resources`` are filled when the task handler validated the plan (a message without them: '' and []);
+    ``notes``: [] (PlanStep has none; a preview has them, ``missions.preview_plan``)."""
     return {'id': step.step_id, 'instruction': step.instruction, 'skill': step.skill,
             'args': json.loads(step.args_json or '{}'), 'timeout_s': step.timeout_s, 'retries': step.retries,
             'on_failure': step.on_failure, 'kind': getattr(step, 'kind', '') or '',
-            'resources': list(getattr(step, 'resources', None) or [])}
+            'resources': list(getattr(step, 'resources', None) or []),
+            'notes': list(getattr(step, 'notes', None) or [])}
 
 
 def preview_plan(config: ConfigStore, mission: str, robot: str, catalog: dict | None = None) -> dict:
@@ -1046,8 +1049,10 @@ class Handler(BaseHTTPRequestHandler):
                     catalog = {}
                 return self._json(preview_plan(bridge.config, missions.check_name(route[1]), bridge.robot, catalog))
             if method == 'POST' and len(route) == 3 and route[0] == 'missions' and route[2] == 'validate':
-                problems, places = missions.check(self._body(), bridge.config, bridge.schemas(), bridge.robot)
-                return self._json({'problems': problems, 'places': places})
+                body = self._body()
+                problems, places = missions.check(body, bridge.config, bridge.schemas(), bridge.robot)
+                return self._json({'problems': problems, 'places': places,
+                                   'notes': missions.notes(body, bridge.config, bridge.robot)})
             if method == 'GET' and route == ['speed']:
                 return self._json(bridge.speed_state)  # replaced on change, never changed in place
             if method == 'POST' and route == ['speed']:
