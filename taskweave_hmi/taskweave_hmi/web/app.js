@@ -167,7 +167,11 @@ function connect() {
     else if (type === 'pad_mode') state.snapshot.pad_mode = data;
     else if (type === 'speed') { state.snapshot.speed = data; renderSpeed(); return; }
     else if (type === 'manual') { state.snapshot.manual = data; renderManual(); return; }
-    else if (type === 'notice') { padNotice(data); if (data.taught) teachTaught(); return; }
+    else if (type === 'notice') {
+      padNotice(data);
+      if (data.taught) { noteSaved(`arm:${data.taught.scope}/${data.taught.name}`, data.text, data.undo); teachTaught(); }
+      return;
+    }
     else if (type === 'plan') { if (state.snapshot.plan?.plan_id !== data.plan_id) state.snapshot.outcomes = {}; state.snapshot.plan = data; }
     else if (type === 'episode') {
       state.snapshot.outcomes[data.step_id] = data;
@@ -1681,9 +1685,86 @@ async function refreshPose() {
     ? fmt(data.pose) + (data.relative[0] ? `  ·  nearest ${data.relative[0].instance} (${data.relative[0].distance} m)` : '')
     : (data.error || 'no robot pose');
   ['robot-pose', 'teach-pose'].forEach((id) => { $(id).textContent = text; $(id).classList.toggle('muted', !ok); });
+  state.robotPose = ok ? data : null;
+  document.dispatchEvent(new Event('robot-pose'));  // the "at" hints follow (atHint)
   return ok ? data : null;
 }
 setInterval(() => { if ((pointsVisible || robotVisible) && !document.hidden) refreshPose(); }, 2000);
+
+// Which placed object a teach uses, before it saves: its name and how far the robot is from it (the operator should
+// stand at it), with the nearest one when that is another. pick() -> instance name, or '' for the nearest of `type`.
+function atHint(pick, type) {
+  const node = el('span', { class: 'muted small-text at-hint' });
+  const update = () => {
+    if (!node.isConnected && node.dataset.drawn) { document.removeEventListener('robot-pose', update); return; }
+    node.dataset.drawn = '1';
+    const relative = (state.robotPose?.relative || []).filter((r) => r.object === type);
+    const nearest = relative[0];
+    const chosen = pick() ? relative.find((r) => r.instance === pick()) : nearest;
+    if (!chosen) { node.textContent = pick() ? `at ${pick()}` : ''; node.classList.remove('bad'); return; }
+    const other = nearest && nearest.instance !== chosen.instance ? ` · nearest is ${nearest.instance} (${nearest.distance} m)` : '';
+    node.textContent = `at ${chosen.instance}, ${chosen.distance} m from the robot${other}`;
+    node.classList.toggle('bad', !!other);
+  };
+  document.addEventListener('robot-pose', update);
+  node._update = update;
+  update();
+  return node;
+}
+
+// The last Teach save (from this browser or the pad), shown under its entry until the next one: what was saved, where it
+// was measured, and Undo (POST /api/teach/undo: the files as they were before that save; refused once they changed).
+function noteSaved(key, text, undo) { state.lastSaved = { key, text, undo: undo || null }; }
+function savedNote(key) {
+  const saved = state.lastSaved;
+  if (!saved || saved.key !== key) return '';
+  const box = el('div', { class: 'msg saved-note' }, el('span', { text: saved.text }));
+  if (saved.undo) {
+    const button = el('button', { class: 'btn small', text: 'Undo', title: `Put ${saved.undo.files.join(', ')} back as before this save`, 'data-edit': '' });
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      const { ok, data } = await api('POST', '/api/teach/undo', { id: saved.undo.id });
+      if (!ok) { message(box, (data.problems || [data.error || 'not undone']).join('\n'), true); return; }
+      noteSaved(key, `Undone: ${data.label} (${data.files.join(', ')} as before).`, null);
+      await Promise.all([loadPoints(), typeof loadArm === 'function' ? loadArm() : null]);
+    });
+    box.append(' ', button);
+  }
+  return box;
+}
+
+// Before a save overwrites a pose: two taps, the change shown between them (the delete pattern, longer: there is
+// something to read). True on the first tap (the change shown, nothing saved), false on the second.
+function confirmOverwrite(button, msg, label, text) {
+  if (button._armed) { clearTimeout(button._armed); button._armed = null; button.classList.remove('confirm'); button.textContent = label; return false; }
+  button.classList.add('confirm'); button.textContent = 'Tap again to overwrite';
+  button._shown = text;
+  message(msg, text, 'warn');
+  button._armed = setTimeout(() => {
+    button.classList.remove('confirm'); button.textContent = label; button._armed = null;
+    if (msg.classList.contains('warn') && msg.textContent === text) message(msg, '');
+  }, 8000);
+  return true;
+}
+// The two taps of an overwrite whose change is asked again at each tap (the robot may move in between): true when
+// this tap only shows it, the first time or because it is not the change shown at the first tap ("moved").
+function overwriteAsked(button, msg, label, text) {
+  if (button._armed && button._shown === text) { confirmOverwrite(button, msg, label, ''); return false; }
+  const moved = button._armed && text;
+  if (button._armed) confirmOverwrite(button, msg, label, '');  // disarm
+  if (!text) return false;
+  confirmOverwrite(button, msg, label, moved ? `Changed since the first tap. ${text}` : text);
+  button._shown = text;
+  return true;
+}
+// old -> new of a base pose ({x, y, yaw} m, rad) for the confirm; '' when nothing changes
+function poseChange(old, now) {
+  const moved = Math.hypot(now.x - old.x, now.y - old.y) * 1000;
+  const turned = Math.abs(((now.yaw - old.yaw) * DEG + 540) % 360 - 180);
+  if (moved < 0.5 && turned < 0.05) return '';
+  return `x ${old.x.toFixed(3)} → ${now.x.toFixed(3)}, y ${old.y.toFixed(3)} → ${now.y.toFixed(3)}, yaw ${(old.yaw * DEG).toFixed(1)}° → `
+    + `${(now.yaw * DEG).toFixed(1)}°: moves ${moved.toFixed(0)} mm, turns ${turned.toFixed(1)}°`;
+}
 
 // Teach sub-tabs: one list at a time; the choice is kept for this browser (a convenience only)
 function selectTeachPane(pane) {
@@ -1715,15 +1796,18 @@ function stanceCard(obj, data) {
   const variantItem = (v, isNew = false) => {
     const picker = el('select', { 'aria-label': 'Measure at object' });
     fillSelect(picker, instances, instances[0]);
+    const hint = atHint(() => picker.value, obj.object);
+    picker.addEventListener('change', hint._update);
     return pointItem({
       title: v.variant, pose: v.offset, usedBy: v.used_by, name: v.variant, isNew, nameLabel: 'Variant',
       address: ['stance', 'objects', obj.object, v.variant], instancePicker: instances.length ? picker : null,
-      fromRobot: fromInstance(() => picker.value),
+      fromRobot: fromInstance(() => picker.value), at: () => picker.value, atHintNode: instances.length ? hint : null,
     });
   };
   const overrideItem = (instance, o, isNew = false) => pointItem({
     title: `${instance} / ${o.variant}`, pose: o.offset, usedBy: o.used_by, name: o.variant, isNew, nameLabel: 'Variant',
     address: ['stance', 'instances', instance, o.variant], fromRobot: fromInstance(() => instance),
+    at: () => instance, atHintNode: atHint(() => instance, obj.object),
     note: o.fallback ? `Without the override, ${instance} uses the ${obj.object} ${o.variant} stance.` : '',
   });
   const variants = el('ul', { class: 'points' }, obj.variants.map((v) => variantItem(v)));
@@ -1774,7 +1858,11 @@ function stanceCard(obj, data) {
 }
 
 // One editable point. address = ['location', name] or ['stance', scope, owner, variant]; the last element is the name.
-function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabel = 'Name', instancePicker = null, fromRobot, note = '' }) {
+// Set from robot fills the form; saved untouched, the teach node saves where the robot stands then (its stale and clock
+// jump checks: POST .../teach); a number edited after that is saved as typed (PUT). at(): the placed object a stance is
+// measured at, atHintNode: where that is shown (atHint).
+function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabel = 'Name', instancePicker = null, fromRobot, note = '',
+  at = () => null, atHintNode = null }) {
   const head = el('button', { class: 'point-head', 'aria-expanded': String(isNew) },
     el('b', { text: title || 'new' }), el('span', { class: 'mono', text: fmt(pose) }),
     usedBy.length ? el('span', { class: 'used', text: `used by ${usedBy.join(', ')}` }) : '');
@@ -1794,10 +1882,11 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
   const deleteButton = el('button', { class: 'btn danger', text: isNew ? 'Cancel' : 'Delete', 'data-edit': '' });
   const edit = el('div', { class: 'point-edit' }, nameField, el('div', { class: 'grid3' }, xField, yField, yawField),
     el('div', { class: 'row gap' }, instancePicker || '', robotButton, driveButton),
+    atHintNode || '',
     note ? el('p', { class: 'muted small-text', text: note }) : '',
     msg, el('div', { class: 'row gap' }, deleteButton, saveButton));
   edit.hidden = !isNew;
-  const item = el('li', { class: 'point' }, head, edit);
+  const item = el('li', { class: 'point' }, head, savedNote(address.join('/')), edit);
   head.addEventListener('click', () => { edit.hidden = !edit.hidden; head.setAttribute('aria-expanded', String(!edit.hidden)); });
   if (isNew) setTimeout(() => nameInput.focus(), 0);
   // Drive here goes to the saved point, so it waits for a save after edits
@@ -1805,6 +1894,16 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
   const markChanged = () => { changed = true; driveButton.disabled = true; driveButton.title = 'Save first'; };
   driveButton.disabled = changed;
   [nameInput, xInput, yInput, yawInput].forEach((field) => field.addEventListener('input', markChanged));
+  // filled from the robot and not edited since: Save asks the teach node (null: the numbers are saved as typed)
+  let fromRobotRead = null;
+  [xInput, yInput, yawInput].forEach((field) => field.addEventListener('input', () => {
+    if (fromRobotRead) message(msg, 'Edited: Save stores the numbers as typed, not checked against the robot.', 'warn');
+    fromRobotRead = null;
+  }));
+  instancePicker?.addEventListener('change', () => {
+    if (fromRobotRead) message(msg, 'Another object: Set from robot again.', 'warn');
+    fromRobotRead = null;
+  });
   // navigate_to target: a location by name, a stance at a placed object (the picked one for a type-level stance)
   const driveTarget = () => {
     if (address[0] === 'location') return name;
@@ -1829,7 +1928,10 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
     if (!value) { message(msg, 'No current robot pose.', true); return; }
     xInput.value = value.x; yInput.value = value.y; yawInput.value = +(value.yaw * DEG).toFixed(2);
     markChanged();
-    message(msg, 'Filled in from the robot. Check, then save.');
+    fromRobotRead = { ...value };
+    atHintNode?._update();
+    message(msg, 'Filled in from the robot. Save has the teach node store where the robot stands then (it refuses a '
+      + 'stale or jumped pose); edit a number to save it as typed instead.');
   });
   saveButton.addEventListener('click', async () => {
     const newName = nameInput.value.trim();
@@ -1840,10 +1942,36 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
     }
     const target = isNew ? [...address.slice(0, -1), newName] : address;
     const body = { x: values[0], y: values[1], yaw: values[2] / DEG };
+    const where = at();
+    let change = isNew ? '' : poseChange(pose, body);
+    if (fromRobotRead && !isNew) {  // the node saves the robot's pose at Save: compare that one, asked at each tap
+      const { ok, data: preview } = await api('POST', `/api/points/${address.map(encodeURIComponent).join('/')}/preview`, { at: where });
+      change = !ok ? `cannot compare with the saved one (${(preview.problems || [preview.error || 'no answer']).join('; ')}): tap again to save anyway`
+        : preview.exists ? poseChange(preview.old, preview.new) : '';
+      if (ok) {  // the form shows what will be saved
+        xInput.value = preview.new.x; yInput.value = preview.new.y; yawInput.value = +(preview.new.yaw * DEG).toFixed(2);
+      }
+    }
+    if (overwriteAsked(saveButton, msg, 'Save', change ? `Overwrites ${name}: ${change}` : '')) return;
     if (!isNew && newName !== name) body.rename = newName;
     if (isNew) body.create = true;
-    const { ok, data } = await api('PUT', `/api/points/${target.map(encodeURIComponent).join('/')}`, body);
-    if (!ok) { message(msg, (data.problems || [data.error || 'not saved']).join('\n'), true); return; }
+    const key = target.slice(0, -1).concat(body.rename || target[target.length - 1]).join('/');
+    if (fromRobotRead) {  // through the teach node: it reads the pose now, with its checks
+      const { ok, data } = await api('POST', `/api/points/${target.map(encodeURIComponent).join('/')}/teach`,
+        { at: where, create: body.create, rename: body.rename });
+      if (!ok && data.undo) {  // refused after a part was written (a rename): that part can be undone
+        noteSaved(key, `Not finished: ${(data.problems || []).join('; ')}`, data.undo);
+        await loadPoints();
+        return;
+      }
+      if (!ok) { message(msg, (data.problems || [data.error || 'not taught']).join('\n'), true); return; }
+      const distance = data.distance_m != null ? `, ${data.distance_m} m from the robot` : '';
+      noteSaved(key, `Taught ${key.split('/').pop()}${data.at ? ` at ${data.at}${distance}` : ''}: ${data.message} → ${data.file}`, data.undo);
+    } else {
+      const { ok, data } = await api('PUT', `/api/points/${target.map(encodeURIComponent).join('/')}`, body);
+      if (!ok) { message(msg, (data.problems || [data.error || 'not saved']).join('\n'), true); return; }
+      noteSaved(key, `Saved ${key.split('/').pop()} as typed → ${data.file}`, data.undo);
+    }
     await loadPoints();
   });
   let armed = null;

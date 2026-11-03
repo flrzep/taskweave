@@ -101,6 +101,9 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 
 - **Buttons** (`.btn`): secondary by default (field surface, strong border, text colour). `.primary`: brand fill,
   white text. `.danger`: red text and border on the card; `.danger.confirm` (the second press) is a solid red fill.
+  Save on an existing location or stance and Capture on an existing pose or point ask first: "Tap again to overwrite"
+  on an amber fill (`.btn.confirm`, 8 s), the change (mm, °) in a `.msg.warn` under it; the change is asked again at the
+  second tap and shown again instead of saving when it differs.
   `.danger.solid`: red fill from the first press, for a stop that needs no second tap (the manual skill's Abort).
   `.small`: `--tap-s` high, 14px. `.ghost`: a text link in brand colour. Hover darkens or tints, active moves down
   1px, disabled is 45% opacity. `.icon`: a square small button for ↑ ↓ ⧉ ✕; a step's ✕ asks first, as a solid red
@@ -183,6 +186,9 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 - **Details and summary**: summaries in brand text, 44px high; nested ones inside a point are muted and monospace.
 - **Messages** (`.msg`, `.msg.bad`, `.msg.warn`, `.error`): a 4px left rule in green, red or amber (canceled,
   aborted by the operator) on a 9% tint, body text colour.
+- **Last save** (`.saved-note`, Teach tab): a `.msg` under the entry just saved or taught (from here or the pad): what,
+  at which placed object and how far the robot was from it, the file, and a small **Undo** (until the next save).
+  Which placed object a teach uses shows before it as `.at-hint` (muted; red when another one is nearer).
 - **Joint and limit bars** (`.joint-row`, `.limit-bar`): a pill track with a 4px brand marker at `--at`; within 10° of
   a limit the track, marker, name and value turn red. On a laptop one row per joint (name, bar, value, −, target, +;
   gripper rows put Open and Close under the last three columns). On a phone the row wraps: name and value, the bar

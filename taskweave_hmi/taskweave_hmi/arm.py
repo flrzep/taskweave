@@ -12,7 +12,7 @@ Scopes in addresses: ``robot`` or an object type name.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 import numpy as np
 
@@ -164,6 +164,17 @@ def capture_pose(store: ConfigStore, robot_name: str, name: str, body: Mapping, 
     current tool targets (forward kinematics), None if unavailable. An existing position keeps its form (hands or
     joints) and its joint set; ``body.tools`` limits a hand capture to those hands (the others are kept). A new one
     takes ``body.form`` ('hands' or 'joints')."""
+    request = pose_request(store, robot_name, name, body, joints, targets)
+    try:
+        return robot.save_pose(store, robot_name, name, request)
+    except robot.RobotSettingsError as error:
+        raise ArmError(str(error)) from error
+
+
+def pose_request(store: ConfigStore, robot_name: str, name: str, body: Mapping, joints: dict[str, float],
+                 targets: dict | None) -> dict:
+    """What capture_pose saves (robot.save_pose's request: joints, tools in the base frame, elbow, create), nothing
+    written: also the "new" side of a capture preview."""
     store.reload()
     named = layout.robot_poses(store, robot_name)  # as the Robot tab lists them (an unreadable one does not stop it)
     poses, pose_of = list(named), named.__getitem__
@@ -190,10 +201,39 @@ def capture_pose(store: ConfigStore, robot_name: str, name: str, body: Mapping, 
         kept = {tool: target for tool, target in (existing or {}).get('tools', {}).items() if tool not in only}
         request.update(tools={**kept, **{tool: targets[tool] for tool in only}},
                        elbow=(existing or {}).get('elbow'))
-    try:
-        return robot.save_pose(store, robot_name, name, request)
-    except robot.RobotSettingsError as error:
-        raise ArmError(str(error)) from error
+    return request
+
+
+def _rotation(hand: Mapping) -> np.ndarray:
+    return rpy_matrix(np.zeros(3), np.asarray(hand['rpy'], float))[:3, :3]
+
+
+def capture_changes(old_hands: Mapping, new_hands: Mapping, old_joints: Mapping, new_joints: Mapping,
+                    linear: Iterable[str] = ()) -> dict:
+    """What a capture would change on an existing position, for the operator to confirm: per hand (``{xyz, rpy}``,
+    rpy in rad) the new and old pose, how far its TCP moves (mm) and turns (°); per joint the old and new value and the
+    change (° for a revolute joint, m for a linear one). A hand or joint only one side has: old or new None."""
+    linear = set(linear)
+    hands = []
+    for tool in dict.fromkeys([*new_hands, *old_hands]):
+        old, new = old_hands.get(tool), new_hands.get(tool)
+        entry = {'tool': tool, 'old': old, 'new': new, 'moved_mm': None, 'turned_deg': None}
+        if old and new:
+            entry['moved_mm'] = round(float(np.linalg.norm(np.subtract(new['xyz'], old['xyz']))) * 1000, 1)
+            relative = _rotation(old).T @ _rotation(new)
+            cos = float(np.clip((np.trace(relative) - 1.0) / 2.0, -1.0, 1.0))
+            entry['turned_deg'] = round(math.degrees(math.acos(cos)), 1)
+        hands.append(entry)
+    joints = []
+    for joint in dict.fromkeys([*new_joints, *old_joints]):
+        old, new = old_joints.get(joint), new_joints.get(joint)
+        unit = 'm' if joint in linear else 'deg'
+        change = None if old is None or new is None else float(new) - float(old)
+        if change is not None and unit == 'deg':
+            change = math.degrees(change)
+        joints.append({'joint': joint, 'old': old, 'new': new, 'unit': unit,
+                       'change': None if change is None else round(change, 4 if unit == 'm' else 2)})
+    return {'hands': hands, 'joints': joints}
 
 
 def grip_ranges(store: ConfigStore, robot_name: str) -> dict[str, list[float]]:

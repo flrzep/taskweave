@@ -248,7 +248,10 @@ def _written(store: ConfigStore, paths) -> str:
 def _target_address(store: ConfigStore, robot: str, kind: str, path: list[str]) -> tuple[str, bool, str | None, str]:
     """(reference, instance override, ``type=`` of the store's target calls, frame) of a point address: a location is
     its name, a stance of the type the bare variant with ``type=<type>`` (nothing needs to be placed), an override
-    ``<instance>/<variant>``."""
+    ``<instance>/<variant>``. A name with a ``/`` (an encoded one in the URL) is refused: the teach node would read
+    ``<instance>/<name>``."""
+    if any('/' in part for part in path):
+        raise PointError(f'{"/".join(path)!r}: a name has no "/"')
     frame = _frame(store, kind, path)
     if kind == 'location':
         moves = targets.plain_kind(store, robot, path[0])
@@ -298,6 +301,40 @@ def save(store: ConfigStore, robot: str, kind: str, path: list[str], body: Mappi
     except targets.REFUSED as error:
         raise PointError(str(error)) from error
     return _written(store, paths)
+
+
+def teach_reference(store: ConfigStore, robot: str, kind: str, path: list[str], at: str | None,
+                    create: bool = False) -> tuple[str, bool, str | None]:
+    """What the teach node is asked for to save a point from the robot (kind base): ``(reference, instance_override,
+    the placed object measured at)``. A location is its name; a stance of the type is measured at the placed object
+    ``at`` (``<at>/<variant>``), an override at its own instance. Refused like save: a name that moves something else,
+    ``create`` of one that exists, a stance without a placed object of its type."""
+    store.reload()
+    reference, override, on_type, frame = _target_address(store, robot, kind, path)
+    if create and _exists(store, robot, kind, path):
+        raise PointError(f'{"/".join(path)} already exists')
+    if kind == 'location':
+        return reference, False, None
+    if override:
+        return reference, True, path[1]
+    instance = store.object_instances().get(at or '')
+    if instance is None or instance.object != on_type:
+        raise PointError(f'pick the placed {on_type} to measure the stance at' if not at
+                         else f'{at} is not a placed {on_type}')
+    return f'{at}{VARIANT_SEPARATOR}{path[2]}', False, at
+
+
+def stored_pose(store: ConfigStore, robot: str, kind: str, path: list[str]) -> dict:
+    """The pose a point has now ({x, y, yaw}, as save takes it); PointError when there is none."""
+    if kind == 'location':
+        pose = store.locations().get(path[0])
+    else:
+        scope, owner, variant = path
+        entry = stance_offsets(store, robot).get(scope, {}).get(owner, {}).get(variant)
+        pose = None if entry is None else Pose2D.from_dict(entry)
+    if pose is None:
+        raise PointError(f'{"/".join(path)} is not there')
+    return pose_dict(pose)
 
 
 def delete(store: ConfigStore, robot: str, kind: str, path: list[str]) -> str:
