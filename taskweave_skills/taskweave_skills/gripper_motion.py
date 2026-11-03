@@ -272,12 +272,13 @@ class MoveGripper(_PointMotion):
         return bool(self.ik is not None and self.ik.torso and leg.tools and self.ik.torso['joint'] not in leg.joints)
 
     def _torso_choice(self, ctx, leg: Target, m: dict, mode: str, approach: float, label: str, flip=None,
-                      ahead=None):
+                      ahead=None, height: float | None = None):
         """ik.solve_with_torso for the leg: the target and, with an approach, the pre-grasp; for a straight line the
         points along it (spaced ik.torso.line_sample_m), so the height holds for the whole line. ``flip``: may a grasp
         be flipped (default: not on a line). ``ahead``: the tools of the move that follows (the point itself after a
         pre-grasp offset): the height must also let the hands walk a straight line to them from here; if no height
-        can, the choice is made without it (the old behaviour). A TorsoChoice or a FAILED result naming every
+        can, the choice is made without it (the old behaviour). ``height``: only this one is checked (a height the
+        torso look-ahead planned: ik.check_height, ``ahead`` required). A TorsoChoice or a FAILED result naming every
         rejected height."""
         from .ik import IkError, Samples, TorsoError
 
@@ -291,11 +292,16 @@ class MoveGripper(_PointMotion):
             flips = mode != 'linear' if flip is None else flip
 
             def search():
+                if height is not None:
+                    return self.ik.check_height(samples, height, current, leg.joints, elbow=m.get('elbow'),
+                                                allow_flip=flips, should_stop=lambda: ctx.should_stop)
                 return self.ik.solve_with_torso(samples, leg.joints, current, lambda: ctx.should_stop,
                                                 elbow=m.get('elbow'), allow_flip=flips)
             if ahead is None:
                 return search()
             samples.ahead = self._ahead_check(ahead, current)
+            if height is not None:
+                return search()
             try:
                 return search()
             except TorsoError as error:
@@ -616,7 +622,7 @@ class MoveGripper(_PointMotion):
         from .points import instance_matrix, point_poses, point_targets
 
         try:
-            base_in_cell = self.hold.transform(self.cell_frame, self.robot.base['frame'])
+            base_in_cell = self._base_in_cell()
         except LookupError as error:
             return SkillResult.failed(f'where is the robot? {error}')
         # a symmetric object (e.g. a frame lying the other way round) is grasped from the robot's side
@@ -692,7 +698,7 @@ class MoveGripper(_PointMotion):
         base_in_cell = None
         if st.frame == 'object':
             try:
-                base_in_cell = self.hold.transform(self.cell_frame, self.robot.base['frame'])
+                base_in_cell = self._base_in_cell()
             except LookupError as error:
                 return SkillResult.failed(f'where is the robot? {error}')
         chosen = hands if hands is not None else self._select(rule, point_poses(last, names), st.reference)

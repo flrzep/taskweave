@@ -664,6 +664,15 @@ class _PointMotion(_PoseMotion):
         self.approach_m = float(params.pop('approach_m', 0.0))  # straight final approach (m) unless args say other
         super().configure(params)
 
+    predicted_base = None    # torso_window: the base pose (4x4, cell frame) a later step stands at, while predicting
+
+    def _base_in_cell(self) -> np.ndarray:
+        """The base frame in the cell (4x4): where a predicted later step stands (``predicted_base``), else TF now
+        (LookupError)."""
+        if self.predicted_base is not None:
+            return self.predicted_base
+        return self.hold.transform(self.cell_frame, self.robot.base['frame'])
+
     def _approach_in(self, ctx, tools: dict, before: dict, lifts: list, label: str, elbow=None, approach=0.0,
                      planner='auto', exact=False):
         """Planned (free) path to ``before`` (the tools ``approach`` m back along their approach), then straight in to
@@ -756,7 +765,7 @@ class _ObjectMotion(_PointMotion):
         resolved = args.get(RESOLVED)
         if resolved:
             try:
-                base_in_cell = self.hold.transform(self.cell_frame, self.robot.base['frame'])
+                base_in_cell = self._base_in_cell()
             except LookupError as error:
                 return SkillResult.failed(f'where is the robot? {error}')
             return onto_pose(resolved['instance'], resolved['pose'], resolved['mine'], base_in_cell,
@@ -769,7 +778,7 @@ class _ObjectMotion(_PointMotion):
         try:
             target, contact = self.config.instance_contact(args['to'])
             mine = self.config.object_contact(kind, args['contact'])
-            base_in_cell = self.hold.transform(self.cell_frame, self.robot.base['frame'])
+            base_in_cell = self._base_in_cell()
         except KeyError as error:
             return SkillResult.rejected(str(error.args[0]))
         except LookupError as error:
