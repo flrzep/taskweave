@@ -190,6 +190,13 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   right (sticky under the top), the settings full width under both. The base as a readout (`.readout`: x, y, yaw in
   Barlow Semi Condensed 24px over muted 13px names), the nearest placed object under it in muted monospace, or in
   red why there is no pose.
+- **Step sheet** (phone, `.pg-sheet`): a tap on a step's chip (also the running one) opens a bottom sheet over a
+  scrim (`.pg-scrim`, 45% ink; under the status bar, so Pause and Abort stay in reach, and the bottom nav): a 44 × 5
+  handle, the step's tile (52px) with its state and number over the instruction (20px, 600), the step's progress
+  while it runs, the side card's rows (command, target, locks, on failure, status; 96px labels), each note in an amber
+  box (`.pg-sheet-note`), and a full-width Close (48px). A non-modal dialog (`role="dialog"`, labelled by the title):
+  focus goes to Close when it opens and back to the chip when it closes (Close, the scrim, Escape or the chip
+  again). Never taller than the room between the status bar and the nav; it scrolls inside.
 - **Lists and rows**: mission rows (`.list li`) with a brand left rule (red when invalid); plan steps (`.steps`) with a
   numbered dot: a neutral ✓ when done, red when it failed, ringed green while running; points, poses and recordings (`.point`)
   open into an editor, the pad's target gets a brand inset rule. Mission editor steps (`.edit-step`) have a drag

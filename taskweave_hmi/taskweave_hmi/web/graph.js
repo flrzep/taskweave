@@ -226,11 +226,15 @@ function choose(step, pickable) {
     pickStart(step);
     return;
   }
-  view.selected = view.selected === step.id || state.snapshot?.status.step?.id === step.id ? null : step.id;
+  const running = state.snapshot?.status.step?.id === step.id && !PHONE.matches;
+  const opening = view.selected !== step.id && !running;
+  view.selected = opening ? step.id : null;
   renderGraph();
+  if (opening && PHONE.matches) $('plan-graph').querySelector('[data-sheet-close]')?.focus();  // into the sheet
 }
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || !view.selected || e.target.closest?.('textarea, select, input, [contenteditable]')) return;
+  if (PHONE.matches) { closeSheet(view.selected); return; }
   view.selected = null;
   renderGraph();
 });
@@ -273,23 +277,32 @@ function planCard(i, ctx, phone) {
   const eyebrow = el('div', { class: 'pg-eyebrow', text: `${start ? 'start here' : status} · step ${i + 1} of ${plan.steps.length}` });
   const tile = div(`pg-tile kind-${colourOf(step)}`, iconElement(iconOf(step, event)));
   const progress = live ? div('pg-progress', el('i', { style: `width: ${Math.max(0, Math.min(1, s.step_progress)) * 100}%` })) : '';
-  if (phone) {
-    return div(`pg-sheet state-${status}`, div('pg-handle'),
-      div('pg-sheet-row', tile, div('pg-sheet-text', eyebrow,
-        el('div', { class: 'pg-sheet-title', text: `${i + 1} · ${step.instruction}` }),
-        el('div', { class: 'pg-sheet-sub', text: [command, mainArg(step), (step.resources || []).join(' + '),
-          `fails: ${failureText(r[i])}`].filter(Boolean).join(' · ') }),
-        statusText ? el('div', { class: 'pg-sheet-sub mono', text: statusText }) : '')),
-      progress);
-  }
   const row = (label, value, cls = '') => (value ? [el('dt', { text: label }), el('dd', { class: cls, text: value })] : []);
+  const rows = (notes) => el('dl', { class: 'pg-rows' }, ...row('command', command), ...row('target', mainArg(step), 'mono'),
+    ...row('locks', (step.resources || []).join(', ') || '–'), ...row('on failure', failureText(r[i])),
+    ...row('status', statusText, live ? 'mono' : ''), ...(notes ? (step.notes || []).flatMap((note) => row('note', note)) : []));
+  if (phone) {
+    // the bottom sheet (a dialog, not modal: the status bar's Pause and Abort stay in reach above the scrim): the same
+    // rows as the side card, the notes as amber boxes, Close; a tap on the scrim, Escape or the chip close it too
+    const title = el('div', { class: 'pg-sheet-title', id: 'pg-sheet-title', text: `${i + 1} · ${step.instruction}` });
+    const close = el('button', { type: 'button', class: 'btn pg-sheet-close', 'data-sheet-close': '', text: 'Close' });
+    close.addEventListener('click', () => closeSheet(step.id));
+    const scrim = div('pg-scrim');
+    scrim.addEventListener('click', () => closeSheet(step.id));
+    return [scrim, el('section', { class: `pg-sheet state-${status}`, role: 'dialog', 'aria-labelledby': 'pg-sheet-title' },
+      div('pg-handle'), div('pg-sheet-row', tile, div('pg-sheet-text', eyebrow, title)), progress, rows(false),
+      ...(step.notes || []).map((note) => el('p', { class: 'pg-sheet-note', text: note })), close)];
+  }
   return el('aside', { class: `pg-card state-${status}${live || start || view.selected === step.id ? ' marked' : ''}`,
     'aria-live': 'polite' },
   div('pg-card-head', tile, div('pg-card-titles', eyebrow, el('div', { class: 'pg-card-title', text: step.instruction }))),
-  progress,
-  el('dl', { class: 'pg-rows' }, ...row('command', command), ...row('target', mainArg(step), 'mono'),
-    ...row('locks', (step.resources || []).join(', ') || '–'), ...row('on failure', failureText(r[i])),
-    ...row('status', statusText, live ? 'mono' : ''), ...(step.notes || []).flatMap((note) => row('note', note))));
+  progress, rows(true));
+}
+// the sheet closes: nothing selected, the keyboard focus back on the step's chip
+function closeSheet(id) {
+  view.selected = null;
+  renderGraph();
+  $('plan-graph').querySelector(`[data-step="${CSS.escape(id)}"]`)?.focus();
 }
 
 // the step the card shows: the selected one, else the running one, else (a live run that failed) the failed one,
@@ -343,7 +356,7 @@ function rail(bands, ctx, end) {
   return div(`pg-rail${sheet >= 0 ? ' with-sheet' : ''}`,
     ...bands.map((band, b) => section(band, 0, b === 0 ? ctx.cycleNote : '')),
     end ? el('div', { class: 'pg-end', text: end }) : '',
-    sheet >= 0 ? planCard(sheet, ctx, true) : '');
+    ...(sheet >= 0 ? planCard(sheet, ctx, true) : []));
 }
 
 // the lanes: core's resource names in their order, then any other resource a step holds
@@ -473,9 +486,8 @@ function renderGraph() {
     return;
   }
   const active = document.activeElement;  // rebuilt on every update: keep the keyboard focus on its chip or band
-  const refocus = box.contains(active) && (active.dataset.step || active.dataset.band)
-    ? (active.dataset.step ? `[data-step="${CSS.escape(active.dataset.step)}"]` : `[data-band="${CSS.escape(active.dataset.band)}"]`)
-    : null;
+  const refocus = !box.contains(active) ? null : active.dataset.step ? `[data-step="${CSS.escape(active.dataset.step)}"]`
+    : active.dataset.band ? `[data-band="${CSS.escape(active.dataset.band)}"]` : 'sheetClose' in active.dataset ? '[data-sheet-close]' : null;
   const missionName = missionOf(plan);
   if (missionPlan[missionName] !== plan.plan_id) {  // a new plan: the mission file may have changed
     delete missionCache[missionName];

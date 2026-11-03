@@ -771,7 +771,7 @@ li.empty { list-style: none; padding: 6px 2px; }
 
 /* phone: the rail (lanes collapsed), 44 px chips with the number inside, and the step in a bottom sheet */
 .pg-rail { display: grid; gap: var(--sp-5); }
-.pg-rail.with-sheet { padding-bottom: 150px; }  /* the sheet covers the bottom of the page */
+.pg-rail.with-sheet { padding-bottom: 60vh; }  /* the sheet covers the bottom of the page: the plan scrolls clear of it */
 .pg-rband { display: grid; gap: var(--sp-3); }
 .pg-rband.sub { margin-left: var(--sp-3); }
 .pg-rail .pg-band { position: static; height: var(--tap-min); padding: 0 var(--sp-3) 0 var(--sp-2); }
@@ -781,12 +781,20 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-rail .pg-chip .icon { width: 20px; height: 20px; }
 .pg-rnum { position: absolute; bottom: 3px; left: 0; right: 0; font: 10px/1 var(--cond); text-align: center; }
 .pg-rail .pg-end { position: static; }
-.pg-sheet { position: fixed; left: 0; right: 0; bottom: calc(var(--nav) + env(safe-area-inset-bottom, 0px)); z-index: 4; display: grid; gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-4) var(--sp-4); background: var(--surface-card);
-  border-radius: 16px 16px 0 0; box-shadow: var(--shadow-2); border-top: 1px solid var(--border); }
-.pg-handle { justify-self: center; width: 36px; height: 4px; border-radius: var(--r-pill); background: var(--border); }
-.pg-sheet-title { font: 600 var(--fs-md)/1.25 var(--sans); overflow-wrap: anywhere; }
-.pg-sheet-sub { font-size: var(--fs-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+.pg-sheet { position: fixed; left: 0; right: 0; bottom: calc(var(--nav) + env(safe-area-inset-bottom, 0px)); z-index: 4; display: grid; gap: var(--sp-4);
+  max-height: calc(100dvh - var(--top-h, 76px) - var(--nav) - var(--sp-6)); overflow-y: auto; overscroll-behavior: contain;
+  padding: 10px var(--sp-5) var(--sp-5); background: var(--surface-card);
+  border-radius: 20px 20px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / 18%); border-top: 1px solid var(--border); }
+/* the scrim: over the page, under the status bar (Pause and Abort stay in reach) and the bottom nav */
+.pg-scrim { position: fixed; inset: 0; z-index: 2; background: rgb(10 12 20 / 45%); }
+.pg-handle { justify-self: center; width: 44px; height: 5px; border-radius: var(--r-pill); background: var(--border); }
+.pg-sheet .pg-tile { width: 52px; height: 52px; border-radius: 14px; }
+.pg-sheet .pg-tile .icon { width: 26px; height: 26px; }
+.pg-sheet-title { font: 600 var(--fs-lg)/1.25 var(--sans); overflow-wrap: anywhere; }
+.pg-sheet .pg-rows { grid-template-columns: 96px minmax(0, 1fr); gap: var(--sp-2) var(--sp-3); font-size: 15px; }
+.pg-sheet-note { margin: 0; padding: var(--sp-3); border-radius: var(--r-m); font-size: var(--fs-s);
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface-card)); border-left: 4px solid var(--warn); }
+.pg-sheet-close { min-height: var(--tap); width: 100%; }
 /* slow in and out: the running chip's glow swells and fades. Only the number --breath is animated, so the glow is
    mixed per frame from the skill colour (interpolating the colours tinted the swell and the fade differently) */
 @property --breath { syntax: '<number>'; inherits: false; initial-value: 0; }
