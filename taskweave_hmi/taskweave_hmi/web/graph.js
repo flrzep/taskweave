@@ -493,15 +493,22 @@ function lanesGraph(bands, ctx, end) {
   });
   graph.append(over);
   if (end) graph.append(el('div', { class: 'pg-end', text: end, style: `left: ${x0}px; top: ${y + G.endGap}px` }));
-  // the picked step's details: a pop-up beside its chip (right of it, else left), its top at the chip's row, kept
-  // inside the graph's height
+  // the picked step's details: a pop-up beside its bar (right of it if it fits, else left), its top at the bar's row
+  // and kept inside the graph's height; with room on neither side (a bar to the last lane, a narrow card) under the
+  // bar, inside the graph's width (renderGraph makes the graph tall enough for it)
   const picked = view.selected ? plan.steps.findIndex((s) => s.id === view.selected) : -1;
   if (picked >= 0) {
     const pop = planCard(picked, ctx, false);
     const x = shown.has(picked) ? chipX(picked) : x0 + G.gutter;
     const right = shown.has(picked) ? x + chipW(picked) : x;
-    pop.style.left = `${width - (right + POP_GAP) >= POP_W || x < POP_W + POP_GAP ? right + POP_GAP : x - POP_W - POP_GAP}px`;
-    pop.style.top = `${Math.max(0, Math.min(rowY[picked] - G.row / 2, height - POP_MIN_H))}px`;
+    const top = rowY[picked] - G.row / 2;
+    if (width - (right + POP_GAP) >= POP_W) pop.style.left = `${right + POP_GAP}px`;
+    else if (x >= POP_W + POP_GAP) pop.style.left = `${x - POP_W - POP_GAP}px`;
+    else {
+      pop.style.left = `${Math.max(0, Math.min(x, width - POP_W))}px`;
+      pop.style.top = `${top + G.chip + POP_GAP}px`;
+    }
+    pop.style.top ||= `${Math.max(0, Math.min(top, height - POP_MIN_H))}px`;
     graph.append(pop);
   }
   return { node: div('pg', graph), pairs, replans: replans.length };
@@ -559,6 +566,10 @@ function renderGraph() {
   } else {
     const drawn = lanesGraph(bands, ctx, end);
     box.replaceChildren(drawn.node, legend(plan, ctx.events, drawn.replans > 0, drawn.pairs > 0));
+    // the pop-up is placed over the graph: the graph grows to hold it (one under a low bar, a tall one)
+    const pop = box.querySelector('.pg-pop');
+    const graph = box.querySelector('.pg-graph');
+    if (pop && graph) graph.style.height = `${Math.max(graph.offsetHeight, pop.offsetTop + pop.offsetHeight)}px`;
   }
   if (refocus) (box.querySelector(refocus) || box.querySelector('[data-step]'))?.focus({ preventScroll: true });
 }
