@@ -280,9 +280,11 @@ main { max-width: var(--content); margin: 0 auto; padding: var(--sp-4) var(--sp-
               grid-template-rows: auto 1fr;  /* a taller side column stretches the plan's row, not the board's */
               align-items: start; gap: var(--sp-5); }
   #board { grid-area: board; } .run-plan { grid-area: plan; }
-  .run-side { grid-area: side; display: grid; gap: var(--sp-5); min-width: 0; position: sticky;
-              top: calc(var(--top-h, 76px) + var(--sp-5));  /* the 3D view stays in sight while the plan scrolls */
-              max-height: calc(100dvh - var(--top-h, 76px) - 2 * var(--sp-5)); overflow-y: auto; overscroll-behavior: contain; }
+  /* the side columns of Run and Robot: the 3D view stays in sight while the page scrolls, never taller than the window
+     (on a short screen the column scrolls on its own) */
+  .run-side, .robot-side { grid-area: side; display: grid; gap: var(--sp-5); min-width: 0; position: sticky;
+                           top: calc(var(--top-h, 76px) + var(--sp-5)); max-height: calc(100dvh - var(--top-h, 76px) - 2 * var(--sp-5));
+                           overflow-y: auto; overscroll-behavior: contain; }
   #viewer3d-run { aspect-ratio: 16 / 11; }
 }
 /* recent steps: the last finished ones of this run, newest first: a mark (a neutral check, ! red, ↻ amber for a retry),
@@ -429,16 +431,18 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
 .robot-joints { order: 4; } .robot-settings > * { order: 5; }
 .readout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2) var(--sp-4); margin: 0; }
 .readout dt { font-size: var(--fs-sm); color: var(--text-muted); }
-.readout dd { margin: 0; font: 600 var(--fs-xl)/1.1 var(--cond); white-space: nowrap; }
+.readout dd { margin: 0; font: 600 var(--fs-xl)/1.1 var(--cond); white-space: nowrap; min-width: 0; overflow: hidden;
+               text-overflow: ellipsis; }
+@media (max-width: 400px) { .readout { gap: var(--sp-2); } .readout dd { font-size: var(--fs-lg); } }
+#robot-pose.bad { color: var(--bad); }
 @media (min-width: 1180px) {
   body[data-view="robot"] main { max-width: 1600px; padding: var(--sp-5) var(--sp-6) var(--sp-12); }
   .robot-grid { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; gap: var(--sp-5);
                 grid-template-rows: auto auto 1fr auto;  /* the 3D view's extra height under the joints, not between */
                 grid-template-areas: "busy busy" "base side" "joints side" "settings settings"; }
+  .robot-grid:has(> #robot-busy[hidden]) { grid-template-rows: auto 1fr auto;
+                                            grid-template-areas: "base side" "joints side" "settings settings"; }
   #robot-busy { grid-area: busy; } .robot-base { grid-area: base; } .robot-joints { grid-area: joints; }
-  .robot-side { grid-area: side; display: grid; gap: var(--sp-5); min-width: 0; position: sticky;
-                top: calc(var(--top-h, 76px) + var(--sp-5));  /* never taller than the window (as the Run tab's) */
-                max-height: calc(100dvh - var(--top-h, 76px) - 2 * var(--sp-5)); overflow-y: auto; overscroll-behavior: contain; }
   .robot-settings { grid-area: settings; display: grid; gap: var(--sp-4); min-width: 0; }
   #viewer3d-robot { aspect-ratio: 16 / 11; }
 }

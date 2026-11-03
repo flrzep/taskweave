@@ -1802,10 +1802,11 @@ async function refreshPose() {
   const text = ok ? fmt(data.pose) + (near ? `  ·  ${near}` : '') : (data.error || 'no robot pose');
   $('teach-pose').textContent = text; $('teach-pose').classList.toggle('muted', !ok);
   // the Robot tab: x, y and yaw big, the nearest placed object (or why there is no pose) under them
-  const fixed = (v, digits) => (Math.abs(v) < 0.5 * 10 ** -digits ? 0 : v).toFixed(digits);  // no "-0.000"
-  $('robot-x').textContent = ok ? `${fixed(data.pose.x, 3)} m` : '–';
-  $('robot-y').textContent = ok ? `${fixed(data.pose.y, 3)} m` : '–';
-  $('robot-yaw').textContent = ok ? `${fixed(data.pose.yaw * DEG, 1)}°` : '–';
+  // no "-0.000"; a value the answer does not have: –
+  const fixed = (v, digits, unit) => (Number.isFinite(v) ? `${(Math.abs(v) < 0.5 * 10 ** -digits ? 0 : v).toFixed(digits)}${unit}` : '–');
+  $('robot-x').textContent = fixed(ok ? data.pose?.x : NaN, 3, ' m');
+  $('robot-y').textContent = fixed(ok ? data.pose?.y : NaN, 3, ' m');
+  $('robot-yaw').textContent = fixed(ok ? data.pose?.yaw * DEG : NaN, 1, '°');
   $('robot-pose').textContent = ok ? near : text;
   $('robot-pose').classList.toggle('bad', !ok);
   state.robotPose = ok ? data : null;
