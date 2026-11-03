@@ -13,6 +13,7 @@ target that is not there is a TargetError (a KeyError): the modules let it throu
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Iterator, Mapping
 
 from taskweave_core.config import ConfigError, ConfigStore, TargetWriteError
@@ -299,3 +300,59 @@ def approach_default(store: ConfigStore) -> float:
     """The hand motion's straight final approach when a point does not set its own (m)."""
     params = {k: v for k, v in module_config(store, 'move_gripper', 'hand').items() if k != 'implementations'}
     return float((params.get('motion') or {}).get('approach_m', 0.0))
+
+
+# ---- a move step's preview (dry run) -------------------------------------------------------------------------------
+DRY_RUN = 'dry_run'
+
+
+def dry_run_args(args) -> dict:
+    """The args of a move step's preview (POST /api/skills/move/dry_run): the step's own with ``dry_run`` on. Raises
+    ValueError for args that are not an object or that hold a placeholder (``{fact}``, ``{param}``: filled at run
+    time, so there is nothing to solve yet)."""
+    if not isinstance(args, Mapping):
+        raise ValueError('args: the move step\'s arguments as an object')
+    placeholders = sorted({text for text in _strings(args) if '{' in text})
+    if placeholders:
+        raise ValueError(f'{", ".join(placeholders)} is filled at run time: a preview needs the values')
+    return {**args, DRY_RUN: True}
+
+
+def joint_goal_view(store: ConfigStore, robot: str, joints: Mapping) -> list[dict]:
+    """A dry run's ``data.joint_goal`` ({joint: value}, rad or m) as the preview shows it: per joint group of the robot
+    (``joints.groups`` and the ``<tool>_arm`` groups, in that order) ``{group, joints: [{name, value, unit}]}`` with
+    the values of the goal in deg (revolute) or m (``joints.linear``); joints in no group come last, each a group of
+    its own."""
+    from taskweave_core.config.limits import joint_groups
+
+    linear = set(store.robot(robot).data.get('joints', {}).get('linear', []))
+    try:
+        groups = joint_groups(store, robot)
+    except ConfigError:
+        groups = {}
+
+    def shown(name: str) -> dict:
+        value = float(joints[name])
+        if name in linear:
+            return {'name': name, 'value': round(value, 3), 'unit': 'm'}
+        return {'name': name, 'value': round(math.degrees(value), 1), 'unit': 'deg'}
+
+    view, seen = [], set()
+    for group, members in groups.items():
+        hit = [name for name in members if name in joints and name not in seen]
+        if hit:
+            seen.update(hit)
+            view.append({'group': group, 'joints': [shown(name) for name in hit]})
+    view += [{'group': name, 'joints': [shown(name)]} for name in joints if name not in seen]
+    return view
+
+
+def dry_run_answer(store: ConfigStore, robot: str, outcome: str, message: str, data: Mapping) -> dict:
+    """What the preview answers: the skill's outcome, message and data, plus ``goal`` (``joint_goal_view`` of
+    ``data.joint_goal``; [] without one) and ``torso`` (a base move's ``data.torso`` given as joint values, in the same
+    view; else None: the data's word stands, ``keep`` or none for the drive height)."""
+    goal = data.get('joint_goal') if isinstance(data.get('joint_goal'), Mapping) else {}
+    torso = data.get('torso')
+    return {'outcome': outcome, 'message': message, 'data': dict(data),
+            'goal': joint_goal_view(store, robot, goal) if goal else [],
+            'torso': joint_goal_view(store, robot, torso) if isinstance(torso, Mapping) and torso else None}

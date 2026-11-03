@@ -50,6 +50,11 @@ HTTP API (JSON):
   Manual skills (drive, pose and point tests, held poses; one at a time, never while a mission runs) answer when they
                                    end: {outcome, message, aborted}. While one runs it is in /api/state (manual) and
                                    the live event manual: {skill, label, since (server epoch s), elapsed_s}, else null
+  POST /api/skills/move/dry_run {args}  a move step's preview: its args with dry_run, nothing moves; answers when the
+                                   skill does: {outcome, message, data (the skill's: joint_goal, legs, torso, kind,
+                                   carrying ...), goal (joint_goal per joint group, deg / m)}. 422 {problems} for args
+                                   with a placeholder; 409 while a mission or a manual skill runs (they share the move
+                                   skill); not shown as a manual skill (nothing to abort)
   POST /api/skill/abort            cancel the running manual skill: {ok, skill}; 409 {ok: false, message} when none
                                    runs. Never a mission (that is /api/abort). Its own request then answers outcome
                                    canceled, aborted true
@@ -512,11 +517,11 @@ class Bridge(Node):
         return {'frame': self.cell_frame, 'objects': collision['objects'], 'skipped': collision['skipped'],
                 **scene.config_scene(self.config), 'updated': collision['updated']}
 
-    def check_idle(self) -> None:
+    def check_idle(self, what: str = 'change settings') -> None:
         with self.lock:
             state = self.status['state']
         if state in ('running', 'paused'):
-            raise Busy(f'a mission is {state}; change settings when it has finished or was aborted')
+            raise Busy(f'a mission is {state}; {what} when it has finished or was aborted')
 
     def apply_navigation(self, settings: dict) -> dict[str, str]:
         """Set clearance and driving on the running path planner; node -> 'applied' or the reason it was not."""
@@ -604,25 +609,14 @@ class Bridge(Node):
                 self.manual_handle, self.manual_abort = None, False
                 manual = self.manual_view()
             self._broadcast('manual', manual)
-            action = self.skill_clients.get(skill)
-            if action is None:
-                action = self.skill_clients[skill] = ActionClient(self, RunSkill, names.skill_action(skill),
-                                                                  callback_group=self.group)
-            if not action.wait_for_server(timeout_sec=CALL_TIMEOUT_S):
-                raise TimeoutError(f'skill {skill} is not served')
+            action = self._skill_action(skill)
             goal = RunSkill.Goal(step_id='hmi', skill=skill, args_json=json.dumps(args), timeout_s=timeout_s,
                                  instruction=f'{skill} from the HMI')
             with self.lock:
                 aborted = self.manual_abort
             if aborted:  # Abort while the skill server was looked for: nothing sent, nothing moved
                 return {'outcome': 'canceled', 'message': 'aborted before it started', 'aborted': True}
-            sent = action.send_goal_async(goal)
-            deadline = time.monotonic() + CALL_TIMEOUT_S
-            while not sent.done() and time.monotonic() < deadline:
-                time.sleep(0.05)
-            if not sent.done() or not sent.result().accepted:
-                raise TimeoutError(f'{skill} did not accept the goal')
-            handle = sent.result()
+            handle = self._send_goal(action, goal)
             with self.lock:
                 self.manual_handle, aborted = handle, self.manual_abort
             if aborted:  # Abort came while the goal was on its way: cancel it now that there is a handle
@@ -645,6 +639,60 @@ class Bridge(Node):
             with self.lock:
                 self.manual, self.manual_handle, self.manual_abort = None, None, False
             self._broadcast('manual', None)
+            self.skill_lock.release()
+
+    def _skill_action(self, skill: str):
+        """The RunSkill action client of ``skill`` once its server is there; TimeoutError when it is not served."""
+        action = self.skill_clients.get(skill)
+        if action is None:
+            action = self.skill_clients[skill] = ActionClient(self, RunSkill, names.skill_action(skill),
+                                                              callback_group=self.group)
+        if not action.wait_for_server(timeout_sec=CALL_TIMEOUT_S):
+            raise TimeoutError(f'skill {skill} is not served')
+        return action
+
+    @staticmethod
+    def _send_goal(action, goal):
+        """Send ``goal`` and wait for the skill server to accept it: its handle, or TimeoutError."""
+        sent = action.send_goal_async(goal)
+        deadline = time.monotonic() + CALL_TIMEOUT_S
+        while not sent.done() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if not sent.done() or not sent.result().accepted:
+            raise TimeoutError(f'{goal.skill} did not accept the goal')
+        return sent.result()
+
+    def dry_run_move(self, args) -> dict:
+        """A move step's preview (POST /api/skills/move/dry_run): the step's args with ``dry_run`` on the skill server,
+        nothing moves; ``targets.dry_run_answer``. Refused (Busy) while a mission runs or is paused and while a manual
+        skill runs, as a manual skill is: the skill server runs goals side by side on its one ``move``, and a dry run
+        that does not succeed has the server call ``move.stop()``, which stops the parts of the move that runs. So it
+        holds the manual-skill lock while it runs (no manual skill starts meanwhile), but it is not a manual skill:
+        not in the manual strip, nothing to abort."""
+        args = targets.dry_run_args(args)
+        self.check_idle('preview a move')
+        if not self.skill_lock.acquire(blocking=False):
+            raise Busy('a manual skill is running; preview a move when it has finished')
+        try:
+            action = self._skill_action(targets.MOVE)
+            goal = RunSkill.Goal(step_id='hmi-preview', skill=targets.MOVE, args_json=json.dumps(args),
+                                 timeout_s=MANUAL_SKILL_TIMEOUT_S, instruction='move preview from the HMI')
+            handle = self._send_goal(action, goal)
+            result = handle.get_result_async()
+            clock = self.speed.clock(self.now_s())
+            problem = await_skill(result.done, lambda: clock(self.now_s()), MANUAL_SKILL_TIMEOUT_S + CALL_TIMEOUT_S,
+                                  action.server_is_ready)
+            if problem:
+                handle.cancel_goal_async()
+                raise TimeoutError(f'move preview {problem}; cancelled')
+            outcome = result.result().result
+            try:
+                data = json.loads(outcome.data_json or '{}')
+            except json.JSONDecodeError:
+                data = {}
+            return targets.dry_run_answer(self.config, self.robot, OUTCOMES[outcome.outcome], outcome.message,
+                                          data if isinstance(data, dict) else {})
+        finally:
             self.skill_lock.release()
 
     def manual_view(self) -> dict | None:
@@ -1137,6 +1185,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(bridge.reach(self._body()))
             if method == 'POST' and route == ['points', 'drive']:
                 return self._json(bridge.drive(str(self._body()['target'])))
+            if method == 'POST' and route == ['skills', 'move', 'dry_run']:
+                try:
+                    return self._json(bridge.dry_run_move(self._body().get('args')))
+                except ValueError as error:  # a placeholder in the args, or no args
+                    return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)
             if method == 'POST' and route == ['skill', 'abort']:
                 aborted = bridge.abort_skill()
                 if aborted is None:

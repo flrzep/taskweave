@@ -160,6 +160,11 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   number fields labelled "x (m)", "y (m)", "z (m)". Hands are 20px checkboxes per hand, a muted "or", and the rule
   words as a segmented control. An object marked as a group (Motion (advanced)) is a muted `details` summary, open
   when it has a value. Text fallbacks are monospace textareas.
+- **Move preview** (`.step-preview`): under a move step's arguments a small secondary **Preview** button (a dry run:
+  nothing moves), off with a muted "No preview: …" beside it while a mission or a manual skill runs or an argument is
+  a placeholder. The answer stays until the step is edited: a `.msg` with the skill's message over label / value rows
+  (`.preview-goal`, monospace 13px, labels muted: base, torso, each joint group in ° or m, carrying, on the way; the
+  joint names as the tooltip), or a `.msg.bad` line with the outcome and message, as the step's problems.
 - **Chips** (`.chip`): a dot and the word, in the state colour on an 11% tint. Each state sets `--c` (text), `--fill`
   and `--ink` (for the solid badge).
 - **Details and summary**: summaries in brand text, 44px high; nested ones inside a point are muted and monospace.

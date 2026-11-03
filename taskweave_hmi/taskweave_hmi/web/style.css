@@ -359,6 +359,13 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
 .edit-step .field.has-problem { box-shadow: inset 3px 0 0 var(--bad); padding-left: var(--sp-2); }
 .edit-step .field.has-problem > .arg-head label, .edit-step .field.has-problem > label { color: var(--bad); }
 .problem-note { margin-top: var(--sp-1); }
+/* a move step's Preview (dry run): the button, why it is off, the answer as label / value rows in monospace */
+.step-preview { display: grid; gap: var(--sp-2); }
+.preview-answer { display: grid; gap: var(--sp-1); }
+.preview-goal { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px var(--sp-3); margin: 0;
+                font-family: var(--mono); font-size: var(--fs-sm); }
+.preview-goal dt { color: var(--text-muted); }
+.preview-goal dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .edit-step .icon.confirm { width: auto; padding: 0 var(--sp-2); background: var(--bad); border-color: var(--bad); color: var(--on-fill);
                            font: 600 var(--fs-s) var(--sans); }  /* Remove? (the second tap removes) */  /* the buttons go below the number on a narrow phone */
 .edit-step .handle { cursor: grab; touch-action: none; color: var(--text-muted); border-color: var(--border); background: none; }
