@@ -156,8 +156,9 @@ window.addEventListener('viewer3d-ready', startRunViewer);  // Run is the tab th
 // ---------- live state ----------
 function connect() {
   const source = new EventSource('/api/events');
-  source.onopen = () => $('conn').classList.add('on');
-  source.onerror = () => { $('conn').classList.remove('on'); renderSpeed(); };
+  const link = (on) => { $('conn').classList.toggle('on', on); $('conn').setAttribute('aria-label', on ? 'Connected' : 'Not connected'); };
+  source.onopen = () => link(true);
+  source.onerror = () => { link(false); renderSpeed(); };
   source.onmessage = (event) => {
     const { type, data } = JSON.parse(event.data);
     if (type === 'state') { state.snapshot = data; renderSpeed(); renderManual(); refreshCatalog(); }  // (re)connected: may have missed points
@@ -386,7 +387,7 @@ function renderPhases(s, plan, outcomes, active) {
     el('div', { class: 'ph-bar' }, el('i')), el('div', { class: 'name' }, el('span', { text: band.name }),
       el('b', { text: `${done}/${band.steps.length}` })));
     item.style.setProperty('--steps', band.steps.length);
-    item.style.setProperty('--done', `${(done / band.steps.length) * 100}%`);
+    item.style.setProperty('--done-part', `${(done / band.steps.length) * 100}%`);
     item.title = `${band.name} · ${done}/${band.steps.length}`;
     return item;
   }));
@@ -495,6 +496,20 @@ $('speed-up').addEventListener('click', () => stepSpeed(1));
 $('speed-range').addEventListener('input', () => { speedUi.dragging = true; $('speed-value').textContent = `${$('speed-range').value} %`; });
 $('speed-range').addEventListener('change', () => { speedUi.dragging = false; setSpeed({ percent: Number($('speed-range').value) }); });
 $('speed-test').addEventListener('click', () => setSpeed({ test_mode: !speedNow()?.test_mode }));
+// Speed in the status bar opens the panel under it (the slider, presets, test mode); a click elsewhere or Escape closes
+// it. Escape is not stopped: it still aborts a manual skill
+function openSpeed(open) {
+  show($('speed-panel'), open);
+  $('speed-open').setAttribute('aria-expanded', String(open));
+  if (open) $('speed-panel').querySelector('button:not(:disabled), input:not(:disabled)')?.focus();
+}
+$('speed-open').addEventListener('click', () => openSpeed($('speed-panel').hidden));
+document.addEventListener('pointerdown', (e) => {
+  if (!$('speed-panel').hidden && !e.target.closest('#speed-panel, #speed-open')) openSpeed(false);
+});
+$('speed-panel').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { openSpeed(false); $('speed-open').focus(); }
+});
 
 // ---------- manual skill: Abort ----------
 // A skill started from here outside a mission (Drive here, Move here, Go here, a carry pose's Test) shows in the top

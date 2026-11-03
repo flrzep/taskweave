@@ -12,21 +12,30 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body class="on-run">
-<div class="top">
-<header class="bar">
-  <div class="brand">
+<!-- the rail: the sections, the P3 mark and the robot; on a phone it is the bottom nav (the mark and robot hidden) -->
+<nav class="rail" aria-label="Sections">
+  <div class="rail-brand">
     <!-- P3 logo (P3_Logo_2024.svg, Wikimedia Commons), inline so it takes the theme colour -->
     <svg class="logo" viewBox="200 225 1615 1550" role="img" aria-label="P3"><path d="M687.29,236.45H212.42v1527.1l317.06-317.06V453.86h7.11c80.31,0,153.24,54.18,153.24,105.18l-.03,532.17c179.66-28.5,319.5-123.94,319.5-423.42,0-338.46-135.21-431.33-322.02-431.33Z"/><path d="M1787.58,236.45h-660.59l-.4,212.41h401.07l-277.74,277.15v198.16s93.83-29.1,181.33-29.89c81.56-.99,157.38,22.37,147.09,116.2-13.26,120.95-73.64,153.89-173.81,186.16-72.26,23.36-165.5,30.88-276.75,32.66l-.2,215.43s378.31,15.98,512.22-95.92c29.23-22.6,58.67-55.69,83.33-96.27,23.9-39.32,39.44-79.35,46.4-114.88,3.71-14.08,6.24-27.65,7.63-40.51.69-4.03,1.51-7.98,2.11-12.06,20.98-143.92-22.37-273.98-99.97-321.69h-.2c-17.22-9.11-37.21-15.64-60.18-18.81-26.53-3.56-57.41-2.77-92.85,3.76l261.51-261.9v-250.03Z"/></svg>
-    <div class="brand-text"><b>taskweave</b><small id="robot">connecting…</small></div>
+    <b>taskweave</b>
   </div>
-  <span id="pad-notice" class="pad-notice" hidden></span>
-  <span id="pad-mode" class="chip pad" title="PS4 pad mode: PS = drive, d-pad left/right = jog that arm (hold L1)">pad: drive</span>
-  <span id="conn" class="conn" title="live connection"></span>
-</header>
+  <div class="tabs" role="tablist" aria-orientation="vertical">
+  <button role="tab" data-view="run" aria-selected="true"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l6-3.5z"/></svg><span>Run</span></button>
+  <button role="tab" data-view="missions" aria-selected="false"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg><span>Missions</span></button>
+  <button role="tab" data-view="robot" aria-selected="false"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01"/></svg><span>Robot</span></button>
+  <button role="tab" data-view="points" aria-selected="false"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg><span>Teach</span></button>
+  <button role="tab" data-view="record" aria-selected="false" hidden><svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" fill="currentColor"/></svg><span>Record</span></button>
+  <button role="tab" data-view="log" aria-selected="false"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9l3 3-3 3M12 15h5"/></svg><span>Log</span></button>
+  </div>
+  <small id="robot" class="rail-robot">connecting…</small>
+</nav>
 
-<!-- the mission, on every tab. Running (also planning, paused): its state, goal, step and the step's progress, with
-     Pause and Abort (two taps); idle: the mission picker and Start. Start's answer and the last error under it -->
-<div id="mission" class="mission" role="group" aria-label="Mission">
+<div class="shell">
+<div class="top">
+<!-- the status bar, on every tab: the mission (running, also planning and paused: its state, goal, step and the step's
+     progress, with Pause and Abort, two taps; idle: the mission picker and Start), the speed override and the link to
+     the robot. Start's answer and the last error under it -->
+<header id="mission" class="mission" role="group" aria-label="Mission">
   <div class="mission-row">
     <span id="state" class="chip">idle</span>
     <div id="mission-run" class="mission-run" hidden>
@@ -39,28 +48,37 @@
       <select id="mission-select" aria-label="Mission to start"></select>
       <button id="btn-start" class="btn small primary">Start</button>
     </div>
+    <!-- global speed override: the value in the bar, the controls in a panel under it (Speed opens it) -->
+    <div id="speed" class="speed off" role="group" aria-label="Speed override">
+      <button id="speed-open" class="btn small speed-open" aria-expanded="false" aria-controls="speed-panel">
+        <span class="sub">Speed</span><output id="speed-value" class="speed-value" aria-live="polite">–</output>
+        <span class="speed-flag">test</span>
+      </button>
+    </div>
     <div id="mission-controls" class="mission-controls" hidden>
       <button id="btn-pause" class="btn small" disabled>Pause</button>
       <button id="btn-abort" class="btn small danger" disabled>Abort</button>
     </div>
+    <div class="sys">
+      <span id="pad-mode" class="chip pad" title="PS4 pad mode: PS = drive, d-pad left/right = jog that arm (hold L1)">pad: drive</span>
+      <span id="conn" class="conn" role="img" aria-label="Not connected" title="live connection"></span>
+    </div>
   </div>
+  <span id="pad-notice" class="pad-notice" role="status" hidden></span>
+  <div id="speed-panel" class="speed-panel" role="group" aria-label="Set the speed" hidden>
+    <div class="speed-set">
+      <button id="speed-down" class="icon" aria-label="Slower" title="Slower">−</button>
+      <input id="speed-range" type="range" min="1" max="100" step="1" value="100" aria-label="Speed override in percent">
+      <button id="speed-up" class="icon" aria-label="Faster" title="Faster">+</button>
+    </div>
+    <div id="speed-presets" class="segmented" role="group" aria-label="Speed presets"></div>
+    <button id="speed-test" class="btn small speed-test" aria-pressed="false">Test mode</button>
+  </div>
+  <span id="speed-msg" class="speed-msg" hidden></span>
   <div id="start-msg" class="msg" hidden></div>
   <div id="last-error" class="error" hidden><span id="last-error-text"></span><button id="last-error-close" class="icon"
     aria-label="Dismiss this error" title="Dismiss (it shows again on a new error)">✕</button></div>
-</div>
-
-<!-- global speed override: in the sticky top bar, so it is in reach on every tab and while a mission runs -->
-<div id="speed" class="speed off" role="group" aria-label="Speed override">
-  <div class="speed-read"><span class="sub">Speed</span><output id="speed-value" class="speed-value" aria-live="polite">–</output></div>
-  <div class="speed-set">
-    <button id="speed-down" class="icon" aria-label="Slower" title="Slower">−</button>
-    <input id="speed-range" type="range" min="1" max="100" step="1" value="100" aria-label="Speed override in percent">
-    <button id="speed-up" class="icon" aria-label="Faster" title="Faster">+</button>
-  </div>
-  <div id="speed-presets" class="segmented" role="group" aria-label="Speed presets"></div>
-  <button id="speed-test" class="btn small speed-test" aria-pressed="false">Test mode</button>
-  <span id="speed-msg" class="speed-msg" hidden></span>
-</div>
+</header>
 
 <!-- a skill started from the HMI outside a mission (drive, pose or point test, carry pose): on every tab while it
      runs, with Abort (one press, or Escape: stopping is the safe direction) -->
@@ -68,15 +86,6 @@
   <span id="manual-text" class="manual-text"></span>
   <button id="manual-abort" class="btn small danger solid" title="Abort this skill (Esc)">Abort</button>
 </div>
-
-<nav class="tabs" role="tablist">
-  <button role="tab" data-view="run" aria-selected="true">Run</button>
-  <button role="tab" data-view="missions" aria-selected="false">Missions</button>
-  <button role="tab" data-view="robot" aria-selected="false">Robot</button>
-  <button role="tab" data-view="points" aria-selected="false">Teach</button>
-  <button role="tab" data-view="record" aria-selected="false" hidden>Record</button>
-  <button role="tab" data-view="log" aria-selected="false">Log</button>
-</nav>
 </div>
 
 <main>
@@ -338,6 +347,7 @@
     <div class="card"><div class="label">Events</div><ol id="log" class="log"></ol></div>
   </section>
 </main>
+</div>
 
 <template id="step-template">
   <li class="edit-step">

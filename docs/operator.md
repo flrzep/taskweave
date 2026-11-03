@@ -76,9 +76,11 @@ why): teach and edit between runs.
 Check first that the stack is up: `taskweave skills` lists the skills of the running system (an error or an empty list
 means the task handler or skill servers are not running), and `taskweave status` shows `[idle]`.
 
-### From the HMI: the mission bar and the Run tab
+### From the HMI: the status bar and the Run tab
 
-1. The **mission bar** under the header is on every tab. While no mission runs it holds the mission picker: pick the
+The sections (Run, Missions, Robot, Teach, Record, Log) are in the rail at the left; on a phone at the bottom.
+
+1. The **status bar** at the top is on every tab. While no mission runs it holds the mission picker: pick the
    mission and press **Start**. The answer appears under the bar: `Started <plan id>`, or why it was refused (the same
    reasons as `rejected: ...` below).
 2. While a mission runs the bar shows it, with **Pause** (stops the robot where it is; the same button then reads
@@ -92,7 +94,7 @@ The **status board** at the top of the Run tab is the run in large type, readabl
 (RUNNING, PAUSED, DONE, FAILED, ...), the step number out of the total, the step's instruction, and under it, while a step runs, how long it has run. An error shows under it; when the mission
 stopped, with the step it stopped at and how to go on. It stays on the board until the next start: the bar's ✕ hides
 only the bar's copy. The strip at its foot shows the
-mission's phases (its included missions): done in green, the current one ringed. While a mission runs, the mission bar on the Run tab
+mission's phases (its included missions): done in grey, the current one ringed. While a mission runs, the status bar on the Run tab
 keeps only the state, Pause and Abort.
 
 The plan shows as a **Graph** (the steps and where a failure leads: retry, replan, skip, abort) or a **List**, each step
@@ -102,8 +104,8 @@ with its fixtures, and the taught targets and objects. **Robot** frames the robo
 A note `no robot pose` means the stack has no position of the robot: the 3D view and every drive are off until it
 has one again.
 
-The **speed strip** in the top bar (on every tab) sets the global speed override and test mode, also while a mission
-runs (section 3).
+**Speed** in the status bar (on every tab) shows the global speed override; press it for the slider, the presets and
+test mode, also while a mission runs (section 3).
 
 ### From the command line
 
@@ -166,11 +168,11 @@ when the planner finds nothing left to do (`stop_when`, `max_cycles`, or no stac
 
 ### On screen
 
-The mission bar under the header (on every tab) is the same information as `taskweave status`:
+The status bar at the top (on every tab) is the same information as `taskweave status`:
 
 | On screen | Same as in the status line |
 |---|---|
-| The badge and the coloured rail: `IDLE` grey, `PLANNING` and `RUNNING` blue, `PAUSED` amber with stripes, `SUCCEEDED` green, `FAILED` and `ABORTED` red | The state in brackets. |
+| The badge and the coloured rail, like a stack light: `IDLE` grey, `PLANNING` and `RUNNING` green, `PAUSED` amber with stripes, `SUCCEEDED` dark grey (done), `FAILED` and `ABORTED` red | The state in brackets. |
 | The first line: the mission's goal, the plan id and `cycle n` at the right | The goal, `cycle n`. |
 | Under it: `step 4/9`, the step's instruction, the skill, status, elapsed time and attempt (from the second), and a thin progress bar | `step 4/9: s4 move "..." attempt 1 running 45% 12.3s`. |
 | A red box under the bar | `last error`, as `<step id> (<skill>) <result>: <message>`. Like the status line, it stays until the next failure: after a retry that worked it is still there while the mission runs on. ✕ hides it until another error comes or the next start. |

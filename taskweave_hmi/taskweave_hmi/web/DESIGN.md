@@ -10,12 +10,13 @@ background.
 An operator panel, not a marketing page. It is used on a laptop and on phones in a factory hall: bright light,
 gloves, standing at the robot. So:
 
-- **One brand colour, used for action.** The P3 brand blue `#0000ff` is the logo, the header rule, primary buttons,
-  links and selected tabs. Nothing else is blue.
+- **One brand colour, used for action.** The P3 brand blue `#0000ff` is the logo, primary buttons, links and the
+  selected section. Nothing else is blue.
 - **Steel neutrals.** Cool grey-blue surfaces and borders that recede, so the state colours stand out.
-- **Colour means state.** Green succeeded, amber paused or warning, red failed or near a limit, grey idle, blue
-  running. They are never used for decoration.
-- **Andon status.** The mission bar has a rail and a solid badge in the state colour and a light tint of it while a
+- **Colour means state, like a stack light.** Green running (also planning, a manual skill), amber paused or to look
+  at, red stopped on a fault or near a limit, grey idle; finished as planned is neutral (dark slate), not green, so
+  green means one thing: it runs. The same green marks a healthy link and a save. Never used for decoration.
+- **Andon status.** The status bar has a rail and a solid badge in the state colour and a light tint of it while a
   mission runs. Paused also gets a striped rail, so it differs from running by more than hue.
 - **Big, flat, legible.** Barlow (a signage face) with tabular figures, 16px body, 48px main buttons, 44px minimum
   touch targets on phones, borders at 3:1 on fields and buttons, no glass, no gradients.
@@ -31,24 +32,27 @@ headline are large text and clear 3:1 by a wide margin.
 | Token | Light | Dark | Role |
 | --- | --- | --- | --- |
 | `--surface-page` | `#edf0f4` | `#0b0d17` | page background |
-| `--surface-card` | `#ffffff` | `#141827` | cards, header, tabs |
+| `--surface-card` | `#ffffff` | `#141827` | cards, status bar, rail |
 | `--surface-field` | `#f4f6f9` | `#0f121f` | inputs, secondary buttons, tracks |
-| `--surface-hover` | `#e6e9f0` | `#1d2236` | hover on rows, tabs, buttons |
+| `--surface-hover` | `#e6e9f0` | `#1d2236` | hover on rows, sections, buttons |
 | `--border` | `#d5d9e2` | `#272c42` | hairlines: cards, rows, dividers |
 | `--border-strong` | `#8d93a6` | `#5d6485` | field and button outlines (3:1 on their surface) |
 | `--text` | `#0d1026` | `#e9ebf5` | body text (18.8:1 / 14.9:1 on card) |
 | `--text-muted` | `#545a70` | `#a3a8bf` | secondary text, labels (6.8:1 / 7.5:1 on card) |
-| `--brand` | `#0000ff` | `#3d3dff` | fill of primary buttons, running badge and rail, header rule |
+| `--brand` | `#0000ff` | `#3d3dff` | fill of primary buttons |
 | `--brand-hover` | `#0000c4` | `#5252ff` | primary button hover |
 | `--brand-edge` | `#0000ff` | `#6b6bff` | primary button border (lifts it off the dark card) |
-| `--brand-text` | `#0000ff` | `#9494ff` | links, selected tab and segment, markers (8.6:1 / 6.7:1) |
-| `--brand-soft` | `#e8e8ff` | `#1d1f4d` | brand tint |
+| `--brand-text` | `#0000ff` | `#9494ff` | links, selected section and segment, markers (8.6:1 / 6.7:1) |
+| `--brand-soft` | `#e8e8ff` | `#1d1f4d` | brand tint: the selected section in the rail (its text 7.3:1 / 5.5:1) |
 | `--on-brand` | `#ffffff` | `#ffffff` | text on `--brand` (8.6:1 / 6.3:1) |
 | `--logo` | `#0000ff` | `#ffffff` | the P3 logo |
-| `--ok` | `#0a7a4a` | `#45c98f` | succeeded, connected, saved |
+| `--run` | `#0a7a4a` | `#45c98f` | running, planning, a manual skill: badge, rails, the running step (5.4:1 / 8.5:1) |
+| `--ok` | `#0a7a4a` | `#45c98f` | healthy: connected, saved (the same green as running) |
+| `--done` | `#2e3447` | `#c9cddb` | succeeded and done steps and phases: neutral, not green (12.4:1 on card) |
 | `--warn` | `#9a5200` | `#f2a64f` | paused, jog mode, canceled |
 | `--bad` | `#c0112d` | `#ff7385` | failed, aborted, errors, near a joint limit, danger buttons |
 | `--idle` | `#5c6177` | `#8e93ab` | idle, pending |
+| `--rail`, `--nav` | 92px, 60px | | the section rail's width; the phone's bottom nav height |
 | `--on-fill` | `#ffffff` | `#0b0d17` | text on a solid state fill (5.4 to 9.5:1) |
 | `--kind-*` | drive, arm, grip, wait, other | lighter in dark | skill colours in the plan graph, categorical only |
 | `--viewer-bg` | `#161a2a` | `#080a12` | 3D view background, dark in both themes |
@@ -67,7 +71,7 @@ network may have no internet). `font-variant-numeric: tabular-nums` throughout, 
 | --- | --- | --- |
 | `--fs-xs` | 12px | joint names in small grids |
 | `--fs-sm` | 13px | monospace meta, log, legend, section eyebrows (`.sub`, uppercase, 0.06em) |
-| `--fs-s` | 14px | field labels, chips, tabs (uppercase, 0.05em), small buttons, help text |
+| `--fs-s` | 14px | field labels, chips, small buttons, help text (the rail's section names are `--fs-sm`, 13px) |
 | `--fs-base` | 16px / 1.5 | body, inputs, buttons, card titles (`.label`, 600) |
 | `--fs-md` | 18px | brand name, state badge (700, uppercase), record stats |
 | `--fs-lg` | 20px / 1.35 | current step instruction |
@@ -89,8 +93,8 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
 - Radius: `--r-xs` 3px (bar markers), `--r-s` 6px (buttons, inputs, rows, messages), `--r-m` 10px (cards, 3D view),
   `--r-pill` (chips, progress, limit bars).
 - Shadows: `--shadow-1` a faint lift on cards (none in dark, where borders carry the edge), `--shadow-2` under the
-  sticky header and tabs.
-- Focus: a 3px ring in `--focus` (brand text at 55%), offset 2px; inset on tabs and segments.
+  sticky status bar.
+- Focus: a 3px ring in `--focus` (brand text at 55%), offset 2px; inset on segments.
 
 ## Touch targets
 
@@ -117,9 +121,13 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 - **Segmented control** (`.segmented`): a field-coloured track; the chosen option (`aria-pressed` or
   `aria-selected`) is raised on the card surface in brand text with a strong ring. `.choice` and `.teach-panes`
   wrap and share the width.
-- **Sticky top** (`.top`): header (brand, pad, connection), mission bar, speed strip, manual skill strip, tabs; on
-  every tab.
-- **Mission bar** (`.mission`): below the header. On the Run tab, while a mission is active, it keeps only the badge
+- **Shell**: the section rail (`.rail`, 92px, sticky, full height) at the left: the P3 mark and "taskweave", the
+  sections (`.tabs`, `role="tablist"`: a 22px stroke icon over the name, 64px high, the selected one in brand text on
+  `--brand-soft`), the robot's name at the foot. The page beside it, the sticky top (`.top`: status bar, manual skill
+  strip) over the views. At 600px and below the rail is a bottom nav (60px, fixed, the selected section with a 3px
+  brand rule on top) without mark and robot; the step sheet sits above it.
+- **Status bar** (`.mission`, the one bar on every tab, 76px): the mission, then Speed, Pause / Abort and the pad
+  mode and connection dot (`.sys`) at the right. On the Run tab, while a mission is active, it keeps only the badge
   and Pause / Abort, and its error hides (the status board shows both); idle it keeps the picker and Start everywhere. A 4px rail in the state colour (striped amber when paused) and the
   state as a solid badge (`#state`, uppercase Barlow Semi Condensed 14px; `planning` while the task handler prepares
   the plan). While a mission is active (`.mission.active`, a 5% state tint): the goal (18px, 600) with plan id and
@@ -127,8 +135,10 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   and attempt in muted monospace, a 4px progress bar of the step, and small Pause / Resume and Abort (`.danger`, two
   taps) on the right. Idle: badge, the mission picker (up to 520px) and a small primary Start. Under the bar, small:
   Start's answer (`.msg`, idle only) and the last error (`.error` with a ✕ that hides that error until another one or
-  the next start). On a phone: badge, step n/N, Pause, Abort in one row (44px targets, "Tap again to abort" wraps),
-  the instruction under it, no goal or detail; idle: badge, picker, Start.
+  the next start). From 601 to 1000px: badge, step n/N, Speed, Pause, Abort in one row, the instruction under it, no
+  goal; the pad mode shows only while it jogs an arm (also on a phone). On a phone: badge, step n/N, the speed and the
+  connection in one row, the instruction and progress under it, then Pause and Abort side by side, full width; idle:
+  badge, speed, then picker and Start. A pad press's answer floats under the bar for a while (`.pad-notice`).
 - **Status board** (`.board`, Run tab): the andon panel of the run, read from a few metres. A 10px rail in the state
   colour (striped amber when paused) on a 5% tint; the state word (Barlow Semi Condensed 36px, caps, in the state's
   text colour: "done" for succeeded), the mission and cycle; the step number at 60px with "/ N", the instruction at
@@ -136,20 +146,17 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   Ready to start", or the chosen start step), done, failed (the failed step, from the outcomes when the status has no
   step) and aborted each have their own words. The last error (not after a success) in a red-ruled panel, with how to go on once it stopped. After a run the board
   keeps showing that run (and names a different picked mission as next) while the plan below previews the pick. Under
-  it the phases: the plan graph's bands as one bar each, as wide as their steps, done in green, the current one ringed
-  in the state colour, name and done/total under it. On the Run tab the mission bar keeps only the badge and the
+  it the phases: the plan graph's bands as one bar each, as wide as their steps, the done part neutral, the current one ringed
+  in the state colour, name and done/total under it (done in `--done`, neutral). On the Run tab the mission bar keeps only the badge and the
   controls (`body.on-run`), so the words are not shown twice, and its error hides (the board shows it).
-- **Tabs** (`.tabs`): in the sticky top bar with the header (`.top` wraps both). Uppercase 14px, 48px high, equal
-  width; the selected one in brand text with a 3px underline. At 400px and below they drop the uppercase so all six
-  fit; if they still do not, they scroll inside the bar, never the page.
-- **Speed override** (`.speed`): a strip in the sticky top bar below the mission bar, on every tab. The percent
-  big (Barlow Semi Condensed 30px), − / + icon buttons around a range slider in brand colour, the presets as a
-  segmented control, and a test mode toggle that turns amber with its cap (the value turns amber too). The
-  handler's message on a clamped or refused request below, for 8 s. Greyed out with a hint without the task handler.
-  On a phone: value and presets, then slider and test mode.
-- **Manual skill** (`.manual`): a strip in the sticky top bar below the speed strip, on every tab, only while a skill
+- **Speed override** (`.speed`): in the status bar, a small button "Speed 60 %" (the value in Barlow Semi Condensed
+  20px; amber with "TEST" while test mode caps it; greyed out without the task handler; on a phone the value only).
+  It opens a panel under the bar (`aria-expanded`, focus to its first control; a click elsewhere or Escape closes
+  it): − / + around a range slider in brand colour, the presets as a segmented control, and the test mode toggle,
+  amber while on. The handler's message on a clamped or refused request under the bar, for 8 s.
+- **Manual skill** (`.manual`): a strip in the sticky top below the status bar, on every tab, only while a skill
   started from the HMI outside a mission runs (Drive here, Move here, Go here, a carry pose's Test). "Running
-  <label> (<skill>) · <n> s" in 600 weight on a 5% brand tint with a 4px brand left rule (running blue), one line
+  <label> (<skill>) · <n> s" in 600 weight on a 5% `--run` tint with a 4px `--run` left rule (running green), one line
   with an ellipsis on a laptop, wrapping on a phone, and a small `.danger.solid` **Abort** on the right: one press,
   Escape does the same (not while typing in a field). The button that started the skill then says "aborted" as a
   `.msg.warn`.
@@ -211,5 +218,5 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 
 ## Icons and imagery
 
-The P3 logo inline in the header (takes `--logo`). Icons are plain Unicode arrows and marks today (↑ ↓ ✕ ✓ ←); the 3D
+The P3 logo inline at the top of the rail (takes `--logo`). Icons are plain Unicode arrows and marks today (↑ ↓ ✕ ✓ ←); the 3D
 view toolbar expects inline SVG icons with a 1.75px stroke in `currentColor`. No photos or illustrations.
