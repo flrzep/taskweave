@@ -52,7 +52,8 @@ HTTP API (JSON):
                                    the live event manual: {skill, label, since (server epoch s), elapsed_s}, else null
   POST /api/skills/move/dry_run {args}  a move step's preview: its args with dry_run, nothing moves; answers when the
                                    skill does: {outcome, message, data (the skill's: joint_goal, legs, torso, kind,
-                                   carrying ...), goal (joint_goal per joint group, deg / m)}. 422 {problems} for args
+                                   carrying ...), goal (joint_goal per joint group, deg / m), torso (a drive's torso
+                                   values the same way, else null)}. 422 {problems} for args
                                    with a placeholder; 409 while a mission or a manual skill runs (they share the move
                                    skill); not shown as a manual skill (nothing to abort)
   POST /api/skill/abort            cancel the running manual skill: {ok, skill}; 409 {ok: false, message} when none
