@@ -90,12 +90,13 @@ The sections (Run, Missions, Robot, Teach, Record, Log) are in the rail at the l
    there, with the robot and the objects as they are now. Tap it again to clear it. Use it to repeat the end of a
    mission after a fix, not as a shortcut through a mission whose first steps set things up.
 
-The **status board** at the top of the Run tab is the run in large type, readable from a few metres: the state
-(RUNNING, PAUSED, DONE, FAILED, ...), the step number out of the total, the step's instruction, and under it, while a step runs, how long it has run. An error shows under it; when the mission
-stopped, with the step it stopped at and how to go on. It stays on the board until the next start: the bar's ✕ hides
-only the bar's copy. The strip at its foot shows the
-mission's phases (its included missions): done in grey, the current one ringed. While a mission runs, the status bar on the Run tab
-keeps only the state, Pause and Abort.
+The **run board** at the top of the Run tab is a little robot walking the mission: the bar under its feet is the
+mission's phases (its included missions), filled as they are done, and the robot stands where the run is. It walks
+while a step runs, stands still when paused, cheers when done and slumps with crossed eyes when the mission failed.
+Its bubble shows the step number out of the total, the step's instruction, how long it has run and, when it stopped,
+the error; the button in it is the next move: **Start**, **Resume**, **Retry step N** (from the step it stopped at)
+or **Run again**. The error stays until the next start: the bar's ✕ hides only the bar's copy. While a mission runs,
+the status bar on the Run tab keeps only the state, Pause and Abort.
 
 The plan shows as a **Graph** (the steps and where a failure leads: retry, replan, skip, abort) or a **List**, each step
 with its outcome once it ran. On a laptop the board and the plan are at the left and the 3D view and **Recent steps**

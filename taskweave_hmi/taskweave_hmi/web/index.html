@@ -92,22 +92,68 @@
   <!-- a workspace on a laptop (1180px and wider): the board and the plan at the left, the 3D view and the recent steps
        at the right; narrower, one column: board, 3D view, plan, recent steps -->
   <section id="view-run" class="view run-grid">
-    <!-- the status board: what the robot is doing, readable from a few metres; the bar above keeps the controls -->
-    <section id="board" class="card board" aria-label="Mission status">
+    <!-- the run board: a robot walks the mission (its floor is the phases, it stands where the run is), says what it
+         does in a bubble and offers the next move there (Start, Resume, Retry, Run again); app.js renderBoard -->
+    <section id="board" class="card board state-idle" aria-label="Mission status">
       <div class="board-head">
-        <span id="board-state" class="board-state" aria-live="polite">idle</span>
         <b id="board-goal" class="board-goal"></b>
-        <span id="board-cycle" class="board-cycle mono"></span>
+        <span id="board-cycle" class="board-cycle"></span>
       </div>
-      <div class="board-main">
+      <span id="board-state" class="sr-only" aria-live="polite">idle</span>
+      <div class="board-say">
         <div class="board-count"><span id="board-step">–</span><span id="board-total" class="board-of"></span></div>
         <div class="board-now">
           <div id="board-instruction" class="board-instruction" aria-live="polite"></div>
           <div id="board-detail" class="board-detail"></div>
+          <div id="board-error" class="board-error" role="alert" hidden></div>
         </div>
+        <button id="board-act" class="btn primary board-act" type="button" hidden></button>
       </div>
-      <div id="board-error" class="board-error" role="alert" hidden></div>
-      <ol id="board-phases" class="board-phases" aria-label="Phases" hidden></ol>
+      <div class="board-stage">
+        <svg class="bot" viewBox="0 0 200 300" aria-hidden="true">
+          <ellipse class="bot-shadow" cx="100" cy="296" rx="54" ry="4.5"/>
+          <g class="bot-all">
+            <g class="bot-arm bot-arm-l">
+              <rect class="b1" x="21" y="142" width="20" height="58" rx="8"/>
+              <rect class="b2" x="18" y="196" width="26" height="8" rx="3"/>
+              <rect class="b2" x="19" y="201" width="7" height="15" rx="3"/><rect class="b2" x="36" y="201" width="7" height="15" rx="3"/>
+              <circle class="b2" cx="31" cy="142" r="11"/>
+            </g>
+            <g class="bot-arm bot-arm-r">
+              <rect class="b1" x="159" y="142" width="20" height="58" rx="8"/>
+              <rect class="b2" x="156" y="196" width="26" height="8" rx="3"/>
+              <rect class="b2" x="157" y="201" width="7" height="15" rx="3"/><rect class="b2" x="174" y="201" width="7" height="15" rx="3"/>
+              <circle class="b2" cx="169" cy="142" r="11"/>
+            </g>
+            <g class="bot-leg bot-leg-l">
+              <rect class="b1" x="67" y="230" width="26" height="54" rx="8"/>
+              <rect class="b2" x="60" y="278" width="38" height="16" rx="8"/>
+            </g>
+            <g class="bot-leg bot-leg-r">
+              <rect class="b1" x="107" y="230" width="26" height="54" rx="8"/>
+              <rect class="b2" x="102" y="278" width="38" height="16" rx="8"/>
+            </g>
+            <g class="bot-top">
+              <rect class="b2" x="88" y="62" width="24" height="14" rx="3"/>
+              <path class="b1" d="M42 238 Q34 238 34 230 V140 A66 66 0 0 1 166 140 V230 Q166 238 158 238 Z"/>
+              <path class="bot-gloss" d="M50 132 A52 52 0 0 1 86 88"/>
+              <rect class="b2" x="66" y="150" width="68" height="62" rx="12"/>
+              <circle class="bot-light" cx="100" cy="171" r="10"/>
+              <path class="bot-vent" d="M82 192 H118 M82 200 H118"/>
+              <g class="bot-head">
+                <path class="bot-stalk" d="M100 18 V6"/>
+                <circle class="bot-light" cx="100" cy="6" r="6"/>
+                <rect class="b2" x="41" y="30" width="12" height="22" rx="4"/><rect class="b2" x="147" y="30" width="12" height="22" rx="4"/>
+                <rect class="b1" x="50" y="16" width="100" height="50" rx="13"/>
+                <rect class="bi" x="60" y="25" width="80" height="32" rx="11"/>
+                <g class="bot-eyes"><rect class="be" x="80" y="31" width="12" height="20" rx="6"/><rect class="be" x="108" y="31" width="12" height="20" rx="6"/></g>
+                <path class="bot-x" d="M80 34l12 14M92 34l-12 14M108 34l12 14M120 34l-12 14"/>
+              </g>
+            </g>
+          </g>
+        </svg>
+        <ol id="board-phases" class="board-phases" aria-label="Phases"></ol>
+      </div>
     </section>
 
     <div class="run-side">
@@ -125,7 +171,6 @@
         </div></div>
       <div id="plan-graph" class="graph-box"></div>
       <ol id="plan" class="steps" hidden><li class="muted">No plan yet</li></ol>
-      <p id="start-hint" class="muted small-text" hidden></p>
     </div>
   </section>
 

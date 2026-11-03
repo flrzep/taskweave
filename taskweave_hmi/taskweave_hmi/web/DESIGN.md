@@ -77,8 +77,7 @@ network may have no internet). `font-variant-numeric: tabular-nums` throughout, 
 | `--fs-lg` | 20px / 1.35 | current step instruction |
 | `--fs-xl` | 24px / 1.2 | `h2` |
 | `--fs-2xl` | 30px / 1.12 | speed value, recording headline (26px on a phone), the board's "/ N" (`--fs-xl` on a phone) |
-| `--fs-3xl` | 36px | the status board's state word (30px on a phone) |
-| `--fs-4xl` | 60px | the status board's step number (a 44px literal on a phone, its only use) |
+| `--fs-4xl` | 60px | the run board's step number (a 44px literal on a phone, its only use) |
 
 Weights: 400 body, 500 instruction, 600 titles and buttons, 700 badges and the brand name.
 
@@ -128,7 +127,7 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   brand rule on top) without mark and robot; the step sheet sits above it.
 - **Status bar** (`.mission`, the one bar on every tab, 76px): the mission, then Speed, Pause / Abort and the pad
   mode and connection dot (`.sys`) at the right. On the Run tab, while a mission is active, it keeps only the badge
-  and Pause / Abort, and its error hides (the status board shows both); idle it keeps the picker and Start everywhere. A 4px rail in the state colour (striped amber when paused) and the
+  and Pause / Abort, and its error hides (the run board shows both); idle it keeps the picker and Start everywhere. A 4px rail in the state colour (striped amber when paused) and the
   state as a solid badge (`#state`, uppercase Barlow Semi Condensed 14px; `planning` while the task handler prepares
   the plan). While a mission is active (`.mission.active`, a 5% state tint): the goal (18px, 600) with plan id and
   cycle right, under it "step n/N" and the step's instruction, one line with an ellipsis, then skill, status, seconds
@@ -152,16 +151,22 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   each: a mark (✓ in `--done`, ↻ in `--warn` for a step tried again, ! in `--warn` when canceled, else in `--bad`; its
   meaning as hidden text), the instruction with the command and message in muted 13px under it, and the time on the
   run's clock in muted monospace.
-- **Status board** (`.board`, Run tab): the andon panel of the run, read from a few metres. A 10px rail in the state
-  colour (striped amber when paused) on a 5% tint; the state word (Barlow Semi Condensed 36px, caps, in the state's
-  text colour: "done" for succeeded), the mission and cycle; the step number at 60px with "/ N", the instruction at
-  24px (two lines, three on a phone), and under it the command, status, seconds and attempt. Planning, idle ("26 steps ·
-  Ready to start", or the chosen start step), done, failed (the failed step, from the outcomes when the status has no
-  step) and aborted each have their own words. The last error (not after a success) in a red-ruled panel, with how to go on once it stopped. After a run the board
-  keeps showing that run (and names a different picked mission as next) while the plan below previews the pick. Under
-  it the phases: the plan graph's bands as one bar each, as wide as their steps, the done part neutral, the current one ringed
-  in the state colour, name and done/total under it (done in `--done`, neutral). On the Run tab the mission bar keeps only the badge and the
-  controls (`body.on-run`), so the words are not shown twice, and its error hides (the board shows it).
+- **Run board** (`.board`, Run tab): a little robot walks the mission. Its floor is the phases (the plan graph's
+  bands as 8px bars, as wide as their steps, the done part filled, the current one in the state colour, names and
+  done/total under them; one unnamed floor for a plan without phases). It stands where the run is (`--p`: done steps
+  plus the step's progress, over the total; at the chosen start step while idle) and moves there in 1.2 s. Its pose is
+  the state: blinking when idle, walking (legs, arms, a bob, its shadow) while running, frozen mid-stride with sleepy
+  eyes when paused, looking about with a blinking light while planning, arms up and three hops when done, slumped with
+  crossed red eyes when failed, flat eyes when aborted; its antenna tip and chest light are the state colour. It is
+  drawn in two greys (`--bot`, `--bot-2`) with a dark visor (`--bot-ink`) and light eyes, from the user's baseline (a
+  head with two eyes, a round-topped body, arms, legs) with a visor, antenna, chest panel, two-finger grippers and feet
+  added. Above it a bubble (2px border in the state colour at 45%, its tail over the robot) says what it does: the
+  step number at 60px with "/ N" (or "26 steps" while idle), the instruction at 24px (two lines, three on a phone),
+  the command, status, seconds and attempt, the error in red; and the next move as one button: Start / Start at step
+  N, Resume, Retry step N (the step it stopped at), Run again (Start <mission> when another one is picked). No
+  "press Start in the bar above" lines: the button is the instruction. The mission's goal and the cycle (↻ 2) sit
+  above. Reduced motion keeps the poses without the motion. On the Run tab the mission bar keeps only the badge and
+  the controls (`body.on-run`), so the words are not shown twice, and its error hides (the board shows it).
 - **Speed override** (`.speed`): in the status bar, a small button "Speed 60 %" (the value in Barlow Semi Condensed
   20px; amber with "TEST" while test mode caps it; greyed out without the task handler; on a phone the value only).
   It opens a panel under the bar (`aria-expanded`, focus to its first control; a click elsewhere or Escape closes
@@ -269,7 +274,7 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   Phases are bands (`.pg-band`, `--surface-field`, 24px) with a chevron, done/total and the usual failure rule;
   closed, one row with the lanes as mini chips and the state word, remembered per mission. Only exceptions are
   marked: rule badges on the chip's top edge, a dashed replan line in the left gutter (no parallel-candidate boxes:
-  they were noise). A click on a step (the running one too; the status board shows that one anyway) opens its details in
+  they were noise). A click on a step (the running one too; the run board shows that one anyway) opens its details in
   a 320px pop-up beside the step, its track too (`.pg-pop`, right of it if it fits, else left, else under it, the graph growing
   to hold it; a non-modal dialog with Close; Escape, a click
   elsewhere or the step again close it, the focus goes to Close and back to the step). At 600px and below: a rail of
@@ -279,4 +284,5 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 ## Icons and imagery
 
 The P3 logo inline at the top of the rail (takes `--logo`). Icons are plain Unicode arrows and marks today (↑ ↓ ✕ ✓ ←); the 3D
-view toolbar expects inline SVG icons with a 1.75px stroke in `currentColor`. No photos or illustrations.
+view toolbar expects inline SVG icons with a 1.75px stroke in `currentColor`. No photos; one illustration, the run
+board's robot (inline SVG in index.html, flat greys and the state colour).

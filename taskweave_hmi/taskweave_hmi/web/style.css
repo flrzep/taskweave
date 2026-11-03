@@ -23,7 +23,7 @@
   --sans: "Barlow", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --cond: "Barlow Semi Condensed", "Barlow", system-ui, sans-serif;
   --fs-xs: 12px; --fs-sm: 13px; --fs-s: 14px; --fs-base: 16px; --fs-md: 18px; --fs-lg: 20px; --fs-xl: 24px; --fs-2xl: 30px;
-  --fs-3xl: 36px; --fs-4xl: 60px;  /* the Run tab's status board, read from a few metres */
+  --fs-3xl: 36px; --fs-4xl: 60px;  /* the Run tab's run board, read from a few metres */
 
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-12: 48px;
   --r-xs: 3px; --r-s: 6px; --r-m: 10px; --r-pill: 999px;
@@ -160,44 +160,106 @@ body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); align-i
   .mission #state { min-width: 0; }
   .mission-controls .btn { flex: 1; padding: 0 var(--sp-3); white-space: normal; line-height: 1.15; }
 }
-/* run board: the Run tab's status board (an andon panel). A 10px rail and the state word in the state colour, the
-   mission and cycle, the step number big with "/ N", the instruction at 24px (two lines), the command and time under
-   it, an error panel when it stopped, and a strip of the phases (bands of the plan graph) sized by their steps. On the
+/* run board: a little robot walks the mission (Run tab). Its floor is the phases (the plan graph's bands, as wide as
+   their steps, the done part filled); it stands where the run is (--p from app.js) and its pose is the state: walking
+   while running, frozen mid-stride and sleepy-eyed when paused, looking about while planning, arms up when done,
+   slumped with crossed eyes when failed, flat eyes when aborted, blinking when idle. Its chest light is the state
+   colour. Above it a bubble (its tail over the robot) says what it does and holds the next move as one button. On the
    Run tab the bar above keeps only the badge and the controls, so the words are not shown twice. */
-.board { --state: var(--idle); position: relative; overflow: hidden; gap: var(--sp-3);
-         padding: var(--sp-4) var(--sp-6) var(--sp-5) calc(var(--sp-6) + 10px);
-         background: color-mix(in srgb, var(--state) 5%, var(--surface-card)); transition: background .4s; }
-.board::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 10px; background: var(--state); transition: background .4s; }
+.board { --state: var(--idle); --bot-h: 150px; --bot-w: calc(var(--bot-h) * 2 / 3); --p: 0;
+         --bot: #dfe2e9; --bot-2: #c2c7d2; --bot-ink: #1e212b; --bot-eye: #e6fbff; gap: var(--sp-3); padding: var(--sp-4) var(--sp-6) var(--sp-4);
+         background: color-mix(in srgb, var(--state) 6%, var(--surface-card)); transition: background .4s; }
 .board.state-running, .board.state-planning { --state: var(--run); }
 .board.state-paused { --state: var(--warn); }
-.board.state-paused::before { background: repeating-linear-gradient(-45deg, var(--warn) 0 8px,
-                              color-mix(in srgb, var(--warn) 35%, var(--surface-card)) 8px 16px); }
 .board.state-succeeded { --state: var(--done); }
 .board.state-failed, .board.state-aborted { --state: var(--bad); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .board { --bot: #6b7387; --bot-2: #545b6d; --bot-ink: #0d0f15; } }
+:root[data-theme="dark"] .board { --bot: #6b7387; --bot-2: #545b6d; --bot-ink: #0d0f15; }
 .board-head { display: flex; align-items: baseline; gap: var(--sp-4); min-width: 0; }
-.board-state { flex: none; font: 700 var(--fs-3xl)/1 var(--cond); letter-spacing: .04em; text-transform: uppercase; color: var(--state-text); }
-.board { --state-text: var(--text-muted); }
-.board.state-running, .board.state-planning { --state-text: var(--run); }
-.board.state-paused { --state-text: var(--warn); } .board.state-succeeded { --state-text: var(--done); }
-.board.state-failed, .board.state-aborted { --state-text: var(--bad); }
 .board-goal { min-width: 0; font: 600 var(--fs-lg)/1.25 var(--cond); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.board-cycle { margin-left: auto; flex: none; color: var(--text-muted); white-space: nowrap; }
-.board-main { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-6); align-items: center; }
-.board-count { display: flex; align-items: baseline; gap: var(--sp-2); white-space: nowrap; }
-#board-step { font: 700 var(--fs-4xl)/1 var(--cond); }
+.board-cycle { margin-left: auto; flex: none; font: 700 var(--fs-lg)/1 var(--cond); color: var(--state); }
+
+/* the bubble: the step count big, what the robot does, the next move; its tail points down at the robot */
+.board-say { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
+  gap: var(--sp-2) var(--sp-5); padding: var(--sp-3) var(--sp-5); border-radius: var(--r-m);
+  background: var(--surface-card); border: 2px solid color-mix(in srgb, var(--state) 45%, var(--border));
+  transition: border-color .4s; }
+.board-say::after { content: ""; position: absolute; top: 100%; width: 18px; height: 12px; margin-top: 2px;
+  left: clamp(18px, calc(var(--p) * (100% - var(--bot-w)) + var(--bot-w) / 2 - 9px), calc(100% - 36px));
+  background: color-mix(in srgb, var(--state) 45%, var(--border)); clip-path: polygon(0 0, 100% 0, 50% 100%);
+  transition: left 1.2s ease, background .4s; }
+.board-count { display: flex; align-items: baseline; gap: var(--sp-1); white-space: nowrap; }
+#board-step { font: 700 var(--fs-4xl)/.9 var(--cond); font-variant-numeric: tabular-nums; }
 .board-of { font: 600 var(--fs-2xl)/1 var(--cond); color: var(--text-muted); }
 .board-instruction { font: 500 var(--fs-xl)/1.3 var(--sans); display: -webkit-box; -webkit-box-orient: vertical;
-                     -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+  -webkit-line-clamp: 2; overflow: hidden; }
+.board-instruction:empty { display: none; }
 .board-detail { margin-top: var(--sp-1); color: var(--text-muted); }
-.board-error { padding: var(--sp-3) var(--sp-4); border-radius: var(--r-s); font-size: var(--fs-md); font-weight: 500;
-               background: color-mix(in srgb, var(--bad) 9%, var(--surface-card)); box-shadow: inset 4px 0 0 var(--bad); }
-.board-error small { display: block; margin-top: var(--sp-1); font-size: var(--fs-s); font-weight: 400; color: var(--text-muted); }
-.board-phases { display: flex; gap: var(--sp-2); margin: var(--sp-1) 0 0; padding: 0; list-style: none; }
+.board-detail:empty { display: none; }
+.board-error { margin-top: var(--sp-2); color: var(--bad); font-weight: 600; overflow-wrap: anywhere; }
+.board-act { min-height: var(--tap); padding: 0 var(--sp-6); font-size: var(--fs-md); }
+
+/* the stage: the robot on its floor */
+.board-stage { position: relative; height: calc(var(--bot-h) + 30px); margin-top: var(--sp-2); }
+.board-stage:has(.board-phases.single) { height: calc(var(--bot-h) + 10px); }
+.bot { position: absolute; bottom: 28px; height: var(--bot-h); width: var(--bot-w); overflow: visible;
+  left: calc(var(--p) * (100% - var(--bot-w))); transition: left 1.2s ease; }
+.board-stage:has(.board-phases.single) .bot { bottom: 8px; }
+.bot .b1 { fill: var(--bot); } .bot .b2 { fill: var(--bot-2); } .bot .bi { fill: var(--bot-ink); } .bot .be { fill: var(--bot-eye); }
+.bot-gloss { fill: none; stroke: #fff; stroke-opacity: .5; stroke-width: 6; stroke-linecap: round; }
+.bot-vent, .bot-stalk { fill: none; stroke: var(--bot); stroke-width: 4; stroke-linecap: round; }
+.bot-stalk { stroke: var(--bot-2); }
+.bot-shadow { fill: var(--text); opacity: .1; transform-box: fill-box; transform-origin: center; }
+.bot-light { fill: var(--state); transition: fill .4s; }
+.bot-x { fill: none; stroke: var(--bad); stroke-width: 4; stroke-linecap: round; display: none; }
+.bot g { transform-box: view-box; transition: transform .5s ease; }
+.bot-arm-l { transform-origin: 31px 142px; transform: rotate(12deg); }
+.bot-arm-r { transform-origin: 169px 142px; transform: rotate(-12deg); }
+.bot-leg-l { transform-origin: 80px 234px; } .bot-leg-r { transform-origin: 120px 234px; }
+.bot-top { transform-origin: 100px 238px; } .bot-head { transform-origin: 100px 66px; }
+.bot-eyes { transform-origin: 100px 41px; }
+/* idle: a blink now and then */
+.state-idle .bot-eyes { animation: bot-blink 5s infinite; }
+/* walking (running), and the same walk frozen mid-stride (paused) */
+.state-running .bot-leg-l, .state-paused .bot-leg-l { animation: bot-leg .8s ease-in-out infinite; }
+.state-running .bot-leg-r, .state-paused .bot-leg-r { animation: bot-leg .8s ease-in-out -.4s infinite; }
+.state-running .bot-arm-l, .state-paused .bot-arm-l { animation: bot-arm-l .8s ease-in-out -.4s infinite; }
+.state-running .bot-arm-r, .state-paused .bot-arm-r { animation: bot-arm-r .8s ease-in-out infinite; }
+.state-running .bot-all, .state-paused .bot-all { animation: bot-bob .4s ease-in-out infinite; }
+.state-paused .bot g, .state-paused .bot-all, .state-paused .bot-shadow { animation-play-state: paused; }
+.state-paused .bot-eyes { transform: scaleY(.3); }
+/* planning: looks about, the light blinks */
+.state-planning .bot-eyes { animation: bot-look 1.6s ease-in-out infinite; }
+.state-planning .bot-light { animation: bot-light .8s steps(2) infinite; }
+/* done: arms up, a few hops */
+.state-succeeded .bot-arm-l { transform: rotate(150deg); } .state-succeeded .bot-arm-r { transform: rotate(-150deg); }
+.state-succeeded .bot-all { animation: bot-hop .5s ease-out 3; }
+.state-succeeded .bot-shadow { animation: bot-shadow .5s ease-out 3; }
+.state-running .bot-shadow { animation: bot-shadow .4s ease-in-out infinite; }
+/* failed: slumped, head down, crossed eyes; aborted: flat eyes */
+.state-failed .bot-top { transform: translateY(6px) rotate(6deg); }
+.state-failed .bot-head { transform: rotate(8deg); }
+.state-failed .bot-arm-l { transform: rotate(4deg); } .state-failed .bot-arm-r { transform: rotate(-4deg); }
+.state-failed .bot-eyes { display: none; } .state-failed .bot-x { display: inline; }
+.state-aborted .bot-eyes { transform: scaleY(.15); }
+.state-aborted .bot-arm-l { transform: rotate(4deg); } .state-aborted .bot-arm-r { transform: rotate(-4deg); }
+@keyframes bot-blink { 0%, 93%, 100% { transform: none; } 96% { transform: scaleY(.1); } }
+@keyframes bot-leg { 0%, 100% { transform: rotate(16deg); } 50% { transform: rotate(-16deg); } }
+@keyframes bot-arm-l { 0%, 100% { transform: rotate(30deg); } 50% { transform: rotate(2deg); } }
+@keyframes bot-arm-r { 0%, 100% { transform: rotate(-30deg); } 50% { transform: rotate(-2deg); } }
+@keyframes bot-bob { 0%, 100% { transform: none; } 50% { transform: translateY(-5px); } }
+@keyframes bot-look { 0%, 100% { transform: translateX(-8px); } 50% { transform: translateX(8px); } }
+@keyframes bot-light { 50% { fill: var(--bot); } }
+@keyframes bot-hop { 0%, 100% { transform: none; } 40% { transform: translateY(-16px); } }
+@keyframes bot-shadow { 0%, 100% { transform: none; } 45% { transform: scaleX(.8); } }
+
+/* the floor: one bar per phase, as wide as its steps, the done part filled; the current one in the state colour */
+.board-phases { position: absolute; inset: auto 0 0 0; display: flex; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
 .board-phases li { flex: var(--steps) 1 0; min-width: 0; display: grid; gap: var(--sp-1); }
-.board-phases .ph-bar { height: 10px; border-radius: var(--r-pill); overflow: hidden;
-                     background: color-mix(in srgb, var(--text-muted) 16%, var(--surface-card)); }
-.board-phases .ph-bar i { display: block; height: 100%; width: var(--done-part); background: var(--done); border-radius: inherit; }
-.board-phases li.now .ph-bar { outline: 2px solid var(--state); outline-offset: 2px; }
+.board-phases .ph-bar { height: 8px; border-radius: var(--r-pill); overflow: hidden;
+  background: color-mix(in srgb, var(--text) 10%, var(--surface-card)); }
+.board-phases .ph-bar i { display: block; height: 100%; width: var(--done-part); background: var(--done); border-radius: inherit;
+  transition: width .6s ease; }
 .board-phases li.now .ph-bar i { background: var(--state); }
 .board-phases li.failed .ph-bar i { background: var(--bad); }
 .board-phases li.failed .ph-bar { box-shadow: inset 0 0 0 2px var(--bad); }  /* also when nothing was done */
@@ -206,22 +268,21 @@ body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); align-i
 .board-phases .name span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .board-phases .name b { flex: none; margin-left: auto; font: 600 var(--fs-s) var(--cond); color: var(--text); }
 .board-phases li.now .name { color: var(--text); font-weight: 600; }
+.board-phases.single .name { display: none; }
 body.on-run .mission.active .mission-goal, body.on-run .mission.active .mission-step,
 body.on-run .mission.active .mission-meta, body.on-run .mission.active .progress, body.on-run .mission .error { display: none; }
 body.on-run .mission.active .mission-row { grid-template-columns: auto minmax(0, 1fr) auto auto auto;
                                           grid-template-areas: "state . speed ctrl sys"; }
 @media (max-width: 600px) {
-  .board { padding: var(--sp-3) var(--sp-4) var(--sp-4) calc(var(--sp-4) + 8px); }
-  .board::before { width: 8px; }
-  .board-head { flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
-  .board-state { font-size: var(--fs-2xl); }
+  .board { --bot-h: 96px; padding: var(--sp-3) var(--sp-4); }
   .board-goal { font-size: var(--fs-md); }
-  .board-cycle { display: none; }
-  .board-main { grid-template-columns: 1fr; gap: var(--sp-2); }
+  .board-say { grid-template-columns: auto minmax(0, 1fr); padding: var(--sp-3) var(--sp-4); gap: var(--sp-2) var(--sp-3); }
+  .board-act { grid-column: 1 / -1; }
   #board-step { font-size: 44px; }  /* between --fs-3xl and --fs-4xl: the only use */
   .board-of { font-size: var(--fs-xl); }
   .board-instruction { font-size: var(--fs-lg); -webkit-line-clamp: 3; }
   .board-phases .name b { display: none; }
+}
 }
 
 @media (pointer: coarse), (max-width: 600px) {  /* the ✕ grows to a touch target into the message's padding */
@@ -852,4 +913,6 @@ li.empty { list-style: none; padding: 6px 2px; }
 @media (prefers-reduced-motion: reduce) {
   #progress-bar, .card.status, .card.status::before, .mission, .mission::before { transition: none; }
   .pg-chip.state-running { animation: none; }
+  .bot, .bot g, .board-say::after { transition: none; }
+  .board .bot *, .board .bot-all { animation: none !important; }  /* the poses stay, without the motion */
 }
