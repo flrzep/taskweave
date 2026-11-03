@@ -236,7 +236,9 @@ class SkillServer(Node):
     def _execute_goal(self, skill: Skill, handle) -> RunSkill.Result:
         goal = handle.request
         result = self._run(skill, goal, handle)
-        if result.outcome != Outcome.SUCCEEDED:
+        if result.outcome != Outcome.SUCCEEDED and not _is_dry_run(goal):
+            # a dry run moves nothing, and a skill's stop() acts on the whole instance: it would stop a goal
+            # of the same skill that runs at the same time
             try:
                 skill.stop()
             except Exception:  # stopping must never mask the original outcome
@@ -293,6 +295,14 @@ class SkillServer(Node):
         for key, value in ctx.work.stats().items():   # a skill may add keys of its own (nav2_override)
             speed.setdefault(key, value)
         return result
+
+
+def _is_dry_run(goal) -> bool:
+    try:
+        args = json.loads(goal.args_json or '{}')
+    except json.JSONDecodeError:
+        return False
+    return isinstance(args, dict) and args.get('dry_run') is True
 
 
 def _default_timeout(skill: Skill, args: dict) -> float:
