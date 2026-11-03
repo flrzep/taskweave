@@ -132,6 +132,30 @@ class HoldCollision:
             return 'the planning scene has lost it (move_group restarted?)'
         return None
 
+    def world_joint(self):
+        """(virtual joint, model frame, 4x4 its transform) of MoveIt's robot state now (the base pose in the planning
+        frame), or None (no scene, or not exactly one multi-dof joint): what torso_window moves to a predicted base
+        pose."""
+        from moveit_msgs.msg import PlanningSceneComponents
+        from moveit_msgs.srv import GetPlanningScene
+
+        from .ik import pose_matrix
+        try:
+            if self.get_client is None:
+                from rclpy.callback_groups import ReentrantCallbackGroup
+                self.get_client = self.node.create_client(GetPlanningScene, self.get_service,
+                                                          callback_group=ReentrantCallbackGroup())
+            request = GetPlanningScene.Request()
+            request.components.components = PlanningSceneComponents.ROBOT_STATE
+            answer, _ = self._call(self.get_client, self.get_service, request)
+        except Exception:  # noqa: BLE001 - no scene: the checks stay at the live base pose
+            return None
+        joints = answer.scene.robot_state.multi_dof_joint_state if answer is not None else None
+        if joints is None or len(joints.joint_names) != 1:
+            return None
+        (name,), (t,) = joints.joint_names, joints.transforms     # the one virtual joint
+        return name, joints.header.frame_id, pose_matrix(t.translation, t.rotation)
+
     # ---- messages -----------------------------------------------------------------
     @staticmethod
     def _attached(name, link, shapes, object_in_link, touch_links):

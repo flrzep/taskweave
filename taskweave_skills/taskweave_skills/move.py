@@ -27,6 +27,11 @@ own; one that has no implementation for the robot answers REJECTED "this robot c
 work. The parts are the classes of the former motion skills. ``Move`` gives a part what it resolved in
 ``args[RESOLVED]`` (``parts.py``), so it hands over the same targets the old skills made of their names.
 
+A carry run by the executive gets what follows in its hold window (``ctx.context``, P6-10b): ``_ahead`` resolves each
+step after it, as this skill will when it runs, up to the step that ends the hold (a grip that opens, another skill, a
+placeholder still open, a move of free hands); the carry part predicts and plans the torso heights from them
+(torso_window, torso_plan).
+
 The result is the part's, with ``kind`` (one of the five), ``module`` (``move.<part>``), ``target`` and, for a carry,
 ``carrying`` (the held instance) added to its data, and its message prefixed with the command and what moved ("move to
 target · carrying frame_1 · hook"). ``dry_run: true`` resolves and solves, moves nothing and answers
@@ -307,15 +312,55 @@ class Move(Skill):
             if first.outcome != Outcome.SUCCEEDED:
                 return self._finish(first, plan, module, prefix='joints of ')
         result = None
-        for number, call in enumerate(plan.calls, start=1):
-            result = module.execute(ctx, call)
-            if result.outcome != Outcome.SUCCEEDED:
-                if len(plan.calls) > 1:
-                    result.message = f'leg {number}/{len(plan.calls)}: {result.message}'
-                return self._finish(result, plan, module)
+        if plan.part == 'carry' and (getattr(ctx, 'context', None) or {}).get('ahead') is not None:
+            module.ahead = lambda: self._ahead(ctx)     # the carry part asks when it plans the torso (lazy)
+        try:
+            for number, call in enumerate(plan.calls, start=1):
+                result = module.execute(ctx, call)
+                if result.outcome != Outcome.SUCCEEDED:
+                    if len(plan.calls) > 1:
+                        result.message = f'leg {number}/{len(plan.calls)}: {result.message}'
+                    return self._finish(result, plan, module)
+        finally:
+            module.ahead = None
         if len(plan.calls) > 1:
             result.message = f'{len(plan.calls)} legs: {result.message}'
         return self._finish(result, plan, module)
+
+    def _ahead(self, ctx) -> list[dict]:
+        """The steps after this one in its hold window (``ctx.context`` ahead), resolved as they will be: ``{id,
+        plan}`` (a Plan) per move step this skill can resolve now, and last ``{id, end: why}`` for the step that ends
+        the window: a grip (the hold may end), another skill, a placeholder with no value yet, a step that does not
+        resolve now, a move of free hands or of joints. Nothing is checked against the planning scene; a navigate
+        step makes the later steps resolve at its pose (``_near``)."""
+        from .gripper_motion import Grip
+
+        out = []
+        self._predicting, self._near_at = True, None
+        try:
+            for entry in (ctx.context or {}).get('ahead') or []:
+                sid, skill, args = str(entry.get('id', '')), entry.get('skill'), entry.get('args') or {}
+                if skill == Grip.name:
+                    end = 'a grip' + (f' {args["action"]}' if args.get('action') else '')
+                elif skill != self.name:
+                    end = f'a {skill} step'
+                elif not entry.get('resolved'):
+                    end = 'a placeholder has no value yet'
+                else:
+                    plan = self._plan(args)
+                    end = f'it does not resolve now: {plan.message}' if isinstance(plan, SkillResult) else \
+                        f'a {move_label(plan.kind)} move of free hands' if plan.part == 'hand' else \
+                        f'a {move_label(plan.kind)} move' if plan.part == 'joints' or plan.before else None
+                    if end is None:
+                        out.append({'id': sid, 'plan': plan})
+                        pose = (plan.calls[-1].get(RESOLVED) or {}).get('pose') if plan.part == 'navigate' else None
+                        self._near_at = pose if isinstance(pose, Pose2D) else self._near_at
+                        continue
+                out.append({'id': sid, 'end': end})
+                break
+        finally:
+            self._predicting, self._near_at = False, None
+        return out
 
     def _data(self, plan: Plan) -> dict:
         """What every result of a plan has in its data: the kind, the module that ran, the target, what it carries."""
@@ -401,7 +446,10 @@ class Move(Skill):
         return self._reject(text, form)
 
     def _near(self) -> Pose2D | None:
-        """Where the robot's base is in the cell (odometry, else TF): which turn of a symmetric object it handles."""
+        """Where the robot's base is in the cell (odometry, else TF; a step ahead: where a navigate before it ends,
+        ``_ahead``): which turn of a symmetric object it handles."""
+        if getattr(self, '_near_at', None) is not None:
+            return self._near_at
         for part in ('navigate', 'straight'):
             module = self.modules.get(part)
             pose = module._current() if module is not None and hasattr(module, '_current') else None
@@ -595,7 +643,7 @@ class Move(Skill):
             return self._reject(f'{text}: a hand moves while holding only when the held object has a collision shape: '
                                 f'objects/{kind}.yaml has no collision: (add one, or move it with hand: holding or an '
                                 'object target)', form)
-        missing = self._scene_problem(hold)
+        missing = None if getattr(self, '_predicting', False) else self._scene_problem(hold)   # _ahead: not now
         if missing:
             return self._reject(f'{text}: the held object\'s shape is not in the planning scene ({missing}): grip it '
                                 'again, or move it with hand: holding or an object target', form)

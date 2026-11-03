@@ -282,7 +282,7 @@ class SkillServer(Node):
             handle.publish_feedback(RunSkill.Feedback(progress=float(progress), status=status))
 
         ctx = SkillContext(self.now, timeout, lambda: handle.is_cancel_requested, publish, goal.instruction,
-                           self.get_logger(), speed=self.speed, context=context)
+                           self.get_logger(), speed=self.speed, context=context, step_id=goal.step_id)
         try:
             result = skill.execute(ctx, args)
         except Exception as error:  # a crashing skill is a failed step, not a dead server

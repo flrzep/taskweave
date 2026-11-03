@@ -261,6 +261,29 @@ ROBOT_PROFILE = {
                         'global_heights': {'type': 'integer', 'minimum': 0, 'default': 3},
                         # the best height at the edge of a feasible band: this many halvings of the grid step around it
                         'refine': {'type': 'integer', 'minimum': 0, 'default': 2},
+                        # torso look-ahead over a hold (taskweave_skills torso_plan.py, object_motion.py): a held
+                        # step with torso auto and the executive's context plans the heights of the rest of the hold
+                        'lookahead': {
+                            'type': 'object', 'additionalProperties': False,
+                            'properties': {
+                                'enabled': {'type': 'boolean', 'default': True},
+                                # planning time at a held step (s, wall clock): a plan stopped by it or capped by
+                                # max_checks falls back to the per-step choice
+                                'budget_s': {'type': 'number', 'exclusiveMinimum': 0, 'default': 10.0},
+                                'max_checks': {'type': 'integer', 'minimum': 1, 'default': 150},
+                                # a later step takes its planned height while the state is as planned: the torso (m),
+                                # each holding hand's TCP (m), each held arm joint (rad)
+                                'torso_m': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.01},
+                                'object_m': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.02},
+                                'branch_rad': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.3},
+                                # a ride (the torso moving with the held object) is collision checked this often (m);
+                                # default: the planner's direct_step_rad (as the executed ride), else this
+                                'ride_sample_m': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.02},
+                                # halvings of the change-step refine (toward the height before the change);
+                                # default: ik.torso.refine
+                                'refine': {'type': 'integer', 'minimum': 0},
+                            },
+                        },
                     },
                     'additionalProperties': False,
                 },

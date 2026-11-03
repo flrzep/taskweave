@@ -57,6 +57,7 @@ ALGORITHM = {
     'SWIVEL_SIGN': 'direction convention of the jog swivel axis',
     'UNREACHABLE_MARGIN_M': 'numerical slack on the arm-length bound of the torso reach check (F17)',
     'BANDS_KEPT': 'size cap of the held-search band memory (F17)',
+    'RIDE_EXACT': 'numerical tolerance of the FK check that a torso ride carries the held hands (P6-10b)',
 }
 
 ROOT = Path(__file__).resolve().parents[2]

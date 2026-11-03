@@ -43,7 +43,7 @@ from taskweave_core.gripper import joint_for_opening, opening_for_joint, opening
 from taskweave_core.skill import SkillResult
 
 from .collision import HoldCollision, shapes_of
-from .joints import _FingerMotion, _JointSkill, _PointMotion
+from .joints import RIDE_EXACT, _FingerMotion, _JointSkill, _PointMotion
 from .parts import RESOLVED
 
 # skills/<skill>.yaml (spec 2.2) -> the joint skill parameter names
@@ -272,12 +272,13 @@ class MoveGripper(_PointMotion):
         return bool(self.ik is not None and self.ik.torso and leg.tools and self.ik.torso['joint'] not in leg.joints)
 
     def _torso_choice(self, ctx, leg: Target, m: dict, mode: str, approach: float, label: str, flip=None,
-                      ahead=None):
+                      ahead=None, height: float | None = None):
         """ik.solve_with_torso for the leg: the target and, with an approach, the pre-grasp; for a straight line the
         points along it (spaced ik.torso.line_sample_m), so the height holds for the whole line. ``flip``: may a grasp
         be flipped (default: not on a line). ``ahead``: the tools of the move that follows (the point itself after a
         pre-grasp offset): the height must also let the hands walk a straight line to them from here; if no height
-        can, the choice is made without it (the old behaviour). A TorsoChoice or a FAILED result naming every
+        can, the choice is made without it (the old behaviour). ``height``: only this one is checked (a height the
+        torso look-ahead planned: ik.check_height, ``ahead`` required). A TorsoChoice or a FAILED result naming every
         rejected height."""
         from .ik import IkError, Samples, TorsoError
 
@@ -290,12 +291,21 @@ class MoveGripper(_PointMotion):
                 [leg.tools, *([leg.before(approach)] if approach > 0 else [])])
             flips = mode != 'linear' if flip is None else flip
 
+            if height is not None and mode == 'linear':        # planned: walked as the move will go
+                from .cartesian import tcp_targets
+                return self._walked([tcp_targets(leg.tools)], current, height, label, ahead)
+
             def search():
+                if height is not None:
+                    return self.ik.check_height(samples, height, current, leg.joints, elbow=m.get('elbow'),
+                                                allow_flip=flips, should_stop=lambda: ctx.should_stop)
                 return self.ik.solve_with_torso(samples, leg.joints, current, lambda: ctx.should_stop,
                                                 elbow=m.get('elbow'), allow_flip=flips)
             if ahead is None:
                 return search()
             samples.ahead = self._ahead_check(ahead, current)
+            if height is not None:
+                return search()
             try:
                 return search()
             except TorsoError as error:
@@ -309,6 +319,27 @@ class MoveGripper(_PointMotion):
         except IkError as error:
             return SkillResult.failed(f'{label}: {error}', torso=[{'leg': leg.label, 'height': None,
                                                                    'rejected': getattr(error, 'rejected', [])}])
+
+    def _walked(self, legs: list, current: dict, height: float, label: str, ahead=None):
+        """A TorsoChoice at ``height`` (planned by the torso look-ahead) when the straight lines to ``legs``
+        ([{tool: 4x4}]) walk from ``current`` with the torso there first (held hands following, ``_walk_lines``) and
+        the line after them to ``ahead`` too; a FAILED result otherwise. As the move goes: no IK of the goals."""
+        import re
+
+        from .ik import TorsoChoice
+
+        problem, end = self._walk_lines(legs, current, height, keep_arms=True)     # the ride as planned
+        if problem is None and end is not None and ahead is not None:
+            arms = [re.compile(self.ik.joint_pattern.format(tool=t)) for t in ahead]
+            problem = self._ahead_check(ahead, end)(height, {n: v for n, v in end.items()
+                                                             if any(a.fullmatch(n) for a in arms)})
+            problem = problem and f'next move: {problem}'
+        if problem is not None or end is None:
+            return SkillResult.failed(f'{label}: at the planned torso {height:g}: {problem or "no URDF chain"}')
+        arms = [re.compile(self.ik.joint_pattern.format(tool=t)) for t in legs[-1]]
+        joint = self.ik.torso['joint']
+        return TorsoChoice(height, {joint: height}, {n: v for n, v in end.items() if any(a.fullmatch(n) for a in arms)},
+                           set(), 0.0, skipped='planned: the lines walked')
 
     def _line_samples(self, tools: dict, current: dict):
         """A function of the torso height: the target sets along the straight line the TCPs would move on from where
@@ -337,11 +368,14 @@ class MoveGripper(_PointMotion):
         at.verify = verify
         return at
 
-    def _state_at(self, hands, current: dict, height: float, poses: dict | None = None, global_search: bool = True):
+    def _state_at(self, hands, current: dict, height: float, poses: dict | None = None, global_search: bool = True,
+                  keep_arms: bool = False):
         """(joints, problem) once the torso is at ``height``: the arms keep their joints, except hands that hold an
-        object: it goes with the torso and their arms are solved again there (joints._widen). ``poses``: the held
-        hands' TCPs at ``current`` (default: where they are now; torso_plan passes predicted ones). ``global_search``
-        False: local IK only (repeatable; torso_plan's rides)."""
+        object: it goes with the torso and their arms are solved again there (joints._widen). ``keep_arms`` (the
+        torso look-ahead, whose planned rides execute so): while the URDF chains carry the held hands with the column
+        (the hands' FK at ``height`` with the arms unchanged is the column's motion of their FK now, within
+        RIDE_EXACT) the unchanged arms are the answer, no IK. ``poses``: the held hands' TCPs at ``current`` (default:
+        where they are now; torso_plan passes predicted ones). ``global_search`` False: local IK only (repeatable)."""
         from .ik import IkError
         from .points import target_of
 
@@ -353,6 +387,10 @@ class MoveGripper(_PointMotion):
         column = self.ik.joint_motion(joint, current, height)
         if column is None:
             return state, None
+        now, then = (self.ik.tcps_at(held, current), self.ik.tcps_at(held, state)) if keep_arms else ({}, {})
+        if keep_arms and len(now) == len(then) == len(held) and all(
+                np.allclose(then[h], column @ now[h], atol=RIDE_EXACT) for h in held):
+            return state, None
         poses = self.hold.tcp_poses(held) if poses is None else poses
         try:
             arms = self.ik.solve({h: target_of(column @ poses[h]) for h in held}, {joint: height}, current=current,
@@ -361,16 +399,17 @@ class MoveGripper(_PointMotion):
             return None, f'{" and ".join(held)} cannot follow the torso to {height:g}: {str(error).split(":")[0]}'
         return {**state, **arms}, None
 
-    def _walk_lines(self, legs: list, current: dict, height: float):
+    def _walk_lines(self, legs: list, current: dict, height: float, keep_arms: bool = False):
         """Walk the straight lines to each of ``legs`` ([{tool: 4x4 TCP goal}], one after the other) on the URDF chains
         with the torso at ``height``, as the moves would: (None or why the first failing leg fails, the joints at the
-        end). Every step is collision checked with the torso at ``height``."""
+        end). Every step is collision checked with the torso at ``height``. ``keep_arms``: the ride to ``height`` as a
+        planned one executes (``_state_at``)."""
         import re
 
         from .cartesian import PathError, linear_path, matching_flip
 
         joint = self.ik.torso['joint']
-        state, problem = self._state_at(list(legs[0]), current, height)
+        state, problem = self._state_at(list(legs[0]), current, height, keep_arms=keep_arms)
         if state is None:
             return problem, None
         patterns = [re.compile(self.ik.joint_pattern.format(tool=t)) for t in legs[0]]
@@ -616,7 +655,7 @@ class MoveGripper(_PointMotion):
         from .points import instance_matrix, point_poses, point_targets
 
         try:
-            base_in_cell = self.hold.transform(self.cell_frame, self.robot.base['frame'])
+            base_in_cell = self._base_in_cell()
         except LookupError as error:
             return SkillResult.failed(f'where is the robot? {error}')
         # a symmetric object (e.g. a frame lying the other way round) is grasped from the robot's side
@@ -692,7 +731,7 @@ class MoveGripper(_PointMotion):
         base_in_cell = None
         if st.frame == 'object':
             try:
-                base_in_cell = self.hold.transform(self.cell_frame, self.robot.base['frame'])
+                base_in_cell = self._base_in_cell()
             except LookupError as error:
                 return SkillResult.failed(f'where is the robot? {error}')
         chosen = hands if hands is not None else self._select(rule, point_poses(last, names), st.reference)

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Torso look-ahead over a hold (P6-10b):** a held move with `torso: auto` run by the task handler plans the torso
+  heights of the rest of the hold (to the grip that opens it) before it moves: keep the height while it works, fewest
+  changes, as late as possible (`torso_window` predicts the steps from the real hold and what `move` resolves of each,
+  `torso_plan` plans, `move.carry` keeps the plan for the later steps and re-plans when the state is not the planned
+  one: retry, jog, start mid-plan). Only a hold no height can serve is REJECTED before moving; a plan over its time
+  budget or check cap falls back to the per-step choice. New optional profile keys `ik.torso.lookahead` (`enabled`,
+  `budget_s`, `max_checks`, `torso_m`, `object_m`, `branch_rad`, `ride_sample_m`, `refine`): deploy before a profile
+  sets them. A torso ride while holding keeps the arms' joints when the URDF chains show the column carries the held
+  hands (no IK per sample: a cold frame_cycle plan 3-6 s instead of 16.5 s); a planned ride executes that way. `data.torso_plan`
+  in the result and in step_finished episodes (`EPISODE_DATA`); `planned: true` in `data.torso`. `ctx.step_id` on the
+  skill context.
+- **Predicted base poses in collision checks:** `IkClient.at_base` puts MoveIt's virtual joint into the validity
+  requests (`/check_state_validity` honours it; `/compute_ik` does not, measured: IK then runs without
+  `avoid_collisions` and the validity service checks the solution).
 - **A failed dry run (`args.dry_run: true`) no longer calls `skill.stop()`**: it moves nothing, and `stop()` of a skill acts on the whole instance, so it could stop a goal of the same skill running at the same time.
 - **step_finished episodes keep `carrying`, `kind` and `module`** (`EPISODE_DATA`); **`PlanStep.notes`** (`string[]`): the
   validation notes of the step (`Step.notes`). Rebuild `taskweave_interfaces`.

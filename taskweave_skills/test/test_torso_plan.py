@@ -378,17 +378,22 @@ def test_skill_checks_solve_one_height_walk_the_lines_and_end_where_the_lines_en
     ik = Ik(reach=lambda tool, target, h: 0.0 if h <= 0.35 else None)
     walked = []
 
-    def walk(legs, current, height):
+    def walk(legs, current, height, keep_arms=False):
+        assert keep_arms                                     # the plan walks its rides as they execute
         walked.append((len(legs), current['lift'], height))
         return ('leg 1: collision' if height < 0.1 else None), {**current, 'lift': height, 'left_j1': 0.7}
     skill = SimpleNamespace(ik=ik, _walk_lines=walk, _ahead_check=None, _state_at=None)
     checks = SkillChecks(skill)
     step = WindowStep('s2_s6', targets=[t.TOOLS], lines=[{'left': np.eye(4)}], hands=('left', 'right'))
     ok = checks.step(step, 0.3, t.now(0.3))
-    assert ok.ok and ok.state['left_j1'] == 0.7 and walked[-1] == (1, 0.3, 0.3) and searches[-1] is False
-    out = checks.step(step, 0.4, t.now(0.4))
+    assert ok.ok and ok.state['left_j1'] == 0.7 and walked[-1] == (1, 0.3, 0.3) and searches == []
+    assert checks.step(step, 0.4, t.now(0.4)).ok and searches == []          # a line walks: no IK of its goal
+    solved = WindowStep('s2_s6', targets=[t.TOOLS], hands=('left', 'right'))     # no line: IK of the goal
+    out = checks.step(solved, 0.4, t.now(0.4))
     assert not out.ok and not out.lasting and 'no IK solution' in out.reason     # local no-IK: the seeds decide
-    assert not checks.step(step, 0.4, t.now(0.4), rescue=True).ok and searches[-1] is True
+    assert not checks.step(solved, 0.4, t.now(0.4), rescue=True).ok and searches[-1] is True
+    count = len(searches)
+    assert checks.step(step, 0.4, t.now(0.4), rescue=True).ok and len(searches) == count   # a line: walked again
     line = checks.step(step, 0.0, t.now(0.0))
     assert not line.ok and not line.lasting and line.reason == 'line: leg 1: collision'
     assert checks.step(WindowStep('drive'), 0.3, t.now(0.3)).ok           # nothing to reach: the arms stay
@@ -398,7 +403,7 @@ def test_skill_checks_solve_one_height_walk_the_lines_and_end_where_the_lines_en
 
 
 def test_skill_checks_take_the_targets_of_a_step_with_lines_only():
-    """Review M1: the end of the last line ({tool: 4x4}) becomes the IK target."""
+    """Review M1: the end of the last line ({tool: 4x4}) becomes the IK target (the bound, a step without lines)."""
     t = _fake_ik()
     ik = t.FakeIk()
     seen = []
@@ -406,9 +411,10 @@ def test_skill_checks_take_the_targets_of_a_step_with_lines_only():
         solution={'left_j1': 0.1}, cost=0.0)
     goal = np.eye(4)
     goal[:3, 3] = [0.6, 0.2, 0.3]
-    skill = SimpleNamespace(ik=ik, _walk_lines=lambda legs, current, h: (None, None), _ahead_check=None)
-    check = SkillChecks(skill).step(WindowStep('set_down', lines=[{'left': goal}]), 0.3, t.now(0.3))
-    assert check.ok and seen[0][0]['left']['tcp'] == [0.6, 0.2, 0.3]
+    skill = SimpleNamespace(ik=ik, _walk_lines=lambda legs, current, h, keep_arms=False: (None, None),
+                            _ahead_check=None)
+    assert SkillChecks._targets(WindowStep('set_down', lines=[{'left': goal}]))[0]['left']['tcp'] == [0.6, 0.2, 0.3]
+    assert SkillChecks(skill).step(WindowStep('set_down', lines=[{'left': goal}]), 0.3, t.now(0.3)).ok and not seen
     assert SkillChecks(skill).bound(WindowStep('set_down', lines=[{'left': goal}]), 0.3) is None
 
 
@@ -419,11 +425,15 @@ def test_skill_checks_ride_in_samples_with_the_held_hands_following_on_local_ik(
     ik.tcps_at = lambda tools, state: {tool: np.eye(4) * state['lift'] for tool in tools}
     calls = []
 
-    def state_at(hands, current, height, poses=None, global_search=True):
+    def state_at(hands, current, height, poses=None, global_search=True, keep_arms=False):
+        assert keep_arms
         calls.append((round(current['lift'], 4), round(height, 4), round(float(poses['left'][0, 0]), 4),
                       global_search))
         return {**current, 'lift': height, 'left_j1': height}, None
+    assert SkillChecks(SimpleNamespace(ik=ik, _state_at=state_at)).ride_sample == pytest.approx(0.02)   # lookahead
+    ik.torso['lookahead'] = {'ride_sample_m': 0.5}
     assert SkillChecks(SimpleNamespace(ik=ik, _state_at=state_at)).ride_sample == pytest.approx(0.05)   # half a step
+    del ik.torso['lookahead']
     checks = SkillChecks(SimpleNamespace(ik=ik, _state_at=state_at), ride_sample_m=0.2)
     ride = checks.ride(WindowStep('set_down', hands=('left',)), t.now(0.7), 0.3)
     assert not ride.ok and ride.reason == 'collision at 0.500' and calls == [(0.7, 0.5, 0.7, False)]
@@ -439,7 +449,8 @@ def test_state_at_takes_predicted_poses_and_local_ik():
     from taskweave_skills.gripper_motion import MoveGripper
     solved = []
     ik = SimpleNamespace(torso={'joint': 'lift'}, joint_motion=lambda joint, state, h: np.eye(4),
-                         solve=lambda tools, fixed, **kw: solved.append((tools, kw)) or {'left_j1': 1.0})
+                         solve=lambda tools, fixed, **kw: solved.append((tools, kw)) or {'left_j1': 1.0},
+                         tcps_at=lambda tools, state: {})          # no chain: no proof the column carries the hand
 
     def live(hands):
         raise AssertionError('the live poses were read')
@@ -451,6 +462,47 @@ def test_state_at_takes_predicted_poses_and_local_ik():
                                            global_search=False)
     assert problem is None and state == {'lift': 0.3, 'left_j1': 1.0}
     assert solved[0][0]['left']['tcp'] == [0.5, 0.1, 0.2] and solved[0][1]['global_search'] is False
+
+
+def test_state_at_keeps_the_arms_when_the_column_carries_the_held_hands():
+    """Fix round 1 I3: a torso ride moves everything above the column; when the chains say the hands' FK at the new
+    height is the column's motion of their FK now, the arms keep their joints (no IK); else IK as before."""
+    pytest.importorskip('sensor_msgs')
+    from taskweave_skills.gripper_motion import MoveGripper
+
+    def lifted(h):
+        m = np.eye(4)
+        m[2, 3] = h
+        return m
+    solved = []
+    ik = SimpleNamespace(torso={'joint': 'lift'}, joint_motion=lambda joint, state, h: lifted(h - state['lift']),
+                         solve=lambda tools, fixed, **kw: solved.append(tools) or {'left_j1': 1.0},
+                         tcps_at=lambda tools, state: {t: lifted(state['lift'] + 0.2) for t in tools})
+    skill = SimpleNamespace(ik=ik, hold=SimpleNamespace(hand_holds={'left': 'box'}),
+                            p=SimpleNamespace(position_tolerance=1e-3))
+    state, problem = MoveGripper._state_at(skill, ['left'], {'lift': 0.7, 'left_j1': 0.4}, 0.3, poses={},
+                                           keep_arms=True)
+    assert problem is None and state == {'lift': 0.3, 'left_j1': 0.4} and solved == []
+    skill.hold.tcp_poses = lambda hands: {h: lifted(0.2) for h in hands}
+    state, _ = MoveGripper._state_at(skill, ['left'], {'lift': 0.7, 'left_j1': 0.4}, 0.3)    # the per-step path:
+    assert state['left_j1'] == 1.0 and len(solved) == 1                                     # IK, as on main
+    ik.tcps_at = lambda tools, state: {t: lifted(0.2) for t in tools}       # the hand does not ride: IK
+    state, _ = MoveGripper._state_at(skill, ['left'], {'lift': 0.7, 'left_j1': 0.4}, 0.3, keep_arms=True)
+    assert state['left_j1'] == 1.0 and len(solved) == 2
+
+
+def test_only_the_planned_paths_keep_the_arms_the_per_step_path_is_mains():
+    """Re-review N1: _walk_lines defaults to today's ride (IK), the per-step line samples verify with it, and only
+    the planned check (_walked) keeps the arms."""
+    pytest.importorskip('sensor_msgs')
+    from taskweave_skills.gripper_motion import MoveGripper
+    seen = []
+    skill = SimpleNamespace(_state_at=lambda hands, current, h, keep_arms=False: seen.append(keep_arms) or (None, 'x'),
+                            ik=SimpleNamespace(torso={'joint': 'lift'}))
+    MoveGripper._walk_lines(skill, [{'left': np.eye(4)}], {'lift': 0.5}, 0.3)
+    skill._walk_lines = lambda legs, current, h, keep_arms=False: seen.append(('walk', keep_arms)) or ('blocked', None)
+    MoveGripper._walked(skill, [{'left': np.eye(4)}], {'lift': 0.5}, 0.3, 'x')
+    assert seen == [False, ('walk', True)]
 
 
 def test_plan_rejects_nothing_on_an_empty_window():
@@ -527,3 +579,83 @@ def test_a_step_after_an_off_grid_pin_is_not_hopeless_while_the_pin_height_may_w
     out = Fake(works, bound=lambda i, h: 'out of reach' if i == 'x' else None)
     plan = TorsoPlan(GRID).plan(steps, LIVE, start(), out)
     assert not plan.ok and plan.certain                  # every height, the pin's too, out of reach: proven
+
+
+def test_a_pin_out_of_reach_exactly_is_not_hopeless_while_a_height_within_tolerance_of_it_works():
+    """Re-review 3 P1 (probe 6 E): x is pinned within tolerance of the start height; the pin itself is out of reach,
+    the start height is not, and a plan reaches x at it (a at 0.3, b back at the start height)."""
+    pin = round(LIVE + 0.0008, 6)
+    works = {'a': band((LIVE, LIVE), (0.3, 0.3)),
+             'b': lambda h, st: abs(h - 0.3) < 1e-6 or (abs(h - LIVE) < 1e-6 and ('a', 0.3) in st['trail']),
+             'x': band((LIVE, LIVE))}
+    bound = lambda i, h: 'out of reach: x' if i == 'x' and abs(h - pin) < 1e-6 else None   # noqa: E731
+    steps = [WindowStep('a'), WindowStep('b'), WindowStep('x', torso=pin)]
+    plan = TorsoPlan(GRID).plan(steps, LIVE, start(), Fake(works, lasting=False, bound=bound))
+    assert not plan.certain
+    assert plan.ok and plan.heights['x'] == LIVE, plan.message
+
+
+def test_skill_checks_put_a_step_where_its_base_stands_and_report_progress_and_seed_the_rescue_from_a_band():
+    """T2/T4: a step's predicted base reaches IkClient.at_base (world), progress is called per step check, and the
+    rescue starts IK from the arms of F17's remembered band for the same search."""
+    t = _fake_ik()
+    worlds, seeds = [], []
+
+    class Ik(t.FakeIk):
+        def check_height(self, samples, height, current, fixed=None, elbow=None, allow_flip=False,
+                         global_search=False, should_stop=lambda: False, hint=None):
+            worlds.append(self.world)
+            seeds.append(hint)
+            return SimpleNamespace(solution={'left_j1': 0.2}, cost=0.0)
+    ik = Ik(reach=lambda tool, target, h: 0.0)
+    skill = SimpleNamespace(ik=ik, _walk_lines=None, _ahead_check=None, _state_at=None)
+    seen = []
+    checks = SkillChecks(skill, world=lambda moved: ('world_joint', moved), progress=lambda step: seen.append(step.id))
+    moved = np.eye(4)
+    there = WindowStep('hook', targets=[t.TOOLS], base=moved)
+    assert checks.step(there, 0.3, t.now(0.3)).ok and worlds[-1] == ('world_joint', moved) and ik.world is None
+    assert checks.step(WindowStep('lift', targets=[t.TOOLS]), 0.3, t.now(0.3)).ok and worlds[-1] is None
+    assert seen == ['hook', 'lift']
+    key = ik._band_key(_band_samples(there), {}, None, False)
+    ik.bands[key] = (0.33, {'left_j1': 0.9})
+    assert checks.band(there) == (0.33, {'left_j1': 0.9})
+    checks.step(there, 0.3, t.now(0.3), rescue=True)
+    assert seeds[-1] == {'left_j1': 0.9} and seeds[-2] is None
+
+
+def _band_samples(step):
+    from taskweave_skills.ik import Samples
+    return Samples(step.targets)
+
+
+def test_refine_halves_toward_the_height_before_the_change_and_keeps_off_the_very_edge():
+    """F17's refine at a change step: c works up to 0.37 (0.3 planned, 0.4 out): 0.35 passes, 0.375 does not, so
+    one finest step of margin from it: 0.325."""
+    works = {'c': band((0.0, 0.37)), 'd': band((0.0, 0.7))}
+    steps = [WindowStep('c'), WindowStep('d')]
+    fake = Fake(works, lasting=False)
+    found = TorsoPlan(GRID).refine(steps, 0.3, start(LIVE), fake, LIVE, 2)
+    assert found[0] == 0.325 and set(found[1]) == {'c', 'd'} and ('c', LIVE, 0.35) in fake.ridden
+    stops = iter([False, False, True])
+    assert TorsoPlan(GRID).refine(steps, 0.3, start(LIVE), Fake(works, lasting=False), LIVE, 2,
+                                  lambda: next(stops, True)) is None       # cut short: the planned height
+    assert TorsoPlan(GRID).refine(steps, 0.3, start(LIVE), Fake({'c': band((0.0, 0.3)), 'd': works['d']}), LIVE,
+                                  2) is None                              # nothing between passes: keep 0.3
+    found = TorsoPlan(GRID).refine(steps, 0.3, start(LIVE), Fake({'c': band((0.0, 0.39)), 'd': works['d']}), LIVE, 3)
+    assert found[0] == 0.375                     # 0.3875 passes on the very edge (0.4 out): its inner 0.375
+    assert TorsoPlan(GRID).refine(steps, 0.3, start(LIVE), fake, LIVE, 0) is None
+
+
+def test_a_check_cut_short_by_a_stop_is_not_remembered():
+    """T4: the time budget runs out during a check (a ride, an IK call): the next plan must make it again."""
+    memory, stop = {}, {'now': False}
+
+    class Late(Fake):
+        def step(self, step, height, state, rescue=False):
+            stop['now'] = stop['now'] or step.id == 'b'       # the budget ends while b is checked
+            return super().step(step, height, state, rescue)
+    steps = [WindowStep('a', key='a'), WindowStep('b', key='b')]
+    works = {'a': band((0.0, 0.75)), 'b': band((0.0, 0.75))}
+    plan = TorsoPlan(GRID, memory=memory).plan(steps, LIVE, start(), Late(works), should_stop=lambda: stop['now'])
+    assert plan.outcome == 'stopped' and any('"a"' in key for key in memory)
+    assert not any('"b"' in key for key in memory)

@@ -56,10 +56,17 @@ controllers store such a configuration with every taught point; here the profile
 
 With the profile's ``ik.torso`` ({joint, candidates, weights: {torso, wrist}, wrist_joints, line_sample_m})
 ``solve_with_torso`` also chooses the torso height: see there.
+
+A predicted base pose (``at_base``: the torso look-ahead checks a later step where the robot will stand) goes into the
+collision checks as the value of MoveIt's virtual joint (``multi_dof_joint_state``), which /check_state_validity
+honours. /compute_ik does not (measured 3 Nov: it solves and collision checks at the live base pose whatever the request
+says), so while a base pose is set IK runs without ``avoid_collisions`` and every solution is checked with the validity
+service instead; the arm solution in the base frame does not depend on where the base stands.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import re
@@ -262,6 +269,8 @@ LINE_SAMPLE_M = default(ROBOT_PROFILE, 'ik', 'torso', 'line_sample_m')          
 
 
 class IkClient:
+    world = None    # at_base: (virtual joint, 4x4 its transform) of a predicted base pose, None: where the base is
+
     def __init__(self, node, robot, limits: dict | None = None):
         from moveit_msgs.srv import GetPositionIK  # only needed when the robot has an ik section
         from rclpy.callback_groups import ReentrantCallbackGroup
@@ -341,16 +350,42 @@ class IkClient:
                                                 callback_group=ReentrantCallbackGroup())
         return sorted(self.chains)
 
+    @contextlib.contextmanager
+    def at_base(self, world):
+        """IK and collision checks with the base at ``world`` ((virtual joint, 4x4 transform in MoveIt's model frame),
+        None: where it stands) inside the block (module doc)."""
+        before, self.world = self.world, world
+        try:
+            yield
+        finally:
+            self.world = before
+
+    def _with_world(self, state):
+        """``state`` (a RobotState message) with the predicted base pose of ``at_base`` set, if any."""
+        if self.world is not None:
+            from geometry_msgs.msg import Transform
+            from sensor_msgs.msg import MultiDOFJointState
+
+            joint, matrix = self.world
+            t = Transform()
+            t.translation.x, t.translation.y, t.translation.z = (float(v) for v in matrix[:3, 3])
+            w, x, y, z = quaternion(matrix[:3, :3])
+            t.rotation.w, t.rotation.x, t.rotation.y, t.rotation.z = w, x, y, z
+            state.multi_dof_joint_state = MultiDOFJointState(joint_names=[joint], transforms=[t])
+        return state
+
     def valid(self, joints: dict, group: str) -> bool:
-        """MoveIt's collision check of ``joints`` on top of its current state (True if the service is not there)."""
+        """MoveIt's collision check of ``joints`` on top of its current state (True if the service is not there), the
+        base where ``at_base`` puts it."""
         from moveit_msgs.msg import RobotState
         from moveit_msgs.srv import GetStateValidity
         from sensor_msgs.msg import JointState
 
         if not self.validity.wait_for_service(timeout_sec=1.0):
             return True
-        request = GetStateValidity.Request(group_name=self.validity_group or group, robot_state=RobotState(
-            joint_state=JointState(name=list(joints), position=[float(v) for v in joints.values()]), is_diff=True))
+        request = GetStateValidity.Request(group_name=self.validity_group or group, robot_state=self._with_world(
+            RobotState(joint_state=JointState(name=list(joints), position=[float(v) for v in joints.values()]),
+                       is_diff=True)))
         future = self.validity.call_async(request)
         deadline = time.monotonic() + 2.0
         while not future.done():
@@ -713,13 +748,15 @@ class IkClient:
         return best, found
 
     def check_height(self, samples, height: float, current: dict, fixed: dict | None = None, elbow=None,
-                     allow_flip: bool = False, global_search: bool = False, should_stop=lambda: False) -> TorsoChoice:
+                     allow_flip: bool = False, global_search: bool = False, should_stop=lambda: False,
+                     hint: dict | None = None) -> TorsoChoice:
         """One height of solve_with_torso, the torso already there (``current`` has it at ``height``): every sample
         solved, its state checked, ``samples.verify`` / ``ahead``; no torso cost. Raises TorsoError. As at the current
         height of the search, the explicit collision check is skipped when ``avoid_collisions`` is on (IK checked the
-        state it was given, idle arm included). torso_plan's step check; ``global_search``: its one-time rescue."""
+        state it was given, idle arm included). torso_plan's step check; ``global_search``: its one-time rescue;
+        ``hint``: arms IK starts from first (a remembered band's)."""
         return self._torso_height(samples, height, dict(fixed or {}), current, self.torso['joint'], height, 0.0,
-                                  should_stop, elbow, allow_flip, global_search=global_search)
+                                  should_stop, elbow, allow_flip, global_search=global_search, hint=hint)
 
     def _torso_height(self, samples, height, fixed, current, joint, now, weight, should_stop, elbow,
                       allow_flip, global_search=False, hint=None, global_only=False) -> TorsoChoice:
@@ -748,8 +785,8 @@ class IkClient:
             if k == 0:
                 main = (arm, {t for t, info in self.last.items() if info.get('flipped')}, self._arm_cost(arm, current))
             # staying at the current height moves no torso and no idle arm, and IK already rejects a solution in
-            # collision (avoid_collisions): no second check
-            stay = height == now and getattr(self, 'avoid_collisions', False)
+            # collision (avoid_collisions; not at a predicted base pose: at_base): no second check
+            stay = height == now and getattr(self, 'avoid_collisions', False) and self.world is None
             if not stay and not self._state_valid({joint: height, **self.idle_joints(tools, current), **arm},
                                                   next(iter(tools))):
                 raise TorsoError(f'{where}collision (idle arm included)')
@@ -825,7 +862,9 @@ class IkClient:
         side = elbow or (self.choose or {}).get('elbow')
         digits = 4      # live joint states jitter in the last digits: the same pose must give the same key
         near = {name: round(float(value), digits) for name, value in {**(current or {}), **fixed}.items()}
-        return json.dumps([tools, sorted(fixed), near, bool(allow_flip), side], sort_keys=True, default=float)
+        world = None if self.world is None else [self.world[0], np.round(self.world[1], digits).tolist()]
+        return json.dumps([tools, sorted(fixed), near, bool(allow_flip), side, world], sort_keys=True,
+                          default=float)
 
     def _remember(self, tools, fixed, current, allow_flip, elbow, arm) -> None:
         """Keep the solve() answer so the move that follows the torso search does not solve it again."""
@@ -1089,7 +1128,9 @@ class IkClient:
     def _request(self, tool: str, group: str, pose: np.ndarray, timeout_s: float):
         request = self.Request()
         ik = request.ik_request
-        ik.group_name, ik.ik_link_name, ik.avoid_collisions = group, self.tools[tool]['link'], self.avoid_collisions
+        # at a predicted base pose (at_base) the validity service checks collisions, not IK (module doc)
+        ik.group_name, ik.ik_link_name = group, self.tools[tool]['link']
+        ik.avoid_collisions = self.avoid_collisions and self.world is None
         ik.pose_stamped.header.frame_id = self.frame
         position = ik.pose_stamped.pose.position
         position.x, position.y, position.z = (float(v) for v in pose[:3, 3])
