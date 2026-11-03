@@ -1738,8 +1738,23 @@ function savedNote(key) {
 function confirmOverwrite(button, msg, label, text) {
   if (button._armed) { clearTimeout(button._armed); button._armed = null; button.classList.remove('confirm'); button.textContent = label; return false; }
   button.classList.add('confirm'); button.textContent = 'Tap again to overwrite';
+  button._shown = text;
   message(msg, text, 'warn');
-  button._armed = setTimeout(() => { button.classList.remove('confirm'); button.textContent = label; button._armed = null; }, 8000);
+  button._armed = setTimeout(() => {
+    button.classList.remove('confirm'); button.textContent = label; button._armed = null;
+    if (msg.classList.contains('warn') && msg.textContent === text) message(msg, '');
+  }, 8000);
+  return true;
+}
+// The two taps of an overwrite whose change is asked again at each tap (the robot may move in between): true when
+// this tap only shows it, the first time or because it is not the change shown at the first tap ("moved").
+function overwriteAsked(button, msg, label, text) {
+  if (button._armed && button._shown === text) { confirmOverwrite(button, msg, label, ''); return false; }
+  const moved = button._armed && text;
+  if (button._armed) confirmOverwrite(button, msg, label, '');  // disarm
+  if (!text) return false;
+  confirmOverwrite(button, msg, label, moved ? `Changed since the first tap. ${text}` : text);
+  button._shown = text;
   return true;
 }
 // old -> new of a base pose ({x, y, yaw} m, rad) for the confirm; '' when nothing changes
@@ -1927,16 +1942,28 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
     }
     const target = isNew ? [...address.slice(0, -1), newName] : address;
     const body = { x: values[0], y: values[1], yaw: values[2] / DEG };
-    const change = isNew ? '' : poseChange(pose, body);
-    if (change && confirmOverwrite(saveButton, msg, 'Save', `Overwrites ${name}: ${change}`
-      + (fromRobotRead ? ' (the teach node reads the pose again when it saves)' : ''))) return;
+    const where = at();
+    let change = isNew ? '' : poseChange(pose, body);
+    if (fromRobotRead && !isNew) {  // the node saves the robot's pose at Save: compare that one, asked at each tap
+      const { ok, data: preview } = await api('POST', `/api/points/${address.map(encodeURIComponent).join('/')}/preview`, { at: where });
+      change = !ok ? `cannot compare with the saved one (${(preview.problems || [preview.error || 'no answer']).join('; ')}): tap again to save anyway`
+        : preview.exists ? poseChange(preview.old, preview.new) : '';
+      if (ok) {  // the form shows what will be saved
+        xInput.value = preview.new.x; yInput.value = preview.new.y; yawInput.value = +(preview.new.yaw * DEG).toFixed(2);
+      }
+    }
+    if (overwriteAsked(saveButton, msg, 'Save', change ? `Overwrites ${name}: ${change}` : '')) return;
     if (!isNew && newName !== name) body.rename = newName;
     if (isNew) body.create = true;
-    const where = at();
     const key = target.slice(0, -1).concat(body.rename || target[target.length - 1]).join('/');
     if (fromRobotRead) {  // through the teach node: it reads the pose now, with its checks
       const { ok, data } = await api('POST', `/api/points/${target.map(encodeURIComponent).join('/')}/teach`,
         { at: where, create: body.create, rename: body.rename });
+      if (!ok && data.undo) {  // refused after a part was written (a rename): that part can be undone
+        noteSaved(key, `Not finished: ${(data.problems || []).join('; ')}`, data.undo);
+        await loadPoints();
+        return;
+      }
       if (!ok) { message(msg, (data.problems || [data.error || 'not taught']).join('\n'), true); return; }
       const distance = data.distance_m != null ? `, ${data.distance_m} m from the robot` : '';
       noteSaved(key, `Taught ${key.split('/').pop()}${data.at ? ` at ${data.at}${distance}` : ''}: ${data.message} → ${data.file}`, data.undo);

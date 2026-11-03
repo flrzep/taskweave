@@ -101,8 +101,9 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 
 - **Buttons** (`.btn`): secondary by default (field surface, strong border, text colour). `.primary`: brand fill,
   white text. `.danger`: red text and border on the card; `.danger.confirm` (the second press) is a solid red fill.
-  A Save or Capture that would overwrite a taught pose asks first: "Tap again to overwrite" on an amber fill
-  (`.btn.confirm`, 8 s), the change (mm, °) in a `.msg.warn` under it.
+  Save on an existing location or stance and Capture on an existing pose or point ask first: "Tap again to overwrite"
+  on an amber fill (`.btn.confirm`, 8 s), the change (mm, °) in a `.msg.warn` under it; the change is asked again at the
+  second tap and shown again instead of saving when it differs.
   `.danger.solid`: red fill from the first press, for a stop that needs no second tap (the manual skill's Abort).
   `.small`: `--tap-s` high, 14px. `.ghost`: a text link in brand colour. Hover darkens or tints, active moves down
   1px, disabled is 45% opacity. `.icon`: a square small button for ↑ ↓ ⧉ ✕; a step's ✕ asks first, as a solid red

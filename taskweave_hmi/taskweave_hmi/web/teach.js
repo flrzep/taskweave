@@ -122,21 +122,22 @@ function positionItem(p) {
   const url = `/api/teach/arm/${encodeURIComponent(p.scope)}/${encodeURIComponent(p.name)}`;
   capture.addEventListener('click', async () => {
     const body = { at: at(), instance_override: override.checked };
-    // the "at" choice or the override changed since the comparison: compare again
-    if (capture._armed && capture._for !== JSON.stringify(body)) confirmOverwrite(capture, msg, 'Capture from robot', '');
-    capture._for = JSON.stringify(body);
-    if (!capture._armed) {  // first tap: what it would change, then a second tap saves
-      busy(capture, 'Comparing the robot now with the saved one…');
-      const { ok, data: preview } = await api('POST', `${url}/preview`, body);
-      capture.disabled = false;
-      const where = preview.at ? ` at ${preview.at}` : '';
-      if (ok && !preview.exists) message(msg, '');  // nothing saved yet to overwrite
-      else if (confirmOverwrite(capture, msg, 'Capture from robot', ok ? `Overwrites ${p.name}${where}: ${changeText(preview)}`
-        : `Cannot compare with the saved one (${failText(preview, 'no answer')}). Tap again to overwrite anyway.`)) return;
-    } else confirmOverwrite(capture, msg, 'Capture from robot', '');
+    // what it would change, asked at each tap (the arm may move in between); a second tap on the same change saves
+    busy(capture, 'Comparing the robot now with the saved one…');
+    const { ok: compared, data: preview } = await api('POST', `${url}/preview`, body);
+    capture.disabled = false;
+    const where = preview.at ? ` at ${preview.at}` : '';
+    const change = !compared ? `Cannot compare with the saved one (${failText(preview, 'no answer')}). Tap again to overwrite anyway.`
+      : preview.exists ? `Overwrites ${p.name}${where}${body.instance_override ? ' (this one only)' : ''}: ${changeText(preview)}` : '';
+    if (overwriteAsked(capture, msg, 'Capture from robot', change)) return;
     busy(capture, 'Saving the robot\'s current arm…');
     const { ok, data: result } = await api('POST', `${url}/capture`, body);
     capture.disabled = false;
+    if (!ok && result.undo) {  // refused after the teach node saved (the grip): that save can be undone
+      noteSaved(`arm:${keyOf(p)}`, `Not finished: ${failText(result, 'not captured')}`, result.undo);
+      await loadArm();
+      return;
+    }
     if (!ok) { message(msg, failText(result, 'not captured'), true); return; }
     noteSaved(`arm:${keyOf(p)}`, takenText(p.name, result), result.undo);
     await loadArm();
@@ -345,7 +346,8 @@ function changeText(preview) {
 // it) and the teach node's answer.
 function takenText(name, result) {
   const where = result.at ? ` at ${result.at}${result.distance_m != null ? `, ${result.distance_m} m from the robot` : ''}` : '';
-  return `Taught ${name}${where}${result.message ? `: ${result.message}` : ''} → ${result.file}`;
+  const notes = (result.notes || []).map((note) => ` (${note})`).join('');
+  return `Taught ${name}${where}${result.message ? `: ${result.message}` : ''} → ${result.file}${notes}`;
 }
 
 // A pad teach press saved a position: show the new numbers.

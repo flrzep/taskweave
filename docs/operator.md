@@ -220,10 +220,13 @@ Every entry shows which missions use it; one that a mission uses cannot be renam
 edits the stored values, **Advanced** a hand target's elbow side, straight approach and finger opening. In a number field
 ↑ / ↓ (on a laptop also the small arrows at its right end) change a position by 1 mm and an angle by 1°, with Shift
 by 10 mm or 10°; decimals are written with a dot in every browser language (a typed comma becomes one). **Delete**
-needs a second tap. A **Save** or **Capture from robot** that would overwrite a taught pose first shows the change (how
-far each hand or the base moves and turns, each joint's change) and saves on a second tap. After a save, a line under
-the entry says what was saved, where, and offers **Undo**: it puts the files back as they were before that save, until
-they change again (another save, the pad, an editor). Saved values are used from the next move or mission start.
+needs a second tap. **Save** on an existing location or stance and **Capture from robot** on an existing pose or point
+first show the change (how far each hand or the base moves and turns, each joint's change; from the robot: where it is
+now, asked again at the second tap, which saves only if it still is) and save on a second tap. A typed **Save** of a
+pose, point or carry pose and the pad's teach press save at once, without that step. After any of these saves, a line
+under the entry says what was saved, where, and offers **Undo**: it puts the files back as they were before that save,
+until they change again (another save, the pad, an editor). The HMI keeps the last 20 saves, until it restarts. Saved
+values are used from the next move or mission start.
 
 While a move started here runs (**Drive here**, **Move here**, **Go here**, a carry pose's **Test**), a bar in the top
 bar shows what it goes to and for how long, on every tab. Its red **Abort** stops it at once with one press, as does
