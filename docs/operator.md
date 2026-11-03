@@ -88,8 +88,14 @@ means the task handler or skill servers are not running), and `taskweave status`
    there, with the robot and the objects as they are now. Tap it again to clear it. Use it to repeat the end of a
    mission after a fix, not as a shortcut through a mission whose first steps set things up.
 
+The **status board** at the top of the Run tab is the run in large type, readable from a few metres: the state
+(RUNNING, PAUSED, DONE, FAILED, ...), the step number out of the total, the step's instruction, and under it, while a step runs, how long it has run. An error shows under it; when the mission
+stopped, with the step it stopped at and how to go on. The strip at its foot shows the
+mission's phases (its included missions): done in green, the current one ringed. While a mission runs, the mission bar on the Run tab
+keeps only the state, Pause and Abort.
+
 The plan shows as a **Graph** (the steps and where a failure leads: retry, replan, skip, abort) or a **List**, each step
-with its outcome once it ran. The 3D view at the top of the Run tab shows the robot where the stack believes it is, in the cell
+with its outcome once it ran. The 3D view under the board shows the robot where the stack believes it is, in the cell
 with its fixtures, and the taught targets and objects. **Robot** frames the robot, **Cell** the whole cell,
 **Follow** keeps the camera on the robot as it drives, **Labels** shows the names (greyed out while nothing is taught).
 A note `no robot pose` means the stack has no position of the robot: the 3D view and every drive are off until it

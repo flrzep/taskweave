@@ -133,6 +133,7 @@ function argsText(args) { return Object.entries(args || {}).map(([k, v]) => `${k
 document.querySelectorAll('.tabs button').forEach((button) => button.addEventListener('click', () => {
   document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-selected', String(b === button)));
   document.querySelectorAll('.view').forEach((view) => show(view, view.id === `view-${button.dataset.view}`));
+  document.body.classList.toggle('on-run', button.dataset.view === 'run');  // the board shows the run: the bar keeps its controls
   if (button.dataset.view === 'missions') { if (state.editing) refreshCatalog(); else loadMissions(); }
   pointsVisible = button.dataset.view === 'points';
   robotVisible = button.dataset.view === 'robot';
@@ -201,6 +202,7 @@ function renderRun() {
   const outcomes = live ? snap.outcomes : {};
   const startIndex = plan && state.startStep ? plan.steps.findIndex((step) => step.id === state.startStep) : -1;
   if (startIndex < 0) state.startStep = null;  // another mission, or the step is gone
+  renderBoard(s, plan, outcomes, startIndex);
   $('btn-start').textContent = !active && startIndex >= 0 ? `Start at step ${startIndex + 1}` : 'Start';
   const pickable = !active && !!plan?.steps.length;
   show($('start-hint'), pickable);
@@ -283,6 +285,107 @@ function renderMission(s) {
   $('btn-start').disabled = active;
   return active;
 }
+// ---------- status board (Run tab) ----------
+// What the robot is doing, readable from a few metres: the state word, the mission and cycle, "16 / 26" big, the
+// step's instruction and under it the command, status and time; when it stopped, the error and how to go on; a strip
+// of the phases (the plan graph's bands) sized by their steps, done in green, the current one ringed.
+const BOARD_WORDS = { idle: 'idle', planning: 'planning', running: 'running', paused: 'paused', succeeded: 'done',
+  failed: 'failed', aborted: 'aborted' };
+const board = { phases: null, error: null };  // the phases' last arguments, the error text shown
+// graph.js (bandsOf) loads after this file: draw the phases once more when every script is there
+window.addEventListener('load', () => { if (board.phases) renderPhases(...board.phases); });
+// plan / outcomes: what the Run tab shows (the picked mission's preview while idle); the board shows the run itself
+// while one is active or has ended, the preview only before any run
+function renderBoard(s, shown, shownOutcomes, startIndex) {
+  const planning = s.state === 'running' && s.step_index === -1 && s.step_status === 'planning';
+  const word = planning ? 'planning' : s.state;
+  $('board').className = `card board state-${word}`;
+  $('board-state').textContent = BOARD_WORDS[word] || word;
+  const active = s.state === 'running' || s.state === 'paused';
+  const ended = ['succeeded', 'failed', 'aborted'].includes(s.state) && !!s.plan_id;
+  const run = active || ended;
+  const plan = run ? state.snapshot.plan : shown;
+  const outcomes = run ? state.snapshot.outcomes || {} : shownOutcomes;
+  const picked = $('mission-select').value;
+  const next = ended && picked && picked !== missionOf(plan) ? ` Next: ${picked}, Start in the bar above.` : '';
+  $('board-goal').textContent = run ? s.goal || '' : missionOf(plan) || '';
+  $('board-cycle').textContent = s.plan_id && (active || ended) ? `cycle ${s.cycle} · ${s.plan_id}` : '';
+  const total = plan?.steps.length || s.step_count || 0;
+  const at = s.step_index >= 0 ? s.step_index + 1 : null;
+  let count = '–', of = '', text = '', detail = '';
+  if (planning) {
+    of = `${s.step_count} steps`; text = 'Preparing the plan';
+    detail = 'The robot starts when the plan is ready.';
+  } else if (active && s.step) {
+    count = at ? String(at) : '–'; of = `/ ${total}`; text = s.step.instruction;
+    const label = s.step.skill === 'move' && s.step.kind ? moveLabel(s.step.kind) : s.step.skill;
+    detail = [label, s.state === 'paused' ? 'paused: Resume in the bar above' : s.step_status,
+      `${(s.step_elapsed_s ?? 0).toFixed(0)} s`, s.attempt > 1 ? `attempt ${s.attempt}` : ''].filter(Boolean).join(' · ');
+  } else if (active) {  // between steps (or a replan): no step in the status
+    count = at ? String(at) : '–'; of = total ? `/ ${total}` : '';
+    text = s.state === 'paused' ? 'Paused between steps' : 'Going on to the next step';
+    detail = s.state === 'paused' ? 'Resume in the bar above.' : s.step_status || '';
+  } else if (s.state === 'succeeded' && s.plan_id) {
+    count = String(total); of = `/ ${total}`; text = 'Finished';
+    detail = `Start runs it again.${next}`;
+  } else if ((s.state === 'failed' || s.state === 'aborted') && s.plan_id) {
+    // where it stopped: the status's step, else the last step that finished without success
+    const steps = plan?.steps || [];
+    const last = [...steps.keys()].reverse().find((i) => ['FAILED', 'REJECTED', 'CANCELED', 'TIMEOUT']
+      .includes(outcomes[steps[i].id]?.outcome));
+    const index = at ? at - 1 : last ?? -1;
+    count = index >= 0 ? String(index + 1) : '–'; of = total ? `/ ${total}` : '';
+    text = (s.step || steps[index])?.instruction || (s.state === 'aborted' ? 'Aborted' : 'The mission stopped');
+    detail = (s.state === 'aborted' ? 'Aborted by the operator.'
+      : index >= 0 ? `Failed at step ${index + 1}.` : 'The mission stopped.') + next;
+  } else if (plan?.steps.length) {
+    count = String(total); of = 'steps';
+    text = startIndex >= 0 ? `Ready to start at step ${startIndex + 1}` : 'Ready to start';
+    detail = startIndex >= 0 ? plan.steps[startIndex].instruction : 'Press Start in the bar above, or click a step in the plan to start there.';
+  } else {
+    text = 'No mission running'; detail = 'Pick a mission in the bar above and press Start.';
+  }
+  $('board-step').textContent = count;
+  $('board-total').textContent = of;
+  $('board-instruction').textContent = text;
+  $('board-instruction').title = text;
+  $('board-detail').textContent = detail;
+  // the last error, as the bar shows it off the Run tab (not after a success); how to go on once it stopped. Rewritten
+  // only when it changed, so a screen reader announces it once
+  const stopped = s.state === 'failed' || s.state === 'aborted';
+  const error = s.last_error && s.state !== 'succeeded' ? s.last_error : '';
+  const key = error ? `${stopped}|${error}` : '';
+  show($('board-error'), !!error);
+  if (key !== board.error) {
+    board.error = key;
+    $('board-error').replaceChildren(...(error ? [document.createTextNode(error), stopped ? el('small',
+      { text: 'To go on: click a step in the plan and press Start; the steps before it are left out.' }) : ''] : []));
+  }
+  board.phases = [s, plan, outcomes, active];
+  renderPhases(s, plan, outcomes, active);
+}
+// the phases: the plan graph's bands (graph.js bandsOf, from each step's origin); one band: none shown
+function renderPhases(s, plan, outcomes, active) {
+  const list = $('board-phases');
+  const bands = plan?.steps.length && typeof bandsOf === 'function'
+    ? bandsOf(plan, typeof missionCache === 'object' ? missionCache[missionOf(plan)] : null) : [];
+  show(list, bands.length > 1);
+  if (bands.length < 2) { list.replaceChildren(); return; }
+  list.replaceChildren(...bands.map((band) => {
+    const done = band.steps.filter((i) => outcomes[plan.steps[i].id]?.event === 'step_finished').length;
+    const now = active && band.steps.includes(s.step_index);
+    const failed = band.steps.some((i) => ['FAILED', 'REJECTED'].includes(outcomes[plan.steps[i].id]?.outcome));
+    const item = el('li', { class: `${now ? 'now' : ''}${failed ? ' failed' : ''}`,
+      'aria-label': `${band.name}: ${done} of ${band.steps.length} steps done${now ? ', running' : ''}` },
+    el('div', { class: 'ph-bar' }, el('i')), el('div', { class: 'name' }, el('span', { text: band.name }),
+      el('b', { text: `${done}/${band.steps.length}` })));
+    item.style.setProperty('--steps', band.steps.length);
+    item.style.setProperty('--done', `${(done / band.steps.length) * 100}%`);
+    item.title = `${band.name} · ${done}/${band.steps.length}`;
+    return item;
+  }));
+}
+
 $('last-error-close').addEventListener('click', () => { missionUi.dismissed = $('last-error-text').textContent; show($('last-error'), false); });
 
 // ---------- run controls ----------

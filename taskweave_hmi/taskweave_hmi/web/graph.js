@@ -338,7 +338,8 @@ function rail(bands, ctx, end) {
     });
     return node;
   };
-  const sheet = view.selected ? ctx.focus : ctx.states.findIndex(isLive);
+  // the sheet for a step the operator picked; the running step is on the status board above (app.js renderBoard)
+  const sheet = view.selected ? ctx.focus : -1;
   return div(`pg-rail${sheet >= 0 ? ' with-sheet' : ''}`,
     ...bands.map((band, b) => section(band, 0, b === 0 ? ctx.cycleNote : '')),
     end ? el('div', { class: 'pg-end', text: end }) : '',
