@@ -44,24 +44,28 @@ def test_step_events_are_numbered_and_read_since_a_number():
 
 def test_a_run_marks_where_its_step_events_begin_and_resume_is_not_a_new_run():
     from taskweave_hmi.server import STATES
-    from taskweave_interfaces.msg import TaskStatus
+    from taskweave_interfaces.msg import Plan, TaskStatus
 
     bridge = bridge_with()
     bridge.events, bridge.event_seq, bridge.outcomes, bridge.recorder = deque(maxlen=50), 0, {}, None
-    bridge.status = {'state': 'idle'}
+    bridge.status, bridge.plan, bridge.run_from_seq, bridge.run_from_next = {'state': 'idle'}, None, 0, None
     state = lambda name: TaskStatus(state=STATES.index(name))   # noqa: E731
     step = lambda: bridge._episode(type('Msg', (), {'data': json.dumps({'event': 'step_finished', 'step_id': 's1'})}))  # noqa: E731
-    bridge._status(state('running'))
-    assert bridge.status['run_from_seq'] == 0
+    plan = lambda: bridge._plan(Plan(plan_id='cycle-0001'))       # noqa: E731
+    bridge._status(state('running')), plan()
+    assert bridge.plan['run_from_seq'] == 0
     step(), step()
     bridge._status(state('paused')), bridge._status(state('running'))   # Resume: the same run
-    assert bridge.status['run_from_seq'] == 0
+    plan()                                                                # a replan: the same run
+    assert bridge.plan['run_from_seq'] == 0
     bridge._status(state('failed'))
-    bridge._status(state('running'))                                      # started again: a new run
-    assert bridge.status['run_from_seq'] == 2
-    step()
-    bridge._status(state('running'))
-    assert bridge.status['run_from_seq'] == 2
+    bridge._status(state('running')), bridge._status(state('failed'))   # refused while planning: no plan came
+    plan()
+    assert bridge.plan['run_from_seq'] == 0
+    bridge._status(state('running')), plan()                             # started again: a new run
+    assert bridge.plan['run_from_seq'] == 2
+    step(), plan()
+    assert bridge.plan['run_from_seq'] == 2
 
 
 def test_a_manual_skill_waits_on_work_time_and_is_given_up_when_its_server_is_gone():

@@ -138,14 +138,15 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   the next start). From 601 to 1000px: badge, step n/N, Speed, Pause, Abort in one row, the instruction under it, no
   goal; the pad mode shows only while it jogs an arm (also on a phone). On a phone: badge, step n/N, the speed and the
   connection in one row, the instruction and progress under it, then Pause and Abort side by side, full width; idle:
-  badge, speed, then picker and Start. A pad press's answer is a line in the bar for a while (`.pad-notice`, in the
-  flow: it never covers the manual skill strip).
+  badge, speed, then picker and Start. A pad press's answer is a toast at the page's foot for a while (`.pad-notice`,
+  fixed, taps pass through; above the bottom nav on a phone), so the bar keeps its height. On a phone the sticky top is
+  at most 70% of the screen high and scrolls inside.
 - **Run workspace** (`.run-grid`, Run tab): up to 1179px one column, board, 3D view, plan, recent steps. From 1180px
   two columns, 7 : 5 with 20px gaps and the page up to 1600px wide: the board over the plan at the left, the 3D view
   (16 : 11) over the recent steps at the right, sticky under the top (`--top-h`, the top's measured height) and never
   taller than the window (it scrolls on its own on a short screen).
-- **Recent steps** (`.recent`): the last six finished steps of this run (after `status.run_from_seq`: a restart of the
-  same mission is a new run), newest first, one row each: a mark (✓ in `--done`, ↻ in `--warn` for a step tried again,
+- **Recent steps** (`.recent`): the last six finished steps of this run (after `plan.run_from_seq`, set when a run's
+  plan arrives: a restart of the same mission is a new run, a start refused while planning is none), newest first, one row each: a mark (✓ in `--done`, ↻ in `--warn` for a step tried again,
   ! in `--warn` when canceled, else in `--bad`; its meaning as hidden text), the instruction with the
   command and message in muted 13px under it, and the time on the run's clock in muted monospace.
 - **Status board** (`.board`, Run tab): the andon panel of the run, read from a few metres. A 10px rail in the state

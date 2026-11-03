@@ -259,7 +259,7 @@ function renderRun() {
 }
 
 // The Run tab's recent steps: the last RECENT finished steps of the run shown, newest first: the step events of the
-// last plan after the run's start (status.run_from_seq: a restart of the same mission has the same plan id). A
+// last plan after the run's start (plan.run_from_seq: a restart of the same mission has the same plan id). A
 // neutral check for a success, ! red for a failure, amber ! for one canceled (Abort, Pause), ↻ amber for a retry (a
 // step that ended without success and started again in this run), the instruction with the command and its message,
 // and the time on the run's clock. Rebuilt only when its rows change.
@@ -267,7 +267,7 @@ const RECENT = 6;
 let recentKey = '';
 function renderRecent(snap) {
   const plan = snap.plan?.plan_id;
-  const from = snap.status?.run_from_seq ?? 0;
+  const from = snap.plan?.run_from_seq ?? 0;
   const run = snap.events.filter((e) => e.plan_id === plan && e.seq > from);
   const finished = run.filter((e) => e.event === 'step_finished').slice(-RECENT).reverse();
   const key = `${plan}|${from}|${finished.map((e) => e.seq).join(',')}|${run.at(-1)?.seq ?? ''}`;
@@ -670,9 +670,11 @@ function dropDirty(node, next) {
     dropping.timer = setTimeout(() => { dropping.node = null; dropNote(''); }, 3000);
     return;
   }
-  clearTimeout(dropping.timer); dropping.node = null; dropNote('');
+  clearDrop();
+  if (state.dirty) { state.dirty = false; show($('editor-dirty'), false); }  // dropped: a third tap does not ask again
   next();
 }
+function clearDrop() { clearTimeout(dropping.timer); dropping.node = null; dropNote(''); }
 function pickMission(item, name) {
   if (state.editing?.name === name) return;
   dropDirty(item, () => openEditor(name));
@@ -686,6 +688,7 @@ function filterMissions() {
 $('mission-search').addEventListener('input', filterMissions);
 // the list or the editor (narrow) / both (wide): .editing on the view; nothing open: the empty side says what to do
 function showEditor(open) {
+  clearDrop();  // a question left from the mission before is gone with it
   const had = $('view-missions').contains(document.activeElement);
   show($('editor'), open);
   show($('editor-empty'), !open);
@@ -1733,6 +1736,7 @@ $('btn-save').addEventListener('click', async () => {
   showProblems([]);
   state.dirty = false; show($('editor-dirty'), false);
   $('mission-search').value = '';  // the saved mission is in the list, whatever was searched
+  clearDrop();
   state.editing = { ...state.editing, name, isNew: false };
   show($('btn-delete'), true);
   // the plan graph reads its band names again

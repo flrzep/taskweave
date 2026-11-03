@@ -327,7 +327,8 @@ class Bridge(Node):
         self.outcomes: dict[str, dict] = {}   # step id -> latest step event for the current plan and cycle
         self.events: deque = deque(maxlen=200)
         self.event_seq = 0
-        self.run_from_seq = 0  # the last step event before the run shown began (_status)
+        self.run_from_seq = 0      # the last step event before the run shown began (_plan)
+        self.run_from_next = None  # where a run that turned running begins, until its plan arrives (_status)
         self.listeners: list[queue.Queue] = []
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(TaskStatus, names.STATUS, self._status, latched, callback_group=self.group)
@@ -415,15 +416,16 @@ class Bridge(Node):
                     listener.put_nowait(None)
 
     def _status(self, msg: TaskStatus) -> None:
-        """The task handler's status; ``run_from_seq`` added: the last step event before the run shown began (a run
-        begins when the state turns running from idle or an end, not on Resume), so the browser can tell this run's step
-        events from an earlier run of the same mission (plan ids start again at -0001 on each start)."""
+        """The task handler's status. A run begins when the state turns running from idle or an end (not on Resume):
+        where its step events will begin is kept for its plan (_plan), so a start refused while planning leaves the
+        plan shown and its run as they were."""
         status = status_dict(msg)
         with self.lock:
             before = (self.status or {}).get('state')
             if status['state'] in ACTIVE and before not in ACTIVE:
-                self.run_from_seq = self.event_seq
-            status['run_from_seq'] = getattr(self, 'run_from_seq', 0)
+                self.run_from_next = self.event_seq
+            elif status['state'] not in ACTIVE:
+                self.run_from_next = None   # it ended (or was refused) before a plan came
             self.status = status
         self._broadcast('status', status)
 
@@ -433,6 +435,12 @@ class Bridge(Node):
         with self.lock:
             if self.plan is None or self.plan['plan_id'] != plan['plan_id']:
                 self.outcomes = {}
+            # ``run_from_seq``: the last step event before this plan's run began, so the browser can tell this run's
+            # events from an earlier run of the same mission (plan ids start again at -0001 on each start); a new
+            # plan within a run (a replan) keeps it
+            if getattr(self, 'run_from_next', None) is not None:
+                self.run_from_seq, self.run_from_next = self.run_from_next, None
+            plan['run_from_seq'] = getattr(self, 'run_from_seq', 0)
             self.plan = plan
         self._broadcast('plan', plan)
 
