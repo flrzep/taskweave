@@ -195,27 +195,7 @@ function renderRun() {
   const pad = snap.pad_mode || 'drive';  // the PS4 pad: drives the base, or jogs one arm's TCP
   $('pad-mode').textContent = pad === 'drive' ? 'pad: drive' : `pad: ${pad} arm`;
   $('pad-mode').className = `chip pad ${pad === 'drive' ? '' : 'jog'}`;
-  $('state').textContent = s.state;
-  $('state').className = `chip ${s.state}`;
-  $('goal').textContent = s.goal || 'No mission running';
-  $('cycle').textContent = s.plan_id ? `${s.plan_id} · cycle ${s.cycle}` : '';
-  const active = s.state === 'running' || s.state === 'paused';
-  // the task handler prepares the plan: running, no step yet, step_status 'planning'
-  const planning = s.state === 'running' && s.step_index === -1 && s.step_status === 'planning';
-  if (planning) $('state').textContent = 'planning';
-  if (planning) $('cycle').textContent = `${s.plan_id} · planning ${s.step_count} step${s.step_count === 1 ? '' : 's'}…`;
-  show($('current'), active && !!s.step);
-  if (s.step) {
-    $('step-meta').textContent = `step ${s.step_index + 1}/${s.step_count} · ${s.step.skill} · attempt ${s.attempt}`;
-    $('step-instruction').textContent = s.step.instruction;
-    $('progress-bar').style.width = `${Math.max(0, Math.min(1, s.step_progress)) * 100}%`;
-    $('step-detail').textContent = `${s.step_status || ''} · ${s.step_elapsed_s.toFixed(1)} s`;
-  }
-  message($('last-error'), s.last_error && s.state !== 'succeeded' ? s.last_error : '', true);
-  $('btn-pause').disabled = !active;
-  $('btn-pause').textContent = s.state === 'paused' ? 'Resume' : 'Pause';
-  $('btn-abort').disabled = !active;
-  $('btn-start').disabled = active;
+  const active = renderMission(s);
   const { plan, live } = shownPlan();
   const outcomes = live ? snap.outcomes : {};
   const startIndex = plan && state.startStep ? plan.steps.findIndex((step) => step.id === state.startStep) : -1;
@@ -260,6 +240,50 @@ function renderRun() {
   })));
 }
 
+// ---------- mission bar ----------
+// In the sticky top bar, on every tab. While a mission is active (running, planning, paused): the state badge, the
+// goal, "step n/N" with the step's instruction (one line, ellipsis), a thin progress bar of the step, Pause / Resume
+// and Abort (two taps). Idle (also after the end of one): the badge, the mission picker and Start. Under the bar,
+// Start's answer (while idle) and the last error: it follows the status as before (gone on success, on the next
+// failure a new one), and ✕ hides that error until another comes.
+const missionUi = { dismissed: null };
+function renderMission(s) {
+  const active = s.state === 'running' || s.state === 'paused';
+  // the task handler prepares the plan: running, no step yet, step_status 'planning'
+  const planning = s.state === 'running' && s.step_index === -1 && s.step_status === 'planning';
+  $('state').textContent = planning ? 'planning' : s.state;
+  $('state').className = `chip ${s.state}`;
+  $('mission').classList.toggle('active', active);
+  show($('mission-run'), active);
+  show($('mission-controls'), active);
+  show($('mission-start'), !active);
+  $('goal').textContent = s.goal || 'No mission running';
+  $('goal').title = $('goal').textContent;
+  $('cycle').textContent = s.plan_id ? `${s.plan_id} · cycle ${s.cycle}` : '';
+  show($('current'), active && !!s.step);
+  if (planning) {
+    $('step-meta').textContent = ''; $('step-detail').textContent = '';  // in the instruction's place: a phone shows it
+    $('step-instruction').textContent = `planning ${s.step_count} step${s.step_count === 1 ? '' : 's'}…`;
+  } else if (s.step) {
+    $('step-meta').textContent = `step ${s.step_index + 1}/${s.step_count}`;
+    $('step-instruction').textContent = s.step.instruction;
+    $('progress-bar').style.width = `${Math.max(0, Math.min(1, s.step_progress)) * 100}%`;
+    $('step-detail').textContent = `${s.step.skill} · ${s.step_status || ''} · ${s.step_elapsed_s.toFixed(1)} s`
+      + `${s.attempt > 1 ? ` · attempt ${s.attempt}` : ''}`;
+  }
+  $('step-instruction').title = $('step-instruction').textContent;  // all of it, where the bar cuts it
+  if (active) message($('start-msg'), '');  // its answer has been seen: the bar shows the run now
+  const error = s.last_error && s.state !== 'succeeded' ? s.last_error : '';
+  $('last-error-text').textContent = error;
+  show($('last-error'), !!error && error !== missionUi.dismissed);
+  $('btn-pause').disabled = !active;
+  $('btn-pause').textContent = s.state === 'paused' ? 'Resume' : 'Pause';
+  $('btn-abort').disabled = !active;
+  $('btn-start').disabled = active;
+  return active;
+}
+$('last-error-close').addEventListener('click', () => { missionUi.dismissed = $('last-error-text').textContent; show($('last-error'), false); });
+
 // ---------- run controls ----------
 $('btn-pause').addEventListener('click', async () => {
   await api('POST', state.snapshot?.status.state === 'paused' ? '/api/resume' : '/api/pause');
@@ -280,7 +304,7 @@ $('btn-start').addEventListener('click', async () => {
   if (!mission) return;
   const startStep = state.startStep;
   const { ok, data } = await api('POST', '/api/start', startStep ? { mission, start_step: startStep } : { mission });
-  if (ok) state.startStep = null;
+  if (ok) { state.startStep = null; missionUi.dismissed = null; }
   message($('start-msg'), ok ? `Started ${data.plan_id}${startStep ? ` at ${startStep}` : ''}`
     : (data.message || data.error || 'not started'), !ok);
 });
@@ -366,7 +390,7 @@ $('speed-test').addEventListener('click', () => setSpeed({ test_mode: !speedNow(
 // A skill started from here outside a mission (Drive here, Move here, Go here, a carry pose's Test) shows in the top
 // bar while it runs, on every tab, with Abort: one press, no second tap (stopping is the safe direction), and Escape
 // does the same unless a text field has the focus. The seconds count on the browser's clock from the server's
-// elapsed_s, so the two clocks need not agree. Missions keep their own Abort (two taps, Run tab).
+// elapsed_s, so the two clocks need not agree. Missions keep their own Abort (two taps, mission bar).
 const manualUi = { since: null, start: 0, timer: null };
 function manualText() {
   const m = state.snapshot?.manual;

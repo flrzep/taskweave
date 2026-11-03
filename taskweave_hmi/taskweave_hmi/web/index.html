@@ -24,6 +24,31 @@
   <span id="conn" class="conn" title="live connection"></span>
 </header>
 
+<!-- the mission, on every tab. Running (also planning, paused): its state, goal, step and the step's progress, with
+     Pause and Abort (two taps); idle: the mission picker and Start. Start's answer and the last error under it -->
+<div id="mission" class="mission" role="group" aria-label="Mission">
+  <div class="mission-row">
+    <span id="state" class="chip">idle</span>
+    <div id="mission-run" class="mission-run" hidden>
+      <div class="mission-goal"><b id="goal">No mission running</b><span id="cycle" class="muted mono"></span></div>
+      <span id="step-meta" class="mission-meta"></span>
+      <span class="mission-step"><span id="step-instruction"></span><span id="step-detail" class="muted mono"></span></span>
+      <div id="current" class="progress" hidden><div id="progress-bar"></div></div>
+    </div>
+    <div id="mission-start" class="mission-start">
+      <select id="mission-select" aria-label="Mission to start"></select>
+      <button id="btn-start" class="btn small primary">Start</button>
+    </div>
+    <div id="mission-controls" class="mission-controls" hidden>
+      <button id="btn-pause" class="btn small" disabled>Pause</button>
+      <button id="btn-abort" class="btn small danger" disabled>Abort</button>
+    </div>
+  </div>
+  <div id="start-msg" class="msg" hidden></div>
+  <div id="last-error" class="error" hidden><span id="last-error-text"></span><button id="last-error-close" class="icon"
+    aria-label="Dismiss this error" title="Dismiss (it shows again on a new error)">✕</button></div>
+</div>
+
 <!-- global speed override: in the sticky top bar, so it is in reach on every tab and while a mission runs -->
 <div id="speed" class="speed off" role="group" aria-label="Speed override">
   <div class="speed-read"><span class="sub">Speed</span><output id="speed-value" class="speed-value" aria-live="polite">–</output></div>
@@ -57,32 +82,7 @@
 <main>
   <!-- RUN -->
   <section id="view-run" class="view">
-    <div class="card status">
-      <div class="row between"><span id="state" class="chip">idle</span><span id="cycle" class="muted mono"></span></div>
-      <h2 id="goal">No mission running</h2>
-      <div id="current" class="current" hidden>
-        <div class="muted mono" id="step-meta"></div>
-        <div id="step-instruction" class="instruction"></div>
-        <div class="progress"><div id="progress-bar"></div></div>
-        <div class="muted mono" id="step-detail"></div>
-      </div>
-      <div id="last-error" class="error" hidden></div>
-      <div class="row gap">
-        <button id="btn-pause" class="btn" disabled>Pause</button>
-        <button id="btn-abort" class="btn danger" disabled>Abort</button>
-      </div>
-    </div>
-
     <div id="viewer3d-run" class="viewer3d" role="region" aria-label="3D view: the robot live in its cell"></div>
-
-    <div class="card">
-      <label for="mission-select" class="label">Start a mission</label>
-      <div class="row gap">
-        <select id="mission-select"></select>
-        <button id="btn-start" class="btn primary">Start</button>
-      </div>
-      <div id="start-msg" class="msg" hidden></div>
-    </div>
 
     <div class="card">
       <div class="row between"><div class="label">Plan</div>

@@ -74,7 +74,58 @@ button, input, select, textarea { font-family: inherit; }
         box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); }
 .conn.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
 
-/* speed override: a strip between header and tabs, the value big; amber while test mode caps it, greyed out without
+/* mission bar: the mission on every tab, below the header. The andon look of the old status card made compact: a rail
+   and a solid badge in the state colour (paused: a striped rail), a light tint while a mission is active. Active:
+   badge, goal over "step n/N" and the instruction (one line each, ellipsis) over a thin progress bar of the step, and
+   Pause / Abort; idle: badge, picker, Start. On a phone: badge, step n/N, Pause, Abort in one row, the instruction
+   under it, no goal; idle: badge, picker, Start */
+.mission { --state: var(--idle); position: relative; display: grid; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4) var(--sp-2) calc(var(--sp-4) + 4px);
+           border-bottom: 1px solid var(--border); transition: background .4s; }
+.mission::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--state); transition: background .4s; }
+.mission:has(#state.running) { --state: var(--brand); }
+.mission:has(#state.paused) { --state: var(--warn); }
+.mission:has(#state.paused)::before { background: repeating-linear-gradient(-45deg, var(--warn) 0 6px,
+                                      color-mix(in srgb, var(--warn) 35%, var(--surface-card)) 6px 12px); }
+.mission:has(#state.succeeded) { --state: var(--ok); }
+.mission:has(#state.failed), .mission:has(#state.aborted) { --state: var(--bad); }
+.mission.active { background: color-mix(in srgb, var(--state) 5%, var(--surface-card)); }
+.mission-row { display: grid; align-items: center; justify-content: start; gap: var(--sp-1) var(--sp-3);
+               grid-template-columns: auto minmax(0, 520px) auto; grid-template-areas: "state pick start"; }
+.mission.active .mission-row { justify-content: stretch; grid-template-columns: auto auto minmax(0, 1fr) auto;
+                               grid-template-areas: "state goal goal ctrl" "state meta step ctrl" "state prog prog ctrl"; }
+.mission .chip { grid-area: state; justify-content: center; min-width: 9.5ch; font: 700 var(--fs-s)/1 var(--cond); text-transform: uppercase;
+                 letter-spacing: .07em; padding: 7px 10px; border-radius: var(--r-s); background: var(--fill); color: var(--ink); }
+.mission .chip::before { display: none; }
+.mission-run, .mission-start { display: contents; }
+.mission-goal { grid-area: goal; display: flex; align-items: baseline; gap: var(--sp-3); min-width: 0; }
+.mission-goal b { font: 600 var(--fs-md)/1.25 var(--cond); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mission-goal .mono { margin-left: auto; flex: none; white-space: nowrap; }
+.mission-meta { grid-area: meta; font: 600 var(--fs-base) var(--cond); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mission-step { grid-area: step; display: flex; align-items: baseline; gap: var(--sp-3); min-width: 0; }
+#step-instruction { flex: 0 1 auto; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#step-detail { flex: none; margin-left: auto; white-space: nowrap; }
+.mission .progress { grid-area: prog; height: 4px; margin-top: 2px; }
+#mission-select { grid-area: pick; min-height: var(--tap-s); padding-block: 4px; }
+#btn-start { grid-area: start; }
+.mission-controls { grid-area: ctrl; display: flex; gap: var(--sp-2); }
+.mission.active #start-msg { display: none; }  /* Start's answer is for idle; it can arrive after the run's status */
+.mission .msg, .mission .error { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); }
+.mission .error { display: flex; align-items: flex-start; gap: var(--sp-2); }
+#last-error-text { flex: 1; min-width: 0; align-self: center; }
+#last-error-close { width: 28px; height: 28px; border: 0; background: none; color: var(--text-muted); }
+@media (max-width: 600px) {
+  .mission { padding: var(--sp-2) var(--sp-3) var(--sp-2) calc(var(--sp-3) + 4px); }
+  .mission.active .mission-row { grid-template-columns: auto minmax(0, 1fr) auto;
+                                 grid-template-areas: "state meta ctrl" "step step step" "prog prog prog"; }
+  .mission-goal, #step-detail { display: none; }
+  .mission .chip { min-width: 0; }
+  .mission-controls .btn { padding: 0 var(--sp-3); white-space: normal; line-height: 1.15; max-width: 7.5em; }  /* "Tap again to abort" in two lines */
+}
+@media (pointer: coarse), (max-width: 600px) {  /* the ✕ grows to a touch target into the message's padding */
+  #last-error-close { width: var(--tap-min); height: var(--tap-min); margin: calc(-1 * var(--sp-2)) calc(-1 * var(--sp-3)) calc(-1 * var(--sp-2)) 0; }
+}
+
+/* speed override: a strip between mission bar and tabs, the value big; amber while test mode caps it, greyed out without
    the task handler. On a phone: value and presets, then the slider and test mode */
 .speed { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); padding: var(--sp-2) var(--sp-4);
          border-bottom: 1px solid var(--border); }
@@ -156,12 +207,9 @@ h2 { margin: 0; font: 600 var(--fs-xl)/1.2 var(--sans); letter-spacing: -.01em; 
 .card.status { --state: var(--idle); position: relative; padding-left: calc(var(--sp-4) + 10px); overflow: hidden; gap: var(--sp-4);
                background: color-mix(in srgb, var(--state) 5%, var(--surface-card)); transition: background .4s; }
 .card.status::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 10px; background: var(--state); transition: background .4s; }
-.card.status:has(#state.running), .card.status.rec-live:has(#rec-state.running) { --state: var(--brand); }
-.card.status:has(#state.paused) { --state: var(--warn); }
-.card.status:has(#state.paused)::before { background: repeating-linear-gradient(-45deg, var(--warn) 0 8px,
-                                          color-mix(in srgb, var(--warn) 35%, var(--surface-card)) 8px 16px); }
-.card.status:has(#state.succeeded), .card.status.rec-live:has(#rec-state.succeeded) { --state: var(--ok); }
-.card.status:has(#state.failed), .card.status:has(#state.aborted), .card.status.rec-live:has(#rec-state.failed) { --state: var(--bad); }
+.card.status.rec-live:has(#rec-state.running) { --state: var(--brand); }
+.card.status.rec-live:has(#rec-state.succeeded) { --state: var(--ok); }
+.card.status.rec-live:has(#rec-state.failed) { --state: var(--bad); }
 .card.status .chip { font: 700 var(--fs-md)/1 var(--cond); text-transform: uppercase; letter-spacing: .07em; padding: 8px 14px;
                      border-radius: var(--r-s); background: var(--fill); color: var(--ink); }
 .card.status .chip::before { display: none; }
@@ -489,6 +537,6 @@ li.empty { list-style: none; padding: 6px 2px; }
   .tabs button { padding: 0 var(--sp-2); text-transform: none; letter-spacing: 0; }  /* all six tabs fit at 360px */
 }
 @media (prefers-reduced-motion: reduce) {
-  #progress-bar, .card.status, .card.status::before { transition: none; }
+  #progress-bar, .card.status, .card.status::before, .mission, .mission::before { transition: none; }
   .plan-graph .state-running .node-box { animation: none; }
 }

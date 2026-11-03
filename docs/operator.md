@@ -76,19 +76,20 @@ why): teach and edit between runs.
 Check first that the stack is up: `taskweave skills` lists the skills of the running system (an error or an empty list
 means the task handler or skill servers are not running), and `taskweave status` shows `[idle]`.
 
-### From the HMI: the Run tab
+### From the HMI: the mission bar and the Run tab
 
-1. Pick the mission under **Start a mission** and press **Start**. The answer appears under it: `Started <plan id>`, or
-   why it was refused (the same reasons as `rejected: ...` below).
-2. **Pause** stops the robot where it is; the same button then reads **Resume**. **Abort** ends the mission. Both work
-   like the commands below. A pad can do the same if the cell's `operator.yaml` maps buttons to it (the frame cell: options
+1. The **mission bar** under the header is on every tab. While no mission runs it holds the mission picker: pick the
+   mission and press **Start**. The answer appears under the bar: `Started <plan id>`, or why it was refused (the same
+   reasons as `rejected: ...` below).
+2. While a mission runs the bar shows it, with **Pause** (stops the robot where it is; the same button then reads
+   **Resume**) and **Abort** (ends the mission; tap twice). Both work like the commands below. A pad can do the same if the cell's `operator.yaml` maps buttons to it (the frame cell: options
    = pause / resume, share = abort).
 3. **Start at a step:** before starting, open the plan (**List**) and tap a step: the mission's first cycle then begins
    there, with the robot and the objects as they are now. Tap it again to clear it. Use it to repeat the end of a
    mission after a fix, not as a shortcut through a mission whose first steps set things up.
 
 The plan shows as a **Graph** (the steps and where a failure leads: retry, replan, skip, abort) or a **List**, each step
-with its outcome once it ran. The 3D view below the status shows the robot where the stack believes it is, in the cell
+with its outcome once it ran. The 3D view at the top of the Run tab shows the robot where the stack believes it is, in the cell
 with its fixtures, and the taught targets and objects. **Robot** frames the robot, **Cell** the whole cell,
 **Follow** keeps the camera on the robot as it drives, **Labels** shows the names (greyed out while nothing is taught).
 A note `no robot pose` means the stack has no position of the robot: the 3D view and every drive are off until it
@@ -158,16 +159,17 @@ when the planner finds nothing left to do (`stop_when`, `max_cycles`, or no stac
 
 ### On screen
 
-The status card at the top of the Run tab is the same information as `taskweave status`, made to be read from a few
-metres away:
+The mission bar under the header (on every tab) is the same information as `taskweave status`:
 
 | On screen | Same as in the status line |
 |---|---|
-| The badge and the coloured rail: `IDLE` grey, `RUNNING` blue, `PAUSED` amber with stripes, `SUCCEEDED` green, `FAILED` and `ABORTED` red | The state in brackets. |
-| The big line: the mission's goal, or `No mission running` | The goal. |
-| `cycle n` at the top right | `cycle n`. |
-| Under the goal: the step (`step 4/9 · move`), its instruction, a progress bar and the attempt and elapsed time | `step 4/9: s4 move "..." attempt 1 running 45% 12.3s`. |
-| A red box under it | `last error`, as `<step id> (<skill>) <result>: <message>`. Like the status line, it stays until the next failure: after a retry that worked it is still there while the mission runs on. |
+| The badge and the coloured rail: `IDLE` grey, `PLANNING` and `RUNNING` blue, `PAUSED` amber with stripes, `SUCCEEDED` green, `FAILED` and `ABORTED` red | The state in brackets. |
+| The first line: the mission's goal, the plan id and `cycle n` at the right | The goal, `cycle n`. |
+| Under it: `step 4/9`, the step's instruction, the skill, status, elapsed time and attempt (from the second), and a thin progress bar | `step 4/9: s4 move "..." attempt 1 running 45% 12.3s`. |
+| A red box under the bar | `last error`, as `<step id> (<skill>) <result>: <message>`. Like the status line, it stays until the next failure: after a retry that worked it is still there while the mission runs on. ✕ hides it until another error comes or the next start. |
+
+On a phone the bar shows the badge, `step n/N`, Pause and Abort, and the instruction under them; the goal and the
+details are left out.
 
 In the plan, each step that ran is marked with its result: `SUCCEEDED`, `FAILED` (the attempt that failed, then the
 retry), `REJECTED`, `TIMEOUT`, `CANCELED`. A step marked `REJECTED` at once, before anything moved, means the mission or

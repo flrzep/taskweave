@@ -15,9 +15,8 @@ gloves, standing at the robot. So:
 - **Steel neutrals.** Cool grey-blue surfaces and borders that recede, so the state colours stand out.
 - **Colour means state.** Green succeeded, amber paused or warning, red failed or near a limit, grey idle, blue
   running. They are never used for decoration.
-- **Andon status.** The run status card has a rail and a solid badge in the state colour, a light tint of it on the
-  card, and the goal as a large headline. Paused also gets a striped rail, so it differs from running by more than
-  hue.
+- **Andon status.** The mission bar has a rail and a solid badge in the state colour and a light tint of it while a
+  mission runs. Paused also gets a striped rail, so it differs from running by more than hue.
 - **Big, flat, legible.** Barlow (a signage face) with tabular figures, 16px body, 48px main buttons, 44px minimum
   touch targets on phones, borders at 3:1 on fields and buttons, no glass, no gradients.
 
@@ -56,7 +55,7 @@ headline are large text and clear 3:1 by a wide margin.
 | `--viewer-line`, `--viewer-ink`, `--viewer-tools` | | | 3D view border, text and toolbar backing |
 | `--spin-arrows` | ▲ ▼ in `#545a70` | in `#a3a8bf` | a number field's arrows (an SVG image: `--text-muted`'s value) |
 
-Tints are mixed from the state colour with `color-mix()`: chips 11%, messages 9%, the status card 5%.
+Tints are mixed from the state colour with `color-mix()`: chips 11%, messages 9%, the mission bar and status card 5%.
 
 ## Typography
 
@@ -73,7 +72,7 @@ network may have no internet). `font-variant-numeric: tabular-nums` throughout, 
 | `--fs-md` | 18px | brand name, state badge (700, uppercase), record stats |
 | `--fs-lg` | 20px / 1.35 | current step instruction |
 | `--fs-xl` | 24px / 1.2 | `h2` |
-| `--fs-2xl` | 30px / 1.12 | status headline (26px on a phone) |
+| `--fs-2xl` | 30px / 1.12 | speed value, recording headline (26px on a phone) |
 
 Weights: 400 body, 500 instruction, 600 titles and buttons, 700 badges and the brand name.
 
@@ -113,10 +112,21 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 - **Segmented control** (`.segmented`): a field-coloured track; the chosen option (`aria-pressed` or
   `aria-selected`) is raised on the card surface in brand text with a strong ring. `.choice` and `.teach-panes`
   wrap and share the width.
+- **Sticky top** (`.top`): header (brand, pad, connection), mission bar, speed strip, manual skill strip, tabs; on
+  every tab.
+- **Mission bar** (`.mission`): below the header. A 4px rail in the state colour (striped amber when paused) and the
+  state as a solid badge (`#state`, uppercase Barlow Semi Condensed 14px; `planning` while the task handler prepares
+  the plan). While a mission is active (`.mission.active`, a 5% state tint): the goal (18px, 600) with plan id and
+  cycle right, under it "step n/N" and the step's instruction, one line with an ellipsis, then skill, status, seconds
+  and attempt in muted monospace, a 4px progress bar of the step, and small Pause / Resume and Abort (`.danger`, two
+  taps) on the right. Idle: badge, the mission picker (up to 520px) and a small primary Start. Under the bar, small:
+  Start's answer (`.msg`, idle only) and the last error (`.error` with a ✕ that hides that error until another one or
+  the next start). On a phone: badge, step n/N, Pause, Abort in one row (44px targets, "Tap again to abort" wraps),
+  the instruction under it, no goal or detail; idle: badge, picker, Start.
 - **Tabs** (`.tabs`): in the sticky top bar with the header (`.top` wraps both). Uppercase 14px, 48px high, equal
   width; the selected one in brand text with a 3px underline. At 400px and below they drop the uppercase so all six
   fit; if they still do not, they scroll inside the bar, never the page.
-- **Speed override** (`.speed`): a strip in the sticky top bar between header and tabs, on every tab. The percent
+- **Speed override** (`.speed`): a strip in the sticky top bar below the mission bar, on every tab. The percent
   big (Barlow Semi Condensed 30px), − / + icon buttons around a range slider in brand colour, the presets as a
   segmented control, and a test mode toggle that turns amber with its cap (the value turns amber too). The
   handler's message on a clamped or refused request below, for 8 s. Greyed out with a hint without the task handler.
@@ -129,8 +139,8 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   `.msg.warn`.
 - **Cards** (`.card`): card surface, hairline border, 10px radius, 16px padding, a grid with 12px gaps.
   `details.card` opens from its whole title row.
-- **Status card** (`.card.status`): the andon panel. A 10px rail and a solid badge (`.chip` inside it) in the state
-  colour, a 5% tint on the card, the goal as the headline, a 10px progress bar in the state colour.
+- **Status card** (`.card.status`): the andon panel of a recording (Record tab). A 10px rail and a solid badge
+  (`.chip` inside it) in the state colour, a 5% tint on the card, the title as the headline.
 - **Lists and rows**: mission rows (`.list li`) with a brand left rule (red when invalid); plan steps (`.steps`) with a
   numbered dot that fills green or red when done, rings blue while running; points, poses and recordings (`.point`)
   open into an editor, the pad's target gets a brand inset rule. Mission editor steps (`.edit-step`) have a drag
