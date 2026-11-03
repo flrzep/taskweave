@@ -449,6 +449,7 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
   if (error !== board.error) {
     board.error = error;
     $('board-error').textContent = error;
+    $('board-error').title = error;  // the whole of it, where two lines cut it
   }
   board.phases = [s, plan, outcomes, active];
   renderPhases(s, plan, outcomes, active);

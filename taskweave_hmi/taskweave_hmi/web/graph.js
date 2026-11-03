@@ -426,15 +426,15 @@ function lanesGraph(bands, ctx, end) {
     const held = (step.resources || []).map(laneIndex).filter((l) => l >= 0);
     chipLane[i] = prev = held.length ? Math.min(...held) : prev;
   });
-  // A step on one lane: a chip as wide as its lane (inset), the icon at its left end. A step on several: a thin
-  // track from its first lane to its last (inset) and a tile (at most G.tile wide, the icon centred) in the middle of
-  // it, so it reads as one step holding those lanes, not as a bar of time.
+  // Every step is a tile (at most G.tile wide, the icon centred): in the middle of its lane, or for a step on several
+  // lanes in the middle of a thin track from its first lane to its last (inset), so it reads as one step holding
+  // those lanes, not as a bar of time.
   const lastLane = plan.steps.map((step, i) => Math.max(chipLane[i], ...(step.resources || []).map(laneIndex)));
   const wide = (i) => lastLane[i] > chipLane[i];
   const spanX = (i) => laneX(chipLane[i]) + G.inset;
   const spanR = (i) => laneX(lastLane[i] + 1) - G.inset;
-  const chipW = (i) => (wide(i) ? Math.min(lane - 2 * G.inset, G.tile) : lane - 2 * G.inset);
-  const chipX = (i) => (wide(i) ? (spanX(i) + spanR(i) - chipW(i)) / 2 : spanX(i));
+  const chipW = () => Math.min(lane - 2 * G.inset, G.tile);
+  const chipX = (i) => (spanX(i) + spanR(i) - chipW()) / 2;
   const items = [];  // {band, y, depth, extra, open} and {step, y, owner}
   const rowY = [];   // per step: its chip's centre (a step of a closed band: the band header's)
   const shown = new Set();
@@ -479,7 +479,6 @@ function lanesGraph(bands, ctx, end) {
         style: `left: ${spanX(i)}px; top: ${top + (G.chip - G.track) / 2}px; width: ${spanR(i) - spanX(i)}px; height: ${G.track}px` }));
     }
     const chip = chipButton(step, i, ctx);
-    if (wide(i)) chip.classList.add('tile');
     chip.style.left = `${chipX(i)}px`;
     chip.style.top = `${top}px`;
     chip.style.width = `${chipW(i)}px`;

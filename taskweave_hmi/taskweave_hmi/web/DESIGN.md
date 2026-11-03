@@ -46,8 +46,9 @@ headline are large text and clear 3:1 by a wide margin.
 | `--brand-soft` | `#e8e8ff` | `#1d1f4d` | brand tint: the selected section in the rail (its text 7.3:1 / 5.5:1) |
 | `--on-brand` | `#ffffff` | `#ffffff` | text on `--brand` (8.6:1 / 6.3:1) |
 | `--logo` | `#0000ff` | `#ffffff` | the P3 logo |
-| `--run` | `#0a7a4a` | `#45c98f` | running, planning, a manual skill: badge, rails, the running step (5.4:1 / 8.5:1) |
-| `--ok` | `#0a7a4a` | `#45c98f` | healthy: connected, saved (the same green as running) |
+| `--run-fill` | `#7ccf00` | `#93e02a` | running, planning, a manual skill, as a fill: badge (with `--on-run`, `#142400` / `#0f1a00`), rails, lights, bars; a vivid yellow-green |
+| `--run` | `#3f7d00` | `#a6e85a` | the same as text and thin rings: the running step's number, ring and dot (5.1:1 / 11:1) |
+| `--ok` | `#0a7a4a` | `#45c98f` | healthy: connected, saved (a calmer green than running) |
 | `--done` | `#2e3447` | `#c9cddb` | succeeded and done steps and phases: neutral, not green (12.4:1 on card) |
 | `--warn` | `#9a5200` | `#f2a64f` | paused, jog mode, canceled |
 | `--bad` | `#c0112d` | `#ff7385` | failed, aborted, errors, near a joint limit, danger buttons |
@@ -157,10 +158,11 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   plus the step's progress, over the total; at the chosen start step while idle) and moves there in 1.2 s. Its pose is
   the state: blinking when idle, walking (legs, arms, a bob, its shadow) while running, frozen mid-stride with sleepy
   eyes when paused, looking about with a blinking light while planning, arms up and three hops when done, slumped with
-  crossed red eyes when failed, flat eyes when aborted; its antenna tip and chest light are the state colour. It is
-  drawn in two greys (`--bot`, `--bot-2`) with a dark visor (`--bot-ink`) and light eyes, from the user's baseline (a
-  head with two eyes, a round-topped body, arms, legs) with a visor, antenna, chest panel, two-finger grippers and feet
-  added. Above it a bubble (2px border in the state colour at 45%, its tail over the robot) says what it does: the
+  crossed red eyes when failed, flat eyes when aborted; its antenna tip and chest light are the state colour. A small
+  comic figure (the user's direction): a big head with a dark visor (`--bot-ink`) and light eyes, a small torso, and
+  head, hands and feet floating apart from it on bendy limbs (round strokes whose curve changes as they swing, CSS `d`)
+  and a long floppy antenna that lags the walk; two greys (`--bot`, `--bot-2`). Above it a bubble of one fixed height (132px, 200px on a phone: the lines clip, the board does not jump from
+  step to step; an error takes the room of the second instruction line) (2px border in the state colour at 45%, its tail over the robot) says what it does: the
   step number at 60px with "/ N" (or "26 steps" while idle), the instruction at 24px (two lines, three on a phone),
   the command, status, seconds and attempt, the error in red; and the next move as one button: Start / Start at step
   N, Resume, Retry step N (the step it stopped at), Run again (Start <mission> when another one is picked). No
@@ -263,9 +265,8 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   (`--tap-s` square, light icons; `aria-pressed="true"` in brand fill).
 - **Plan graph** (`.pg`, graph.js): steps top to bottom in resource lanes (base, hands, torso, joints) that share the
   Plan card's width (at least 64px each; drawn again when the card resizes), rows of 32px, step numbers in Barlow Semi
-  Condensed in a 28px gutter. A step on one lane is a 28px chip as wide as the lane (4px inside), its icon
-  (icons.js) at the left end. A step on several lanes is a tile (at most 64px wide, icon centred) in the middle of a
-  12px track (`.pg-track`, a pill from its first lane to its last, 4px inside, the step's colour at 10-35%): it
+  Condensed in a 28px gutter. Every step is a 28px tile (at most 64px wide, its icon from icons.js centred) in the
+  middle of its lane; a step on several lanes sits in the middle of a 12px track (`.pg-track`, a pill from its first lane to its last, 4px inside, the step's colour at 10-35%): it
   reads as one step holding those lanes, not as a bar of time (the earlier full-width bar looked like a Gantt
   chart). The track spans a lane between that the step does not hold (base and right arm, the left arm between);
   the pop-up's Locks row says which it holds. Chips take the skill colour (`--k` from `--kind-*`):

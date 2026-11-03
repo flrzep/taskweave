@@ -111,44 +111,25 @@
       </div>
       <div class="board-stage">
         <svg class="bot" viewBox="0 0 200 300" aria-hidden="true">
-          <ellipse class="bot-shadow" cx="100" cy="296" rx="54" ry="4.5"/>
+          <ellipse class="bot-shadow" cx="100" cy="294" rx="50" ry="4.5"/>
           <g class="bot-all">
-            <g class="bot-arm bot-arm-l">
-              <rect class="b1" x="21" y="142" width="20" height="58" rx="8"/>
-              <rect class="b2" x="18" y="196" width="26" height="8" rx="3"/>
-              <rect class="b2" x="19" y="201" width="7" height="15" rx="3"/><rect class="b2" x="36" y="201" width="7" height="15" rx="3"/>
-              <circle class="b2" cx="31" cy="142" r="11"/>
+            <g class="bot-leg bot-leg-l"><path class="bot-limb" d="M88 236 Q82 256 86 274"/><ellipse class="b2" cx="82" cy="282" rx="14" ry="8"/></g>
+            <g class="bot-leg bot-leg-r"><path class="bot-limb" d="M112 236 Q118 256 114 274"/><ellipse class="b2" cx="118" cy="282" rx="14" ry="8"/></g>
+            <g class="bot-arm bot-arm-l"><path class="bot-limb" d="M62 182 Q40 198 44 222"/><circle class="b1" cx="44" cy="226" r="9"/></g>
+            <g class="bot-arm bot-arm-r"><path class="bot-limb" d="M138 182 Q160 198 156 222"/><circle class="b1" cx="156" cy="226" r="9"/></g>
+            <g class="bot-body">
+              <rect class="b1" x="70" y="166" width="60" height="62" rx="22"/>
+              <circle class="bot-light" cx="100" cy="192" r="9"/>
+              <path class="bot-vent" d="M89 213 H111"/>
             </g>
-            <g class="bot-arm bot-arm-r">
-              <rect class="b1" x="159" y="142" width="20" height="58" rx="8"/>
-              <rect class="b2" x="156" y="196" width="26" height="8" rx="3"/>
-              <rect class="b2" x="157" y="201" width="7" height="15" rx="3"/><rect class="b2" x="174" y="201" width="7" height="15" rx="3"/>
-              <circle class="b2" cx="169" cy="142" r="11"/>
-            </g>
-            <g class="bot-leg bot-leg-l">
-              <rect class="b1" x="67" y="230" width="26" height="54" rx="8"/>
-              <rect class="b2" x="60" y="278" width="38" height="16" rx="8"/>
-            </g>
-            <g class="bot-leg bot-leg-r">
-              <rect class="b1" x="107" y="230" width="26" height="54" rx="8"/>
-              <rect class="b2" x="102" y="278" width="38" height="16" rx="8"/>
-            </g>
-            <g class="bot-top">
-              <rect class="b2" x="88" y="62" width="24" height="14" rx="3"/>
-              <path class="b1" d="M42 238 Q34 238 34 230 V140 A66 66 0 0 1 166 140 V230 Q166 238 158 238 Z"/>
-              <path class="bot-gloss" d="M50 132 A52 52 0 0 1 86 88"/>
-              <rect class="b2" x="66" y="150" width="68" height="62" rx="12"/>
-              <circle class="bot-light" cx="100" cy="171" r="10"/>
-              <path class="bot-vent" d="M82 192 H118 M82 200 H118"/>
-              <g class="bot-head">
-                <path class="bot-stalk" d="M100 18 V6"/>
-                <circle class="bot-light" cx="100" cy="6" r="6"/>
-                <rect class="b2" x="41" y="30" width="12" height="22" rx="4"/><rect class="b2" x="147" y="30" width="12" height="22" rx="4"/>
-                <rect class="b1" x="50" y="16" width="100" height="50" rx="13"/>
-                <rect class="bi" x="60" y="25" width="80" height="32" rx="11"/>
-                <g class="bot-eyes"><rect class="be" x="80" y="31" width="12" height="20" rx="6"/><rect class="be" x="108" y="31" width="12" height="20" rx="6"/></g>
-                <path class="bot-x" d="M80 34l12 14M92 34l-12 14M108 34l12 14M120 34l-12 14"/>
-              </g>
+            <g class="bot-head">
+              <g class="bot-ant"><path class="bot-stalk" d="M100 60 C100 38 112 26 126 18"/><circle class="bot-light" cx="126" cy="18" r="8"/></g>
+              <rect class="b2" x="24" y="94" width="12" height="28" rx="6"/><rect class="b2" x="164" y="94" width="12" height="28" rx="6"/>
+              <rect class="b1" x="34" y="60" width="132" height="96" rx="32"/>
+              <path class="bot-gloss" d="M50 80 Q54 68 70 65"/>
+              <rect class="bi" x="48" y="80" width="104" height="52" rx="24"/>
+              <g class="bot-eyes"><rect class="be" x="73" y="91" width="17" height="30" rx="8.5"/><rect class="be" x="110" y="91" width="17" height="30" rx="8.5"/></g>
+              <path class="bot-x" d="M74 96l16 20M90 96l-16 20M110 96l16 20M126 96l-16 20"/>
             </g>
           </g>
         </svg>
