@@ -103,8 +103,11 @@ HTTP API (JSON):
   PUT  /api/teach/target {scope, name, at, form, instance_override} or {}   where a pad teach press saves
   PUT  /api/teach/held/<type>/<name> {joints, path, rename}; DELETE the same   held poses (move_object to: {pose})
   POST /api/teach/held/<type>/<name>/test   move the held object there now (move_object; move {to} once served)
-  POST /api/teach/held/<type>/<name>/capture   teach it from the held object (targets layout: the teach node's object
-                                   kind; 422 with its answer while it cannot be taught yet)
+  POST /api/teach/held/<type>/<name>/capture {[tool]}   teach it from the held object (the teach node's object kind:
+                                   the held object's origin in the base frame from the holding hand's TCP and grip; a
+                                   new one as one pose, an existing path gets it as its last waypoint; tool names the
+                                   hand when several objects are held): {file, message, undo}; 422 with the node's
+                                   answer (nothing held, another type held, several held)
   GET  /api/recordings              {status, recordings, free_bytes} (404 without recordings_dir; recording.py)
   POST /api/recordings/start {mission, name, cycles, reset, bag, camera, video, quality, max_min};  POST .../stop
   DELETE /api/recordings/<id>;  PUT /api/recordings/<id>/keep {keep}  exempt it from replacement
@@ -1044,15 +1047,18 @@ class Bridge(Node):
             return None
         return None if placed is None else round(math.hypot(placed.pose.x - pose.x, placed.pose.y - pose.y), 2)
 
-    def capture_held(self, name: str) -> dict:
+    def capture_held(self, name: str, body: dict) -> dict:
         """Teach a held pose (an object target in the base frame) from where the held object is now: the teach
-        node's ``object`` kind, which answers that it cannot be taught yet (the HMI shows its message)."""
+        node's ``object`` kind (the holding hand's TCP and grip; ``tool``: that hand, when several objects are held).
+        Refused (nothing held, another type, several held): a HeldError with the node's answer."""
         self.check_idle()
+        tool = text_arg(body, 'tool')
         try:
-            response = self.teach('object', name)
+            response, saved = self.undoable(None, lambda: self.teach('object', name, [tool] if tool else ()),
+                                            f'carry pose {name}')
         except arm.ArmError as error:
             raise held.HeldError(str(error)) from error
-        return {'file': self.relative(response.file), 'message': response.message}
+        return {'file': self.relative(response.file), 'message': response.message, 'undo': saved}
 
     def relative(self, file: str) -> str:
         """The files the teach node wrote (``a, b``), relative to the config folder when they are in it."""
@@ -1551,8 +1557,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._object_body()   # nothing in it is used: a body of another shape is still refused
                     return self._json(bridge.test_held(obj, name))
                 if len(route) == 5 and method == 'POST' and route[4] == 'capture':
-                    self._object_body()
-                    result = bridge.capture_held(name)
+                    result = bridge.capture_held(name, self._object_body())
                     bridge.points_changed()
                     return self._json(result)
             if method == 'POST' and route == ['robot', 'move']:

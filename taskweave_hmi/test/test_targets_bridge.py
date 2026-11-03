@@ -170,12 +170,24 @@ def test_a_capture_on_a_targets_cell_teaches_a_hand_target_and_shows_the_answer(
                       'at': 'bay_1_stack_1_front', 'distance_m': None, 'undo': None, 'notes': []}
 
 
-def test_a_held_pose_capture_shows_the_cores_cannot_be_taught_yet(serve, config):  # noqa: F811
+def test_a_held_pose_capture_shows_the_nodes_refusal(serve, config):  # noqa: F811
     from taskweave_interfaces.srv import TeachPoint
 
-    text = "object 'carry': a held object in the base frame cannot be taught yet: write the pose ..."
+    text = 'nothing is held: grip the object first'
     bridge = teach_bridge(config, lambda request: TeachPoint.Response(success=False, message=text))
     status, data = serve(bridge)('POST', '/api/teach/held/frame_type2/carry/capture', {})
     assert status == 422 and data['problems'] == [text]
     assert bridge.sent_requests[0].kind == 'object' and bridge.sent_requests[0].name == 'carry'
+    assert list(bridge.sent_requests[0].tools) == []
+
+
+def test_a_held_pose_capture_names_the_hand(serve, config):  # noqa: F811
+    from taskweave_interfaces.srv import TeachPoint
+
+    bridge = teach_bridge(config, lambda request: TeachPoint.Response(
+        success=True, message="object 'carry' saved", file=str(config.root / 'robots/galbot_s1/targets.yaml')))
+    status, data = serve(bridge)('POST', '/api/teach/held/frame_type2/carry/capture', {'tool': 'left'})
+    assert status == 200 and data['message'] == "object 'carry' saved"
+    assert data['file'] == 'robots/galbot_s1/targets.yaml'
+    assert list(bridge.sent_requests[0].tools) == ['left']
 
