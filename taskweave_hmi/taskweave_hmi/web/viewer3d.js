@@ -141,6 +141,8 @@ export class Viewer3D {
       edge: new THREE.LineBasicMaterial({ color: BOX_COLOUR, transparent: true, opacity: 0.7 }),
       triad: new THREE.LineBasicMaterial({ vertexColors: true }),
       location: new THREE.MeshBasicMaterial({ color: NEUTRAL, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false }),
+      // a stance: where the robot stands at a placed object, a fainter arrow in a ring (the robot's footprint)
+      stance: new THREE.MeshBasicMaterial({ color: NEUTRAL, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }),
       marker: new THREE.MeshBasicMaterial({ color: NEUTRAL }),
       gripper: new THREE.LineBasicMaterial({ color: NEUTRAL }),
       accentMesh: new THREE.MeshBasicMaterial({ color: accent, side: THREE.DoubleSide }),
@@ -154,6 +156,7 @@ export class Viewer3D {
       cylinder: new THREE.CylinderGeometry(1, 1, 1, 20).rotateX(Math.PI / 2),
       cone: new THREE.ConeGeometry(1, 1, 20).rotateX(Math.PI / 2),
       arrow: arrowGeometry(),
+      ring: new THREE.RingGeometry(0.17, 0.19, 40),
       triad: triadGeometry(0.1),
       tool: triadGeometry(0.05),
       gripper: gripperGeometry(),
@@ -466,6 +469,21 @@ export class Viewer3D {
       bounds.expandByPoint(root.position);
     });
 
+    // the robot's stances at each placed object (base poses in the cell frame, /api/scene stances)
+    (data.stances || []).forEach((stance) => {
+      const root = new THREE.Group();
+      root.position.set(stance.x, stance.y, 0.002);
+      root.quaternion.copy(quatYaw(stance.yaw));
+      const body = new THREE.Mesh(this._geoms.arrow, this._mats.stance);
+      const ring = new THREE.Mesh(this._geoms.ring, this._mats.stance);
+      body.renderOrder = ring.renderOrder = 1;
+      root.add(ring, body);
+      const info = { kind: 'stance', name: stance.variant, placed: stance.instance, object: stance.object,
+        override: !!stance.override };
+      this._addMarker(info, root, body, body, stance.variant);
+      bounds.expandByPoint(root.position);
+    });
+
     const placedPose = new Map();
     (data.placed || []).forEach((obj) => {
       const root = new THREE.Group();
@@ -570,7 +588,8 @@ export class Viewer3D {
     return colour;
   }
 
-  // {kind: 'location' | 'placed' | 'point', name} or null. A point marker can be narrowed with placed / tool.
+  // {kind: 'location' | 'placed' | 'point' | 'stance', name} or null. A point or stance marker can be narrowed with
+  // placed (its object) and a point with tool.
   setHighlight(target) {
     this.highlight = target ? { ...target } : null;
     const accent = this._accent();  // the theme may have changed since
@@ -593,9 +612,11 @@ export class Viewer3D {
     });
   }
 
-  // Moves the camera's target to the marker, closer if the view is far away.
+  // Moves the camera's target to the marker, closer if the view is far away. focus(kind, name), or focus(target) with
+  // a target as setHighlight takes it (a point or stance at one placed object).
   focus(kind, name) {
-    const marker = this._markers.find((m) => this._matches(m, { kind, name }));
+    const target = typeof kind === 'object' ? kind : { kind, name };
+    const marker = this._markers.find((m) => this._matches(m, target));
     if (!marker) return false;
     marker.root.updateMatrixWorld();
     const at = new THREE.Vector3().setFromMatrixPosition(marker.root.matrixWorld);
@@ -606,6 +627,16 @@ export class Viewer3D {
     this.controls.update();
     this._requestRender();
     return true;
+  }
+
+  // The scene again now (after a Teach save or an Undo: config points moved, which the poll does not notice, as it
+  // rebuilds only when the collision objects change).
+  async reloadScene() {
+    if (this.mode !== 'cell' || this._disposed) return;
+    const scene = await this.fetchJSON('/api/scene').catch(() => null);
+    if (!scene || this._disposed) return;
+    this._sceneAt = Date.now();
+    this._buildScene(scene);
   }
 
   onPick(callback) {

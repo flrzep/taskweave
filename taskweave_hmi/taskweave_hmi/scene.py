@@ -142,9 +142,11 @@ def object_types(store: ConfigStore) -> list[str]:
     return sorted(files | {instance.object for instance in store.object_instances().values()})
 
 
-def config_scene(store: ConfigStore) -> dict:
+def config_scene(store: ConfigStore, robot: str | None = None) -> dict:
     """Placed objects (with the run-time object state), locations and object points from the config. A point's
-    tool poses are in the object frame: at the placed object's top item (``top_z`` for a stack)."""
+    tool poses are in the object frame: at the placed object's top item (``top_z`` for a stack). With ``robot``,
+    its stances too: every placed object's variants as base poses in the cell frame (``override``: the instance's
+    own, else the type's; ``default``: the first variant, what ``stance:<instance>`` means)."""
     placed = [{'name': name, 'object': instance.object, 'x': round(instance.pose.x, 4),
                'y': round(instance.pose.y, 4), 'z': round(instance.z, 4), 'yaw': round(instance.pose.yaw, 4),
                'top_z': round(instance.top_z, 4),
@@ -159,4 +161,22 @@ def config_scene(store: ConfigStore) -> dict:
             continue
         object_points += [{'object_type': object_type, 'name': point['name'], 'tools': point['tools']}
                           for point in entries]
-    return {'placed': placed, 'locations': locations, 'points': object_points}
+    return {'placed': placed, 'locations': locations, 'points': object_points,
+            'stances': stance_poses(store, robot) if robot else []}
+
+
+def stance_poses(store: ConfigStore, robot: str) -> list[dict]:
+    """The robot's stances at each placed object, in the cell frame (as placed; the yaw symmetry a robot may use
+    when it drives there is left out)."""
+    overrides = points.stance_offsets(store, robot).get('instances', {})
+    result = []
+    for name, instance in sorted(store.object_instances().items()):
+        try:
+            variants = store.stance_variants(robot, instance)
+        except (ConfigError, KeyError):   # a type the robot has no stances for, or a file it cannot read
+            continue
+        result += [{'instance': name, 'object': instance.object, 'variant': variant,
+                    **points.pose_dict(instance.pose.compose(offset)),
+                    'override': variant in overrides.get(name, {}), 'default': index == 0}
+                   for index, (variant, offset) in enumerate(variants.items())]
+    return result

@@ -183,63 +183,71 @@
   </section>
 
   <!-- POINTS -->
-  <section id="view-points" class="view" hidden>
-    <div id="points-busy" class="error" hidden></div>
-    <div class="teach-head">
-      <span class="muted small-text">Robot now</span>
-      <div id="teach-pose" class="mono">–</div>
-      <div id="arm-target" class="msg" hidden></div>
+  <!-- Teach: the cell in 3D beside the lists from 1180px (above them narrower): click a marker to open its entry, an
+       object for what it has and to teach new there (teach3d.js) -->
+  <section id="view-points" class="view teach-grid" hidden>
+    <div class="teach-side">
+      <div id="viewer3d-teach" class="viewer3d" role="region" aria-label="3D view of the cell: click a marker or an object to teach it"></div>
+      <div id="teach-pick" class="card teach-pick" role="group" aria-label="The picked object" hidden></div>
     </div>
-    <div id="teach-panes" class="segmented teach-panes" role="tablist" aria-label="What to teach">
-      <button role="tab" data-pane="locations">Locations</button>
-      <button role="tab" data-pane="stances">Stances</button>
-      <button role="tab" data-pane="poses">Poses</button>
-      <button role="tab" data-pane="points">Points</button>
-      <button role="tab" data-pane="carry">Carry poses</button>
-    </div>
-    <div class="teach-pane" data-pane="locations">
-      <div class="card">
-        <div class="row between"><div class="label">Locations</div><button id="btn-add-location" class="btn small">+ Location</button></div>
-        <p class="muted small-text">Where the robot drives to: base poses in the cell frame. Drive there (pad or a mission
-          step), + Location, Set from robot, Save: the teach node saves where it stands. The pad's teach press saves arm
-          positions only · <span id="locations-file" class="mono"></span></p>
-        <ul id="location-list" class="points"></ul>
+    <div class="teach-main">
+      <div id="points-busy" class="error" hidden></div>
+      <div class="teach-head">
+        <span class="muted small-text">Robot now</span>
+        <div id="teach-pose" class="mono">–</div>
+        <div id="arm-target" class="msg" hidden></div>
       </div>
-    </div>
-    <div class="teach-pane" data-pane="stances">
-      <p class="muted small-text">Where the robot stands to work at an object, relative to the object: every placed object of
-        a type follows. Placed objects come from the cell layout (cell/objects.yaml) and are read-only here.</p>
-      <div id="stance-cards" class="stack"></div>
-    </div>
-    <div class="teach-pane" data-pane="poses">
-      <div class="card">
-        <div class="row between"><div class="label">Poses</div><button id="btn-add-pose" class="btn small" data-edit>+ Pose</button></div>
-        <p class="muted small-text">Where the robot holds its arms, torso and head, relative to itself: the same wherever it
-          stands (missions: <span class="mono">pose:</span>). Open one, put the arm there with the pad and press L1 + L3, or
-          Capture. Saved at once, used from the next move.</p>
-        <ul id="pose-list" class="points"></ul>
+      <div id="teach-panes" class="segmented teach-panes" role="tablist" aria-label="What to teach">
+        <button role="tab" data-pane="locations">Locations</button>
+        <button role="tab" data-pane="stances">Stances</button>
+        <button role="tab" data-pane="poses">Poses</button>
+        <button role="tab" data-pane="points">Points</button>
+        <button role="tab" data-pane="carry">Carry poses</button>
       </div>
-    </div>
-    <div class="teach-pane" data-pane="points">
-      <div class="card">
-        <div class="row between"><div class="label">Points</div><button id="btn-add-point" class="btn small" data-edit>+ Point</button></div>
-        <p class="muted small-text">Where the gripper goes on an object (a grasp, a place), relative to the object: every
-          placed object of the type follows (missions: <span class="mono">point:</span>). Taught and tested at the placed
-          one chosen per type.</p>
-        <ul id="point-list" class="arm-groups"></ul>
+      <div class="teach-pane" data-pane="locations">
+        <div class="card">
+          <div class="row between"><div class="label">Locations</div><button id="btn-add-location" class="btn small">+ Location</button></div>
+          <p class="muted small-text">Where the robot drives to: base poses in the cell frame. Drive there (pad or a mission
+            step), + Location, Set from robot, Save: the teach node saves where it stands. The pad's teach press saves arm
+            positions only · <span id="locations-file" class="mono"></span></p>
+          <ul id="location-list" class="points"></ul>
+        </div>
       </div>
-    </div>
-    <div class="teach-pane" data-pane="carry">
-      <div class="card">
-        <div class="label">Carry poses</div>
-        <p class="muted small-text">Where the robot carries an object it holds (move_object <span class="mono">pose:</span>):
-          some joints first (e.g. the body), then the object along straight lines through the waypoints, in the robot's
-          base frame. Typed in here; Test needs the robot holding one.</p>
-        <ul id="held-list" class="arm-groups"></ul>
+      <div class="teach-pane" data-pane="stances">
+        <p class="muted small-text">Where the robot stands to work at an object, relative to the object: every placed object of
+          a type follows. Placed objects come from the cell layout (cell/objects.yaml) and are read-only here.</p>
+        <div id="stance-cards" class="stack"></div>
       </div>
+      <div class="teach-pane" data-pane="poses">
+        <div class="card">
+          <div class="row between"><div class="label">Poses</div><button id="btn-add-pose" class="btn small" data-edit>+ Pose</button></div>
+          <p class="muted small-text">Where the robot holds its arms, torso and head, relative to itself: the same wherever it
+            stands (missions: <span class="mono">pose:</span>). Open one, put the arm there with the pad and press L1 + L3, or
+            Capture. Saved at once, used from the next move.</p>
+          <ul id="pose-list" class="points"></ul>
+        </div>
+      </div>
+      <div class="teach-pane" data-pane="points">
+        <div class="card">
+          <div class="row between"><div class="label">Points</div><button id="btn-add-point" class="btn small" data-edit>+ Point</button></div>
+          <p class="muted small-text">Where the gripper goes on an object (a grasp, a place), relative to the object: every
+            placed object of the type follows (missions: <span class="mono">point:</span>). Taught and tested at the placed
+            one chosen per type.</p>
+          <ul id="point-list" class="arm-groups"></ul>
+        </div>
+      </div>
+      <div class="teach-pane" data-pane="carry">
+        <div class="card">
+          <div class="label">Carry poses</div>
+          <p class="muted small-text">Where the robot carries an object it holds (move_object <span class="mono">pose:</span>):
+            some joints first (e.g. the body), then the object along straight lines through the waypoints, in the robot's
+            base frame. Typed in here; Test needs the robot holding one.</p>
+          <ul id="held-list" class="arm-groups"></ul>
+        </div>
+      </div>
+      <p class="muted small-text">Saved points are used at the next mission start. A point a mission refers to cannot be
+        renamed or deleted.</p>
     </div>
-    <p class="muted small-text">Saved points are used at the next mission start. A point a mission refers to cannot be
-      renamed or deleted.</p>
   </section>
 
   <!-- ROBOT -->
@@ -429,6 +437,7 @@
 <script src="held.js"></script>
 <script src="icons.js"></script>
 <script src="graph.js"></script>
+<script src="teach3d.js"></script>
 <script src="record.js"></script>
 <script type="module" src="viewer3d.js"></script>
 </body>

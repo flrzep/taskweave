@@ -209,8 +209,15 @@ padding and the inflation zone, and an arrow to the front. **Fit** shows it from
 
 ### Teaching in the HMI
 
-The Teach tab shows the robot's position at the top and one list at a time. Every list holds targets of one kind
-([targets.md](targets.md)); the list says what it stores and in which file:
+The Teach tab shows the cell in 3D (beside the lists on a laptop, above them on a tablet or phone), the robot's
+position and one list at a time. In the 3D view, click a marker to open what it is: a location, a stance (the arrow in
+a ring where the robot stands at an object) or a grasp point (the gripper outline). The right list opens by itself,
+set to that object, and the entry says at which object and into which file it saves. Click a placed object for what
+it has (its stances and grasp points) and **Teach a stance here** or **Teach a grasp point here**, which open the new
+entry already set to that object. Opening an entry in a list lights its marker up and turns the view to it; after a
+save, or an Undo, the markers are drawn again where they now are.
+
+Every list holds targets of one kind ([targets.md](targets.md)); the list says what it stores and in which file:
 
 | List | What it stores | How to teach it |
 |---|---|---|

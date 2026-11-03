@@ -146,7 +146,7 @@ document.querySelectorAll('.tabs button').forEach((button) => button.addEventLis
   if (button.dataset.view === 'missions') { if (state.editing) refreshCatalog(); else loadMissions(); }
   pointsVisible = button.dataset.view === 'points';
   robotVisible = button.dataset.view === 'robot';
-  if (pointsVisible) { loadPoints(); loadArm(); refreshPose(); }  // teach.js: poses and points
+  if (pointsVisible) { loadPoints(); loadArm(); refreshPose(); startTeachViewer(); }  // teach.js, teach3d.js
   else if (teach.open) { teach.open = null; setTeachTarget(null); }  // the pad teaches only into an open position
   if (robotVisible) { loadRobot(); refreshPose(); }  // robot.js: live grippers and joints, settings
   if (button.dataset.view === 'record') loadRecordings();  // record.js
@@ -171,7 +171,7 @@ function connect() {
   source.onmessage = (event) => {
     const { type, data } = JSON.parse(event.data);
     if (type === 'state') { state.snapshot = data; renderSpeed(); renderManual(); refreshCatalog(); }  // (re)connected: may have missed points
-    else if (type === 'points') { refreshCatalog(); return; }  // saved or taught anywhere (any browser, the pad)
+    else if (type === 'points') { refreshCatalog(); reloadScenes(); return; }  // saved or taught anywhere (any browser, the pad); teach3d.js
     else if (!state.snapshot) return;
     else if (type === 'status') state.snapshot.status = data;
     else if (type === 'pad_mode') state.snapshot.pad_mode = data;
@@ -1939,7 +1939,7 @@ function stanceCard(obj, data) {
   const instances = obj.instances.map((i) => i.name);
   const fromInstance = (pick) => (robot) => robot.relative.find((r) => r.instance === pick())?.offset;
   const variantItem = (v, isNew = false) => {
-    const picker = el('select', { 'aria-label': 'Measure at object' });
+    const picker = el('select', { 'aria-label': 'Measure at object', 'data-measure-at': '' });
     fillSelect(picker, instances, instances[0]);
     const hint = atHint(() => picker.value, obj.object);
     picker.addEventListener('change', hint._update);
@@ -1957,7 +1957,7 @@ function stanceCard(obj, data) {
   });
   const variants = el('ul', { class: 'points' }, obj.variants.map((v) => variantItem(v)));
   const overrides = el('ul', { class: 'points' }, obj.instances.flatMap((i) => i.overrides.map((o) => overrideItem(i.name, o))));
-  const addVariant = el('button', { class: 'btn small', text: '+ Variant' });
+  const addVariant = el('button', { class: 'btn small', text: '+ Variant', 'data-add-variant': '' });
   addVariant.addEventListener('click', () => variants.append(variantItem(
     { variant: '', offset: obj.variants[0]?.offset || { x: -1, y: 0, yaw: 0 }, used_by: [] }, true)));
   const overrideInstance = el('select', { 'aria-label': 'Object for a new override' });
@@ -1997,9 +1997,11 @@ function stanceCard(obj, data) {
     return button;
   }));
   select(state.objectPane[obj.object] || 'stances');
-  return el('div', { class: 'card' },
+  const card = el('div', { class: 'card', 'data-object': obj.object },
     el('div', { class: 'row between wrap' }, el('div', { class: 'label', text: obj.object }), switcher),
     ...Object.values(panes));
+  card._select = select;  // teach3d.js: a stance picked in 3D shows the Stances view
+  return card;
 }
 
 // One editable point. address = ['location', name] or ['stance', scope, owner, variant]; the last element is the name.
@@ -2031,8 +2033,14 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
     note ? el('p', { class: 'muted small-text', text: note }) : '',
     msg, el('div', { class: 'row gap' }, deleteButton, saveButton));
   edit.hidden = !isNew;
-  const item = el('li', { class: 'point' }, head, savedNote(address.join('/')), edit);
-  head.addEventListener('click', () => { edit.hidden = !edit.hidden; head.setAttribute('aria-expanded', String(!edit.hidden)); });
+  const item = el('li', { class: 'point', 'data-address': address.join('/') }, head, savedNote(address.join('/')), edit);
+  head.addEventListener('click', () => {
+    edit.hidden = !edit.hidden;
+    head.setAttribute('aria-expanded', String(!edit.hidden));
+    // its marker in the Teach tab's 3D view (teach3d.js): a location, a stance at the object it is measured at
+    teach3dShow(edit.hidden || isNew ? null : address[0] === 'location' ? { kind: 'location', name }
+      : { kind: 'stance', name, ...(at() ? { placed: at() } : {}) });
+  });
   if (isNew) setTimeout(() => nameInput.focus(), 0);
   // Drive here goes to the saved point, so it waits for a save after edits
   let changed = isNew;

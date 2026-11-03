@@ -486,6 +486,25 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
 #mission-note { margin: 0; color: var(--warn); font-size: var(--fs-s); font-weight: 600; }
 #mission-note:empty { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }  /* stays a live region */
 .log { gap: 0; }
+/* Teach: the cell in 3D above the lists up to 1179px (a 4 : 3 view); from 1180px beside them, 7 : 5, the lists at the
+   left, the 3D view (sticky, never taller than the window) and the picked object's menu at the right */
+.teach-grid { grid-template-columns: minmax(0, 1fr); }
+.teach-side { display: grid; gap: var(--sp-3); min-width: 0; }
+.teach-main { display: grid; gap: var(--sp-3); min-width: 0; }
+#viewer3d-teach { aspect-ratio: 4 / 3; max-height: 50dvh; }
+.teach-pick { gap: var(--sp-3); }
+.teach-pick .pick-group { display: grid; gap: var(--sp-1); }
+.pick-where { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); color: var(--brand-text); font-weight: 600; }
+@media (min-width: 601px) { .teach-main { gap: var(--sp-4); } }
+@media (min-width: 1180px) {
+  body[data-view="points"] main { max-width: 1600px; padding: var(--sp-5) var(--sp-6) var(--sp-12); }
+  .teach-grid { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; gap: var(--sp-5); }
+  .teach-main { grid-column: 1; grid-row: 1; }
+  .teach-side { grid-column: 2; grid-row: 1; position: sticky; top: calc(var(--top-h, 76px) + var(--sp-5));
+                max-height: calc(100dvh - var(--top-h, 76px) - 2 * var(--sp-5)); overflow-y: auto; overscroll-behavior: contain;
+                padding: 6px; margin: -6px; }
+  #viewer3d-teach { aspect-ratio: 16 / 13; max-height: none; }
+}
 /* Missions: the list or the editor up to 1179px (.editing hides the list); from 1180px the list (300px, sticky) beside
    the open mission or a hint, the page up to 1600px wide, no back button */
 .editor-empty { display: none; }

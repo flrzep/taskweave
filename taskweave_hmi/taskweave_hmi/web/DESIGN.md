@@ -185,6 +185,13 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   (`#mission-note`, amber, `role="status"`, 3 s); a second tap on the same one goes on. Focus goes to the back link
   when the list gives way to the editor, to the list's title when the editor closes. The save bar (`.sticky-actions`)
   starts with "● Unsaved changes" in amber; on a phone it sits above the bottom nav, the note on its own line.
+- **Teach in 3D** (`.teach-grid`, teach3d.js): the cell view (4 : 3, at most half the screen high) above the lists up
+  to 1179px; from 1180px 7 : 5, the lists at the left and the view (16 : 13, sticky, never taller than the window) at
+  the right. Markers: locations (an arrow), stances (a fainter arrow in a ring, from `/api/scene` stances), grasp points
+  (a gripper outline per placed object), placed objects (a triad). A pick opens the entry in its pane with a brand
+  line on top, "At <object> · saves to <file>" (`.pick-where`); a placed object opens a card under the view
+  (`.teach-pick`) with its stances and grasp points as buttons and two primary ones, "Teach a stance here" and "Teach
+  a grasp point here". Opening an entry highlights and focuses its marker; the points event redraws the markers.
 - **Robot dashboard** (`.robot-grid`): up to 1179px one column, 3D view, base, grippers, joints, settings. From
   1180px 7 : 5 up to 1600px wide: the base over the joints at the left, the 3D view (16 : 11) over the grippers at the
   right (sticky under the top), the settings full width under both. The base as a readout (`.readout`: x, y, yaw in

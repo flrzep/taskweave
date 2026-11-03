@@ -256,7 +256,7 @@ function positionItem(p) {
     await loadArm();
   });
 
-  const item = el('li', { class: 'point' }, head, savedNote(`arm:${keyOf(p)}`), edit);
+  const item = el('li', { class: 'point', 'data-key': keyOf(p) }, head, savedNote(`arm:${keyOf(p)}`), edit);
   const open = (opened) => {
     edit.hidden = !opened;
     head.setAttribute('aria-expanded', String(opened));
@@ -268,6 +268,8 @@ function positionItem(p) {
     open(opening);
     teach.open = opening ? keyOf(p) : null;
     setTeachTarget(opening ? { scope: p.scope, name: p.name, at: at(), instance_override: override.checked } : null);
+    // its marker in the 3D view (teach3d.js): a point at the object it is taught at; a robot pose has none
+    teach3dShow(opening && !robotScope ? { kind: 'point', name: p.name, object_type: p.scope, ...(at() ? { placed: at() } : {}) } : null);
   });
   item._open = open;
   item._override = () => override.checked;

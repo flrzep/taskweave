@@ -164,7 +164,7 @@ CALL_TIMEOUT_S = 5.0
 ACTIVE = ('running', 'paused')  # a run is under way (also planning: running without a step)
 AFTER_JUMP_S = 2.0  # the teach node's default after_jump_s: it refuses a teach this long after a sim clock jump
 START_TIMEOUT_S = 30.0  # start_mission answers once the plan is checked: seconds on a large cell (0.3.1 took minutes)
-STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'icons.js', 'graph.js', 'record.js', 'viewer3d.js',
+STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'icons.js', 'graph.js', 'record.js', 'viewer3d.js', 'teach3d.js',
                 'style.css', 'viewer3d-demo.html')  # the 3D viewer alone, full window: for testing it
 VENDOR = WEB / 'vendor'  # the 3D view's libraries, served below /vendor/
 MANUAL_SKILL_TIMEOUT_S = 120.0  # work time (sim time x speed override), as the skill's own timeout
@@ -593,7 +593,7 @@ class Bridge(Node):
         self._fetch_scene()
         collision = self.collision
         return {'frame': self.cell_frame, 'objects': collision['objects'], 'skipped': collision['skipped'],
-                **scene.config_scene(self.config), 'updated': collision['updated']}
+                **scene.config_scene(self.config, self.robot), 'updated': collision['updated']}
 
     def check_idle(self, what: str = 'change settings') -> None:
         with self.lock:

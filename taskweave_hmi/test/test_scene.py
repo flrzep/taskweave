@@ -134,3 +134,19 @@ def test_config_scene_lists_placed_objects_locations_and_points(store):
     assert top == {'object_type': 'box', 'name': 'top_grasp',
                    'tools': {'left': {'xyz': [0.0, 0.1, 0.2], 'rpy': [0.0, 1.5708, 0.0]}}}
     assert {p['object_type'] for p in data['points']} == {'box'}   # part_box, crate, shelf: no points
+    assert data['stances'] == []   # no robot asked
+
+
+def test_config_scene_lists_the_robots_stances_at_each_placed_object(store):
+    from taskweave_core.config import Pose2D
+    from taskweave_hmi import points
+
+    stances = {(s['instance'], s['variant']): s for s in scene.config_scene(store, 'demo_bot')['stances']}
+    assert {key for key in stances if key[0].startswith('shelf')} == {
+        ('shelf_a', 'front'), ('shelf_a', 'side'), ('shelf_b', 'front'), ('shelf_b', 'side')}
+    instance = store.object_instances()['shelf_b']
+    expected = instance.pose.compose(Pose2D.from_dict(points.stance_offsets(store, 'demo_bot')['instances']['shelf_b']['front']))
+    front = stances[('shelf_b', 'front')]
+    assert front['override'] and front['default'] and front['object'] == 'shelf'
+    assert (front['x'], front['y']) == (pytest.approx(expected.x, abs=1e-3), pytest.approx(expected.y, abs=1e-3))
+    assert not stances[('shelf_a', 'front')]['override'] and not stances[('shelf_b', 'side')]['default']
