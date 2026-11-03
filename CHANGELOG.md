@@ -14,6 +14,7 @@
 - **Predicted base poses in collision checks:** `IkClient.at_base` puts MoveIt's virtual joint into the validity
   requests (`/check_state_validity` honours it; `/compute_ik` does not, measured: IK then runs without
   `avoid_collisions` and the validity service checks the solution).
+- **A failed dry run (`args.dry_run: true`) no longer calls `skill.stop()`**: it moves nothing, and `stop()` of a skill acts on the whole instance, so it could stop a goal of the same skill running at the same time.
 - **step_finished episodes keep `carrying`, `kind` and `module`** (`EPISODE_DATA`); **`PlanStep.notes`** (`string[]`): the
   validation notes of the step (`Step.notes`). Rebuild `taskweave_interfaces`.
 - **RunSkill `context_json`: the skill sees what follows its step.** The executive sends `{"plan_id", "cycle",

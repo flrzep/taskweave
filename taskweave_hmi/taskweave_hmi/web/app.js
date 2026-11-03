@@ -133,6 +133,7 @@ function argsText(args) { return Object.entries(args || {}).map(([k, v]) => `${k
 document.querySelectorAll('.tabs button').forEach((button) => button.addEventListener('click', () => {
   document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-selected', String(b === button)));
   document.querySelectorAll('.view').forEach((view) => show(view, view.id === `view-${button.dataset.view}`));
+  document.body.classList.toggle('on-run', button.dataset.view === 'run');  // the board shows the run: the bar keeps its controls
   if (button.dataset.view === 'missions') { if (state.editing) refreshCatalog(); else loadMissions(); }
   pointsVisible = button.dataset.view === 'points';
   robotVisible = button.dataset.view === 'robot';
@@ -196,10 +197,12 @@ function renderRun() {
   $('pad-mode').textContent = pad === 'drive' ? 'pad: drive' : `pad: ${pad} arm`;
   $('pad-mode').className = `chip pad ${pad === 'drive' ? '' : 'jog'}`;
   const active = renderMission(s);
+  updatePreviews();
   const { plan, live } = shownPlan();
   const outcomes = live ? snap.outcomes : {};
   const startIndex = plan && state.startStep ? plan.steps.findIndex((step) => step.id === state.startStep) : -1;
   if (startIndex < 0) state.startStep = null;  // another mission, or the step is gone
+  renderBoard(s, plan, outcomes, startIndex);
   $('btn-start').textContent = !active && startIndex >= 0 ? `Start at step ${startIndex + 1}` : 'Start';
   const pickable = !active && !!plan?.steps.length;
   show($('start-hint'), pickable);
@@ -282,6 +285,107 @@ function renderMission(s) {
   $('btn-start').disabled = active;
   return active;
 }
+// ---------- status board (Run tab) ----------
+// What the robot is doing, readable from a few metres: the state word, the mission and cycle, "16 / 26" big, the
+// step's instruction and under it the command, status and time; when it stopped, the error and how to go on; a strip
+// of the phases (the plan graph's bands) sized by their steps, done in green, the current one ringed.
+const BOARD_WORDS = { idle: 'idle', planning: 'planning', running: 'running', paused: 'paused', succeeded: 'done',
+  failed: 'failed', aborted: 'aborted' };
+const board = { phases: null, error: null };  // the phases' last arguments, the error text shown
+// graph.js (bandsOf) loads after this file: draw the phases once more when every script is there
+window.addEventListener('load', () => { if (board.phases) renderPhases(...board.phases); });
+// plan / outcomes: what the Run tab shows (the picked mission's preview while idle); the board shows the run itself
+// while one is active or has ended, the preview only before any run
+function renderBoard(s, shown, shownOutcomes, startIndex) {
+  const planning = s.state === 'running' && s.step_index === -1 && s.step_status === 'planning';
+  const word = planning ? 'planning' : s.state;
+  $('board').className = `card board state-${word}`;
+  $('board-state').textContent = BOARD_WORDS[word] || word;
+  const active = s.state === 'running' || s.state === 'paused';
+  const ended = ['succeeded', 'failed', 'aborted'].includes(s.state) && !!s.plan_id;
+  const run = active || ended;
+  const plan = run ? state.snapshot.plan : shown;
+  const outcomes = run ? state.snapshot.outcomes || {} : shownOutcomes;
+  const picked = $('mission-select').value;
+  const next = ended && picked && picked !== missionOf(plan) ? ` Next: ${picked}, Start in the bar above.` : '';
+  $('board-goal').textContent = run ? s.goal || '' : missionOf(plan) || '';
+  $('board-cycle').textContent = s.plan_id && (active || ended) ? `cycle ${s.cycle} · ${s.plan_id}` : '';
+  const total = plan?.steps.length || s.step_count || 0;
+  const at = s.step_index >= 0 ? s.step_index + 1 : null;
+  let count = '–', of = '', text = '', detail = '';
+  if (planning) {
+    of = `${s.step_count} steps`; text = 'Preparing the plan';
+    detail = 'The robot starts when the plan is ready.';
+  } else if (active && s.step) {
+    count = at ? String(at) : '–'; of = `/ ${total}`; text = s.step.instruction;
+    const label = s.step.skill === 'move' && s.step.kind ? moveLabel(s.step.kind) : s.step.skill;
+    detail = [label, s.state === 'paused' ? 'paused: Resume in the bar above' : s.step_status,
+      `${(s.step_elapsed_s ?? 0).toFixed(0)} s`, s.attempt > 1 ? `attempt ${s.attempt}` : ''].filter(Boolean).join(' · ');
+  } else if (active) {  // between steps (or a replan): no step in the status
+    count = at ? String(at) : '–'; of = total ? `/ ${total}` : '';
+    text = s.state === 'paused' ? 'Paused between steps' : 'Going on to the next step';
+    detail = s.state === 'paused' ? 'Resume in the bar above.' : s.step_status || '';
+  } else if (s.state === 'succeeded' && s.plan_id) {
+    count = String(total); of = `/ ${total}`; text = 'Finished';
+    detail = `Start runs it again.${next}`;
+  } else if ((s.state === 'failed' || s.state === 'aborted') && s.plan_id) {
+    // where it stopped: the status's step, else the last step that finished without success
+    const steps = plan?.steps || [];
+    const last = [...steps.keys()].reverse().find((i) => ['FAILED', 'REJECTED', 'CANCELED', 'TIMEOUT']
+      .includes(outcomes[steps[i].id]?.outcome));
+    const index = at ? at - 1 : last ?? -1;
+    count = index >= 0 ? String(index + 1) : '–'; of = total ? `/ ${total}` : '';
+    text = (s.step || steps[index])?.instruction || (s.state === 'aborted' ? 'Aborted' : 'The mission stopped');
+    detail = (s.state === 'aborted' ? 'Aborted by the operator.'
+      : index >= 0 ? `Failed at step ${index + 1}.` : 'The mission stopped.') + next;
+  } else if (plan?.steps.length) {
+    count = String(total); of = 'steps';
+    text = startIndex >= 0 ? `Ready to start at step ${startIndex + 1}` : 'Ready to start';
+    detail = startIndex >= 0 ? plan.steps[startIndex].instruction : 'Press Start in the bar above, or click a step in the plan to start there.';
+  } else {
+    text = 'No mission running'; detail = 'Pick a mission in the bar above and press Start.';
+  }
+  $('board-step').textContent = count;
+  $('board-total').textContent = of;
+  $('board-instruction').textContent = text;
+  $('board-instruction').title = text;
+  $('board-detail').textContent = detail;
+  // the last error, as the bar shows it off the Run tab (not after a success); how to go on once it stopped. Rewritten
+  // only when it changed, so a screen reader announces it once
+  const stopped = s.state === 'failed' || s.state === 'aborted';
+  const error = s.last_error && s.state !== 'succeeded' ? s.last_error : '';
+  const key = error ? `${stopped}|${error}` : '';
+  show($('board-error'), !!error);
+  if (key !== board.error) {
+    board.error = key;
+    $('board-error').replaceChildren(...(error ? [document.createTextNode(error), stopped ? el('small',
+      { text: 'To go on: click a step in the plan and press Start; the steps before it are left out.' }) : ''] : []));
+  }
+  board.phases = [s, plan, outcomes, active];
+  renderPhases(s, plan, outcomes, active);
+}
+// the phases: the plan graph's bands (graph.js bandsOf, from each step's origin); one band: none shown
+function renderPhases(s, plan, outcomes, active) {
+  const list = $('board-phases');
+  const bands = plan?.steps.length && typeof bandsOf === 'function'
+    ? bandsOf(plan, typeof missionCache === 'object' ? missionCache[missionOf(plan)] : null) : [];
+  show(list, bands.length > 1);
+  if (bands.length < 2) { list.replaceChildren(); return; }
+  list.replaceChildren(...bands.map((band) => {
+    const done = band.steps.filter((i) => outcomes[plan.steps[i].id]?.event === 'step_finished').length;
+    const now = active && band.steps.includes(s.step_index);
+    const failed = band.steps.some((i) => ['FAILED', 'REJECTED'].includes(outcomes[plan.steps[i].id]?.outcome));
+    const item = el('li', { class: `${now ? 'now' : ''}${failed ? ' failed' : ''}`,
+      'aria-label': `${band.name}: ${done} of ${band.steps.length} steps done${now ? ', running' : ''}` },
+    el('div', { class: 'ph-bar' }, el('i')), el('div', { class: 'name' }, el('span', { text: band.name }),
+      el('b', { text: `${done}/${band.steps.length}` })));
+    item.style.setProperty('--steps', band.steps.length);
+    item.style.setProperty('--done', `${(done / band.steps.length) * 100}%`);
+    item.title = `${band.name} · ${done}/${band.steps.length}`;
+    return item;
+  }));
+}
+
 $('last-error-close').addEventListener('click', () => { missionUi.dismissed = $('last-error-text').textContent; show($('last-error'), false); });
 
 // ---------- run controls ----------
@@ -401,6 +505,7 @@ function manualText() {
 }
 function renderManual() {
   const m = state.snapshot?.manual || null;
+  updatePreviews();
   show($('manual'), !!m);
   if (!m) { clearInterval(manualUi.timer); manualUi.timer = null; manualUi.since = null; return; }
   if (manualUi.since !== m.since) {  // a new one: count from its elapsed time, Abort pressable again
@@ -576,7 +681,10 @@ function stepCard(step, index, steps, expanded) {
     showIf(argsBox, [...argsBox.children].map((node) => ({ key: node.dataset.arg, spec: props[node.dataset.arg], node, read: node._value })));
   };
   renderArgs(step.include ? step.with || {} : step.args || {});
+  const preview = movePreview(() => card._read());
+  argsBox.after(preview);
   q('skill').addEventListener('change', () => { renderArgs({}); markDirty(); });
+  ['input', 'change'].forEach((type) => card.addEventListener(type, () => { preview._clear(); preview._refresh(); }));
   card.addEventListener('input', markDirty);
   card.addEventListener('change', markDirty);
   ['input', 'change'].forEach((type) => card.addEventListener(type, () => stepSummary(card)));
@@ -629,8 +737,90 @@ function stepCard(step, index, steps, expanded) {
   };
   setExpanded(card, expanded);
   stepSummary(card);
+  preview._refresh();
   return card;
 }
+
+// ---------- a move step's preview ----------
+// Preview on a move step: its arguments as they are in the editor, run as a dry run on the robot (POST
+// /api/skills/move/dry_run: resolved and solved, nothing moves). The answer stays under the arguments until the step
+// is edited: the skill's message (the command and target) over the joint goal per group (deg, m), the base pose and
+// torso of a drive, what it carries and the goals on the way; a refusal or a failure as a red line, as the step's
+// problems. Not while a mission or a manual skill runs (they share the move skill on the robot), not with a
+// placeholder ({fact}, {param}: filled at run time): the button is off and says why.
+const PREVIEW_SKILL = 'move';
+const placeholdersIn = (value) => (typeof value === 'string' ? (isPlaceholder(value) ? [value] : [])
+  : Array.isArray(value) ? value.flatMap(placeholdersIn) : isPlain(value) ? Object.values(value).flatMap(placeholdersIn) : []);
+function previewBlocked(args) {
+  const snap = state.snapshot;
+  const mission = snap?.status?.state;
+  if (mission === 'running' || mission === 'paused') return `a mission is ${mission}`;
+  if (snap?.manual) return `${snap.manual.label} (${snap.manual.skill}) is running`;
+  const held = [...new Set(placeholdersIn(args))];
+  if (held.length) return `${held.join(', ')} ${held.length > 1 ? 'are' : 'is'} filled at run time`;
+  return Object.keys(args || {}).length ? '' : 'no arguments yet';
+}
+function movePreview(read) {
+  const button = el('button', { type: 'button', class: 'btn small', text: 'Preview',
+    title: 'Resolve and solve this move on the robot with the arguments as they are here; nothing moves' });
+  const why = el('span', { class: 'muted small-text' });
+  const out = el('div', { class: 'preview-out', hidden: '' });
+  const node = el('div', { class: 'step-preview' }, el('div', { class: 'row wrap' }, button, why), out);
+  let busy = false;
+  let step = { skill: '', args: {} };  // the step as last read: _refresh on its edits, _update on status events
+  node._update = () => {
+    const move = step.skill === PREVIEW_SKILL;
+    show(node, move);
+    const blocked = move ? previewBlocked(step.args) : '';
+    button.disabled = busy || !!blocked;
+    why.textContent = busy ? 'Solving… nothing moves.' : blocked ? `No preview: ${blocked}.` : '';
+  };
+  node._refresh = () => { step = read(); node._update(); };
+  node._clear = () => { out.replaceChildren(); show(out, false); };
+  button.addEventListener('click', async () => {
+    const sent = JSON.stringify(step.args);
+    busy = true;
+    node._clear();
+    node._update();
+    let answer;
+    try {
+      const { ok, data } = await api('POST', `/api/skills/${PREVIEW_SKILL}/dry_run`, { args: step.args });
+      answer = ok ? previewAnswer(data)
+        : [el('div', { class: 'msg bad', text: (data.problems || [data.error || 'no answer']).join('\n') })];
+    } catch (error) {  // no connection (the HMI restarting): say so, never stick on "Solving"
+      answer = [el('div', { class: 'msg bad', text: `no answer from the HMI: ${error.message || error}` })];
+    } finally {
+      busy = false;
+      node._update();
+    }
+    if (JSON.stringify(step.args) !== sent) return;  // edited while it solved: the answer is for other args
+    out.replaceChildren(...answer);
+    show(out, true);
+  });
+  return node;
+}
+// the preview's answer: the message, then label / value rows (a group's values with the joint names as the tooltip)
+function previewAnswer(answer) {
+  if (answer.outcome !== 'succeeded') return [el('div', { class: 'msg bad', text: `${answer.outcome}: ${answer.message}` })];
+  const d = answer.data || {};
+  const rows = [];
+  const num = (n, digits) => n.toFixed(digits).replace('-', '−');
+  const value = (j) => (j.unit === 'm' ? `${num(j.value, 3)} m` : `${num(j.value, 1)}°`);
+  const groups = (view) => view.forEach((g) => rows.push([g.group, g.joints.map(value).join('  '), g.joints.map((j) => `${j.name} ${value(j)}`).join('\n')]));
+  if (d.pose) rows.push(['base', `x ${num(d.pose.x, 2)} m · y ${num(d.pose.y, 2)} m · yaw ${num(d.pose.yaw * DEG, 1)}°`]);
+  if (Array.isArray(d.by)) rows.push(['base', `by ${signed(+d.by[0].toFixed(3))} m${d.by[1] ? ` · ${signed(+d.by[1].toFixed(3))} m sideways` : ''}`]);
+  if (answer.torso) groups(answer.torso);
+  else if (['navigate', 'straight'].includes(d.kind)) rows.push(['torso', d.torso === 'keep' ? 'kept' : d.torso == null ? 'drive height' : String(d.torso)]);
+  groups(answer.goal || []);
+  if (d.carrying) rows.push(['carrying', d.carrying]);
+  if (Array.isArray(d.legs) && d.legs.length > 1) rows.push(['on the way', d.legs.slice(0, -1).map((leg) => leg.label).join(' → ')]);
+  if (!rows.length) rows.push(['goal', 'nothing to move']);
+  return [el('div', { class: 'msg preview-answer' }, el('div', { text: answer.message }),
+    el('dl', { class: 'preview-goal' }, rows.flatMap(([label, text, tip]) => [el('dt', { text: label }), el('dd', tip ? { text, title: tip } : { text })])))];
+}
+// the previews follow the mission and the manual skill (a mission start turns them off); each from the step as last
+// read, so a status event reads no fields
+function updatePreviews() { document.querySelectorAll('#step-editor .step-preview').forEach((node) => node._update()); }
 
 // ---------- folded steps ----------
 // A step folds to its summary line (number, instruction, skill and a short reading of its arguments): a long mission

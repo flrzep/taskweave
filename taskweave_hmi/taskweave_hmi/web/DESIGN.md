@@ -72,7 +72,9 @@ network may have no internet). `font-variant-numeric: tabular-nums` throughout, 
 | `--fs-md` | 18px | brand name, state badge (700, uppercase), record stats |
 | `--fs-lg` | 20px / 1.35 | current step instruction |
 | `--fs-xl` | 24px / 1.2 | `h2` |
-| `--fs-2xl` | 30px / 1.12 | speed value, recording headline (26px on a phone) |
+| `--fs-2xl` | 30px / 1.12 | speed value, recording headline (26px on a phone), the board's "/ N" (`--fs-xl` on a phone) |
+| `--fs-3xl` | 36px | the status board's state word (30px on a phone) |
+| `--fs-4xl` | 60px | the status board's step number (a 44px literal on a phone, its only use) |
 
 Weights: 400 body, 500 instruction, 600 titles and buttons, 700 badges and the brand name.
 
@@ -114,7 +116,8 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   wrap and share the width.
 - **Sticky top** (`.top`): header (brand, pad, connection), mission bar, speed strip, manual skill strip, tabs; on
   every tab.
-- **Mission bar** (`.mission`): below the header. A 4px rail in the state colour (striped amber when paused) and the
+- **Mission bar** (`.mission`): below the header. On the Run tab, while a mission is active, it keeps only the badge
+  and Pause / Abort, and its error hides (the status board shows both); idle it keeps the picker and Start everywhere. A 4px rail in the state colour (striped amber when paused) and the
   state as a solid badge (`#state`, uppercase Barlow Semi Condensed 14px; `planning` while the task handler prepares
   the plan). While a mission is active (`.mission.active`, a 5% state tint): the goal (18px, 600) with plan id and
   cycle right, under it "step n/N" and the step's instruction, one line with an ellipsis, then skill, status, seconds
@@ -123,6 +126,16 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   Start's answer (`.msg`, idle only) and the last error (`.error` with a ✕ that hides that error until another one or
   the next start). On a phone: badge, step n/N, Pause, Abort in one row (44px targets, "Tap again to abort" wraps),
   the instruction under it, no goal or detail; idle: badge, picker, Start.
+- **Status board** (`.board`, Run tab): the andon panel of the run, read from a few metres. A 10px rail in the state
+  colour (striped amber when paused) on a 5% tint; the state word (Barlow Semi Condensed 36px, caps, in the state's
+  text colour: "done" for succeeded), the mission and cycle; the step number at 60px with "/ N", the instruction at
+  24px (two lines, three on a phone), and under it the command, status, seconds and attempt. Planning, idle ("26 steps ·
+  Ready to start", or the chosen start step), done, failed (the failed step, from the outcomes when the status has no
+  step) and aborted each have their own words. The last error (not after a success) in a red-ruled panel, with how to go on once it stopped. After a run the board
+  keeps showing that run (and names a different picked mission as next) while the plan below previews the pick. Under
+  it the phases: the plan graph's bands as one bar each, as wide as their steps, done in green, the current one ringed
+  in the state colour, name and done/total under it. On the Run tab the mission bar keeps only the badge and the
+  controls (`body.on-run`), so the words are not shown twice, and its error hides (the board shows it).
 - **Tabs** (`.tabs`): in the sticky top bar with the header (`.top` wraps both). Uppercase 14px, 48px high, equal
   width; the selected one in brand text with a 3px underline. At 400px and below they drop the uppercase so all six
   fit; if they still do not, they scroll inside the bar, never the page.
@@ -160,6 +173,11 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   number fields labelled "x (m)", "y (m)", "z (m)". Hands are 20px checkboxes per hand, a muted "or", and the rule
   words as a segmented control. An object marked as a group (Motion (advanced)) is a muted `details` summary, open
   when it has a value. Text fallbacks are monospace textareas.
+- **Move preview** (`.step-preview`): under a move step's arguments a small secondary **Preview** button (a dry run:
+  nothing moves), off with a muted "No preview: …" beside it while a mission or a manual skill runs or an argument is
+  a placeholder. The answer stays until the step is edited: a `.msg` with the skill's message over label / value rows
+  (`.preview-goal`, monospace 13px, labels muted: base, torso, each joint group in ° or m, carrying, on the way; the
+  joint names as the tooltip), or a `.msg.bad` line with the outcome and message, as the step's problems.
 - **Chips** (`.chip`): a dot and the word, in the state colour on an 11% tint. Each state sets `--c` (text), `--fill`
   and `--ink` (for the solid badge).
 - **Details and summary**: summaries in brand text, 44px high; nested ones inside a point are muted and monospace.
@@ -181,7 +199,8 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   word, remembered per mission. Only exceptions are marked: rule badges on the chip's top edge, a dashed replan line
   in the left gutter, dashed boxes round parallel candidates. The running or selected step opens in a 300px side
   card (`.pg-card`, 2px brand border); below 608px of card width it goes under the graph. At 600px and below: a
-  rail of 44px chips per band and a bottom sheet (`.pg-sheet`). It reads `--g-*` tokens mapped onto the global
+  rail of 44px chips per band and a bottom sheet (`.pg-sheet`) for a step the operator taps (the running step is on
+  the status board). It reads `--g-*` tokens mapped onto the global
   ones.
 
 ## Icons and imagery
