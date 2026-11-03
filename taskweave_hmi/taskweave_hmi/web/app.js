@@ -1717,13 +1717,15 @@ function atHint(pick, type) {
   return node;
 }
 
-// The last Teach save (from this browser or the pad), shown under its entry until the next one: what was saved, where it
-// was measured, and Undo (POST /api/teach/undo: the files as they were before that save; refused once they changed).
-// warnings: what the save left out (the server's notes), each on its own line and the note amber.
-function noteSaved(key, text, undo, warnings = []) { state.lastSaved = { key, text, undo: undo || null, warnings }; }
+// Each entry's last Teach save (from this browser or the pad), shown under it until the page reloads: what was saved,
+// where it was measured, and Undo (POST /api/teach/undo: the files as they were before that save; refused once they
+// changed, so an older one says so). warnings: what the save left out (the server's notes), each on its own line and
+// the note amber.
+const savedNotes = {};
+function noteSaved(key, text, undo, warnings = []) { savedNotes[key] = { text, undo: undo || null, warnings }; }
 function savedNote(key) {
-  const saved = state.lastSaved;
-  if (!saved || saved.key !== key) return '';
+  const saved = savedNotes[key];
+  if (!saved) return '';
   const warnings = saved.warnings || [];
   const box = el('div', { class: `msg saved-note${warnings.length ? ' warn' : ''}` }, el('span', { text: saved.text }),
     ...warnings.map((text) => el('div', { text: text.charAt(0).toUpperCase() + text.slice(1) + '.' })));
