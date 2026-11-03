@@ -244,26 +244,36 @@
   </section>
 
   <!-- ROBOT -->
-  <section id="view-robot" class="view" hidden>
+  <!-- a dashboard on a laptop (1180px and wider): where the robot stands and its joints at the left, the 3D view and
+       the grippers at the right, the settings under both; narrower, one column -->
+  <section id="view-robot" class="view robot-grid" hidden>
     <div id="robot-busy" class="error" hidden></div>
-    <div id="viewer3d-robot" class="viewer3d" role="region" aria-label="3D view: the robot, its joints live, and the room it keeps while driving"></div>
-    <div class="card">
-      <div class="label">Robot pose</div>
-      <div id="robot-pose" class="mono">–</div>
+    <div class="card robot-base">
+      <h2 class="label">Base</h2>
+      <dl class="readout">
+        <div><dt>x</dt><dd id="robot-x">–</dd></div>
+        <div><dt>y</dt><dd id="robot-y">–</dd></div>
+        <div><dt>yaw</dt><dd id="robot-yaw">–</dd></div>
+      </dl>
+      <div id="robot-pose" class="mono muted">–</div>
     </div>
+    <div class="robot-side">
+    <div id="viewer3d-robot" class="viewer3d" role="region" aria-label="3D view: the robot, its joints live, and the room it keeps while driving"></div>
     <div id="gripper-card" class="card" hidden>
       <div class="label">Grippers</div>
       <p class="muted small-text">Finger opening now, from the robot profile's opening table. Open and Close move at once.</p>
       <div id="gripper-msg" class="msg" hidden></div>
       <div id="gripper-list"></div>
     </div>
-    <div class="card">
+    </div>
+    <div class="card robot-joints">
       <div class="label">Joints</div>
       <p class="muted small-text">Live joint values against their limits (red: within 10° of one). Set a joint here when
         the pad cannot get the arm there: it moves at once, without a collision check.</p>
       <div id="joints-msg" class="msg" hidden></div>
       <div id="joint-list"></div>
     </div>
+    <div class="robot-settings">
     <div class="sub settings-head">Settings</div>
     <details class="card">
       <summary class="label">Navigation</summary>
@@ -316,6 +326,7 @@
       <div id="ik-msg" class="msg" hidden></div>
       <div class="row gap"><button id="btn-ik-save" class="btn primary" data-edit>Save</button></div>
     </details>
+    </div>
   </section>
 
   <!-- RECORD -->

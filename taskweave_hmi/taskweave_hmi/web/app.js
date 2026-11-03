@@ -1798,10 +1798,16 @@ function setPointsBusy(text) {
 // The base pose, in the Robot tab and at the top of the Teach tab (what Capture would save for a location).
 async function refreshPose() {
   const { ok, data } = await api('GET', '/api/robot_pose');
-  const text = ok
-    ? fmt(data.pose) + (data.relative[0] ? `  ·  nearest ${data.relative[0].instance} (${data.relative[0].distance} m)` : '')
-    : (data.error || 'no robot pose');
-  ['robot-pose', 'teach-pose'].forEach((id) => { $(id).textContent = text; $(id).classList.toggle('muted', !ok); });
+  const near = ok && data.relative[0] ? `nearest ${data.relative[0].instance} (${data.relative[0].distance} m)` : '';
+  const text = ok ? fmt(data.pose) + (near ? `  ·  ${near}` : '') : (data.error || 'no robot pose');
+  $('teach-pose').textContent = text; $('teach-pose').classList.toggle('muted', !ok);
+  // the Robot tab: x, y and yaw big, the nearest placed object (or why there is no pose) under them
+  const fixed = (v, digits) => (Math.abs(v) < 0.5 * 10 ** -digits ? 0 : v).toFixed(digits);  // no "-0.000"
+  $('robot-x').textContent = ok ? `${fixed(data.pose.x, 3)} m` : '–';
+  $('robot-y').textContent = ok ? `${fixed(data.pose.y, 3)} m` : '–';
+  $('robot-yaw').textContent = ok ? `${fixed(data.pose.yaw * DEG, 1)}°` : '–';
+  $('robot-pose').textContent = ok ? near : text;
+  $('robot-pose').classList.toggle('bad', !ok);
   state.robotPose = ok ? data : null;
   document.dispatchEvent(new Event('robot-pose'));  // the "at" hints follow (atHint)
   return ok ? data : null;

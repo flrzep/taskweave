@@ -191,7 +191,9 @@ their times, for reading back what happened after the run.
 
 ### The Robot tab
 
-What the robot is doing now. At the top a 3D view of the robot alone, its joints live, with the room the path planner
+What the robot is doing now. On a laptop the base pose (x, y, yaw in large figures, the nearest placed object under
+them) and the joints are at the left, the 3D view and the grippers at the right, the settings under both; on a phone
+they follow each other, the 3D view first. The 3D view shows the robot alone, its joints live, with the room the path planner
 keeps around it drawn on the floor: the chassis, the envelope (the robot in its driving pose, arms included), the
 padding and the inflation zone, and an arrow to the front. **Fit** shows it from the front, **Top** straight down,
 **Areas** hides the floor drawing. Below:

@@ -422,6 +422,26 @@ details.card > summary.label { color: var(--text); font: 600 var(--fs-base) var(
 details.card > summary.label:hover { background: var(--surface-hover); }
 details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m) var(--r-m) 0 0; }
 .settings-head { margin-top: var(--sp-2); padding: 0 2px; }
+/* Robot: one column up to 1179px (3D view, base, grippers, joints, settings); from 1180px a dashboard, 7 : 5, the page
+   up to 1600px wide: base over joints at the left, the 3D view over the grippers at the right, the settings under both */
+.robot-side, .robot-settings { display: contents; }
+#robot-busy { order: 0; } #viewer3d-robot { order: 1; } .robot-base { order: 2; } #gripper-card { order: 3; }
+.robot-joints { order: 4; } .robot-settings > * { order: 5; }
+.readout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2) var(--sp-4); margin: 0; }
+.readout dt { font-size: var(--fs-sm); color: var(--text-muted); }
+.readout dd { margin: 0; font: 600 var(--fs-xl)/1.1 var(--cond); white-space: nowrap; }
+@media (min-width: 1180px) {
+  body[data-view="robot"] main { max-width: 1600px; padding: var(--sp-5) var(--sp-6) var(--sp-12); }
+  .robot-grid { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; gap: var(--sp-5);
+                grid-template-rows: auto auto 1fr auto;  /* the 3D view's extra height under the joints, not between */
+                grid-template-areas: "busy busy" "base side" "joints side" "settings settings"; }
+  #robot-busy { grid-area: busy; } .robot-base { grid-area: base; } .robot-joints { grid-area: joints; }
+  .robot-side { grid-area: side; display: grid; gap: var(--sp-5); min-width: 0; position: sticky;
+                top: calc(var(--top-h, 76px) + var(--sp-5));  /* never taller than the window (as the Run tab's) */
+                max-height: calc(100dvh - var(--top-h, 76px) - 2 * var(--sp-5)); overflow-y: auto; overscroll-behavior: contain; }
+  .robot-settings { grid-area: settings; display: grid; gap: var(--sp-4); min-width: 0; }
+  #viewer3d-robot { aspect-ratio: 16 / 11; }
+}
 
 /* plan list, mission list, log */
 .steps, .list, .log, .edit-steps, .points, .placed, .arm-groups, .waypoints { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
