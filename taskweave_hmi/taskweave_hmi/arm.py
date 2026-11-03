@@ -37,6 +37,47 @@ def target_from_hand(hand: Mapping) -> dict:
             'closing': [round(float(v), 4) for v in m[:3, 1]]}
 
 
+def _quat_matrix(xyz, quat) -> np.ndarray:
+    """4x4 from a position and a quaternion [w, x, y, z]."""
+    w, x, y, z = (float(v) for v in quat)
+    m = np.eye(4)
+    m[:3, :3] = [[1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+                 [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+                 [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)]]
+    m[:3, 3] = [float(v) for v in xyz]
+    return m
+
+
+def object_in_base(base: Mapping, instance: Mapping) -> np.ndarray:
+    """A placed object's frame (at its top item: x, y, top_z, yaw in the cell) in the robot's base frame, from the
+    base's pose in the cell (``base``: xyz, quat [w, x, y, z], as /api/robot/base)."""
+    cell_object = rpy_matrix(np.array([instance['x'], instance['y'], instance['top_z']], float),
+                             np.array([0.0, 0.0, instance['yaw']], float))
+    return np.linalg.inv(_quat_matrix(base['xyz'], base['quat'])) @ cell_object
+
+
+def point_targets(base: Mapping, instance: Mapping, tools: Mapping) -> dict:
+    """An object point's tool targets {tool: {tcp, approach, closing}} in the robot's base frame, as the robot stands
+    now: its tool poses (``tools``: {tool: {xyz, rpy}} in the object frame) at that placed object (object_in_base). What
+    the reach check solves for a stance: can the hands get there from here."""
+    frame = object_in_base(base, instance)
+    result = {}
+    for tool, hand in tools.items():
+        m = frame @ rpy_matrix(np.asarray(hand['xyz'], float), np.asarray(hand['rpy'], float))
+        result[tool] = {'tcp': [round(float(v), 4) for v in m[:3, 3]],
+                        'approach': [round(float(v), 4) for v in m[:3, 2]],
+                        'closing': [round(float(v), 4) for v in m[:3, 1]]}
+    return result
+
+
+def hand_distances(base: Mapping, instance: Mapping, current: Mapping) -> dict:
+    """How far each tool's TCP is now (``current``: /api/robot/tools, base frame) from the placed object's origin (its
+    top item), m: which hand is on the object."""
+    origin = object_in_base(base, instance)[:3, 3]
+    return {tool: round(float(np.linalg.norm(np.asarray(target['tcp'], float) - origin)), 3)
+            for tool, target in current.items()}
+
+
 def object_types(store: ConfigStore) -> list[str]:
     return sorted(path.stem for path in (store.root / 'objects').glob('*.yaml'))
 

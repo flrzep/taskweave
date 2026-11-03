@@ -55,3 +55,22 @@ def test_a_capture_takes_the_closed_grippers_as_the_points_grip(store):
     store.reload()
     assert arm.closed_grips(store, ROBOT, [], {'left_finger': 0.62}) == {}          # the profile's closed_from: open
     assert arm.closed_grips(store, ROBOT, [], {'left_finger': 0.75}) != {}
+
+
+def test_point_targets_at_an_object_in_the_base_frame():
+    # the robot at (1, 0) turned 90° (facing +y), the object at (1, 2), top 0.8 m up, turned 90° too: the object
+    # sits 2 m ahead of the robot, its frame lined up with the base's
+    base = {'xyz': [1.0, 0.0, 0.0], 'quat': [math.cos(math.pi / 4), 0.0, 0.0, math.sin(math.pi / 4)]}
+    instance = {'x': 1.0, 'y': 2.0, 'top_z': 0.8, 'yaw': math.pi / 2}
+    # a point 0.1 m in front of the object's origin (its -x), approach along the object's +x
+    found = arm.point_targets(base, instance, {'left': {'xyz': [-0.1, 0.0, 0.05], 'rpy': [0.0, math.pi / 2, 0.0]}})
+    assert found['left']['tcp'] == pytest.approx([1.9, 0.0, 0.85], abs=1e-4)
+    assert found['left']['approach'] == pytest.approx([1.0, 0.0, 0.0], abs=1e-4)
+    assert found['left']['closing'] == pytest.approx([0.0, 1.0, 0.0], abs=1e-4)
+
+
+def test_hand_distances_from_the_object():
+    base = {'xyz': [0.0, 0.0, 0.0], 'quat': [1.0, 0.0, 0.0, 0.0]}
+    instance = {'x': 1.0, 'y': 0.0, 'top_z': 0.5, 'yaw': 0.0}
+    current = {'left': {'tcp': [1.0, 0.0, 0.6]}, 'right': {'tcp': [0.0, 0.0, 0.5]}}
+    assert arm.hand_distances(base, instance, current) == {'left': 0.1, 'right': 1.0}

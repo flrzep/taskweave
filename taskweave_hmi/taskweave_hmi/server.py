@@ -89,6 +89,10 @@ HTTP API (JSON):
   POST /api/robot/move {pose}      go to a named pose now (no mission running: move_joints, or move_gripper for a pose
                                    with tool targets); returns the outcome when it ends
   POST /api/robot/reach {joints, tools, search: [tool]}   per tool: ok, message, warnings, nearest reachable target
+  POST /api/robot/reach {at, points[, search]}   from where the robot stands now, at placed object <at>: per point of
+                                   its type (all, or those named) per tool the same entry, and per tool how far its TCP
+                                   is from the object now {at, points: {point: {tool: entry}}, hands: {tool: m}}
+                                   (Teach's live check; arm.point_targets)
   PUT  /api/robot/joints {joints: {name: value}}  send joint targets now (no mission running; within the limits)
   GET  /api/teach/arm               arm positions: robot poses and object points as one list (arm.py)
   PUT  /api/teach/arm/<robot|type>/<name>      {hands, joints, elbow, approach_m[, rename]};  DELETE the same
@@ -167,8 +171,8 @@ CALL_TIMEOUT_S = 5.0
 ACTIVE = ('running', 'paused')  # a run is under way (also planning: running without a step)
 AFTER_JUMP_S = 2.0  # the teach node's default after_jump_s: it refuses a teach this long after a sim clock jump
 START_TIMEOUT_S = 30.0  # start_mission answers once the plan is checked: seconds on a large cell (0.3.1 took minutes)
-STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'icons.js', 'graph.js', 'record.js', 'viewer3d.js',
-                'teach3d.js', 'style.css', 'viewer3d-demo.html')  # the 3D viewer alone, full window: for testing it
+STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'teachtask.js', 'held.js', 'icons.js', 'graph.js', 'record.js',
+                'viewer3d.js', 'teach3d.js', 'style.css', 'viewer3d-demo.html')  # the 3D viewer alone, full window: for testing it
 VENDOR = WEB / 'vendor'  # the 3D view's libraries, served below /vendor/
 MANUAL_SKILL_TIMEOUT_S = 120.0  # work time (sim time x speed override), as the skill's own timeout
 DRIVE_TIMEOUT_S = 300.0  # a drive across the cell
@@ -650,7 +654,40 @@ class Bridge(Node):
 
     def reach(self, body: dict) -> dict:
         """Can the robot put its tools on these targets? Per tool: ok, message, warnings, and with ``search`` the
-        nearest reachable target (TCP moved along a base axis). Solved like move_gripper solves a named pose."""
+        nearest reachable target (TCP moved along a base axis). Solved like move_gripper solves a named pose. With
+        ``at`` (a placed object): its type's points (``points``: those named, else all) as targets from where the robot
+        stands now, per point, and how far each hand is from the object (reach_at)."""
+        if body.get('at'):
+            return self.reach_at(body)
+        return self.reach_tools(body)
+
+    def reach_at(self, body: dict) -> dict:
+        """The reach of a placed object's points from here (arm.point_targets with the base pose from TF), and each
+        hand's distance from the object now (FK; {} without it)."""
+        at = str(body['at'])
+        instances = self.config.object_instances()
+        if at not in instances:
+            raise points.PointError(f'no placed object {at!r}')
+        instance = instances[at]
+        where = {'x': instance.pose.x, 'y': instance.pose.y, 'top_z': instance.top_z, 'yaw': instance.pose.yaw}
+        base = self.base_transform()
+        wanted = body.get('points')
+        found = [p for p in points.object_points(self.config, instance.object, {})
+                 if wanted is None or p['name'] in wanted]
+        search = body.get('search', [])
+        result = {}
+        for point in found:
+            targets_now = arm.point_targets(base, where, point['tools'])
+            result[point['name']] = self.reach_tools({'joints': body.get('joints'), 'tools': targets_now,
+                                                      'search': search})
+        try:
+            hands = arm.hand_distances(base, where, self.tool_targets())
+        except TimeoutError:
+            hands = {}
+        return {'at': at, 'object': instance.object, 'points': result, 'hands': hands}
+
+    def reach_tools(self, body: dict) -> dict:
+        """Per tool of ``tools``: can IK put it there (reach)."""
         from taskweave_skills.ik import IkClient, IkError, target_warnings
 
         profile = self.config.robot(self.robot)

@@ -28,6 +28,7 @@ async function reloadScenes() {
 
 // ---------- 3D -> the lists ----------
 function picked(info) {
+  if (teachFlowPick(info)) return;  // teaching by task takes the picks (teachtask.js)
   hidePick();
   if (info.here) { showSpot(info.here); return; }  // several stances on one spot: which one
   if (info.kind !== 'placed') teachViewer?.setHighlight(info);

@@ -184,7 +184,11 @@ function connect() {
     else if (type === 'manual') { state.snapshot.manual = data; renderManual(); return; }
     else if (type === 'notice') {
       padNotice(data);
-      if (data.taught) { noteSaved(`arm:${data.taught.scope}/${data.taught.name}`, data.text, data.undo, data.notes); teachTaught(); }
+      if (data.taught) {
+        noteSaved(`arm:${data.taught.scope}/${data.taught.name}`, data.text, data.undo, data.notes);
+        teachTaught();
+        teachFlowTaught(data);  // teachtask.js: the guided screen's grasp or pose
+      }
       return;
     }
     else if (type === 'plan') { if (state.snapshot.plan?.plan_id !== data.plan_id) state.snapshot.outcomes = {}; state.snapshot.plan = data; }

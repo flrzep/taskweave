@@ -203,6 +203,21 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   open the same card as "Stances on this spot" with one button per stance. One `.pick-where` in the tab, on the
   entry picked last. Opening an entry highlights and focuses its marker (and follows its "at" choice, which also takes the note away);
   the points event redraws the markers and the object card. The teach-here buttons are off while a mission runs.
+- **Teach by task** (`.teach-flow`, teachtask.js): the Teach tab opens on one big brand button (`.teach-hero`, 72px,
+  64 on a phone, a plus and "Teach") over the lists. It opens a card in their place: four big job tiles (`.flow-job`,
+  2 x 2 on every width, a 44px line icon in brand, the word big and a short hint): Stand, Grasp, Pose, Spot. Stand and
+  Grasp ask for the object next: the placed ones nearest first with their distance (`.flow-object`, 6 and "All n"),
+  or a click on it in the 3D view (which then belongs to the flow); Stand also offers "No object: a spot in the
+  cell". Then one guided screen, its job and object as chips in the head (the object highlighted and turned to in
+  3D, its distance live): the pad strip (`.flow-pad`, lime tint, amber with "switch to drive" / "switch to an arm"
+  when the pad is in the other mode), the live check (`.flow-reach`: a stance's "Reaches n of m" over the type's
+  grasp points with an L / R tick or cross each, lime when all, amber when some; `.flow-hand`: a grasp's or pose's
+  hands as toggles, a grasp's with each hand's distance from the object, the near ones on), the name (a free one
+  suggested: stand_n, pick_n, pose_n, spot_n; "exists: Save overwrites" in amber), what Capture took (amber "Moved
+  since: capture again" when the robot moved 5 mm or 0.5° since, Save off then), and Capture / Save as 56px buttons.
+  Saved: a lime card with a tick, where and into which file, then Preview (dry run) / Go here / Undo and Teach
+  another / Done. Saves go through the lists' endpoints (teach node, overwrite confirm, Undo); a pad teach press for
+  this grasp or pose shows as "Taught by the pad".
 - **Robot dashboard** (`.robot-grid`): up to 1179px one column, 3D view, base, grippers, joints, settings. From
   1180px 7 : 5 up to 1600px wide: the base over the joints at the left, the 3D view (16 : 11) over the grippers at the
   right (sticky under the top), the settings full width under both. The base as a readout (`.readout`: x, y, yaw in

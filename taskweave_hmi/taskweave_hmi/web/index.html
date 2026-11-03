@@ -218,6 +218,12 @@
     </div>
     <div class="teach-main">
       <div id="points-busy" class="error" hidden></div>
+      <!-- teach by task (teachtask.js): the job first, then the object, then one guided screen; the lists below edit
+           what exists -->
+      <button id="btn-teach" type="button" class="teach-hero" data-edit>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Teach</button>
+      <section id="teach-flow" class="card teach-flow" aria-label="Teach" hidden></section>
+      <div id="teach-list" class="teach-list">
       <div class="teach-head">
         <span class="muted small-text">Robot now</span>
         <div id="teach-pose" class="mono">–</div>
@@ -273,6 +279,7 @@
       </div>
       <p class="muted small-text">Saved points are used at the next mission start. A point a mission refers to cannot be
         renamed or deleted.</p>
+      </div>
     </div>
   </section>
 
@@ -464,6 +471,7 @@
 <script src="icons.js"></script>
 <script src="graph.js"></script>
 <script src="teach3d.js"></script>
+<script src="teachtask.js"></script>
 <script src="record.js"></script>
 <script type="module" src="viewer3d.js"></script>
 </body>

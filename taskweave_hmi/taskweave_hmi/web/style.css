@@ -721,6 +721,104 @@ li.empty { list-style: none; padding: 6px 2px; }
 
 /* Teach tab: the live pose, then one list at a time; arm positions grouped by what they are relative to */
 .teach-head { display: grid; gap: var(--sp-1); padding: 0 2px; }
+/* teach by task (teachtask.js): one big Teach button, four big jobs, the objects nearest first, one guided screen */
+.teach-list { display: grid; gap: var(--sp-3); min-width: 0; }
+@media (min-width: 601px) { .teach-list { gap: var(--sp-4); } }
+.teach-hero { display: flex; align-items: center; justify-content: center; gap: var(--sp-3); min-height: 72px;
+  border: 0; border-radius: 16px; background: var(--brand); color: var(--on-brand); cursor: pointer;
+  font: 700 26px/1 var(--sans); letter-spacing: .01em; box-shadow: var(--shadow-2); }
+.teach-hero svg { width: 30px; height: 30px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; }
+.teach-hero:hover { background: var(--brand-hover); }
+.teach-hero:focus-visible, .flow-job:focus-visible, .flow-object:focus-visible, .flow-hand:focus-visible {
+  outline: 3px solid var(--focus); outline-offset: 2px; }
+.teach-hero:disabled { opacity: .5; cursor: not-allowed; }
+.teach-flow { display: grid; gap: var(--sp-4); }
+.flow-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.flow-head .icon { flex: none; }
+.flow-crumbs { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
+.flow-title { font: 700 var(--fs-lg) var(--sans); }
+.flow-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 var(--sp-3);
+  border-radius: var(--r-pill); background: var(--brand-soft); color: var(--brand-text); font: 600 var(--fs-s) var(--sans); }
+.flow-chip.at { background: var(--surface-field); color: var(--text); }
+.flow-chip.at span { color: var(--text-muted); font-weight: 400; }
+.job-icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.flow-jobs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
+.flow-job { display: grid; justify-items: start; align-content: start; gap: 6px; min-height: 148px; padding: var(--sp-4);
+  text-align: left; border: 1.5px solid var(--border); border-radius: 16px; background: var(--surface-card);
+  color: var(--text); cursor: pointer; transition: border-color .15s, transform .15s; }
+.flow-job .job-icon { color: var(--brand-text); margin-bottom: var(--sp-2); }
+.flow-job b { font: 700 22px/1.1 var(--sans); }
+.flow-job span { color: var(--text-muted); font-size: var(--fs-s); }
+.flow-job:hover { border-color: var(--brand-text); transform: translateY(-2px); }
+.flow-ask { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-muted); font-size: var(--fs-s); }
+.flow-3d { width: 14px; height: 14px; border: 2px solid currentColor; border-radius: 3px; transform: rotate(45deg); }
+.flow-objects { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: var(--sp-2); }
+.flow-object { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--sp-2); align-items: baseline;
+  min-height: var(--tap); padding: var(--sp-2) var(--sp-3); text-align: left; cursor: pointer; color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--r-m); background: var(--surface-card); }
+.flow-object b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-object span { color: var(--text-muted); font-size: var(--fs-xs); }
+.flow-object .flow-m { grid-column: 2; grid-row: 1; font: 600 var(--fs-s) var(--cond); color: var(--text); }
+.flow-object:hover { border-color: var(--brand-text); }
+.flow-alt { justify-self: start; }
+/* the guided screen */
+.flow-pad { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-height: 40px; padding: 0 var(--sp-3);
+  border-radius: var(--r-m); background: color-mix(in srgb, var(--run-fill) 16%, var(--surface-card)); font-size: var(--fs-s); }
+.flow-pad.off { background: color-mix(in srgb, var(--warn) 14%, var(--surface-card)); }
+.flow-pad.off span { color: var(--warn); font-weight: 600; }
+.flow-pad-icon { width: 26px; height: 16px; border: 2px solid currentColor; border-radius: 8px; position: relative; }
+.flow-pad-icon::before, .flow-pad-icon::after { content: ""; position: absolute; top: 4px; width: 4px; height: 4px;
+  border-radius: 50%; background: currentColor; }
+.flow-pad-icon::before { left: 4px; } .flow-pad-icon::after { right: 4px; }
+.flow-live:empty { display: none; }
+.flow-big { font: 600 28px/1.1 var(--cond); }
+.flow-reach { display: grid; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-m);
+  background: var(--surface-field); }
+.flow-reach > b { font: 700 var(--fs-lg) var(--sans); }
+.flow-reach.ok { background: color-mix(in srgb, var(--run-fill) 18%, var(--surface-card)); }
+.flow-reach.ok > b { color: var(--run); }
+.flow-reach.some { background: color-mix(in srgb, var(--warn) 12%, var(--surface-card)); }
+.flow-reach.off > b { color: var(--bad); }
+.flow-reach.wait { color: var(--text-muted); }
+.flow-points { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.flow-point { display: inline-flex; align-items: center; gap: 4px; padding: 2px var(--sp-2); border-radius: var(--r-pill);
+  background: var(--surface-card); font-size: var(--fs-s); }
+.flow-point i { font: 700 11px var(--sans); font-style: normal; }
+.flow-point i.ok { color: var(--run); } .flow-point i.bad { color: var(--bad); }
+.flow-hands { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--sp-2); }
+.flow-hand { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 var(--sp-2); align-items: center;
+  min-height: 64px; padding: var(--sp-2) var(--sp-3); text-align: left; cursor: pointer; color: var(--text-muted);
+  border: 1.5px dashed var(--border-strong); border-radius: var(--r-m); background: none; }
+.flow-hand .icon { grid-row: 1 / 3; width: 26px; height: 26px; }
+.flow-hand b { font: 700 var(--fs-md) var(--sans); text-transform: capitalize; }
+.flow-hand span { font-size: var(--fs-xs); }
+.flow-hand.on { border: 2px solid var(--kind-arm); color: var(--text);
+  background: color-mix(in srgb, var(--kind-arm) 9%, var(--surface-card)); }
+.flow-hand.on .icon { color: var(--kind-arm); }
+.flow-name { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px var(--sp-3); }
+.flow-name label { color: var(--text-muted); font-size: var(--fs-s); }
+.flow-name input { font-weight: 600; }
+.flow-exists { grid-column: 2; font-size: var(--fs-xs); color: var(--warn); }
+.flow-exists:empty { display: none; }
+.flow-exists.bad { color: var(--bad); }
+.flow-captured { min-height: 22px; font-size: var(--fs-s); }
+.flow-shot { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: baseline; }
+.flow-shot b { color: var(--run); }
+.flow-shot.moved b { color: var(--warn); }
+.flow-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--sp-2); }
+.flow-actions .btn { min-height: 56px; }
+.flow-done { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-4); border-radius: var(--r-m);
+  background: color-mix(in srgb, var(--run-fill) 16%, var(--surface-card)); }
+.flow-done > div { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.flow-done b { font: 700 var(--fs-lg) var(--sans); }
+.flow-done .warn { color: var(--warn); font-size: var(--fs-s); }
+.flow-tick { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%;
+  background: var(--run-fill); color: var(--on-run); font: 700 22px/1 var(--sans); }
+@media (max-width: 600px) {
+  .flow-job { min-height: 128px; padding: var(--sp-3); }
+  .flow-job b { font-size: 19px; }
+  .teach-hero { min-height: 64px; font-size: 22px; }
+}
 .arm-groups { gap: 14px; }
 .arm-group { display: grid; gap: 6px; min-width: 0; }
 .arm-group select { width: auto; max-width: 220px; }
