@@ -498,10 +498,13 @@ class _Search:
     def _rule_out(self, k: int, h: float, reason: str) -> None:
         self.dead[(k, h)] = reason
         step = self.steps[k]
-        pinned = isinstance(step.torso, int | float) and (k, round(float(step.torso), 6)) in self.dead
         # an earlier pin off the grid may be kept to this step: its height counts as one of the step's
         held = {round(float(s.torso), 6) for s in self.steps[:k] if isinstance(s.torso, int | float)}
-        if self.hopeless is None and (pinned or all((k, x) in self.dead for x in set(self.all) | held)):
+        heights = set(self.all) | held
+        if isinstance(step.torso, int | float):     # a pin is served at it or at any height within tolerance of it
+            pin = round(float(step.torso), 6)
+            heights = {pin} | {x for x in heights if abs(x - pin) <= self.o.tolerance}
+        if self.hopeless is None and all((k, x) in self.dead for x in heights):
             self.hopeless = k
 
     def _failure(self, first: dict, blocking: int | None = None, gave_up: bool = False) -> Plan:

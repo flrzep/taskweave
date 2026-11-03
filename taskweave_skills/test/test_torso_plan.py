@@ -527,3 +527,17 @@ def test_a_step_after_an_off_grid_pin_is_not_hopeless_while_the_pin_height_may_w
     out = Fake(works, bound=lambda i, h: 'out of reach' if i == 'x' else None)
     plan = TorsoPlan(GRID).plan(steps, LIVE, start(), out)
     assert not plan.ok and plan.certain                  # every height, the pin's too, out of reach: proven
+
+
+def test_a_pin_out_of_reach_exactly_is_not_hopeless_while_a_height_within_tolerance_of_it_works():
+    """Re-review 3 P1 (probe 6 E): x is pinned within tolerance of the start height; the pin itself is out of reach,
+    the start height is not, and a plan reaches x at it (a at 0.3, b back at the start height)."""
+    pin = round(LIVE + 0.0008, 6)
+    works = {'a': band((LIVE, LIVE), (0.3, 0.3)),
+             'b': lambda h, st: abs(h - 0.3) < 1e-6 or (abs(h - LIVE) < 1e-6 and ('a', 0.3) in st['trail']),
+             'x': band((LIVE, LIVE))}
+    bound = lambda i, h: 'out of reach: x' if i == 'x' and abs(h - pin) < 1e-6 else None   # noqa: E731
+    steps = [WindowStep('a'), WindowStep('b'), WindowStep('x', torso=pin)]
+    plan = TorsoPlan(GRID).plan(steps, LIVE, start(), Fake(works, lasting=False, bound=bound))
+    assert not plan.certain
+    assert plan.ok and plan.heights['x'] == LIVE, plan.message
