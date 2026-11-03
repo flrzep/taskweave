@@ -139,8 +139,8 @@ WEB = Path(__file__).parent / 'web'
 STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
 CALL_TIMEOUT_S = 5.0
 START_TIMEOUT_S = 30.0  # start_mission answers once the plan is checked: seconds on a large cell (0.3.1 took minutes)
-STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'graph.js', 'record.js', 'viewer3d.js', 'style.css',
-                'viewer3d-demo.html')  # the 3D viewer alone, full window: for testing it
+STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'icons.js', 'graph.js', 'record.js', 'viewer3d.js',
+                'style.css', 'viewer3d-demo.html')  # the 3D viewer alone, full window: for testing it
 VENDOR = WEB / 'vendor'  # the 3D view's libraries, served below /vendor/
 MANUAL_SKILL_TIMEOUT_S = 120.0  # work time (sim time x speed override), as the skill's own timeout
 DRIVE_TIMEOUT_S = 300.0  # a drive across the cell
@@ -164,11 +164,16 @@ CHUNK = 1 << 20
 def step_dict(step) -> dict:
     """A PlanStep message as the HMI's plan JSON; ``kind`` (a move step's kind of motion, '' for none) and
     ``resources`` are filled when the task handler validated the plan (a message without them: '' and []);
-    ``notes``: [] (PlanStep has none; a preview has them, ``missions.preview_plan``)."""
+    ``origin`` is origin_json parsed (``missions.step_origin``'s shape; None when empty), ``replan_from`` ('' = the step
+    itself) and ``max_replans`` (an older message without the three fields: None, '', 0) feed the plan graph's phases
+    and replan lines; ``notes``: [] (PlanStep has none; a preview has them, ``missions.preview_plan``)."""
+    origin = getattr(step, 'origin_json', '') or ''
     return {'id': step.step_id, 'instruction': step.instruction, 'skill': step.skill,
             'args': json.loads(step.args_json or '{}'), 'timeout_s': step.timeout_s, 'retries': step.retries,
             'on_failure': step.on_failure, 'kind': getattr(step, 'kind', '') or '',
             'resources': list(getattr(step, 'resources', None) or []),
+            'origin': json.loads(origin) if origin else None, 'replan_from': getattr(step, 'replan_from', '') or '',
+            'max_replans': int(getattr(step, 'max_replans', 0) or 0),
             'notes': list(getattr(step, 'notes', None) or [])}
 
 

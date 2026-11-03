@@ -8,7 +8,9 @@ when its file is renamed or deleted.
 
 A refused check names the places of its problems too (``places``: the step of the mission's own steps and the path in
 it, from ``validate_plan_structured``), so the editor marks the step and the field. ``preview_plan`` is the plan a
-start would run now, with each step's kind of motion and resources (``plan_step_info``) for the plan graph.
+start would run now, with each step's kind of motion and resources (``plan_step_info``) and, for the plan graph's
+phases and replan lines, its ``origin`` (``step_origin``), ``replan_from`` and ``max_replans``, as the live plan
+has them.
 Both carry the notes of the steps too (what validation notes without stopping it, e.g. the move form of cell schema
 4): ``notes`` for a check, ``notes`` on each step of a preview.
 """
@@ -145,10 +147,22 @@ def notes(mission: Mapping, store: ConfigStore, robot: str) -> list[dict]:
     return result
 
 
+def step_origin(origin: Mapping | None) -> dict | None:
+    """Where a plan step came from, as the plan JSON has it (PlanStep.origin_json): ``{'include': names of the
+    includes, outermost first ([] for the mission's own steps), 'step': index in the innermost mission's own steps,
+    'top': index of the step, or of the include step it came from, in the top mission's own steps}``; None when the
+    step is not from a mission. ``origin`` is core's ``Step.origin`` (``step`` is the top index there)."""
+    if not origin:
+        return None
+    return {'include': list(origin.get('include') or []), 'step': origin.get('inner_step', origin.get('step')),
+            'top': origin.get('step')}
+
+
 def preview_plan(store: ConfigStore, mission: str, robot: str, catalog: Mapping[str, dict] | None = None) -> dict:
     """The plan a start of ``mission`` would run now, shaped like the live plan (``plan_id`` ``<mission>-preview``);
     no steps when there is nothing to do (e.g. every stack is empty). Each step has ``kind`` (the kind of motion of a
-    move step, '' when there is none or a placeholder hides it), ``resources`` and ``notes`` (``step_notes``);
+    move step, '' when there is none or a placeholder hides it), ``resources``, ``origin`` (``step_origin``),
+    ``replan_from`` ('' for the step itself), ``max_replans`` and ``notes`` (``step_notes``);
     ``catalog`` (skill -> args schema, may be empty) gives the resources of the other skills."""
     plan = MissionFilePlanner(store, mission, None, robot).make_plan({}, 1)
     if plan is None:
@@ -159,7 +173,8 @@ def preview_plan(store: ConfigStore, mission: str, robot: str, catalog: Mapping[
             'steps': [{'id': step.id, 'instruction': step.instruction, 'skill': step.skill, 'args': step.args,
                        'timeout_s': step.timeout_s, 'retries': step.retries, 'on_failure': step.on_failure,
                        'kind': each['kind'] or '', 'resources': list(each['resources']),
-                       'notes': step_notes(step.skill, step.args, store)}
+                       'origin': step_origin(step.origin), 'replan_from': step.replan_from or '',
+                       'max_replans': step.max_replans, 'notes': step_notes(step.skill, step.args, store)}
                       for step, each in zip(plan.steps, info, strict=True)]}
 
 

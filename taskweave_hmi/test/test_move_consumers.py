@@ -61,6 +61,29 @@ def test_the_plan_preview_has_each_steps_kind_and_resources(store):
     assert plan['steps'][0].keys() >= {'id', 'instruction', 'skill', 'args', 'timeout_s', 'retries', 'on_failure'}
 
 
+def test_the_plan_preview_has_each_steps_origin_and_replan_rules(store):
+    """The plan graph's phases (one per include occurrence) and replan lines come from origin and replan_from."""
+    missions_dir = store.root / 'missions'
+    (missions_dir / 'rest_twice.yaml').write_text(
+        'goal: r\ndefaults: {max_replans: 2}\nsteps:\n- {id: a, instruction: A, skill: wait, args: {seconds: 1}}\n'
+        '- {id: b, instruction: B, skill: wait, args: {seconds: 1}, on_failure: replan, replan_from: a}\n')
+    (missions_dir / 'phases.yaml').write_text(
+        'goal: p\nsteps:\n- {id: first, instruction: First, skill: wait, args: {seconds: 1}}\n'
+        '- {id: one, instruction: Rest once, include: rest_twice}\n'
+        '- {id: two, instruction: Again, include: rest_twice}\n')
+    store.reload()
+    steps = missions.preview_plan(store, 'phases', ROBOT)['steps']
+    assert [(s['id'], s['origin']) for s in steps] == [
+        ('first', {'include': [], 'step': 0, 'top': 0}),
+        ('one_a', {'include': ['rest_twice'], 'step': 0, 'top': 1}),
+        ('one_b', {'include': ['rest_twice'], 'step': 1, 'top': 1}),
+        ('two_a', {'include': ['rest_twice'], 'step': 0, 'top': 2}),
+        ('two_b', {'include': ['rest_twice'], 'step': 1, 'top': 2})]
+    assert [s['replan_from'] for s in steps] == ['', '', 'one_a', '', 'two_a']
+    assert [s['max_replans'] for s in steps][1:] == [2, 2, 2, 2]
+    assert missions.step_origin(None) is None
+
+
 def test_the_plan_preview_has_the_notes_of_each_step(store):
     steps = {step['id']: step for step in missions.preview_plan(store, 'forms', ROBOT, move_catalog())['steps']}
     assert [note.split(': ', 1)[0] for note in steps['lift_old']['notes']] == ['args.object']

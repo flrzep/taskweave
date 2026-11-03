@@ -98,6 +98,23 @@ def test_the_live_plan_json_has_each_steps_kind_and_resources():
     assert step_dict(PlanStep(step_id='s2', skill='wait'))['kind'] == ''
 
 
+def test_the_live_plan_json_has_each_steps_origin_and_replan_rules():
+    from types import SimpleNamespace
+
+    from taskweave_hmi.server import step_dict
+    from taskweave_interfaces.msg import PlanStep
+
+    step = step_dict(PlanStep(step_id='s2_s3', skill='wait', origin_json='{"include": ["pick"], "step": 2, "top": 1}',
+                              replan_from='s2_s1', max_replans=3))
+    assert step['origin'] == {'include': ['pick'], 'step': 2, 'top': 1}
+    assert (step['replan_from'], step['max_replans']) == ('s2_s1', 3)
+    assert step_dict(PlanStep(step_id='s1', skill='wait'))['origin'] is None   # not from a mission
+    old = SimpleNamespace(step_id='s1', instruction='', skill='wait', args_json='', timeout_s=0.0, retries=-1,
+                          on_failure='')                                        # an older message: no such fields
+    assert {k: step_dict(old)[k] for k in ('origin', 'replan_from', 'max_replans')} == {
+        'origin': None, 'replan_from': '', 'max_replans': 0}
+
+
 def test_the_plan_preview_over_http_has_kind_and_resources(serve, config):  # noqa: F811
     (config.root / 'missions' / 'drive.yaml').write_text(
         'goal: d\nsteps:\n- {instruction: Drive, skill: move, args: {to: waiting}}\n'
