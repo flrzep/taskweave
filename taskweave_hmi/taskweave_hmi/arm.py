@@ -70,6 +70,35 @@ def point_targets(base: Mapping, instance: Mapping, tools: Mapping) -> dict:
     return result
 
 
+def reach_targets(store: ConfigStore, robot_name: str, at: str, near, base: Mapping,
+                  wanted: Iterable[str] | None = None) -> tuple[dict, dict]:
+    """The hand points of placed object ``at`` as tool targets from where the robot stands now ({point: {tool:
+    target}}, point_targets), and where the object is handled ({x, y, top_z, yaw}). Each point is resolved as a move
+    resolves ``<at>/<name>``: the type's and the robot's layers and the object's own override merged, a stack at its
+    top item, a symmetric object turned to the side the robot works it from (``near``: its base pose in the cell,
+    ConfigStore.handling_instance). ``wanted``: those points only (default all)."""
+    instances = store.object_instances()
+    if at not in instances:
+        raise ArmError(f'no placed object {at!r}')
+    placed = instances[at]
+    names = [name for name, moves in layout.type_kinds(store, robot_name, placed.object).items()
+             if moves == 'hand' and (wanted is None or name in wanted)]
+    handled = store.handling_instance(placed, robot_name, near)
+    found = {}
+    for name in names:
+        target = store.target(f'{at}/{name}', robot_name, near)
+        handled = target.instance or handled
+        tools = {key[:-len(layout.TOOL_SUFFIX)]: {'xyz': list(pose.xyz), 'rpy': list(pose.rpy)}
+                 for key, pose in target.tools.items()}
+        found[name] = point_targets(base, handled_at(handled), tools)
+    return found, handled_at(handled)
+
+
+def handled_at(instance) -> dict:
+    """{x, y, top_z, yaw} of an object as handled (its top item for a stack)."""
+    return {'x': instance.pose.x, 'y': instance.pose.y, 'top_z': instance.top_z, 'yaw': instance.pose.yaw}
+
+
 def hand_distances(base: Mapping, instance: Mapping, current: Mapping) -> dict:
     """How far each tool's TCP is now (``current``: /api/robot/tools, base frame) from the placed object's origin (its
     top item), m: which hand is on the object."""

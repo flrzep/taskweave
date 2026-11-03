@@ -171,8 +171,9 @@ CALL_TIMEOUT_S = 5.0
 ACTIVE = ('running', 'paused')  # a run is under way (also planning: running without a step)
 AFTER_JUMP_S = 2.0  # the teach node's default after_jump_s: it refuses a teach this long after a sim clock jump
 START_TIMEOUT_S = 30.0  # start_mission answers once the plan is checked: seconds on a large cell (0.3.1 took minutes)
+# viewer3d-demo.html: the 3D viewer alone, full window, for testing it
 STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'teachtask.js', 'held.js', 'icons.js', 'graph.js', 'record.js',
-                'viewer3d.js', 'teach3d.js', 'style.css', 'viewer3d-demo.html')  # the 3D viewer alone, full window: for testing it
+                'viewer3d.js', 'teach3d.js', 'style.css', 'viewer3d-demo.html')
 VENDOR = WEB / 'vendor'  # the 3D view's libraries, served below /vendor/
 MANUAL_SKILL_TIMEOUT_S = 120.0  # work time (sim time x speed override), as the skill's own timeout
 DRIVE_TIMEOUT_S = 300.0  # a drive across the cell
@@ -662,29 +663,20 @@ class Bridge(Node):
         return self.reach_tools(body)
 
     def reach_at(self, body: dict) -> dict:
-        """The reach of a placed object's points from here (arm.point_targets with the base pose from TF), and each
-        hand's distance from the object now (FK; {} without it)."""
+        """The reach of a placed object's points from here (arm.reach_targets: as a move resolves them, the object
+        as the robot handles it from where it stands; the base pose from TF), and each hand's distance from the
+        object now (FK; {} without it)."""
         at = str(body['at'])
-        instances = self.config.object_instances()
-        if at not in instances:
-            raise points.PointError(f'no placed object {at!r}')
-        instance = instances[at]
-        where = {'x': instance.pose.x, 'y': instance.pose.y, 'top_z': instance.top_z, 'yaw': instance.pose.yaw}
         base = self.base_transform()
-        wanted = body.get('points')
-        found = [p for p in points.object_points(self.config, instance.object, {})
-                 if wanted is None or p['name'] in wanted]
+        found, where = arm.reach_targets(self.config, self.robot, at, self.robot_pose(), base, body.get('points'))
         search = body.get('search', [])
-        result = {}
-        for point in found:
-            targets_now = arm.point_targets(base, where, point['tools'])
-            result[point['name']] = self.reach_tools({'joints': body.get('joints'), 'tools': targets_now,
-                                                      'search': search})
+        result = {name: self.reach_tools({'joints': body.get('joints'), 'tools': tools, 'search': search})
+                  for name, tools in found.items()}
         try:
             hands = arm.hand_distances(base, where, self.tool_targets())
         except TimeoutError:
             hands = {}
-        return {'at': at, 'object': instance.object, 'points': result, 'hands': hands}
+        return {'at': at, 'object': self.config.object_instances()[at].object, 'points': result, 'hands': hands}
 
     def reach_tools(self, body: dict) -> dict:
         """Per tool of ``tools``: can IK put it there (reach)."""

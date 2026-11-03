@@ -74,3 +74,37 @@ def test_hand_distances_from_the_object():
     instance = {'x': 1.0, 'y': 0.0, 'top_z': 0.5, 'yaw': 0.0}
     current = {'left': {'tcp': [1.0, 0.0, 0.6]}, 'right': {'tcp': [0.0, 0.0, 0.5]}}
     assert arm.hand_distances(base, instance, current) == {'left': 0.1, 'right': 1.0}
+
+
+FIXTURES = Path(__file__).resolve().parents[2] / 'taskweave_core' / 'test' / 'fixtures'
+
+
+@pytest.fixture
+def cell(tmp_path):
+    shutil.copytree(FIXTURES / 'targets_new', tmp_path / 'cell_config')
+    return ConfigStore(tmp_path / 'cell_config')
+
+
+def test_reach_targets_turn_a_symmetric_object_to_the_robots_side(cell):
+    from taskweave_core.config import Pose2D
+
+    # bay_2_stack_2_front: a 180 deg symmetric frame stack placed turned (yaw pi) at (8, 1); bot_two_arm's pick
+    # stance is 1 m behind the object's -x: as placed at (9, 1), turned at (7, 1)
+    base = {'xyz': [7.0, 1.0, 0.0], 'quat': [1.0, 0.0, 0.0, 0.0]}
+    def reach(near):
+        return arm.reach_targets(cell, 'bot_two_arm', 'bay_2_stack_2_front', near, base)
+
+    near_side, near_where = reach(Pose2D(7.0, 1.0, 0.0))
+    far_side, far_where = reach(Pose2D(9.0, 1.0, math.pi))
+    assert set(near_side) == {'rails_top', 'rails_top_steep'}        # the hand points (hook_plate is an object one)
+    assert math.isclose(math.cos(near_where['yaw']), 1.0, abs_tol=1e-3)   # handled from x = 7: turned to yaw 0
+    assert math.isclose(math.cos(far_where['yaw']), -1.0, abs_tol=1e-3)   # from x = 9: as placed
+    instance = cell.object_instances()['bay_2_stack_2_front']
+    assert near_where['top_z'] == pytest.approx(instance.top_z)             # the stack's top item
+    # the same base, the object turned: the left hand's point lands on the other rail
+    assert near_side['rails_top']['left']['tcp'][1] == pytest.approx(0.2513, abs=1e-3)
+    assert far_side['rails_top']['left']['tcp'][1] == pytest.approx(-0.2513, abs=1e-3)
+    only, _ = arm.reach_targets(cell, 'bot_two_arm', 'bay_2_stack_2_front', None, base, ['rails_top'])
+    assert set(only) == {'rails_top'}
+    with pytest.raises(arm.ArmError, match='no placed object'):
+        arm.reach_targets(cell, 'bot_two_arm', 'nowhere', None, base)

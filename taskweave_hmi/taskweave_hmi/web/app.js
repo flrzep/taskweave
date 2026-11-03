@@ -148,6 +148,7 @@ document.querySelectorAll('.tabs button').forEach((button) => button.addEventLis
   robotVisible = button.dataset.view === 'robot';
   if (pointsVisible) { loadPoints(); loadArm(); refreshPose(); startTeachViewer(); }  // teach.js, teach3d.js
   else if (teach.open) { teach.open = null; setTeachTarget(null); }  // the pad teaches only into an open position
+  teachFlowShown(pointsVisible);  // teachtask.js: the same for the guided screen, and its live check
   if (robotVisible) { loadRobot(); refreshPose(); }  // robot.js: live grippers and joints, settings
   if (button.dataset.view === 'record') loadRecordings();  // record.js
   if (button.dataset.view === 'run') startRunViewer();

@@ -23,7 +23,8 @@ const JOBS = {
     icon: '<path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>' },
 };
 const REACH_MS = 1500;    // the live check's period while the guided screen is open
-const MOVED_M = 0.005;    // the robot moved this far (or 0.5°) since Capture: capture again
+const MOVED_M = 0.005;    // the robot moved this far since Capture (a hand, the base, a linear joint): capture again
+const MOVED_DEG = 0.5;    // or turned this far (the base, a hand's approach or closing, a revolute joint)
 const NEAR_HAND_M = 0.3;  // a hand this close to the object is on it (grasp: the hands that are taught)
 const flow = { step: 'closed', job: null, at: null, name: '', hands: [], captured: null, saved: null, checked: null,
   timer: null, asking: false };
@@ -62,6 +63,7 @@ function moveTarget() { return JOBS[flow.job].object ? `${flow.at}/${flow.name}`
 function openFlow(job = null) {
   Object.assign(flow, { step: job ? (JOBS[job].object ? 'object' : 'teach') : 'job', job, at: null, captured: null,
     saved: null, checked: null, allObjects: false });
+  hidePick();  // teach3d.js: an object card from before acts on the lists, hidden now
   if (job && !JOBS[job].object) startTeach();
   renderFlow();
 }
@@ -75,7 +77,10 @@ function closeFlow() {
 }
 function chooseJob(job) {
   flow.job = job;
-  if (JOBS[job].object) { flow.step = 'object'; renderFlow(); } else startTeach();
+  if (JOBS[job].object) { flow.step = 'object'; renderFlow(); return; }
+  flow.at = null;  // a spot or a pose: no object (also when Stand went on to "a spot in the cell")
+  teachViewer?.setHighlight(null);
+  startTeach();
 }
 function chooseObject(instance) {
   flow.at = instance;
@@ -93,11 +98,25 @@ function startTeach() {
 }
 // a grasp or a pose: the pad's teach press saves it here (the name as it stands)
 function padTarget() {
-  if (flow.step !== 'teach' || flow.saved || !NAME_RE.test(flow.name)) return;
-  if (flow.job === 'grasp') setTeachTarget({ scope: typeOf(flow.at), name: flow.name, at: flow.at, instance_override: false });
+  if (flow.step !== 'teach' || flow.saved || !(flow.job === 'grasp' || flow.job === 'pose')) return;
+  if (!NAME_RE.test(flow.name)) setTeachTarget(null);  // no name to teach into: the pad teaches nothing
+  else if (flow.job === 'grasp') setTeachTarget({ scope: typeOf(flow.at), name: flow.name, at: flow.at, instance_override: false });
   else if (flow.job === 'pose') setTeachTarget({ scope: ROBOT_SCOPE, name: flow.name, at: null, form: poseForm() });
 }
 const poseForm = () => ((teach.data?.tools || []).length ? 'hands' : 'joints');
+// The Teach tab shown or left (app.js): the guided screen's live check and pad target only while it is on screen, so a
+// pad press elsewhere teaches nothing
+function teachFlowShown(visible) {
+  if (flow.step !== 'teach' || flow.saved) return;
+  if (visible) { padTarget(); startLive(); return; }
+  stopLive();
+  if (flow.job === 'grasp' || flow.job === 'pose') setTeachTarget(null);
+}
+// Escape closes the flow (not while typing the name: it leaves the field)
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || flow.step === 'closed' || $('view-points').hidden || e.target.closest?.('input, select')) return;
+  closeFlow();
+});
 
 // The Teach tab's 3D view picked something (teach3d.js): on the object step a placed object is the choice, on the
 // guided screen another placed object moves the job there. True: the flow took it (the lists do nothing).
@@ -126,6 +145,7 @@ function startLive() {
   const tick = async () => {
     if (flow.step !== 'teach' || $('view-points').hidden || document.hidden) return;
     renderPad();
+    if (pointsBusy) { renderLive(); return; }  // a mission runs: no IK or FK asked of its MoveIt
     if (flow.asking) return;
     flow.asking = true;
     try { await liveCheck(); } finally { flow.asking = false; }
@@ -136,17 +156,29 @@ function startLive() {
 function stopLive() { clearInterval(flow.timer); flow.timer = null; }
 async function liveCheck() {
   if (flow.saved) return;
-  if (flow.job === 'stance' || flow.job === 'grasp') {
+  const [job, at] = [flow.job, flow.at];
+  if (job === 'stance' || job === 'grasp') {
     // a stance: every grasp point of the type from here; a grasp: only where the hands are (no points solved)
-    const { ok, data } = await api('POST', '/api/robot/reach', { at: flow.at, ...(flow.job === 'grasp' ? { points: [] } : {}) });
+    let answer;
+    try {
+      answer = await api('POST', '/api/robot/reach', { at, ...(job === 'grasp' ? { points: [] } : {}) });
+    } catch (_) {
+      answer = { ok: false, data: { error: 'no answer from the HMI server' } };
+    }
+    if (flow.job !== job || flow.at !== at || flow.step !== 'teach') return;  // another object meanwhile: dropped
+    const { ok, data } = answer;
     flow.checked = ok ? data : { error: data.error || (data.problems || []).join('; ') || 'no answer' };
-    if (ok && flow.job === 'grasp' && !flow.handsSet) {  // the hands on the object, else the nearest one
+    if (ok && job === 'grasp' && !flow.handsSet) {  // the hands on the object, else the nearest one (kept from Capture)
       const near = Object.entries(data.hands || {}).sort((a, b) => a[1] - b[1]);
       const on = near.filter(([, m]) => m <= NEAR_HAND_M).map(([tool]) => tool);
       flow.hands = on.length ? on : near.slice(0, 1).map(([tool]) => tool);
     }
   }
-  if (flow.captured) flow.captured.moved = await movedSinceCapture();
+  const was = flow.captured;
+  if (was && !was.pending && !was.error) {
+    const moved = await movedSinceCapture(was);
+    if (flow.captured === was) was.moved = moved;
+  }
   renderLive();
 }
 // what Capture saw: a stance or spot the base pose (the preview's new pose), a grasp or pose the hands' targets
@@ -157,18 +189,33 @@ async function snapshotNow() {
     return ok ? { base: data.new, exists: data.exists, old: data.old } : { error: data.error || (data.problems || []).join('; ') };
   }
   const { ok, data } = await api('GET', '/api/robot/tools');
-  return ok ? { tools: data } : { error: data.error || 'no robot hands' };
+  if (!ok) return { error: data.error || 'no robot hands' };
+  if (flow.job !== 'pose') return { tools: data };
+  const joints = await api('GET', '/api/robot/joints');  // a pose saves every joint: watch them all
+  return joints.ok ? { tools: data, joints: joints.data.joints || joints.data } : { error: joints.data.error || 'no joint states' };
 }
-async function movedSinceCapture() {
-  const now = await snapshotNow();
-  const was = flow.captured;
-  if (now.error || was.error) return false;
+// the angle between two direction vectors, degrees
+function turnedDeg(a, b) {
+  const dot = a.reduce((sum, v, i) => sum + v * b[i], 0) / (Math.hypot(...a) * Math.hypot(...b) || 1);
+  return Math.acos(Math.max(-1, Math.min(1, dot))) * DEG;
+}
+// Has the robot left what Capture took (`was`)? The base for a stance or spot; for a grasp or pose each saved hand's
+// TCP, approach and closing, and for a pose every joint. Unknown (no answer): not moved, the save's own check decides.
+async function movedSinceCapture(was) {
+  let now;
+  try { now = await snapshotNow(); } catch (_) { return false; }
+  if (now.error || !was || was.error || was.pending) return false;
   if (now.base) return Math.hypot(now.base.x - was.base.x, now.base.y - was.base.y) > MOVED_M
-    || Math.abs(((now.base.yaw - was.base.yaw) * DEG + 540) % 360 - 180) > 0.5;
-  return flow.hands.some((tool) => {
-    const [a, b] = [now.tools[tool]?.tcp, was.tools[tool]?.tcp];
-    return a && b && Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) > MOVED_M;
+    || Math.abs(((now.base.yaw - was.base.yaw) * DEG + 540) % 360 - 180) > MOVED_DEG;
+  const hand = flow.hands.some((tool) => {
+    const [a, b] = [now.tools[tool], was.tools[tool]];
+    if (!a || !b) return false;
+    return Math.hypot(...a.tcp.map((v, i) => v - b.tcp[i])) > MOVED_M
+      || turnedDeg(a.approach, b.approach) > MOVED_DEG || turnedDeg(a.closing, b.closing) > MOVED_DEG;
   });
+  const joint = was.joints && Object.entries(was.joints).some(([name, value]) => now.joints?.[name] != null
+    && Math.abs(now.joints[name] - value) > (isLinear(name) ? MOVED_M : MOVED_DEG / DEG));
+  return hand || !!joint;
 }
 
 // ---------- saving ----------
@@ -178,11 +225,31 @@ function addressOf() {
 }
 async function capture() {
   flow.captured = { pending: true };
+  flow.handsSet = true;  // the hands shown now are the ones saved: no longer chosen by distance under the finger
   renderLive();
-  flow.captured = await snapshotNow();
+  try { flow.captured = await snapshotNow(); } catch (_) { flow.captured = { error: 'no answer from the HMI server' }; }
   renderFlow();
 }
 async function save(button, msg) {
+  if (button._saving) return;
+  button._saving = true;
+  try { await saveNow(button, msg); } catch (_) {
+    message(msg, 'No answer from the HMI server: nothing known about this save. Check the list before trying again.', true);
+  } finally { button._saving = false; renderLive(); }
+}
+// still where Capture took it, at this tap? (the pad may have moved it within the live check's period)
+async function stillCaptured(msg) {
+  const was = flow.captured;
+  const moved = await movedSinceCapture(was);
+  if (flow.captured !== was || !canSave()) return false;
+  if (!moved) return true;
+  was.moved = true;
+  renderLive();
+  message(msg, 'The robot moved since Capture: capture again.', true);
+  return false;
+}
+async function saveNow(button, msg) {
+  if (!canSave() || !(await stillCaptured(msg))) return;
   const exists = takenNames().includes(flow.name);
   const arm = flow.job === 'grasp' || flow.job === 'pose';
   const scope = flow.job === 'pose' ? ROBOT_SCOPE : typeOf(flow.at);
@@ -197,12 +264,12 @@ async function save(button, msg) {
         : `Overwrites ${flow.name}: ${poseChange(data.old, data.new) || 'no change'}`;
   }
   if (overwriteAsked(button, msg, 'Save', change)) return;
+  if (exists && !(await stillCaptured(msg))) return;  // the second tap of an overwrite: checked again
   message(msg, 'Saving…');
   button.disabled = true;
   const { ok, data } = arm
     ? await api('POST', `${armUrl}/capture`, { at: flow.at, tools: flow.hands, form: flow.job === 'pose' ? poseForm() : null })
     : await api('POST', `/api/points/${addressOf().map(encodeURIComponent).join('/')}/teach`, { at: flow.at, create: !exists });
-  button.disabled = false;
   if (!ok) { message(msg, (data.problems || [data.error || 'not saved']).join('\n'), true); return; }
   const where = data.at ? ` at ${data.at}${data.distance_m != null ? `, ${data.distance_m} m away` : ''}` : '';
   flow.saved = { text: `${flow.name}${where} → ${data.file}`, undo: data.undo || null, notes: data.notes || [] };
@@ -325,13 +392,14 @@ function teachStep() {
   mark();
   const captureButton = edits(button(flow.captured && !flow.captured.error ? 'Capture again' : 'Capture', capture,
     `btn flow-capture${flow.captured && !flow.captured.error ? '' : ' primary'}`, { 'data-first': '' }));
-  const saveButton = edits(button('Save', () => save(saveButton, msg), 'btn primary flow-save'));
+  // not data-edit: setPointsBusy would turn it on without a capture; canSave holds the busy state
+  const saveButton = button('Save', () => save(saveButton, msg), 'btn primary flow-save');
   saveButton.disabled = !canSave();
   return [
     el('div', { class: 'flow-pad', id: 'flow-pad' }),
     el('div', { class: 'flow-live', id: 'flow-live' }),
     el('div', { class: 'flow-name' }, el('label', { for: 'flow-name', text: 'Name' }), name, exists),
-    el('div', { class: 'flow-captured', id: 'flow-captured' }),
+    el('div', { class: 'flow-captured', id: 'flow-captured', role: 'status' }),
     el('div', { class: 'flow-actions' }, captureButton, saveButton),
     msg,
   ];
@@ -374,12 +442,15 @@ function renderLive() {
   const captured = $('flow-captured');
   if (captured) captured.replaceChildren(...capturedNodes());
   const save = document.querySelector('#teach-flow .flow-save');
-  if (save) save.disabled = !canSave();
+  if (save) save.disabled = !canSave() || !!save._saving;
 }
-// Save needs a capture the robot has not moved away from, a name, and for a grasp or pose a hand
+// Save needs a capture the robot has not moved away from, a name, and for a grasp (or a pose stored as hands) a hand;
+// nothing while a mission runs
+const needsHand = () => flow.job === 'grasp' || (flow.job === 'pose' && poseForm() === 'hands');
 const canSave = () => !pointsBusy && !!flow.captured && !flow.captured.pending && !flow.captured.error
-  && !flow.captured.moved && NAME_RE.test(flow.name) && !((flow.job === 'grasp' || flow.job === 'pose') && !flow.hands.length);
+  && !flow.captured.moved && NAME_RE.test(flow.name) && !(needsHand() && !flow.hands.length);
 function liveNodes() {
+  if (pointsBusy) return [el('div', { class: 'flow-reach wait' }, 'Paused while a mission runs')];
   const check = flow.checked;
   if (flow.job === 'spot') {
     const p = state.robotPose?.pose;
@@ -410,7 +481,7 @@ function liveNodes() {
     el('b', { text: `Reaches ${good} of ${entries.length}` }),
     el('div', { class: 'flow-points' }, ...entries.map(([point, tools]) => el('span', { class: 'flow-point',
       title: Object.entries(tools).map(([t, e]) => `${t}: ${e.ok ? 'reaches' : e.message}`).join('\n') },
-    el('b', { text: point }), ...Object.entries(tools).map(([tool, e]) => el('i', { class: e.ok ? 'ok' : 'bad',
+    el('b', { text: point }), ...Object.entries(tools).map(([tool, e]) => el('i', { class: e.ok ? 'ok' : 'bad', role: 'img',
       text: `${tool[0].toUpperCase()}${e.ok ? '✓' : '✕'}`, 'aria-label': `${tool} ${e.ok ? 'reaches' : 'does not reach'}` }))))))];
 }
 function capturedNodes() {
