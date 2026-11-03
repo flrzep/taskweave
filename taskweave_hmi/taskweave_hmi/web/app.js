@@ -225,7 +225,7 @@ function renderRun() {
       el('div', { class: 'step-text' },
         el('div', { text: step.instruction }),
         el('div', { class: 'muted mono', text: `${step.skill} ${argsText(step.args)}` }),
-        ...(step.notes || []).map((text) => el('div', { class: 'step-note', text })),  // a preview's (a live plan has none)
+        ...(step.notes || []).map((text) => el('div', { class: 'step-note', text })),  // validation's notes
         note ? el('div', { class: 'muted', text: note }) : ''));
     if (pickable) { item.title = 'Start the mission at this step'; item.addEventListener('click', () => pickStart(step)); }
     list.append(item);
@@ -687,9 +687,10 @@ function targetForm(args) {
   const form = (moveMeta()?.target_forms || TARGET_FORMS)[targetKind(args?.to)];
   return form === 'navigate' && args?.motion?.mode === 'straight' ? 'straight' : form || null;
 }
-// a move step that carries a held object, by its arguments: hand: holding, the old object form, a "to" an object target
+// a move step that carries a held object, by its arguments: hand: holding, the old object form (object with by / at, as
+// icons.js carries() and core's step_info.old_object_form), a "to" an object target
 const carriesByArgs = (args) => !!args && (args.hand === holdingWord() || targetForm(args) === 'carry'
-  || (args.object !== undefined && args.to === undefined && args.hand === undefined));
+  || (args.object !== undefined && args.to === undefined && args.hand === undefined && ('by' in args || 'at' in args)));
 // A move step in parts: its form (null: a "to" whose target is not known here), the head (what it goes to or by) and
 // the rest (its options). moveSummary puts the command before them; the plan graph has it in the node's title.
 function moveParts(args) {
@@ -1423,6 +1424,8 @@ $('btn-save').addEventListener('click', async () => {
   state.dirty = false; show($('editor-dirty'), false);
   state.editing = { ...state.editing, name, isNew: false };
   show($('btn-delete'), true);
+  // the plan graph reads its band names again
+  if (typeof forgetMission === 'function') [name, old].filter(Boolean).forEach(forgetMission);
   message($('save-msg'), rename ? `Renamed ${old} to ${name} and saved. It is used at the next start.`
     : `Saved ${name}. It is used at the next start.`);
   loadMissions();

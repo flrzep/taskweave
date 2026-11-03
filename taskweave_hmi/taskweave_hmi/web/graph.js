@@ -29,7 +29,8 @@ const BREATHE_MS = 2800;  // period of node-breathe for the running step (style.
 const PHONE = window.matchMedia('(max-width: 600px)');
 const WARN_STATES = ['timeout', 'canceled', 'skipped'];  // amber chips; failed and rejected are red
 const BANDS_KEY = 'tw-plan-bands';  // localStorage: {mission: {band key: open}}
-const missionCache = {};
+const missionCache = {};  // mission name -> its file (band names, defaults, loop), until a new plan or a save
+const missionPlan = {};   // mission name -> the plan_id its cached file was read for
 const view = { selected: null };  // the step (id) whose card shows instead of the running one
 
 function svg(tag, attrs = {}, text) {
@@ -71,6 +72,8 @@ async function missionFor(plan) {
   }
   return missionCache[name];
 }
+// the Missions tab saved this mission: read its file again at the next draw
+function forgetMission(name) { delete missionCache[name]; delete missionPlan[name]; }
 
 // The rules each step runs with: the plan's values (mission defaults where a step says "default": retries -1, an
 // empty on_failure) and the step a replan restarts from (replan_from, resolved by core; itself when empty).
@@ -139,13 +142,16 @@ function bandsOf(plan, mission) {
     band.steps.push(i);
     if (chain.length < 2) { band.items.push({ step: i }); return; }
     let sub = band.items[band.items.length - 1]?.sub;
-    if (sub?.group !== chain[1]) {
+    // a new sub-band when the include changes, or the same one starts over (one level deep, origin.step is the index
+    // in chain[1]'s own steps: it falls at the next include of the same mission)
+    if (sub?.group !== chain[1] || (chain.length === 2 && sub.inner !== undefined && o.step <= sub.inner)) {
       sub = { group: chain[1], key: `${band.key}/${chain[1]}@${i}`, name: chain[1], include: chain[1], steps: [],
         items: [] };
       band.items.push({ sub });
     }
     sub.steps.push(i);
     sub.items.push({ step: i });
+    if (chain.length === 2) sub.inner = o.step;
   });
   return bands;
 }
@@ -175,11 +181,12 @@ function bandInfo(band, states, r, steps, lanes) {
     lanes: lanes.filter((lane) => used.has(lane)) };
 }
 
-// The badge of a step whose rule differs from its band's (retries ↻2, skip, abort, retry), and on the phone a
-// replan's target ("to 7"; on the laptop that is the line). cls: 'fail' for failure-type badges, 'skip' muted.
+// The badge of a step whose rule differs from its band's (retries ↻2, or ↻0 for fewer than the band's none; skip,
+// abort, retry), and on the phone a replan's target ("to 7"; on the laptop that is the line). cls: 'fail' for
+// failure-type badges, 'skip' muted.
 function badgeOf(rule, i, usual, phone) {
   const words = [];
-  if (rule.key !== usual && rule.retries > 0) words.push(`↻${rule.retries}`);
+  if (rule.key !== usual && rule.retries !== Number(usual.split('|')[1])) words.push(`↻${Math.max(rule.retries, 0)}`);
   if (jumps(rule, i)) { if (phone) words.push(`to ${rule.replanTo + 1}`); }
   else if (rule.key !== usual && rule.onFailure !== usual.split('|')[0]) words.push(rule.onFailure);
   if (!words.length) return null;
@@ -469,6 +476,10 @@ function renderGraph() {
     ? (active.dataset.step ? `[data-step="${CSS.escape(active.dataset.step)}"]` : `[data-band="${CSS.escape(active.dataset.band)}"]`)
     : null;
   const missionName = missionOf(plan);
+  if (missionPlan[missionName] !== plan.plan_id) {  // a new plan: the mission file may have changed
+    delete missionCache[missionName];
+    missionPlan[missionName] = plan.plan_id;
+  }
   const mission = missionCache[missionName];
   if (mission === undefined) missionFor(plan);
   const states = plan.steps.map((step, i) => stepState(snap, plan, live, step, i));
@@ -483,12 +494,13 @@ function renderGraph() {
   };
   bands.forEach(visit);
   bands.forEach((band) => band.steps.forEach((i) => { usual[i] = info.get(band).usual; }));
-  // open: the operator's choice, else the band with the running step (else the failed one's, the start step's, the
-  // first band)
+  // open: the band with the running step always (the operator's choice does not hide it in a later cycle); else the
+  // operator's choice, else the band with the failed step (else the start step's, the first band)
   const anchor = [states.findIndex(isLive), states.findIndex(isFailed),
     plan.steps.findIndex((s) => s.id === state.startStep), 0].find((i) => i >= 0);
   const stored = storedBands(missionName);
-  const isOpen = (band) => (band.key in stored ? stored[band.key] : band.steps.includes(anchor));
+  const isOpen = (band) => band.steps.some((i) => isLive(states[i]))
+    || (band.key in stored ? stored[band.key] : band.steps.includes(anchor));
   const end = loopText(plan, mission, snap);
   const ctx = { plan, states, r, events: live ? snap.outcomes : {}, snap, usual, info, isOpen, phone: PHONE.matches,
     pickable: snap.status.state !== 'running' && snap.status.state !== 'paused', focus: focusIndex(plan, states),
