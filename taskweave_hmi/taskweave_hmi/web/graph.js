@@ -1,21 +1,36 @@
 'use strict';
-// taskweave HMI, Run tab: the running plan as a graph. Steps top to bottom, coloured by what moves (a move step's kind:
-// navigate and straight drive, hand, posture and joints are the arm; other skills by name), a move step titled by its
-// command (moveLabel: "navigate to", "move to target", ...) and marked "carrying" when it carries a held object;
-// edges for the decision rules (retry, replan, skip, abort, loop); the active step lights up. Rules not in the live
-// plan message (mission defaults, replan_from, stop_when) come from the mission file. Uses $, el, api, state,
-// moveLabel, moveParts, carriesByArgs from app.js.
+// taskweave HMI, Run tab: the running plan as a graph of icon chips (G3). Steps run top to bottom, one row each; a
+// step's chip sits in the lane of the resource it holds (base, hands, torso, joints: step.resources), a bar with dots
+// runs across the other lanes it holds. Phases are bands: one per include of the top mission (origin.top +
+// origin.include[0]) and one per run of its own steps, nested includes as sub-bands; each band collapses to one
+// row, remembered per mission. Only exceptions are marked: the band header names the usual failure rule, a step
+// whose rule differs gets a badge (↻2, skip), a replan is the one line (dashed, through the left gutter to the step
+// it replans from: replan_from). Neighbouring steps on disjoint resources get a dashed box (parallel candidates,
+// display only). The running or selected step opens in the side card. At 600 px and below the lanes collapse into
+// a rail of 44 px chips per band and the card becomes a bottom sheet. Chips are tinted by what moves (--kind-*:
+// drive, arm, grip, wait, other) and show the step's icon (icons.js). Loop rules (stop_when, max_cycles) and band
+// names come from the mission file. Uses $, el, api, state, show, missionOf, shownPlan, pickStart, moveLabel,
+// moveParts, carriesByArgs from app.js and skillIcon, iconElement, moveKindOfArgs from icons.js.
 
 const SVG = 'http://www.w3.org/2000/svg';
-// the lane of a step: its kind of motion (step.kind, filled when the plan is validated: the live plan, the preview), else
-// its skill (cell schema 3, and a step whose kind a placeholder hides)
-const MOVE_LANES = { navigate: 'drive', straight: 'drive', hand: 'arm', posture: 'arm', joints: 'arm' };
-const SKILL_KINDS = { navigate_to: 'drive', drive_straight: 'drive', move_joints: 'arm', move_gripper: 'arm',
+const LANES = ['base', 'hands', 'torso', 'joints'];  // core's resource names (PlanStep.resources), left to right
+const FIRST_LANE = 'hands';  // a first step that holds nothing goes here (later ones: the previous step's lane)
+// what moves: a move step's kind, else the skill (cell schema 3 names too)
+const KIND_COLOURS = { navigate: 'drive', straight: 'drive', hand: 'arm', posture: 'arm', joints: 'arm' };
+const SKILL_COLOURS = { navigate_to: 'drive', drive_straight: 'drive', move_joints: 'arm', move_gripper: 'arm',
   move_object: 'arm', set_posture: 'arm', grip: 'grip', wait: 'wait' };
-const laneOf = (step) => MOVE_LANES[step.kind] || SKILL_KINDS[step.skill] || 'other';
-const G = { width: 384, nodeX: 70, nodeW: 220, nodeH: 52, gap: 30, top: 44, lane: 34, abortLane: 368 };
+const ICON_COLOURS = { navigate: 'drive', straight: 'drive', hand: 'arm', carry: 'arm', posture: 'arm', joints: 'arm',
+  'grip-close': 'grip', 'grip-open': 'grip', wait: 'wait', other: 'other' };
+// the laptop graph (px): number gutter, lane, row pitch, chip, band header, gaps; the replan lines' area left of it
+// (Figma has rows of 34 and bands 14 apart: 32 and 10 let frame_cycle's running phase fit under the sticky header at 768)
+const G = { gutter: 28, lane: 64, row: 32, chip: 28, head: 24, laneHead: 24, bandGap: 10, headGap: 6, subIndent: 12,
+  pairOut: 3, replanArea: 22, replanGap: 6, endGap: 6, endH: 18 };
 const BREATHE_MS = 2800;  // period of node-breathe for the running step (style.css)
+const PHONE = window.matchMedia('(max-width: 600px)');
+const WARN_STATES = ['timeout', 'canceled', 'skipped'];  // amber chips; failed and rejected are red
+const BANDS_KEY = 'tw-plan-bands';  // localStorage: {mission: {band key: open}}
 const missionCache = {};
+const view = { selected: null };  // the step (id) whose card shows instead of the running one
 
 function svg(tag, attrs = {}, text) {
   const node = document.createElementNS(SVG, tag);
@@ -23,6 +38,7 @@ function svg(tag, attrs = {}, text) {
   if (text !== undefined) node.textContent = text;
   return node;
 }
+const div = (cls, ...children) => el('div', { class: cls }, ...children);
 
 function mainArg(step) {
   const a = step.args || {};
@@ -56,25 +72,26 @@ async function missionFor(plan) {
   return missionCache[name];
 }
 
-// The rules each step runs with: the plan's values, mission defaults where the plan says "default".
+// The rules each step runs with: the plan's values (mission defaults where a step says "default": retries -1, an
+// empty on_failure) and the step a replan restarts from (replan_from, resolved by core; itself when empty).
 function rules(plan, mission) {
   const defaults = mission?.defaults || {};
   const ids = plan.steps.map((s) => s.id);
   return plan.steps.map((step, i) => {
-    const source = mission?.steps?.[i] || {};
-    const replanFrom = source.replan_from && ids.includes(source.replan_from) ? ids.indexOf(source.replan_from) : i;
-    return {
-      retries: step.retries >= 0 ? step.retries : (defaults.retries ?? 0),
-      onFailure: step.on_failure || defaults.on_failure || 'abort',
-      replanTo: replanFrom,
-    };
+    const retries = step.retries >= 0 ? step.retries : (defaults.retries ?? 0);
+    const onFailure = step.on_failure || defaults.on_failure || 'abort';
+    const to = step.replan_from ? ids.indexOf(step.replan_from) : -1;
+    return { retries, onFailure, replanTo: to >= 0 ? to : i, maxReplans: step.max_replans || 0,
+      key: `${onFailure}|${retries}` };
   });
 }
+// a rule in words: "abort", "↻2 then skip"
+const ruleText = (r) => `${r.retries > 0 ? `↻${r.retries} then ` : ''}${r.onFailure}`;
+const jumps = (r, i) => r.onFailure === 'replan' && r.replanTo !== i;  // a replan to another step: the one line
 
-// a step's title: a move step's command (its kind's label; "move" while a placeholder hides it), else the skill
+// a step's command: a move step's (its kind's label; "move" while a placeholder hides it), else the skill
 const stepTitle = (step) => (step.skill === 'move' ? (step.kind ? moveLabel(step.kind) : 'move')
   : `${step.skill}${step.kind ? ` ${step.kind}` : ''}`);
-const fit = (text, n) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
 // what a move step carries: from its result (data.carrying, the message "· carrying <instance> ·"), else true when its
 // arguments carry (hand: holding, the old object form, to an object target); a hand move of a hand that holds
 // becomes a carry only at run time
@@ -85,6 +102,12 @@ function carrying(step, event) {
   if (found) return found;
   return done?.data?.module === 'move.carry' || carriesByArgs(step.args) ? true : null;
 }
+const colourOf = (step) => KIND_COLOURS[step.kind || (step.skill === 'move' ? moveKindOfArgs(step.args) : '')]
+  || SKILL_COLOURS[step.skill] || 'other';
+function iconOf(step, event) {
+  const id = skillIcon(step, event?.event === 'step_finished' ? event : undefined);
+  return id === 'hand' && carrying(step, event) ? 'carry' : id;
+}
 
 function stepState(snap, plan, live, step, index) {
   const s = snap.status;
@@ -94,133 +117,392 @@ function stepState(snap, plan, live, step, index) {
   if (event?.event === 'step_finished') return event.outcome.toLowerCase();
   return 'pending';
 }
+const isLive = (st) => st === 'running' || st === 'paused';
+const isFailed = (st) => st === 'failed' || st === 'rejected';
+const isFinished = (st) => st !== 'pending' && !isLive(st);
+
+// The phases of a plan: one band per include occurrence of the top mission and one per run of its own steps; the
+// steps of a nested include are a sub-band (one level: deeper includes stay in their sub-band). A plan without
+// origins (an older task handler) is one band. A band: {key, name, include, steps: [index], items: [{step}|{sub}]}.
+function bandsOf(plan, mission) {
+  const bands = [];
+  plan.steps.forEach((step, i) => {
+    const o = step.origin;
+    const chain = o?.include || [];
+    const group = !o ? 'all' : chain.length ? `i${o.top}:${chain[0]}` : 'own';
+    let band = bands[bands.length - 1];
+    if (band?.group !== group) {
+      band = { group, key: group === 'own' ? `own${o.top}` : group, steps: [], items: [], include: chain[0] || '',
+        name: chain.length ? (mission?.steps?.[o.top]?.instruction || chain[0]) : missionOf(plan) };
+      bands.push(band);
+    }
+    band.steps.push(i);
+    if (chain.length < 2) { band.items.push({ step: i }); return; }
+    let sub = band.items[band.items.length - 1]?.sub;
+    if (sub?.group !== chain[1]) {
+      sub = { group: chain[1], key: `${band.key}/${chain[1]}@${i}`, name: chain[1], include: chain[1], steps: [],
+        items: [] };
+      band.items.push({ sub });
+    }
+    sub.steps.push(i);
+    sub.items.push({ step: i });
+  });
+  return bands;
+}
+
+function storedBands(mission) {
+  try { return (JSON.parse(localStorage.getItem(BANDS_KEY) || '{}') || {})[mission] || {}; } catch (_) { return {}; }
+}
+function storeBand(mission, key, open) {
+  try {
+    const all = JSON.parse(localStorage.getItem(BANDS_KEY) || '{}') || {};
+    all[mission] = { ...(all[mission] || {}), [key]: open };
+    localStorage.setItem(BANDS_KEY, JSON.stringify(all));
+  } catch (_) { /* private mode: the choice lasts until the page reloads */ }
+}
+
+// A band's header data: done/total, its state word, the usual failure rule (the most common one), the lanes it uses.
+function bandInfo(band, states, r, steps, lanes) {
+  const done = band.steps.filter((i) => isFinished(states[i])).length;
+  const count = {};
+  band.steps.forEach((i) => { count[r[i].key] = (count[r[i].key] || 0) + 1; });
+  const usual = Object.entries(count).sort((a, b) => b[1] - a[1])[0][0];
+  const st = band.steps.map((i) => states[i]);
+  const word = st.includes('paused') ? 'paused' : st.includes('running') ? 'running' : st.some(isFailed) ? 'failed'
+    : done === band.steps.length ? 'done' : done ? 'stopped' : 'pending';
+  const used = new Set(band.steps.flatMap((i) => steps[i].resources || []));
+  return { done, usual, rule: r[band.steps.find((i) => r[i].key === usual)], word,
+    lanes: lanes.filter((lane) => used.has(lane)) };
+}
+
+// The badge of a step whose rule differs from its band's (retries ↻2, skip, abort, retry), and on the phone a
+// replan's target ("to 7"; on the laptop that is the line). cls: 'fail' for failure-type badges, 'skip' muted.
+function badgeOf(rule, i, usual, phone) {
+  const words = [];
+  if (rule.key !== usual && rule.retries > 0) words.push(`↻${rule.retries}`);
+  if (jumps(rule, i)) { if (phone) words.push(`to ${rule.replanTo + 1}`); }
+  else if (rule.key !== usual && rule.onFailure !== usual.split('|')[0]) words.push(rule.onFailure);
+  if (!words.length) return null;
+  return { text: words.join(' '), cls: words.length === 1 && rule.onFailure === 'skip' && rule.retries <= 0 ? 'skip' : 'fail' };
+}
+
+function chipButton(step, i, ctx) {
+  const { states, r, events, pickable } = ctx;
+  const status = states[i];
+  const start = pickable && step.id === state.startStep;
+  const chip = el('button', { type: 'button', 'data-step': step.id,
+    class: `pg-chip kind-${colourOf(step)} state-${status}${WARN_STATES.includes(status) ? ' state-warn' : ''}`
+      + `${start ? ' start-here' : view.selected === step.id ? ' selected' : ''}`,
+    'aria-label': `Step ${i + 1}: ${step.instruction} (${status})` }, iconElement(iconOf(step, events[step.id])));
+  const held = carrying(step, events[step.id]);
+  chip.title = [`${i + 1}. ${step.instruction}`, `${stepTitle(step)} · ${mainArg(step)}`,
+    held ? (held === true ? 'carries a held object' : `carrying ${held}`) : '',
+    step.resources?.length ? `uses ${step.resources.join(', ')}` : '', `on failure: ${failureText(r[i])}`,
+    ...(step.notes || []).map((note) => `note: ${note}`)].filter(Boolean).join('\n');
+  // the graph is rebuilt on every status update: breathe at the phase of a page-wide clock, so it runs on
+  if (isLive(status)) chip.style.animationDelay = `-${(performance.now() % BREATHE_MS) / 1000}s`;
+  if (status === 'succeeded') chip.append(el('span', { class: 'pg-dot ok' }));
+  if (isFailed(status)) chip.append(el('span', { class: 'pg-dot bad', text: '✕' }));
+  const badge = badgeOf(r[i], i, ctx.usual[i], ctx.phone);
+  if (badge) chip.append(el('span', { class: `pg-badge ${badge.cls}`, text: badge.text }));
+  chip.addEventListener('click', () => choose(step, pickable));
+  return chip;
+}
+const failureText = (rule) => `${ruleText(rule)}${rule.onFailure === 'replan' ? ` from step ${rule.replanTo + 1}` : ''}`
+  + `${rule.onFailure === 'replan' && rule.maxReplans ? ` · max ${rule.maxReplans}` : ''}`;
+
+// A click on a chip: idle, it picks the start step (app.js) and shows its card; running, it shows the step's card
+// (again, or the running chip: back to the running step). Escape does that too.
+function choose(step, pickable) {
+  if (pickable) {
+    view.selected = state.startStep === step.id ? null : step.id;
+    pickStart(step);
+    return;
+  }
+  view.selected = view.selected === step.id || state.snapshot?.status.step?.id === step.id ? null : step.id;
+  renderGraph();
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !view.selected || e.target.closest?.('textarea, select, input, [contenteditable]')) return;
+  view.selected = null;
+  renderGraph();
+});
+
+// A band's header: chevron and name, then open: done/total · fails: rule; closed: the lanes it uses as mini chips,
+// done/total and its state word.
+function bandHeader(band, info, open, toggle, extra) {
+  const total = band.steps.length;
+  const head = el('button', { type: 'button', class: `pg-band${open ? ' open' : ''}`, 'aria-expanded': String(open),
+    'data-band': band.key, title: `${band.name}${band.include && band.include !== band.name ? ` (${band.include})` : ''}`
+      + `\n${info.done} of ${total} done · ${info.word} · fails: ${ruleText(info.rule)}`
+      + `${info.lanes.length ? `\nuses ${info.lanes.join(', ')}` : ''}` },
+  el('span', { class: 'pg-chev', 'aria-hidden': 'true' }), el('span', { class: 'pg-band-name', text: band.name }));
+  if (!open && info.lanes.length) {
+    head.append(el('span', { class: 'pg-minis', 'aria-label': `uses ${info.lanes.join(', ')}` },
+      ...info.lanes.map((lane) => el('i', { text: lane[0] }))));
+  }
+  head.append(el('span', { class: 'pg-band-meta', text: [extra, `${info.done}/${total}`,
+    open ? `fails: ${ruleText(info.rule)}` : ''].filter(Boolean).join(' · ') }));
+  if (!open) head.append(el('span', { class: `pg-band-word ${info.word}`, text: info.word }));
+  head.addEventListener('click', toggle);
+  return head;
+}
+
+// the card of one step: the side card on a laptop, the bottom sheet on a phone
+function planCard(i, ctx, phone) {
+  const { states, r, events, snap, plan, pickable } = ctx;
+  const step = plan.steps[i];
+  const status = states[i];
+  const event = events[step.id];
+  const s = snap.status;
+  const start = pickable && step.id === state.startStep;
+  const live = isLive(status);
+  const held = carrying(step, event);
+  const command = `${stepTitle(step)}${held ? ` · carrying${held === true ? '' : ` ${held}`}` : ''}`;
+  const finished = event?.event === 'step_finished';
+  const statusText = live
+    ? [s.step_status, `attempt ${s.attempt}`, `${(s.step_elapsed_s || 0).toFixed(1)} s`].filter(Boolean).join(' · ')
+    : finished ? [event.outcome.toLowerCase(), event.message].filter(Boolean).join(' · ') : '';
+  const eyebrow = el('div', { class: 'pg-eyebrow', text: `${start ? 'start here' : status} · step ${i + 1} of ${plan.steps.length}` });
+  const tile = div(`pg-tile kind-${colourOf(step)}`, iconElement(iconOf(step, event)));
+  const progress = live ? div('pg-progress', el('i', { style: `width: ${Math.max(0, Math.min(1, s.step_progress)) * 100}%` })) : '';
+  if (phone) {
+    return div(`pg-sheet state-${status}`, div('pg-handle'),
+      div('pg-sheet-row', tile, div('pg-sheet-text', eyebrow,
+        el('div', { class: 'pg-sheet-title', text: `${i + 1} · ${step.instruction}` }),
+        el('div', { class: 'pg-sheet-sub', text: [command, mainArg(step), (step.resources || []).join(' + '),
+          `fails: ${failureText(r[i])}`].filter(Boolean).join(' · ') }),
+        statusText ? el('div', { class: 'pg-sheet-sub mono', text: statusText }) : '')),
+      progress);
+  }
+  const row = (label, value, cls = '') => (value ? [el('dt', { text: label }), el('dd', { class: cls, text: value })] : []);
+  return el('aside', { class: `pg-card state-${status}${live || start || view.selected === step.id ? ' marked' : ''}`,
+    'aria-live': 'polite' },
+  div('pg-card-head', tile, div('pg-card-titles', eyebrow, el('div', { class: 'pg-card-title', text: step.instruction }))),
+  progress,
+  el('dl', { class: 'pg-rows' }, ...row('command', command), ...row('target', mainArg(step), 'mono'),
+    ...row('locks', (step.resources || []).join(', ') || '–'), ...row('on failure', failureText(r[i])),
+    ...row('status', statusText, live ? 'mono' : ''), ...(step.notes || []).flatMap((note) => row('note', note))));
+}
+
+// the step the card shows: the selected one, else the running one, else (a live run that failed) the failed one,
+// else the start step, else the first
+function focusIndex(plan, states) {
+  const ids = plan.steps.map((s) => s.id);
+  if (view.selected && !ids.includes(view.selected)) view.selected = null;
+  return [ids.indexOf(view.selected), states.findIndex(isLive), states.findIndex(isFailed), ids.indexOf(state.startStep), 0]
+    .find((i) => i >= 0);
+}
+
+function legend(plan, events, anyReplan, anyPair) {
+  const labels = { navigate: moveLabel('navigate'), straight: moveLabel('straight'), hand: moveLabel('hand'),
+    carry: 'carrying', posture: moveLabel('posture'), joints: moveLabel('joints'), 'grip-close': 'grip close',
+    'grip-open': 'grip open', wait: 'wait', other: 'other' };
+  const icons = [...new Set(plan.steps.map((step) => iconOf(step, events[step.id])))];
+  return div('legend',
+    ...icons.map((id) => el('span', { class: `legend-item kind-${ICON_COLOURS[id] || 'other'}` }, iconElement(id),
+      labels[id] || id)),
+    anyPair ? el('span', { class: 'legend-item' }, el('i', { class: 'swatch-pair' }), 'parallel candidates') : '',
+    anyReplan ? el('span', { class: 'legend-item' }, el('i', { class: 'swatch-fail' }), 'replan') : '');
+}
+
+// the line under the last band when the plan repeats: "↻ until no_frames · cycle 1 · max 10"
+function loopText(plan, mission, snap) {
+  const loop = plan.loop || mission?.loop || 'once';
+  if (loop === 'once') return '';
+  const until = mission?.stop_when ? `until ${mission.stop_when}` : (loop === 'forever' ? 'forever' : loop);
+  const cycle = snap.status.plan_id === plan.plan_id && snap.status.cycle ? `cycle ${snap.status.cycle}` : '';
+  return [`↻ ${until}`, cycle, mission?.max_cycles ? `max ${mission.max_cycles}` : ''].filter(Boolean).join(' · ');
+}
+
+// the rail (phone): per band a header and a wrapping grid of 44 px chips, sub-bands indented; no lines
+function rail(bands, ctx, end) {
+  const section = (band, depth, extra) => {
+    const open = ctx.isOpen(band);
+    const node = el('section', { class: `pg-rband${depth ? ' sub' : ''}` },
+      bandHeader(band, ctx.info.get(band), open, ctx.toggle(band), extra));
+    let grid = null;
+    if (open) band.items.forEach((it) => {
+      if (it.sub) { grid = null; node.append(section(it.sub, depth + 1, '')); return; }
+      if (!grid) { grid = div('pg-rchips'); node.append(grid); }
+      const chip = chipButton(ctx.plan.steps[it.step], it.step, ctx);
+      chip.append(el('span', { class: 'pg-rnum', text: String(it.step + 1) }));
+      grid.append(chip);
+    });
+    return node;
+  };
+  const sheet = view.selected ? ctx.focus : ctx.states.findIndex(isLive);
+  return div(`pg-rail${sheet >= 0 ? ' with-sheet' : ''}`,
+    ...bands.map((band, b) => section(band, 0, b === 0 ? ctx.cycleNote : '')),
+    end ? el('div', { class: 'pg-end', text: end }) : '',
+    sheet >= 0 ? planCard(sheet, ctx, true) : '');
+}
+
+// the lanes: core's resource names in their order, then any other resource a step holds
+const lanesOf = (plan) => [...new Set([...LANES, ...plan.steps.flatMap((s) => s.resources || [])])];
+
+// the laptop graph: rows in lanes, chips and band headers positioned in a box; lane dividers, the bars of steps on
+// several lanes and the pair boxes in an SVG underneath, the replan lines in one on top
+function lanesGraph(bands, ctx, end) {
+  const { plan, states, r } = ctx;
+  const lanes = lanesOf(plan);
+  const laneIndex = (name) => lanes.indexOf(name);
+  const replans = plan.steps.map((_, i) => (jumps(r[i], i) ? i : -1)).filter((i) => i >= 0);
+  const x0 = replans.length ? G.replanArea + G.replanGap * (replans.length - 1) : 0;
+  const laneX = (l) => x0 + G.gutter + l * G.lane;
+  const width = laneX(lanes.length);
+  const chipLane = [];
+  let prev = Math.max(0, laneIndex(FIRST_LANE));
+  plan.steps.forEach((step, i) => {  // the leftmost lane it holds, else the previous step's
+    const held = (step.resources || []).map(laneIndex).filter((l) => l >= 0);
+    chipLane[i] = prev = held.length ? Math.min(...held) : prev;
+  });
+  const chipX = (i) => laneX(chipLane[i]) + (G.lane - G.chip) / 2;
+  const items = [];  // {band, y, depth, extra, open} and {step, y, owner}
+  const rowY = [];   // per step: its chip's centre (a step of a closed band: the band header's)
+  const shown = new Set();
+  let y = G.laneHead;
+  const place = (band, depth, extra) => {
+    const open = ctx.isOpen(band);
+    items.push({ band, y, depth, extra, open });
+    if (!open) { band.steps.forEach((i) => { rowY[i] ??= y + G.head / 2; }); y += G.head; return; }
+    y += G.head + G.headGap;
+    band.items.forEach((it) => {
+      if (it.sub) { place(it.sub, depth + 1, ''); y += G.headGap; return; }
+      items.push({ step: it.step, y, owner: band });
+      rowY[it.step] = y + G.row / 2;
+      shown.add(it.step);
+      y += G.row;
+    });
+  };
+  bands.forEach((band, b) => { if (b) y += G.bandGap; place(band, 0, b === 0 ? ctx.cycleNote : ''); });
+  const height = y + (end ? G.endGap + G.endH : 0);
+  const under = svg('svg', { class: 'pg-lines', width, height, 'aria-hidden': 'true' });
+  for (let l = 0; l <= lanes.length; l += 1) {
+    under.append(svg('line', { x1: laneX(l), y1: 0, x2: laneX(l), y2: height, class: 'pg-divider' }));
+  }
+  const graph = el('div', { class: 'pg-graph', style: `width: ${width}px; height: ${height}px`, role: 'group',
+    'aria-label': `Plan ${plan.plan_id}: ${plan.steps.length} steps` }, under,
+  ...lanes.map((lane, l) => el('span', { class: 'pg-lane', text: lane, style: `left: ${laneX(l)}px; width: ${G.lane}px` })));
+  const rows = [];
+  items.forEach((it) => {
+    if (it.band) {
+      const indent = it.depth * G.subIndent;
+      const head = bandHeader(it.band, ctx.info.get(it.band), it.open, ctx.toggle(it.band), it.extra);
+      head.style.cssText = `left: ${x0 + indent}px; top: ${it.y}px; width: ${width - x0 - indent}px`;
+      graph.append(head);
+      return;
+    }
+    const i = it.step;
+    const step = plan.steps[i];
+    const top = it.y + (G.row - G.chip) / 2;
+    rows.push({ i, top, owner: it.owner });
+    graph.append(el('span', { class: `pg-num${isLive(states[i]) ? ' now' : ''}`, text: String(i + 1),
+      style: `left: ${x0}px; top: ${it.y}px; width: ${G.gutter}px; height: ${G.row}px` }));
+    // a step on several lanes: a bar from its chip to the last lane it holds, a dot on each of the others
+    const more = [...new Set((step.resources || []).map(laneIndex).filter((l) => l > chipLane[i]))];
+    if (more.length) {
+      const cy = top + G.chip / 2;
+      const bar = svg('g', { class: `pg-span kind-${colourOf(step)} state-${states[i]}` });
+      bar.append(svg('line', { x1: chipX(i) + G.chip, y1: cy, x2: laneX(Math.max(...more)) + G.lane / 2, y2: cy }),
+        ...more.map((l) => svg('circle', { cx: laneX(l) + G.lane / 2, cy, r: 4 })));
+      under.append(bar);
+    }
+    const chip = chipButton(step, i, ctx);
+    chip.style.left = `${chipX(i)}px`;
+    chip.style.top = `${top}px`;
+    graph.append(chip);
+  });
+  // parallel candidates: neighbouring shown steps of one band on disjoint resources, paired left to right
+  let pairs = 0;
+  for (let k = 0; k + 1 < rows.length; k += 1) {
+    const [a, b] = [rows[k], rows[k + 1]];
+    const ra = plan.steps[a.i].resources || [];
+    const rb = plan.steps[b.i].resources || [];
+    if (a.owner !== b.owner || b.i !== a.i + 1 || !ra.length || !rb.length || ra.some((x) => rb.includes(x))) continue;
+    const left = Math.min(chipX(a.i), chipX(b.i)) - G.pairOut;
+    const right = Math.max(chipX(a.i), chipX(b.i)) + G.chip + G.pairOut;
+    under.append(svg('rect', { x: left, y: a.top - G.pairOut, width: right - left, height: b.top - a.top + G.chip + 2 * G.pairOut, rx: 7,
+      class: 'pg-pair' }));
+    pairs += 1;
+    k += 1;
+  }
+  // replans: from the step's left edge into the left area, up or down, into the target from the left
+  const over = svg('svg', { class: 'pg-lines over', width, height, 'aria-hidden': 'true' });
+  const marker = svg('marker', { id: 'pg-arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 6, markerHeight: 6,
+    orient: 'auto-start-reverse' });
+  marker.append(svg('path', { d: 'M0,0 L10,5 L0,10 z' }));
+  const defs = svg('defs');
+  defs.append(marker);
+  over.append(defs);
+  replans.forEach((i, k) => {
+    const t = r[i].replanTo;
+    if (!shown.has(i) && !shown.has(t)) return;  // both ends in closed bands
+    const lx = G.replanArea - 6 + G.replanGap * (replans.length - 1 - k);
+    const from = rowY[i] + (shown.has(i) ? 4 : 0);
+    const fromX = shown.has(i) ? chipX(i) : x0;
+    const toX = shown.has(t) ? chipX(t) - 2 : x0 - 2;
+    over.append(svg('path', { d: `M${fromX},${from} L${lx},${from} L${lx},${rowY[t]} L${toX},${rowY[t]}`,
+      class: 'pg-replan', 'marker-end': 'url(#pg-arrow)' }));
+    if (!over.querySelector('text')) {  // one label: the lines run side by side
+      const mid = (from + rowY[t]) / 2;
+      over.append(svg('text', { x: lx - 5, y: mid, class: 'pg-replan-label', 'text-anchor': 'middle',
+        transform: `rotate(-90 ${lx - 5} ${mid})` }, 'replan'));
+    }
+  });
+  graph.append(over);
+  if (end) graph.append(el('div', { class: 'pg-end', text: end, style: `left: ${x0}px; top: ${y + G.endGap}px` }));
+  return { node: div('pg', graph, planCard(ctx.focus, ctx, false)), pairs, replans: replans.length };
+}
 
 function renderGraph() {
   const box = $('plan-graph');
   const snap = state.snapshot;
   if (!box || box.hidden || !snap) return;
   const { plan, live } = shownPlan();  // app.js: the live plan, or a preview to pick a start step in
-  if (!plan || !plan.steps.length) { box.replaceChildren(el('p', { class: 'muted', text: plan?.message || 'No plan yet' })); return; }
-  const pickable = snap.status.state !== 'running' && snap.status.state !== 'paused';
-  const mission = missionCache[missionOf(plan)];
+  if (!plan || !plan.steps.length) {
+    box.replaceChildren(el('p', { class: 'muted', text: plan?.message || 'No plan yet' }));
+    return;
+  }
+  const active = document.activeElement;  // rebuilt on every update: keep the keyboard focus on its chip or band
+  const refocus = box.contains(active) && (active.dataset.step || active.dataset.band)
+    ? (active.dataset.step ? `[data-step="${CSS.escape(active.dataset.step)}"]` : `[data-band="${CSS.escape(active.dataset.band)}"]`)
+    : null;
+  const missionName = missionOf(plan);
+  const mission = missionCache[missionName];
   if (mission === undefined) missionFor(plan);
+  const states = plan.steps.map((step, i) => stepState(snap, plan, live, step, i));
   const r = rules(plan, mission);
-  const n = plan.steps.length;
-  const rowY = (i) => G.top + i * (G.nodeH + G.gap);
-  const cx = G.nodeX + G.nodeW / 2;
-  const right = G.nodeX + G.nodeW;
-  const loop = plan.loop || mission?.loop || 'once';
-  const anyAbort = r.some((x) => x.onFailure === 'abort');
-  const endY = rowY(n);
-  const height = endY + 70;
-  const root = svg('svg', { viewBox: `0 0 ${G.width} ${height}`, class: 'plan-graph', role: 'img',
-    'aria-label': `Plan ${plan.plan_id}: ${n} steps` });
-  const defs = svg('defs');
-  root.append(defs);
-  ['ok', 'fail', 'loop'].forEach((kind) => {
-    const marker = svg('marker', { id: `arrow-${kind}`, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 6, markerHeight: 6,
-      orient: 'auto-start-reverse' });
-    marker.append(svg('path', { d: 'M0,0 L10,5 L0,10 z', class: `head-${kind}` }));
-    defs.append(marker);
-  });
-  const edge = (d, kind, dashed = false) => svg('path', { d, class: `edge edge-${kind}${dashed ? ' dashed' : ''}`,
-    'marker-end': `url(#arrow-${kind})` });
-  const label = (x, y, text, cls = '', anchor = 'start') => svg('text', { x, y, class: `edge-label ${cls}`, 'text-anchor': anchor }, text);
-
-  // start, step chain, end
-  root.append(svg('rect', { x: cx - 34, y: 6, width: 68, height: 22, rx: 11, class: 'terminal' }),
-    svg('text', { x: cx, y: 21, class: 'terminal-text', 'text-anchor': 'middle' }, 'start'),
-    edge(`M${cx},28 L${cx},${rowY(0) - 2}`, 'ok'));
-  plan.steps.forEach((step, i) => {
-    const y = rowY(i);
-    const kind = laneOf(step);
-    const status = stepState(snap, plan, live, step, i);
-    const group = svg('g', { class: `node kind-${kind} state-${status}${pickable ? ' pickable' : ''}`
-      + `${pickable && step.id === state.startStep ? ' start-here' : ''}` });
-    if (pickable) group.addEventListener('click', () => pickStart(step));  // app.js
-    const uses = step.resources?.length ? `\nuses ${step.resources.join(', ')}` : '';
-    const noted = (step.notes || []).map((note) => `\nnote: ${note}`).join('');  // a preview's (a live plan has none)
-    const title = svg('title', {}, `${i + 1}. ${step.instruction}\n${stepTitle(step)} `
-      + `${JSON.stringify(step.args)}${uses}${noted}`);
-    const nodeBox = svg('rect', { x: G.nodeX, y, width: G.nodeW, height: G.nodeH, rx: 14, class: 'node-box' });
-    // the graph is rebuilt on every status update: start the breathing at the phase of a page-wide clock, so it
-    // runs on (in and out) instead of restarting with every update
-    if (status === 'running') nodeBox.style.animationDelay = `-${(performance.now() % BREATHE_MS) / 1000}s`;
-    group.append(title, nodeBox,
-      svg('rect', { x: G.nodeX + 9, y: y + 11, width: 5, height: G.nodeH - 22, rx: 2.5, class: 'node-kind' }),
-      svg('text', { x: G.nodeX + 24, y: y + 22, class: 'node-title' }, fit(`${i + 1} · ${stepTitle(step)}`, status === 'pending' ? 28 : 22)),
-      svg('text', { x: G.nodeX + 24, y: y + 39, class: 'node-arg' }, mainArg(step).slice(0, 28)));
-    const held = carrying(step, live ? snap.outcomes[step.id] : null);
-    if (held) {  // a pill on the node's top edge
-      const pill = svg('g', { class: 'node-carry' });
-      pill.append(svg('rect', { x: right - 82, y: y - 8, width: 70, height: 16, rx: 8 }),
-        svg('text', { x: right - 47, y: y + 4, 'text-anchor': 'middle' }, 'carrying'),
-        svg('title', {}, held === true ? 'carries a held object' : `carrying ${held}`));
-      group.append(pill);
-    }
-    if (status === 'running' || status === 'paused') {
-      group.append(svg('text', { x: right - 12, y: y + 22, class: 'node-state', 'text-anchor': 'end' }, status));
-    } else if (status !== 'pending') {  // finished: a round badge
-      const glyph = { succeeded: '✓', failed: '✕', timeout: '⏱', rejected: '✕', canceled: '–' }[status] || '•';
-      group.append(svg('circle', { cx: right - 18, cy: y + G.nodeH / 2, r: 10, class: 'node-badge' }),
-        svg('text', { x: right - 18, y: y + G.nodeH / 2 + 4.5, class: 'node-badge-text', 'text-anchor': 'middle' }, glyph),
-        svg('title', {}, status));
-    }
-    root.append(group);
-    // next step (or end): success, and skip when the step fails with on_failure skip
-    const nextY = i + 1 < n ? rowY(i + 1) - 2 : endY - 2;
-    root.append(edge(`M${cx},${y + G.nodeH} L${cx},${nextY}`, 'ok'));
-    if (r[i].onFailure === 'skip') root.append(label(cx + 6, y + G.nodeH + 18, 'also if it fails (skip)', 'muted-label'));
-    // retries: a loop on the right edge of the node
-    if (r[i].retries > 0) {
-      // upper half of the node; the abort stub uses the lower half
-      root.append(edge(`M${right},${y + 8} C${right + 24},${y + 2} ${right + 24},${y + 30} ${right + 2},${y + 26}`, 'fail', true),
-        label(right + 26, y + 20, `retry ×${r[i].retries}`, 'fail-label'));
-    }
-    // replan: back to the step it replans from, through the left lane
-    if (r[i].onFailure === 'replan') {
-      const ty = rowY(r[i].replanTo) + G.nodeH / 2;
-      const lane = G.lane - (i % 3) * 6;
-      root.append(edge(`M${G.nodeX},${y + G.nodeH / 2 + 6} L${lane},${y + G.nodeH / 2 + 6} L${lane},${ty} L${G.nodeX - 2},${ty}`, 'fail', true),
-        label(lane + 3, y + G.nodeH / 2 + 18, 'replan', 'fail-label'));
-    }
-    // abort: a stub into the right failure lane
-    if (r[i].onFailure === 'abort') {
-      root.append(svg('path', { d: `M${right},${y + G.nodeH - 10} L${G.abortLane},${y + G.nodeH - 10}`, class: 'edge edge-fail' }));
-    }
-  });
-  // end: done, or loop back to the first step
-  if (loop === 'once') {
-    root.append(svg('rect', { x: cx - 34, y: endY, width: 68, height: 22, rx: 11, class: 'terminal' }),
-      svg('text', { x: cx, y: endY + 15, class: 'terminal-text', 'text-anchor': 'middle' }, 'done'));
+  const bands = bandsOf(plan, mission);
+  const lanes = lanesOf(plan);
+  const info = new Map();
+  const usual = [];
+  const visit = (band) => {
+    info.set(band, bandInfo(band, states, r, plan.steps, lanes));
+    band.items.forEach((it) => it.sub && visit(it.sub));
+  };
+  bands.forEach(visit);
+  bands.forEach((band) => band.steps.forEach((i) => { usual[i] = info.get(band).usual; }));
+  // open: the operator's choice, else the band with the running step (else the failed one's, the start step's, the
+  // first band)
+  const anchor = [states.findIndex(isLive), states.findIndex(isFailed),
+    plan.steps.findIndex((s) => s.id === state.startStep), 0].find((i) => i >= 0);
+  const stored = storedBands(missionName);
+  const isOpen = (band) => (band.key in stored ? stored[band.key] : band.steps.includes(anchor));
+  const end = loopText(plan, mission, snap);
+  const ctx = { plan, states, r, events: live ? snap.outcomes : {}, snap, usual, info, isOpen, phone: PHONE.matches,
+    pickable: snap.status.state !== 'running' && snap.status.state !== 'paused', focus: focusIndex(plan, states),
+    toggle: (band) => () => { storeBand(missionName, band.key, !isOpen(band)); renderGraph(); },
+    cycleNote: end && snap.status.plan_id === plan.plan_id && snap.status.cycle ? `cycle ${snap.status.cycle}` : '' };
+  if (ctx.phone) {
+    box.replaceChildren(rail(bands, ctx, end), legend(plan, ctx.events, false, false));
   } else {
-    const until = mission?.stop_when ? `until ${mission.stop_when}` : (loop === 'forever' ? 'forever' : loop);
-    const ly = endY + 8;
-    root.append(svg('path', { d: `M${cx},${endY - 2} L${cx},${ly} L14,${ly} L14,${rowY(0) + 12} L${G.nodeX - 2},${rowY(0) + 12}`,
-      class: 'edge edge-loop', 'marker-end': 'url(#arrow-loop)' }),
-    label(20, ly + 16, [`loop ${until}`, mission?.max_cycles ? `max ${mission.max_cycles}` : '',
-      snap.status.plan_id === plan.plan_id && snap.status.cycle ? `now cycle ${snap.status.cycle}` : ''].filter(Boolean).join(' · '),
-    'loop-label'));
-    if (mission?.stop_when || mission?.max_cycles) {
-      root.append(svg('rect', { x: right - 68, y: endY + 26, width: 68, height: 22, rx: 11, class: 'terminal' }),
-        svg('text', { x: right - 34, y: endY + 41, class: 'terminal-text', 'text-anchor': 'middle' }, 'done'));
-    }
+    const drawn = lanesGraph(bands, ctx, end);
+    box.replaceChildren(drawn.node, legend(plan, ctx.events, drawn.replans > 0, drawn.pairs > 0));
   }
-  if (anyAbort) {
-    const last = Math.max(...r.map((x, i) => (x.onFailure === 'abort' ? i : -1)));
-    const abortY = endY + 26;
-    root.append(svg('path', { d: `M${G.abortLane},${rowY(r.findIndex((x) => x.onFailure === 'abort')) + G.nodeH - 10} L${G.abortLane},${abortY - 2}`,
-      class: 'edge edge-fail' }),
-    svg('rect', { x: G.abortLane - 52, y: abortY, width: 56, height: 22, rx: 11, class: 'terminal terminal-abort' }),
-    svg('text', { x: G.abortLane - 24, y: abortY + 15, class: 'terminal-text', 'text-anchor': 'middle' }, 'abort'),
-    label(G.abortLane - 4, rowY(last) + G.nodeH + 2, 'fails', 'fail-label', 'end'));
-  }
-  box.replaceChildren(root, el('div', { class: 'legend' },
-    ...Object.entries({ drive: 'drive', arm: 'arm', grip: 'gripper', wait: 'wait', other: 'other' })
-      .filter(([kind]) => kind !== 'other' || plan.steps.some((s) => laneOf(s) === 'other'))
-      .map(([kind, text]) => el('span', { class: `legend-item kind-${kind}` }, el('i'), text)),
-    el('span', { class: 'legend-item' }, el('i', { class: 'swatch-fail' }), 'on failure')));
+  if (refocus) box.querySelector(refocus)?.focus();
 }
+PHONE.addEventListener('change', () => renderGraph());
 
 function setPlanView(view) {
   try { localStorage.setItem('tw-plan-view', view); } catch (_) { /* private mode */ }

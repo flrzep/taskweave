@@ -172,8 +172,17 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 - **3D view** (`.viewer3d`): a full-width viewport card, 16:10 on a laptop and 4:3 at 600px and below, dark in both
   themes, 10px radius; a `canvas` child fills it. `.viewer3d-tools` is an overlay toolbar top right for icon buttons
   (`--tap-s` square, light icons; `aria-pressed="true"` in brand fill).
-- **Plan graph** (`.plan-graph`): nodes tinted by skill colour (`--k` from `--kind-*`), state by badge, the running
-  node breathes; it reads `--g-*` tokens mapped onto the global ones.
+- **Plan graph** (`.pg`, graph.js): steps top to bottom as 28px icon chips (icons.js) in resource lanes (base, hands,
+  torso, joints; a bar with dots across the other lanes a step holds), rows of 32px, step numbers in Barlow Semi
+  Condensed in a 28px gutter. Chips are tinted by skill colour (`--k` from `--kind-*`): pending faded, succeeded an
+  8% tint with a green corner dot, running solid with a 2px brand ring and the breathing glow (amber ring paused),
+  failed red with a ✕ dot, timeout / canceled / skipped amber. Phases are bands (`.pg-band`, `--surface-field`, 24px)
+  with a chevron, done/total and the usual failure rule; closed, one row with the lanes as mini chips and the state
+  word, remembered per mission. Only exceptions are marked: rule badges on the chip's top edge, a dashed replan line
+  in the left gutter, dashed boxes round parallel candidates. The running or selected step opens in a 300px side
+  card (`.pg-card`, 2px brand border); below 608px of card width it goes under the graph. At 600px and below: a
+  rail of 44px chips per band and a bottom sheet (`.pg-sheet`). It reads `--g-*` tokens mapped onto the global
+  ones.
 
 ## Icons and imagery
 

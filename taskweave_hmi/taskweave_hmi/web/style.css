@@ -467,58 +467,132 @@ li.empty { list-style: none; padding: 6px 2px; }
 .viewer3d-tools svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.75; }
 @media (max-width: 600px) { .viewer3d { aspect-ratio: 4 / 3; } }
 
-/* plan graph (graph.js): one colour per skill (--k), state shown by badge, glow and breathing */
-.graph-box { display: grid; gap: 10px; }
-.plan-graph { width: 100%; height: auto; max-width: 540px; justify-self: center; overflow: visible;
-  --g-edge: #c3c7d6; --g-fail: #e5566b; --g-loop: var(--brand-text); --g-ok: var(--ok); --g-bad: var(--bad); --g-warn: #d17a12;
-  --g-card: var(--surface-card); --g-ink: var(--text); --g-sub: var(--text-muted); }
-@media (prefers-color-scheme: dark) { .plan-graph { --g-edge: #3c4066; --g-fail: #ff7385; --g-warn: var(--warn); } }
+/* plan graph (graph.js, G3): icon chips in resource lanes, phases as collapsible bands, the running or selected step
+   in a side card; a rail of 44 px chips and a bottom sheet at 600px and below. Chips take their skill colour (--k,
+   from --kind-*) and show state by fill, ring and corner dot; the graph's own colours are the --g-* tokens. */
+.graph-box { display: grid; gap: var(--sp-3); container: plan / inline-size;
+  --g-fail: #e5566b; --g-warn: #d17a12; --g-ok: var(--ok); --g-bad: var(--bad); --g-card: var(--surface-card); }
+@media (prefers-color-scheme: dark) { .graph-box { --g-fail: #ff7385; --g-warn: var(--warn); } }
 .kind-drive { --k: var(--kind-drive); } .kind-arm { --k: var(--kind-arm); } .kind-grip { --k: var(--kind-grip); }
 .kind-wait { --k: var(--kind-wait); } .kind-other { --k: var(--kind-other); }
-.plan-graph .node-box { fill: color-mix(in srgb, var(--k) 6%, var(--g-card)); stroke: color-mix(in srgb, var(--k) 35%, transparent);
-  stroke-width: 1.5; transition: fill .3s, stroke .3s; }
-.plan-graph .node-kind { fill: var(--k); }
-.plan-graph .node-title { font: 600 14px var(--sans); fill: var(--g-ink); }
-.plan-graph .node-arg { font: 12px var(--mono); fill: var(--g-sub); }
-.plan-graph .node-state { font: 600 11.5px var(--cond); fill: var(--k); }
-.plan-graph .node-carry rect { fill: var(--g-card); stroke: var(--k); stroke-width: 1.2; }
-.plan-graph .node-carry text { font: 600 10.5px var(--cond); fill: var(--k); letter-spacing: .02em; }
-.plan-graph .node-badge { stroke: none; }
-.plan-graph .node-badge-text { font: 700 12px var(--sans); fill: var(--on-fill); }
-.plan-graph .state-succeeded .node-badge { fill: var(--g-ok); }
-.plan-graph .state-failed .node-badge, .plan-graph .state-rejected .node-badge { fill: var(--g-bad); }
-.plan-graph .state-timeout .node-badge, .plan-graph .state-canceled .node-badge { fill: var(--g-warn); }
-.plan-graph .state-succeeded .node-box { stroke: color-mix(in srgb, var(--g-ok) 55%, transparent); }
-.plan-graph .state-failed .node-box, .plan-graph .state-timeout .node-box, .plan-graph .state-rejected .node-box {
-  stroke: color-mix(in srgb, var(--g-bad) 60%, transparent); fill: color-mix(in srgb, var(--g-bad) 7%, var(--g-card)); }
-.plan-graph .state-pending .node-box { stroke: color-mix(in srgb, var(--k) 22%, transparent); }
-.plan-graph .state-running .node-box { stroke: var(--k); stroke-width: 2.5; animation: node-breathe 2.8s ease-in-out infinite;  /* period = BREATHE_MS in graph.js */
-  fill: color-mix(in srgb, var(--k) calc(7% + 15% * var(--breath)), var(--g-card));
-  filter: drop-shadow(0 0 9px color-mix(in srgb, var(--k) calc(60% * var(--breath)), transparent)); }
-.plan-graph .state-paused .node-box { stroke: var(--g-warn); stroke-width: 2.5; }
-.plan-graph .state-paused .node-state { fill: var(--g-warn); }
-.plan-graph .edge { fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
-.plan-graph .edge-ok { stroke: var(--g-edge); } .plan-graph .head-ok { fill: var(--g-edge); }
-.plan-graph .edge-fail { stroke: var(--g-fail); } .plan-graph .head-fail { fill: var(--g-fail); }
-.plan-graph .edge-loop { stroke: var(--g-loop); stroke-width: 2.25; } .plan-graph .head-loop { fill: var(--g-loop); }
-.plan-graph .dashed { stroke-dasharray: 5 4; }
-.plan-graph .edge-label { font: 600 11.5px var(--sans); }
-.plan-graph .fail-label { fill: var(--g-fail); } .plan-graph .loop-label { fill: var(--g-loop); }
-.plan-graph .muted-label { fill: var(--g-sub); font-weight: 500; }
-.plan-graph .terminal { fill: color-mix(in srgb, var(--g-sub) 10%, var(--g-card)); stroke: color-mix(in srgb, var(--g-sub) 35%, transparent);
-  stroke-width: 1.25; }
-.plan-graph .terminal-abort { fill: color-mix(in srgb, var(--g-bad) 10%, var(--g-card)); stroke: color-mix(in srgb, var(--g-bad) 55%, transparent); }
-.plan-graph .terminal-text { font: 600 12.5px var(--sans); fill: var(--g-ink); }
-.plan-graph .node.pickable { cursor: pointer; }
-.plan-graph .node.pickable:hover .node-box { stroke-width: 2; }
-.plan-graph .node.start-here .node-box { stroke: var(--brand-text); stroke-width: 2.5; stroke-dasharray: 6 4; }
+.pg { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: var(--sp-6); }
+.pg-graph { position: relative; flex: none; }
+.pg-lines { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.pg-divider { stroke: var(--border); stroke-width: 1; }
+.pg-lane { position: absolute; top: 0; height: 24px; display: grid; place-items: center; color: var(--text-muted);
+  font: 600 11px var(--sans); letter-spacing: .06em; text-transform: uppercase; }
+.pg-num { position: absolute; display: grid; place-items: center; font: 12px var(--cond); color: var(--text-muted); }
+.pg-num.now { font-weight: 700; color: var(--brand-text); }
+.pg-span line { stroke: color-mix(in srgb, var(--k) 45%, transparent); stroke-width: 4; stroke-linecap: round; }
+.pg-span circle { fill: var(--k); }
+.pg-span.state-pending line { stroke: color-mix(in srgb, var(--k) 25%, transparent); }
+.pg-span.state-pending circle { fill: color-mix(in srgb, var(--k) 50%, var(--g-card)); }
+.pg-pair { fill: none; stroke: var(--border-strong); stroke-width: 1.25; stroke-dasharray: 4 3; }
+.pg-replan { fill: none; stroke: var(--g-fail); stroke-width: 1.75; stroke-dasharray: 5 4; stroke-linejoin: round; }
+.pg-lines marker path { fill: var(--g-fail); }
+.pg-replan-label { font: 600 11.5px var(--sans); fill: var(--g-fail); }
+.pg-end { position: absolute; font: 600 var(--fs-xs) var(--sans); color: var(--brand-text); white-space: nowrap; }
+
+/* chips: pending faded, succeeded tinted with a green dot, running solid with a brand ring (breathing), failed red */
+.pg-chip { position: absolute; width: 28px; height: 28px; padding: 0; display: grid; place-items: center; cursor: pointer;
+  border-radius: var(--r-s); border: 1.5px solid var(--k); background: color-mix(in srgb, var(--k) 8%, var(--g-card));
+  color: var(--k); transition: background-color .3s, border-color .3s; }
+.pg-chip .icon { width: 16px; height: 16px; pointer-events: none; }
+.pg-chip:hover { border-width: 2px; }
+.pg-chip:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.pg-chip.state-pending { background: var(--g-card); border-color: color-mix(in srgb, var(--k) 40%, transparent);
+  color: color-mix(in srgb, var(--k) 50%, transparent); }
+.pg-chip.state-running, .pg-chip.state-paused { background: var(--k); border-color: var(--k); color: var(--on-brand);
+  --ring: var(--brand); animation: node-breathe 2.8s ease-in-out infinite;  /* period = BREATHE_MS in graph.js */
+  box-shadow: 0 0 0 2px var(--g-card), 0 0 0 4px var(--ring),
+    0 0 calc(10px * var(--breath)) calc(4px * var(--breath)) color-mix(in srgb, var(--k) 45%, transparent); }
+.pg-chip.state-paused { --ring: var(--g-warn); animation: none; }
+.pg-chip.state-failed, .pg-chip.state-rejected { background: color-mix(in srgb, var(--g-bad) 7%, var(--g-card));
+  border-color: var(--g-bad); color: var(--g-bad); }
+.pg-chip.state-warn { background: color-mix(in srgb, var(--g-warn) 7%, var(--g-card)); border-color: var(--g-warn); }
+.pg-chip.selected, .pg-chip.start-here { outline: 2px dashed var(--brand-text); outline-offset: 2px; }
+.pg-dot { position: absolute; top: -4px; right: -4px; width: 8px; height: 8px; border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--g-card); }
+.pg-dot.ok { background: var(--g-ok); }
+.pg-dot.bad { top: -5px; right: -5px; width: 11px; height: 11px; display: grid; place-items: center;
+  background: var(--g-bad); color: var(--on-fill); font: 700 8px/1 var(--sans); }
+.pg-badge { position: absolute; top: -7px; left: 50%; transform: translateX(-50%); height: 14px; padding: 0 4px;
+  border-radius: var(--r-pill); font: 700 9.5px/12px var(--sans); white-space: nowrap; pointer-events: none;
+  color: var(--g-bad); background: color-mix(in srgb, var(--g-bad) 11%, var(--g-card));
+  border: 1px solid color-mix(in srgb, var(--g-bad) 55%, transparent); }
+.pg-badge.skip { color: var(--text-muted); background: var(--surface-field); border-color: var(--border); }
+
+/* band (phase) headers: a full-width row; closed, the lanes it uses as mini chips and its state word */
+.pg-band { position: absolute; display: flex; align-items: center; gap: 6px; height: 24px; min-width: 0;
+  padding: 0 var(--sp-2) 0 6px; border: 0; border-radius: var(--r-s); background: var(--surface-field);
+  color: var(--text); cursor: pointer; font: 600 var(--fs-s)/1 var(--sans); text-align: left; }
+.pg-band:hover { background: var(--surface-hover); }
+.pg-band:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.pg-chev { flex: none; width: 12px; height: 12px; display: grid; place-items: center; color: var(--text-muted);
+  transition: transform .15s; }
+.pg-chev::before { content: ""; width: 6px; height: 6px; border: solid currentColor; border-width: 0 2px 2px 0;
+  transform: translateX(-1px) rotate(-45deg); }
+.pg-band.open .pg-chev { transform: rotate(90deg); }
+.pg-band-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-band-meta { flex: none; font: 600 var(--fs-xs) var(--sans); color: var(--text-muted); white-space: nowrap; }
+.pg-band-word { flex: none; font: 600 var(--fs-xs) var(--cond); color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: .04em; }
+.pg-band-word.done { color: var(--ok); } .pg-band-word.running { color: var(--brand-text); }
+.pg-band-word.failed { color: var(--bad); } .pg-band-word.paused, .pg-band-word.stopped { color: var(--warn); }
+.pg-minis { flex: none; display: flex; gap: 2px; }
+.pg-minis i { width: 14px; height: 14px; display: grid; place-items: center; border-radius: var(--r-xs);
+  border: 1px solid var(--border-strong); color: var(--text-muted); font: 700 9px/1 var(--sans); font-style: normal;
+  text-transform: uppercase; }
+
+/* the side card: the running or selected step */
+.pg-card { flex: 0 1 300px; min-width: 0; margin-top: 24px; display: grid; gap: var(--sp-3); padding: var(--sp-4);
+  border: 1px solid var(--border); border-radius: var(--r-m); background: var(--surface-card); }
+.pg-card.marked { border: 2px solid var(--brand); padding: calc(var(--sp-4) - 1px); }
+.pg-card-head, .pg-sheet-row { display: flex; gap: var(--sp-3); align-items: center; min-width: 0; }
+.pg-tile { flex: none; width: 44px; height: 44px; border-radius: var(--r-s); display: grid; place-items: center;
+  background: var(--k); color: var(--on-brand); }
+.pg-tile .icon { width: 24px; height: 24px; }
+.pg-card-titles, .pg-sheet-text { display: grid; gap: 2px; min-width: 0; }
+.pg-eyebrow { font: 700 var(--fs-xs) var(--sans); letter-spacing: .04em; text-transform: uppercase; color: var(--brand-text); }
+.pg-card-title { font: 600 var(--fs-lg)/1.25 var(--sans); overflow-wrap: anywhere; }
+.pg-progress { height: 4px; border-radius: var(--r-pill); background: var(--surface-hover); overflow: hidden; }
+.pg-progress i { display: block; height: 100%; background: var(--brand); border-radius: inherit; transition: width .3s; }
+.pg-rows { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 6px var(--sp-3); margin: 0; font-size: var(--fs-s); }
+.pg-rows dt { color: var(--text-muted); }
+.pg-rows dd { margin: 0; overflow-wrap: anywhere; }
+.pg-card.state-failed .pg-eyebrow, .pg-card.state-rejected .pg-eyebrow { color: var(--bad); }
+.pg-card.state-succeeded .pg-eyebrow { color: var(--ok); }
+.pg-card.state-paused .pg-eyebrow, .pg-card.state-timeout .pg-eyebrow, .pg-card.state-canceled .pg-eyebrow { color: var(--warn); }
+.pg-card.state-pending:not(.marked) .pg-eyebrow { color: var(--text-muted); }
+/* too narrow for graph and card side by side (601 to about 670px): the card goes under the graph, full width */
+@container plan (max-width: 607px) { .pg-card { flex-basis: 100%; margin-top: 0; } }
+
 .legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px var(--sp-4); font-size: var(--fs-sm); color: var(--text-muted); }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
-.legend-item i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--k); }
-.legend-item i.swatch-fail { background: none; border-top: 2px dashed var(--bad); height: 0; width: 16px; border-radius: 0; }
-/* slow in and out: fill and a soft glow in the skill colour swell, then fade. Only the number --breath is animated,
-   so both colours are mixed per frame from the same skill colour: interpolating the colours themselves tinted the
-   swell and the fade differently */
+.legend-item .icon { width: 16px; height: 16px; color: var(--k); }
+.legend-item i.swatch-pair { width: 16px; height: 12px; border: 1.25px dashed var(--border-strong); border-radius: 4px; }
+.legend-item i.swatch-fail { width: 16px; height: 0; border-top: 2px dashed var(--g-fail); }
+
+/* phone: the rail (lanes collapsed), 44 px chips with the number inside, and the step in a bottom sheet */
+.pg-rail { display: grid; gap: var(--sp-5); }
+.pg-rail.with-sheet { padding-bottom: 150px; }  /* the sheet covers the bottom of the page */
+.pg-rband { display: grid; gap: var(--sp-3); }
+.pg-rband.sub { margin-left: var(--sp-3); }
+.pg-rail .pg-band { position: static; height: var(--tap-min); padding: 0 var(--sp-3) 0 var(--sp-2); }
+.pg-rail .pg-band-name { font: 700 var(--fs-sm) var(--sans); letter-spacing: .06em; text-transform: uppercase; }
+.pg-rchips { display: flex; flex-wrap: wrap; gap: 10px var(--sp-2); padding-top: 4px; }
+.pg-rail .pg-chip { position: relative; width: 44px; height: 44px; border-radius: var(--r-s); padding-bottom: 10px; }
+.pg-rail .pg-chip .icon { width: 20px; height: 20px; }
+.pg-rnum { position: absolute; bottom: 3px; left: 0; right: 0; font: 10px/1 var(--cond); text-align: center; }
+.pg-rail .pg-end { position: static; }
+.pg-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 4; display: grid; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4) calc(var(--sp-4) + env(safe-area-inset-bottom, 0px)); background: var(--surface-card);
+  border-radius: 16px 16px 0 0; box-shadow: var(--shadow-2); border-top: 1px solid var(--border); }
+.pg-handle { justify-self: center; width: 36px; height: 4px; border-radius: var(--r-pill); background: var(--border); }
+.pg-sheet-title { font: 600 var(--fs-md)/1.25 var(--sans); overflow-wrap: anywhere; }
+.pg-sheet-sub { font-size: var(--fs-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+/* slow in and out: the running chip's glow swells and fades. Only the number --breath is animated, so the glow is
+   mixed per frame from the skill colour (interpolating the colours tinted the swell and the fade differently) */
 @property --breath { syntax: '<number>'; inherits: false; initial-value: 0; }
 @keyframes node-breathe { 0%, 100% { --breath: 0; } 50% { --breath: 1; } }
 
@@ -538,5 +612,5 @@ li.empty { list-style: none; padding: 6px 2px; }
 }
 @media (prefers-reduced-motion: reduce) {
   #progress-bar, .card.status, .card.status::before, .mission, .mission::before { transition: none; }
-  .plan-graph .state-running .node-box { animation: none; }
+  .pg-chip.state-running { animation: none; }
 }
