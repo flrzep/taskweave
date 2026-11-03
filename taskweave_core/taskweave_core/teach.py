@@ -9,19 +9,23 @@ The request names a target reference and a kind, and the node writes it with
     hand    ``<name>``             each tool's TCP in the base frame (the cell frame for a target of
                                    cell/targets.yaml)                         -> robots/<robot>/targets.yaml
     joints  ``<name>``             the joint values of the groups             -> robots/<robot>/targets.yaml
-    object  (a held object in the base frame)  not built: the answer says so
+    object  ``<name>``             the held object's origin in the base frame (a carry pose), from its
+                                   holding hand's TCP and the grip measured at the close
+                                                                              -> robots/<robot>/targets.yaml
 
 ``instance_override`` writes the override for that object instance only (base, hand). ``tools``: the tools of a hand
 teach (default every tool of the profile's ``tool_frames``), the groups of a joints teach (default the target's own
-groups, else every group of the profile). An existing target keeps every key the teach does not set (joints, elbow,
-the other tools), a new one gets the pose only.
+groups, else every group of the profile), the hand whose hold an object teach takes (needed when several objects are
+held). An existing target keeps every key the teach does not set (joints, elbow, the other tools, the way there of a
+path: an object teach replaces a path's last pose), a new one gets the pose only (an object one also its ``type``).
 
 The kinds of the old point model are still taken as aliases: ``location`` and ``stance`` are ``base``,
 ``stance_instance`` is ``base`` with ``instance_override``, ``object_point`` is ``hand``.
 
 The base pose comes from the robot profile's ``base.odom`` topic, which must report the pose in the cell frame (ground
 truth in simulation, the localisation output on a real robot); the TCP poses come from TF (profile ``tool_frames``:
-flange link + offset), the joint values from the profile's ``joints.state`` topic. Jog the tools onto the object with
+flange link + offset), the joint values from the profile's ``joints.state`` topic, what the hands hold and how they
+grip it from the skill server's holds (names.HOLDING). Jog the tools onto the object with
 the pad, then teach (pad ``teach`` button or the CLI).
 
     ros2 service call /taskweave/teach_point taskweave_interfaces/srv/TeachPoint "{name: bin_2, kind: base}"
@@ -29,17 +33,21 @@ the pad, then teach (pad ``teach`` button or the CLI).
     taskweave teach base bin_2/pick [--instance]
     taskweave teach hand bin_2/top_grasp [--tool left]
     taskweave teach joints home [--tool left_arm]
+    taskweave teach object carry [--tool left]
 """
 
 from __future__ import annotations
 
 import datetime
+import json
 import math
 
 import rclpy
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
+from std_msgs.msg import String
 
 from taskweave_interfaces.srv import TeachPoint
 
@@ -48,14 +56,19 @@ from .config import ConfigError, ConfigStore, Pose2D
 from .config import target_store as ts
 from .config import targets as model
 from .config.limits import joint_groups, joint_groups_of
-from .config.poses import Pose3D, quaternion_from_rpy, quaternion_multiply, rotate, rpy_from_quaternion
+from .config.poses import (
+    Pose3D,
+    quaternion_from_matrix,
+    quaternion_from_rpy,
+    quaternion_multiply,
+    rotate,
+    rpy_from_quaternion,
+)
 
 MAX_POSE_AGE_S = 1.0  # default of max_tf_age_s (the HMI imports it)
 OLD_KINDS = {'location': ('base', False), 'stance': ('base', False), 'stance_instance': ('base', True),
              'object_point': ('hand', False)}      # the kinds of the old point model -> (kind, instance_override)
 NEW_KINDS = ('base', 'hand', 'joints', 'object')
-NOT_BUILT = ('a held object in the base frame cannot be taught yet: write the pose of the object target in '
-             'robots/<robot>/targets.yaml (or use the HMI)')
 
 
 def yaw_from_quaternion(q) -> float:
@@ -79,6 +92,7 @@ class Teach(Node):
         self.stamp = 0.0
         self.joints: dict[str, float] = {}   # the latest joint states
         self.joints_stamp = 0.0
+        self.holds: list[dict] = []           # the latest holds (names.HOLDING)
         self.declare_parameter('max_tf_age_s', MAX_POSE_AGE_S)   # refuse to save from TF or a base pose older than this
         self.declare_parameter('after_jump_s', 2.0)   # ... and for this long after a clock jump
         self.max_age_s = self.get_parameter('max_tf_age_s').value
@@ -90,6 +104,8 @@ class Teach(Node):
         topic = (self.robot.data.get('joints') or {}).get('state')
         if topic:
             self.create_subscription(JointState, topic, self._joint_state, 10)
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(String, names.HOLDING, self._holding, latched)
         self.create_service(TeachPoint, names.TEACH_POINT, self._teach)
         self.get_logger().info(f'teach: base pose from {self.robot.base["odom"]}, tool TCPs in {self.cell_frame}'
                                + (f', joints from {topic}' if topic else ''))
@@ -133,6 +149,12 @@ class Teach(Node):
         self.joints.update(zip(msg.name, msg.position, strict=False))
         self.joints_stamp = self._now()
 
+    def _holding(self, msg: String) -> None:
+        try:
+            self.holds = list((json.loads(msg.data or '{}') or {}).get('holds', []))
+        except (ValueError, AttributeError):
+            self.get_logger().warning(f'unreadable {names.HOLDING} message ignored')
+
     def tcp_pose(self, tool: str, stamps: list | None = None, frame: str | None = None):
         """The tool's canonical TCP in ``frame`` (default the cell frame): (position, quaternion xyzw); raises if TF
         lacks it. The TF stamp (seconds) is appended to ``stamps``."""
@@ -167,8 +189,6 @@ class Teach(Node):
                 override = override or old_override
             elif asked not in NEW_KINDS:
                 raise Refused(f'unknown kind {asked!r} (it is one of {", ".join(NEW_KINDS)})')
-            if kind == 'object':
-                raise Refused(NOT_BUILT)
             text, written = getattr(self, f'_teach_{kind}')(request, override)
         except Refused as error:
             response.success, response.message = False, f'{kind} {request.name!r}: {error}'
@@ -282,6 +302,57 @@ class Teach(Node):
         text = '; '.join(f'{tool} xyz {[round(v, 3) for v in pose.xyz]} rpy {[round(v, 3) for v in pose.rpy]}'
                          for tool, pose in stored.items())
         return text, written
+
+    # ---- object -----------------------------------------------------------------------------------------------
+    def _teach_object(self, request, override: bool):
+        if override:
+            raise Refused('instance_override is for base and hand targets of an object')
+        if ts.SEPARATOR in request.name:
+            raise Refused('a contact (<instance>/<name>, in the object frame) is not taught: a held object is taught '
+                          'as a carry pose, a plain name in the base frame')
+        existing = self._existing(request.name, None, None, request.name, False, 'object')
+        hold, hand = self._hold(list(request.tools))
+        placed = self.config.object_instances().get(hold.get('object'))
+        held_type = hold.get('type') or (placed.object if placed is not None else None)
+        wanted = existing.get('type')
+        if wanted and held_type and wanted != held_type:
+            raise Refused(f'{request.name!r} is for {wanted}, the hands hold {hold["object"]} ({held_type})')
+        base = self.robot.base['frame']
+        position, quaternion = self._tcp_poses([hand], base)[hand]
+        grip = hold['grips'][hand]                       # the TCP in the object frame, measured at the close
+        x, y, z, w = quaternion_from_matrix(grip)
+        unturn = (-x, -y, -z, w)                         # the object's turn seen from the TCP
+        back = rotate(unturn, [-grip[row][3] for row in range(3)])   # the object's origin seen from the TCP
+        reach = rotate(quaternion, back)
+        pose = {'xyz': [round(p + r, 5) for p, r in zip(position, reach, strict=True)],
+                'rpy': [round(a, 5) for a in rpy_from_quaternion(quaternion_multiply(quaternion, unturn))]}
+        data = {key: value for key, value in existing.items() if key not in ('xyz', 'rpy')}
+        data['moves'] = 'object'
+        if held_type and not wanted:
+            data['type'] = held_type
+        if data.get('path'):
+            data['path'] = [*data['path'][:-1], pose]   # the way there stays, the end is where the object is now
+        else:
+            data.update(pose)
+        written = self.config.save_target(request.name, data, self.robot.name, note=None if existing else self._note())
+        return f'{hold["object"]} on {hand}: xyz {pose["xyz"]} rpy {pose["rpy"]} in {base}', written
+
+    def _hold(self, tools: list[str]) -> tuple[dict, str]:
+        """The hold an object teach takes and the hand whose grip places the object: the hold of ``tools[0]``, else
+        the only one."""
+        holds = [hold for hold in self.holds if hold.get('hands') and hold.get('grips')]
+        if not holds:
+            raise Refused('nothing is held: grip the object first')
+        if tools:
+            hold = next((h for h in holds if tools[0] in h['hands']), None)
+            if hold is None:
+                raise Refused(f'{tools[0]} holds nothing')
+            return hold, tools[0] if tools[0] in hold['grips'] else next(iter(hold['grips']))
+        if len(holds) > 1:
+            listed = '; '.join(f'{h["object"]} ({", ".join(h["hands"])})' for h in holds)
+            raise Refused(f'several objects are held: {listed}; name the hand')
+        hold = holds[0]
+        return hold, next(h for h in hold['hands'] if h in hold['grips'])
 
     # ---- joints -----------------------------------------------------------------------------------------------
     def _teach_joints(self, request, override: bool):

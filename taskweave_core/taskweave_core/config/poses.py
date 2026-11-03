@@ -104,6 +104,23 @@ def quaternion_multiply(a, b) -> tuple[float, float, float, float]:
             aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz)
 
 
+def quaternion_from_matrix(m) -> tuple[float, float, float, float]:
+    """The quaternion of rotation matrix ``m`` (3x3, or the upper left of a 4x4; nested lists)."""
+    (a, b, c), (d, e, f), (g, h, i) = (row[:3] for row in m[:3])
+    trace = a + e + i
+    if trace > 0:
+        s = 2 * math.sqrt(trace + 1)
+        return ((h - f) / s, (c - g) / s, (d - b) / s, s / 4)
+    if a > e and a > i:
+        s = 2 * math.sqrt(1 + a - e - i)
+        return (s / 4, (b + d) / s, (c + g) / s, (h - f) / s)
+    if e > i:
+        s = 2 * math.sqrt(1 + e - a - i)
+        return ((b + d) / s, s / 4, (f + h) / s, (c - g) / s)
+    s = 2 * math.sqrt(1 + i - a - e)
+    return ((c + g) / s, (f + h) / s, s / 4, (d - b) / s)
+
+
 def rotate(q, v) -> tuple[float, float, float]:
     """Vector ``v`` rotated by quaternion ``q``."""
     x, y, z, _ = quaternion_multiply(quaternion_multiply(q, (*v, 0.0)), (-q[0], -q[1], -q[2], q[3]))

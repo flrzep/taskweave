@@ -300,7 +300,11 @@ Each message is one line and names the file to look at.
   `teach hand NAME` saves them in the robot's base frame as a robot target.
 - `taskweave teach joints NAME [--tool GROUP]` saves the current joint values of the groups the target has, or of every
   group, as a joint target.
-- Carry poses in the base frame (`moves: object`) and contacts are written by hand or in the HMI, not taught.
+- `taskweave teach object NAME [--tool T]` saves where the held object is now (its origin in the robot's base frame,
+  from the holding hand and the grip measured when it closed) as a carry pose; a new one gets the held object's `type`,
+  an existing `path` keeps its way there and gets the new pose as its last one. `--tool` names the hand when several
+  objects are held. Refused when nothing is held or the target is for another type.
+- Contacts (`moves: object` in an object frame) are written by hand or in the HMI, not taught.
 
 The HMI Teach tab edits the same files ([operator.md](operator.md)); every write keeps the comments and is checked
 before it is saved.

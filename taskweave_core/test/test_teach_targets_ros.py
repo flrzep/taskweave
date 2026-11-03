@@ -3,6 +3,7 @@
 The node is called directly (``_teach``) with its odometry, joint states and TF fed by hand, so no other node is needed
 (the pad's button path is in test_teach_ros.py)."""
 
+import json
 import math
 import shutil
 from pathlib import Path
@@ -18,6 +19,7 @@ from geometry_msgs.msg import TransformStamped  # noqa: E402
 from nav_msgs.msg import Odometry  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from sensor_msgs.msg import JointState  # noqa: E402
+from std_msgs.msg import String  # noqa: E402
 
 from taskweave_core.config import ConfigStore  # noqa: E402
 from taskweave_interfaces.srv import TeachPoint  # noqa: E402
@@ -265,9 +267,7 @@ def test_the_old_kinds_are_taken_for_the_new_ones_on_a_targets_cell(node, cell):
     assert load(cell, 'objects/part_box.yaml')['targets']['side']['moves'] == 'hand'
 
 
-def test_a_held_object_is_not_built_and_unknown_kinds_are_refused(node):
-    answer = teach(node, 'carry2', 'object')
-    assert not answer.success and 'cannot be taught yet' in answer.message
+def test_unknown_kinds_are_refused(node):
     answer = teach(node, 'carry2', 'tcp')
     assert not answer.success and 'unknown kind' in answer.message
     assert not teach(node, 'part_box_1/x', 'base', override=False).success    # no pose yet
@@ -333,3 +333,85 @@ def test_the_pad_teaches_a_hand_target_on_a_targets_cell(cell):
         point = load(cell, 'objects/part_box.yaml')['targets']['top_grasp']
         assert point['left_tool']['xyz'] == pytest.approx((-0.7646, 2.3549, 0.9), abs=1e-3)
         assert 'right_tool' not in point and point['moves'] == 'hand'
+
+
+# ---- object (a held object in the base frame) ----------------------------------------------------------------------
+# The left TCP is at (0.2, 0.2, 0.9) in base_link, turned pi about y. Gripped 0.2 m along the object's y and 0.1 m up
+# its z, turned the same way: the object's origin is at (0.2, 0.0, 0.8), level.
+GRIP = [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.2], [0.0, 0.0, -1.0, 0.1], [0.0, 0.0, 0.0, 1.0]]
+RIGHT_GRIP = [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, -0.2], [0.0, 0.0, -1.0, 0.1], [0.0, 0.0, 0.0, 1.0]]
+
+
+def holding(node, *holds) -> None:
+    """The skill server's /taskweave/holding message with ``holds`` ({object, hands, grips, type?})."""
+    node._holding(String(data=json.dumps({'holds': [{'point': f"{h['object']}/rails_top", **h} for h in holds]}
+                                         if holds else {})))
+
+
+def frame_hold(hands=('left', 'right'), **extra) -> dict:
+    grips = {'left': GRIP, 'right': RIGHT_GRIP}
+    return {'object': 'bay_2_stack_2_front', 'type': 'frame_type2', 'hands': list(hands),
+            'grips': {hand: grips[hand] for hand in hands}, **extra}
+
+
+def test_object_of_a_new_name_is_the_held_objects_pose_in_the_base_frame(node, cell):
+    holding(node, frame_hold())
+    answer = teach(node, 'carry_low', 'object')
+    assert answer.success, answer.message
+    assert answer.file.replace('\\', '/').endswith(f'robots/{ROBOT}/targets.yaml')
+    entry = load(cell, f'robots/{ROBOT}/targets.yaml')['carry_low']
+    assert entry['moves'] == 'object' and entry['type'] == 'frame_type2'
+    assert entry['xyz'] == pytest.approx([0.2, 0.0, 0.8], abs=1e-4)
+    assert entry['rpy'] == pytest.approx([0.0, 0.0, 0.0], abs=1e-4)
+    found = ConfigStore(cell).target('carry_low', ROBOT)
+    assert found.kind == 'object' and found.frame == 'base'
+
+
+def test_object_of_an_existing_path_replaces_its_last_waypoint_and_keeps_the_rest(node, cell):
+    holding(node, frame_hold())
+    assert teach(node, 'stand_up', 'object').success
+    entry = load(cell, f'robots/{ROBOT}/targets.yaml')['stand_up']
+    assert entry['path'][0] == {'xyz': [1.3, 0.0, 0.5], 'rpy': [0.0, -0.8727, 0.0]}     # the way there stays
+    assert entry['path'][1]['xyz'] == pytest.approx([0.2, 0.0, 0.8], abs=1e-4)
+    assert entry['type'] == 'frame_type2' and entry['joints'] == {'torso': 0.55}
+    assert '# from carry: out and up' in (cell / 'robots' / ROBOT / 'targets.yaml').read_text()
+
+
+def test_object_with_one_hand_uses_that_hands_grip(node, cell):
+    holding(node, frame_hold(hands=('right',)))
+    assert teach(node, 'carry', 'object').success
+    entry = load(cell, f'robots/{ROBOT}/targets.yaml')['carry']
+    # the right TCP is at (0.2, -0.2, 0.9), gripped at -0.2 along y: the same origin
+    assert entry['path'][-1]['xyz'] == pytest.approx([0.2, 0.0, 0.8], abs=1e-4)
+
+
+def test_object_refuses_with_nothing_held_another_type_or_an_instance_name(node):
+    answer = teach(node, 'carry', 'object')
+    assert not answer.success and 'nothing is held' in answer.message
+    holding(node, {**frame_hold(), 'object': 'part_box_1', 'type': 'part_box'})
+    answer = teach(node, 'carry', 'object')
+    assert not answer.success and 'frame_type2' in answer.message and 'part_box' in answer.message
+    holding(node, frame_hold())
+    answer = teach(node, 'part_box_1/seat', 'object')
+    assert not answer.success and 'contact' in answer.message
+    answer = teach(node, 'home', 'object')
+    assert not answer.success and 'moves joints' in answer.message
+    holding(node)                                        # let go: nothing held again
+    assert 'nothing is held' in teach(node, 'carry', 'object').message
+
+
+def test_object_with_two_holds_needs_the_hand(node, cell):
+    holding(node, frame_hold(hands=('left',)), {**frame_hold(hands=('right',)), 'object': 'bay_1_stack_1_back'})
+    answer = teach(node, 'carry_low', 'object')
+    assert not answer.success and 'left' in answer.message and 'right' in answer.message
+    answer = teach(node, 'carry_low', 'object', tools=['right'])
+    assert answer.success, answer.message
+    assert load(cell, f'robots/{ROBOT}/targets.yaml')['carry_low']['xyz'] == pytest.approx([0.2, 0.0, 0.8], abs=1e-4)
+    assert 'holds nothing' in teach(node, 'carry_low', 'object', tools=['head']).message
+
+
+def test_object_refuses_stale_tf(bare):
+    holding(bare, frame_hold())
+    feed_tf(bare, age_s=30.0)
+    answer = teach(bare, 'carry_low', 'object')
+    assert not answer.success and 'stale' in answer.message

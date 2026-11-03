@@ -36,9 +36,10 @@ import threading
 
 import numpy as np
 
+from taskweave_core import names
 from taskweave_core.node_cache import for_node
 
-TOPIC = '/taskweave/holding'
+TOPIC = names.HOLDING
 
 
 class HoldState:

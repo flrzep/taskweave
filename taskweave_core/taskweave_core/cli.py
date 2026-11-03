@@ -559,16 +559,17 @@ def main(argv=None) -> int:
         sub.add_parser(command)
     teach_parser = sub.add_parser('teach')
     teach_parser.add_argument('kind', choices=['base', 'hand', 'joints', 'object', 'location', 'stance', 'point'],
-                              help='base pose, tool poses (hand), joint values; location, stance and point are the '
-                                   'old names of base, base and hand')
+                              help='base pose, tool poses (hand), joint values, the held object (object: a carry '
+                                   'pose); location, stance and point are the old names of base, base and hand')
     teach_parser.add_argument('name', help='a target: NAME (a cell, robot or joint target) or INSTANCE/NAME (on a '
                                            'placed object)')
     teach_parser.add_argument('--instance', action='store_true',
                               help='base or hand of INSTANCE/NAME: store for this object instance only, not for its '
                                    'object type')
     teach_parser.add_argument('--tool', action='append', dest='tools',
-                              help='hand: store only this tool; joints: only this joint group (repeatable; default: '
-                                   'every tool, or the groups the target has)')
+                              help='hand: store only this tool; joints: only this joint group; object: the hand '
+                                   'whose held object (repeatable; default: every tool, the groups the target has, '
+                                   'the only hold)')
     state_parser = sub.add_parser('state', help='run-time object state').add_subparsers(dest='action', required=True)
     for action, text in (('show', 'what is taken, stack counts, placed objects'), ('clear', 'put every object back')):
         state_parser.add_parser(action, help=text).add_argument('cell_dir', nargs='?', default='.')
