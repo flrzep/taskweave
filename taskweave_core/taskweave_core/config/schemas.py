@@ -276,7 +276,8 @@ ROBOT_PROFILE = {
                                 'torso_m': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.01},
                                 'object_m': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.02},
                                 'branch_rad': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.3},
-                                # a ride (the torso moving with the held object) is collision checked this often (m)
+                                # a ride (the torso moving with the held object) is collision checked this often (m);
+                                # default: the planner's direct_step_rad (as the executed ride), else this
                                 'ride_sample_m': {'type': 'number', 'exclusiveMinimum': 0, 'default': 0.02},
                                 # halvings of the change-step refine (toward the height before the change);
                                 # default: ik.torso.refine

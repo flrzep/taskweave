@@ -124,7 +124,8 @@ def predict(skill, hold: dict, first: dict, ahead: list, base_now: np.ndarray | 
         else:
             window.end = f'{sid}: ' + (f'a move of {item["carrying"]}, not of {hold["object"]}'
                                        if item['part'] == 'carry' and item['carrying'] != hold['object'] else
-                                       f'a {item["part"]} move of {len(item["calls"])} calls')
+                                       f'a {item["part"]} move in {len(item["calls"])} parts' if len(item['calls'])
+                                       > 1 else f'a {item["part"]} move it cannot predict')
             break
         (window.later if window.cut else window.steps).append(step)
         if item['part'] == 'posture' and not window.cut:

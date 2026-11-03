@@ -328,7 +328,7 @@ class MoveGripper(_PointMotion):
 
         from .ik import TorsoChoice
 
-        problem, end = self._walk_lines(legs, current, height)
+        problem, end = self._walk_lines(legs, current, height, keep_arms=True)     # the ride as planned
         if problem is None and end is not None and ahead is not None:
             arms = [re.compile(self.ik.joint_pattern.format(tool=t)) for t in ahead]
             problem = self._ahead_check(ahead, end)(height, {n: v for n, v in end.items()
@@ -368,13 +368,14 @@ class MoveGripper(_PointMotion):
         at.verify = verify
         return at
 
-    def _state_at(self, hands, current: dict, height: float, poses: dict | None = None, global_search: bool = True):
-        """(joints, problem) once the torso is at ``height``: the arms keep their joints. A held object goes with the
-        torso: when the URDF chains carry the held hands with the column (the hands' FK at ``height`` with the arms
-        unchanged is the column's motion of their FK now, within RIDE_EXACT), the unchanged arms are the answer (no
-        IK: the column carries the arms, as the torso move executes); else their arms are solved again there
-        (joints._widen). ``poses``: the held hands' TCPs at ``current`` (default: where they are now; torso_plan
-        passes predicted ones). ``global_search`` False: local IK only (repeatable; torso_plan's rides)."""
+    def _state_at(self, hands, current: dict, height: float, poses: dict | None = None, global_search: bool = True,
+                  keep_arms: bool = False):
+        """(joints, problem) once the torso is at ``height``: the arms keep their joints, except hands that hold an
+        object: it goes with the torso and their arms are solved again there (joints._widen). ``keep_arms`` (the
+        torso look-ahead, whose planned rides execute so): while the URDF chains carry the held hands with the column
+        (the hands' FK at ``height`` with the arms unchanged is the column's motion of their FK now, within
+        RIDE_EXACT) the unchanged arms are the answer, no IK. ``poses``: the held hands' TCPs at ``current`` (default:
+        where they are now; torso_plan passes predicted ones). ``global_search`` False: local IK only (repeatable)."""
         from .ik import IkError
         from .points import target_of
 
@@ -386,8 +387,8 @@ class MoveGripper(_PointMotion):
         column = self.ik.joint_motion(joint, current, height)
         if column is None:
             return state, None
-        now, then = self.ik.tcps_at(held, current), self.ik.tcps_at(held, state)
-        if len(now) == len(then) == len(held) and all(
+        now, then = (self.ik.tcps_at(held, current), self.ik.tcps_at(held, state)) if keep_arms else ({}, {})
+        if keep_arms and len(now) == len(then) == len(held) and all(
                 np.allclose(then[h], column @ now[h], atol=RIDE_EXACT) for h in held):
             return state, None
         poses = self.hold.tcp_poses(held) if poses is None else poses
@@ -398,16 +399,17 @@ class MoveGripper(_PointMotion):
             return None, f'{" and ".join(held)} cannot follow the torso to {height:g}: {str(error).split(":")[0]}'
         return {**state, **arms}, None
 
-    def _walk_lines(self, legs: list, current: dict, height: float):
+    def _walk_lines(self, legs: list, current: dict, height: float, keep_arms: bool = False):
         """Walk the straight lines to each of ``legs`` ([{tool: 4x4 TCP goal}], one after the other) on the URDF chains
         with the torso at ``height``, as the moves would: (None or why the first failing leg fails, the joints at the
-        end). Every step is collision checked with the torso at ``height``."""
+        end). Every step is collision checked with the torso at ``height``. ``keep_arms``: the ride to ``height`` as a
+        planned one executes (``_state_at``)."""
         import re
 
         from .cartesian import PathError, linear_path, matching_flip
 
         joint = self.ik.torso['joint']
-        state, problem = self._state_at(list(legs[0]), current, height)
+        state, problem = self._state_at(list(legs[0]), current, height, keep_arms=keep_arms)
         if state is None:
             return problem, None
         patterns = [re.compile(self.ik.joint_pattern.format(tool=t)) for t in legs[0]]

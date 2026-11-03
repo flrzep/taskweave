@@ -279,3 +279,27 @@ def test_a_planned_ride_keeps_the_arms_and_an_unplanned_one_solves_them_as_befor
     skill.keep_arms = False
     goal, _ = MoveObject._widen(skill, ctx, {'lift': 0.3}, 'ride')
     assert goal == {'lift': 0.3, 'left_j1': 0.9} and len(solved) == 1
+
+
+def test_a_refusal_is_planned_again_once_the_state_changed(store):
+    """Re-review N3: the operator fixed something (here: the frame moved): the retry plans again, not repeats."""
+    out = lambda sid, h: 'out of reach: left target 1.40 m from its shoulder' if sid == 'c' else None   # noqa: E731
+    rig = Rig(store, bound=out)
+    rig.look(0)
+    rig.fake.out = lambda sid, h: None
+    rig.registry.hold['object_in_base'] = moved_object(rig.registry.hold['object_in_base'], [0.05, 0, 0])
+    refused, look, _ = rig.look(0)
+    assert refused is None and look['report']['source'] == 'planned' and look['height'] is not None
+
+
+def test_a_blocked_planned_ride_is_tried_again_with_the_arms_re_solved():
+    """Re-review N2: the planned ride keeps the arms; blocked, once more as without a plan (F16's re-solve)."""
+    from taskweave_skills.object_motion import MoveObject
+    rides = []
+    skill = SimpleNamespace(keep_arms=False, node=None)
+    skill._set_torso = lambda ctx, chosen, label, planner: rides.append(skill.keep_arms) or (
+        SkillResult.failed('blocked') if skill.keep_arms else None)
+    ctx = SimpleNamespace(should_stop=False)
+    assert MoveObject._ride(skill, ctx, None, 'leg', 'auto', True) is None and rides == [True, False]
+    rides.clear()
+    assert MoveObject._ride(skill, ctx, None, 'leg', 'auto', False) is None and rides == [False]

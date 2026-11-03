@@ -48,8 +48,9 @@ cycle with the same steps makes no calls for them.
 ``SkillChecks`` gives the real checks from a carry skill: the reach bound (``IkClient._unreachable``), a step of
 straight lines walked as the move will (``_walk_lines`` from the state, every step collision checked, then the line
 after an offset), any other step as solve_with_torso checks one height (``IkClient.check_height``: IK of every target,
-collisions), a ride with ``_state_at`` (held hands re-solved at sampled heights, each state collision checked); a
-step's predicted base pose goes into the checks (``world``, IkClient.at_base).
+collisions), a ride with ``_state_at(keep_arms=True)`` (the arms keep their joints while the column carries the
+held hands, else they are re-solved; each sampled state collision checked); a step's predicted base pose goes into the
+checks (``world``, IkClient.at_base).
 
 ``refine`` (F17's refine at a change step, run when that step runs: object_motion) tries heights between a change's
 height and its grid neighbour toward the height before the change. F17's band memory seeds the rescue (``SkillChecks``:
@@ -681,8 +682,9 @@ class SkillChecks:
         grid = sorted({round(float(v), 6) for v in self.ik.torso.get('candidates', ())})
         gaps = [round(b - a, 6) for a, b in zip(grid, grid[1:], strict=False)]
         half = max(gaps, key=lambda g: (gaps.count(g), -g)) / 2 if gaps else math.inf    # the grid's usual step
-        dense = (self.ik.torso.get('lookahead') or {}).get(
-            'ride_sample_m', default(ROBOT_PROFILE, 'ik', 'torso', 'lookahead', 'ride_sample_m'))
+        planner = getattr(skill, 'planner', None)        # the executed ride is checked at the planner's step
+        dense = (self.ik.torso.get('lookahead') or {}).get('ride_sample_m') or getattr(
+            planner, 'direct_step', None) or default(ROBOT_PROFILE, 'ik', 'torso', 'lookahead', 'ride_sample_m')
         self.ride_sample = ride_sample_m or min(float(self.ik.torso.get('line_sample_m', LINE_SAMPLE_M)), half,
                                                 float(dense))
 
@@ -739,12 +741,7 @@ class SkillChecks:
         if step.lines:     # a straight line gets to its goal by itself, as the move will (a rescue walks the same)
             return self._walk(step, height, state)
         band = self.band(step) if rescue else None
-        samples, end = Samples(targets), {}
-        if step.lines:
-            def verify(h):
-                problem, end['state'] = self.skill._walk_lines(step.lines, state, h)
-                return problem
-            samples.verify = verify
+        samples = Samples(targets)
         if step.ahead:
             samples.ahead = self.skill._ahead_check(step.ahead, state)
         try:
@@ -754,8 +751,7 @@ class SkillChecks:
                                               hint=band[1] if band else None)
         except TorsoError as error:      # local no-IK depends on the seeds (the state): only the reach bound lasts
             return Check(False, reason=str(error), lasting=OUT_OF_REACH in str(error))
-        after = end.get('state') or {**state, **choice.solution}
-        return Check(True, after, choice.cost)
+        return Check(True, {**state, **choice.solution}, choice.cost)
 
     def _walk(self, step: WindowStep, height: float, state: dict) -> Check:
         """A step of straight lines at ``height``: walked from ``state`` on the URDF chains, every step collision
@@ -770,7 +766,7 @@ class SkillChecks:
         if beyond:
             return Check(False, reason=beyond, lasting=True)
         with self._at(step):
-            problem, end = self.skill._walk_lines(step.lines, state, height)
+            problem, end = self.skill._walk_lines(step.lines, state, height, keep_arms=True)
             end = state if problem is None and end is None else end
             if problem is None and step.ahead:
                 arms = [re.compile(self.ik.joint_pattern.format(tool=t)) for t in step.ahead]
@@ -788,8 +784,9 @@ class SkillChecks:
         return Check(True, end, weight * bend if bend else 0.0)
 
     def ride(self, step: WindowStep, state: dict, height: float, rescue: bool = False) -> Check:
-        """The column moves in samples ``ride_sample`` apart; at each the held hands follow (``_state_at``, local IK
-        unless ``rescue``, from the hands where the last sample left them) and the state is collision checked."""
+        """The column moves in samples ``ride_sample`` apart; at each the held hands go with it (``_state_at``
+        keep_arms: the arms unchanged while the column carries the hands, else re-solved by local IK unless ``rescue``)
+        and the state is collision checked."""
         with self._at(step):
             return self._ride(step, state, height, rescue)
 
@@ -807,7 +804,7 @@ class SkillChecks:
             poses = self.ik.tcps_at(hands, state)
             if len(poses) < len(hands):
                 return Check(False, reason=f'no URDF chain for {sorted(set(hands) - set(poses))}')
-            moved, problem = self.skill._state_at(hands, state, h, poses=poses, global_search=rescue)
+            moved, problem = self.skill._state_at(hands, state, h, poses=poses, global_search=rescue, keep_arms=True)
             if moved is None:
                 return Check(False, reason=problem)
             arms = {n: v for n, v in moved.items() if any(p.fullmatch(n) for p in patterns)}

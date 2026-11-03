@@ -378,7 +378,8 @@ def test_skill_checks_solve_one_height_walk_the_lines_and_end_where_the_lines_en
     ik = Ik(reach=lambda tool, target, h: 0.0 if h <= 0.35 else None)
     walked = []
 
-    def walk(legs, current, height):
+    def walk(legs, current, height, keep_arms=False):
+        assert keep_arms                                     # the plan walks its rides as they execute
         walked.append((len(legs), current['lift'], height))
         return ('leg 1: collision' if height < 0.1 else None), {**current, 'lift': height, 'left_j1': 0.7}
     skill = SimpleNamespace(ik=ik, _walk_lines=walk, _ahead_check=None, _state_at=None)
@@ -410,7 +411,8 @@ def test_skill_checks_take_the_targets_of_a_step_with_lines_only():
         solution={'left_j1': 0.1}, cost=0.0)
     goal = np.eye(4)
     goal[:3, 3] = [0.6, 0.2, 0.3]
-    skill = SimpleNamespace(ik=ik, _walk_lines=lambda legs, current, h: (None, None), _ahead_check=None)
+    skill = SimpleNamespace(ik=ik, _walk_lines=lambda legs, current, h, keep_arms=False: (None, None),
+                            _ahead_check=None)
     assert SkillChecks._targets(WindowStep('set_down', lines=[{'left': goal}]))[0]['left']['tcp'] == [0.6, 0.2, 0.3]
     assert SkillChecks(skill).step(WindowStep('set_down', lines=[{'left': goal}]), 0.3, t.now(0.3)).ok and not seen
     assert SkillChecks(skill).bound(WindowStep('set_down', lines=[{'left': goal}]), 0.3) is None
@@ -423,7 +425,8 @@ def test_skill_checks_ride_in_samples_with_the_held_hands_following_on_local_ik(
     ik.tcps_at = lambda tools, state: {tool: np.eye(4) * state['lift'] for tool in tools}
     calls = []
 
-    def state_at(hands, current, height, poses=None, global_search=True):
+    def state_at(hands, current, height, poses=None, global_search=True, keep_arms=False):
+        assert keep_arms
         calls.append((round(current['lift'], 4), round(height, 4), round(float(poses['left'][0, 0]), 4),
                       global_search))
         return {**current, 'lift': height, 'left_j1': height}, None
@@ -477,12 +480,29 @@ def test_state_at_keeps_the_arms_when_the_column_carries_the_held_hands():
                          tcps_at=lambda tools, state: {t: lifted(state['lift'] + 0.2) for t in tools})
     skill = SimpleNamespace(ik=ik, hold=SimpleNamespace(hand_holds={'left': 'box'}),
                             p=SimpleNamespace(position_tolerance=1e-3))
-    state, problem = MoveGripper._state_at(skill, ['left'], {'lift': 0.7, 'left_j1': 0.4}, 0.3, poses={})
+    state, problem = MoveGripper._state_at(skill, ['left'], {'lift': 0.7, 'left_j1': 0.4}, 0.3, poses={},
+                                           keep_arms=True)
     assert problem is None and state == {'lift': 0.3, 'left_j1': 0.4} and solved == []
-    ik.tcps_at = lambda tools, state: {t: lifted(0.2) for t in tools}       # the hand does not ride: IK
     skill.hold.tcp_poses = lambda hands: {h: lifted(0.2) for h in hands}
-    state, _ = MoveGripper._state_at(skill, ['left'], {'lift': 0.7, 'left_j1': 0.4}, 0.3)
-    assert state['left_j1'] == 1.0 and len(solved) == 1
+    state, _ = MoveGripper._state_at(skill, ['left'], {'lift': 0.7, 'left_j1': 0.4}, 0.3)    # the per-step path:
+    assert state['left_j1'] == 1.0 and len(solved) == 1                                     # IK, as on main
+    ik.tcps_at = lambda tools, state: {t: lifted(0.2) for t in tools}       # the hand does not ride: IK
+    state, _ = MoveGripper._state_at(skill, ['left'], {'lift': 0.7, 'left_j1': 0.4}, 0.3, keep_arms=True)
+    assert state['left_j1'] == 1.0 and len(solved) == 2
+
+
+def test_only_the_planned_paths_keep_the_arms_the_per_step_path_is_mains():
+    """Re-review N1: _walk_lines defaults to today's ride (IK), the per-step line samples verify with it, and only
+    the planned check (_walked) keeps the arms."""
+    pytest.importorskip('sensor_msgs')
+    from taskweave_skills.gripper_motion import MoveGripper
+    seen = []
+    skill = SimpleNamespace(_state_at=lambda hands, current, h, keep_arms=False: seen.append(keep_arms) or (None, 'x'),
+                            ik=SimpleNamespace(torso={'joint': 'lift'}))
+    MoveGripper._walk_lines(skill, [{'left': np.eye(4)}], {'lift': 0.5}, 0.3)
+    skill._walk_lines = lambda legs, current, h, keep_arms=False: seen.append(('walk', keep_arms)) or ('blocked', None)
+    MoveGripper._walked(skill, [{'left': np.eye(4)}], {'lift': 0.5}, 0.3, 'x')
+    assert seen == [False, ('walk', True)]
 
 
 def test_plan_rejects_nothing_on_an_empty_window():

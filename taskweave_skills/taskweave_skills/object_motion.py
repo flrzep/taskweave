@@ -223,16 +223,18 @@ class MoveObject(_HeldMotion):
         self._look = look = {'id': sid, 'key': key, 'call': args, 'tune': tune, 'replanned': False, 'height': None}
         kept = (getattr(self, 'kept', None) or {}).get(key)
         if kept is not None and kept.covers(sid, [str(a.get('id', '')) for a in context.get('ahead') or []]):
-            if kept.plan.certain:    # proven impossible (the reach bound): a retry gets the same refusal
-                look['report'] = {**kept.plan.report(), 'source': 'kept', 'from': kept.first}
-                refused = SkillResult.rejected(kept.plan.message)
-                refused.data['torso_plan'] = look['report']
-                return refused
+            why = kept.mismatch(sid, current, hold, spec['joint'], self.ik.joint_pattern, tune)
+            if kept.plan.certain:    # proven impossible: the same refusal while nothing changed, else plan again
+                if why is None:
+                    look['report'] = {**kept.plan.report(), 'source': 'kept', 'from': kept.first}
+                    refused = SkillResult.rejected(kept.plan.message)
+                    refused.data['torso_plan'] = look['report']
+                    return refused
+                return self._plan_window(ctx, 'replanned' if sid != kept.first else 'planned', why)
             height = kept.plan.heights.get(sid)
             if height is None:       # the plan ends before this step (cut short, stopped, capped): as without it
                 look['report'] = {'source': 'per step', 'why': f'the plan made at {kept.first} does not reach {sid}'}
                 return None
-            why = kept.mismatch(sid, current, hold, spec['joint'], self.ik.joint_pattern, tune)
             if why is None:
                 look['report'] = {'source': 'kept', 'from': kept.first, 'height': round(height, 4)}
                 look['height'] = self._refined(ctx, kept, sid, current, height)
@@ -368,12 +370,19 @@ class MoveObject(_HeldMotion):
 
     def _ride(self, ctx, chosen, label: str, planner: str, planned: bool):
         """_set_torso; a planned height rides as its plan checked it: the arms keep their joints while the column
-        carries the held hands (``keep_arms``, joints._widen), not re-solved by IK."""
+        carries the held hands (``keep_arms``, joints._widen), not re-solved by IK. If that ride is blocked (the real
+        arms are not the planned ones), once more as without a plan (the arms re-solved, F16)."""
         self.keep_arms = planned
         try:
-            return self._set_torso(ctx, chosen, label, planner)
+            result = self._set_torso(ctx, chosen, label, planner)
         finally:
             self.keep_arms = False
+        if result is not None and planned and not ctx.should_stop:
+            if getattr(self, 'node', None) is not None:
+                self.node.get_logger().warning(f'{label}: the planned ride with the arms kept failed '
+                                               f'({result.message}): again with the arms re-solved')
+            result = self._set_torso(ctx, chosen, label, planner)
+        return result
 
     def _planned_choice(self, ctx, search):
         """(choice, planned) of a held leg: at the planned height when there is one, checked here (``search(h)``);

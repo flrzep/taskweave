@@ -333,7 +333,7 @@ then every other height whose local solve found no IK, nearest first; the first 
 (the first height that solves) and linear moves keep the lift.
 
 `ik.torso.lookahead: {enabled, budget_s, max_checks, torso_m, object_m, branch_rad, ride_sample_m, refine}` (all
-optional; defaults true, 10, 150, 0.01, 0.02, 0.3, 0.02, `ik.torso.refine`) is the torso look-ahead over a hold. A held move (`move.carry`) with `torso: auto` that the task
+optional; defaults true, 10, 150, 0.01, 0.02, 0.3, the planner's `direct_step_rad` (else 0.02), `ik.torso.refine`) is the torso look-ahead over a hold. A held move (`move.carry`) with `torso: auto` that the task
 handler runs (it sends the steps that follow, `RunSkill.context_json`) plans the heights of its whole hold window before
 it moves: this step and the following ones up to the grip that opens the hold (or a step it cannot predict: another
 skill, a placeholder with no value yet, a move of free hands). It keeps the current height while that works, changes
@@ -349,8 +349,9 @@ after it plans again from the real arms; a later step out of reach at every heig
 change step refines its height when it runs (`refine` halvings toward the height before, from the real base and arms,
 one finest step of margin from a failing height, within `budget_s`). A torso change while holding (a ride) is checked
 every `ride_sample_m` with the arms keeping their joints (the column carries the held hands; checked on the URDF
-chains, else IK as before) and a planned ride is executed that way. A refusal is repeated when the step runs again
-(retry, replan); a hold proven impossible at a later step, after things moved, fails it. `data.torso_plan` reports
+chains, else IK) and a planned ride is executed that way (blocked: once more with the arms re-solved, as without a
+plan); the per-step search keeps re-solving the arms. A refusal is repeated when the step runs again
+(retry, replan) while the state is the one refused, else the window is planned again; a hold proven impossible at a later step, after things moved, fails it. `data.torso_plan` reports
 it (`source` planned / kept / replanned / per step, `heights`, `changes`, `outcome`, `checks`, `planned_s`; on a
 refusal `message`, `table`, `certain`); a planned leg has `planned: true` in `data.torso`. HMI, joy and older task
 handlers send no context: the per-step search as before.
