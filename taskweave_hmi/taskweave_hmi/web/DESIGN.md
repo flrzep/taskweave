@@ -277,8 +277,12 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   and in from the left. A black dot points at the start step; a dashed brand loop runs up the left gutter back to
   the first step when the mission repeats (its rule along it), else a final ring follows the last step. A replan is
   a dashed red arrow to the step it replans from, labelled; other rule exceptions are badges on the node's top edge.
-  The operator can drag a node or a phase (by its header or stack) with a mouse or pen, kept per mission
-  (`tw-plan-layout`); ↺ top right puts the drawn layout back. A click on a step opens its details in a 320px pop-up
+  A ring's opening is wide enough that its first and last node stay apart; where the box is too narrow for a ring
+  (a phone, mostly from 8 steps) the phase is a snake. The operator can drag a node or a phase (by its header or
+  stack) with a mouse or pen, kept per mission (`tw-plan-layout`, offsets of steps or phases no longer in the plan
+  dropped) and kept inside the box with its outline; ↺ bottom right puts the drawn layout back. The layout is
+  optional, so it has no keyboard path; the nodes and headers are buttons in run order, each header before its
+  steps. The resources a step locks are in its pop-up and its tooltip, a phase's in its header's tooltip. A click on a step opens its details in a 320px pop-up
   beside it (`.pg-pop`, right if it fits, else left, else under it; Close, Escape, a click elsewhere or the step
   again close it); at 600px and below a bottom sheet (`.pg-sheet`). It reads `--g-*` tokens mapped onto the global
   ones.

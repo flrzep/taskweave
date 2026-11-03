@@ -790,7 +790,9 @@ li.empty { list-style: none; padding: 6px 2px; }
 .kind-wait { --k: var(--kind-wait); } .kind-other { --k: var(--kind-other); }
 .pg { display: block; }
 .pg.with-sheet { padding-bottom: 60vh; }  /* the sheet covers the bottom of the page: the plan scrolls clear of it */
-.pg-graph { position: relative; flex: none; }
+.pg-graph { position: relative; flex: none; user-select: none; }
+/* a pen drags the nodes and phases (a finger scrolls: only where a fine pointer hovers) */
+@media (hover: hover) and (pointer: fine) { .pg-chip, .pg-stack, .pg-band { touch-action: none; } }
 .pg-outline { fill: color-mix(in srgb, var(--surface-field) 55%, transparent); stroke: var(--border); stroke-width: 1.25; }
 .pg-outline.running, .pg-outline.paused { stroke: var(--run-fill); stroke-width: 2; }
 .pg-outline.failed { stroke: color-mix(in srgb, var(--g-bad) 60%, transparent); }
@@ -798,7 +800,8 @@ li.empty { list-style: none; padding: 6px 2px; }
   stroke-linejoin: round; }
 .pg-wire { fill: none; stroke: var(--text-muted); stroke-width: 1.75; }
 .pg-wire.todo { stroke: var(--border-strong); stroke-dasharray: 1 5; stroke-linecap: round; stroke-width: 2; }
-.pg-wire.now { stroke: var(--run-fill); stroke-width: 2.5; stroke-dasharray: 7 5; animation: wire-flow .7s linear infinite; }
+.pg-wire.now { stroke: var(--run-fill); stroke-width: 2.5; stroke-dasharray: 7 5;
+  animation: wire-flow .7s linear infinite; }  /* period = WIRE_FLOW_MS in graph.js */
 .pg-wire.fail { stroke: var(--g-fail); stroke-dasharray: 5 4; }
 .pg-wire.loop { stroke: var(--brand-text); stroke-dasharray: 6 5; stroke-width: 1.5; }
 .pg-head path { fill: var(--text-muted); } .pg-head.todo path { fill: var(--border-strong); }
@@ -827,18 +830,15 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-stack:hover { border-width: 2px; }
 .pg-stack:focus-visible, .pg-tidy:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .pg-chip.dragging, .pg-stack.dragging, .pg-band.dragging { cursor: grabbing; z-index: 2; }
-.pg-tidy { position: absolute; top: 0; right: 0; width: 32px; padding: 0; font-size: 16px; }
+.pg-tidy { position: absolute; bottom: 4px; right: 0; width: 32px; padding: 0; font-size: 16px; }
 .pg-lines { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
 
 /* chips: pending faded, succeeded tinted with a green dot, running solid with a brand ring (breathing), failed red */
-.pg-chip { position: absolute; width: 28px; height: 28px; padding: 0; display: grid; place-items: center; cursor: pointer;
-  border-radius: var(--r-s); border: 1.5px solid var(--k); background: color-mix(in srgb, var(--k) 8%, var(--g-card));
+.pg-chip { position: absolute; width: 44px; height: 44px; padding: 0; display: grid; place-items: center; cursor: pointer;
+  border-radius: 14px; border: 1.5px solid var(--k); background: color-mix(in srgb, var(--k) 8%, var(--g-card));
   color: var(--k); transition: background-color .3s, border-color .3s; }
-.pg-chip .icon { width: 16px; height: 16px; pointer-events: none; }
-/* the graph's nodes: 44 px rounded tiles, filled pastel with no outline (done stronger, pending lighter); running,
-   paused, failed and warn keep theirs */
-.pg-graph .pg-chip { width: 44px; height: 44px; border-radius: 14px; }
-.pg-graph .pg-chip .icon { width: 22px; height: 22px; }
+.pg-chip .icon { width: 22px; height: 22px; pointer-events: none; }
+/* filled pastel, no outline (done stronger, pending lighter); running, paused, failed and warn keep theirs */
 .pg-graph .pg-chip:not(.state-running, .state-paused, .state-failed, .state-rejected, .state-warn) {
   border-color: transparent; background: color-mix(in srgb, var(--k) 22%, var(--g-card)); }
 .pg-graph .pg-chip.state-pending { background: color-mix(in srgb, var(--k) 11%, var(--g-card)); }
@@ -888,7 +888,7 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-band-meta { flex: none; font: 600 var(--fs-xs) var(--sans); color: var(--text-muted); white-space: nowrap; }
 
 /* the side card: the running or selected step */
-.pg-card { flex: 0 1 300px; min-width: 0; margin-top: 24px; display: grid; gap: var(--sp-3); padding: var(--sp-4);
+.pg-card { min-width: 0; display: grid; gap: var(--sp-3); padding: var(--sp-4);
   border: 1px solid var(--border); border-radius: var(--r-m); background: var(--surface-card); }
 .pg-card.marked { border: 2px solid var(--run); padding: calc(var(--sp-4) - 1px); }
 .pg-card-head, .pg-sheet-row { display: flex; gap: var(--sp-3); align-items: center; min-width: 0; }
@@ -908,8 +908,7 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-card.state-succeeded .pg-eyebrow { color: var(--done); }
 .pg-card.state-paused .pg-eyebrow, .pg-card.state-timeout .pg-eyebrow, .pg-card.state-canceled .pg-eyebrow { color: var(--warn); }
 .pg-card.state-pending:not(.marked) .pg-eyebrow { color: var(--text-muted); }
-/* too narrow for graph and card side by side (601 to about 670px): the card goes under the graph, full width */
-/* the step pop-up (laptop): beside the picked chip, over the graph */
+/* the step pop-up (laptop): beside the picked node, over the graph */
 .pg-pop { position: absolute; z-index: 3; width: 320px; max-width: calc(100% - 8px); margin: 0; box-shadow: var(--shadow-2); }
 .pg-pop-foot { justify-content: flex-end; }
 

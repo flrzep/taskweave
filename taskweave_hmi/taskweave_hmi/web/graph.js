@@ -23,8 +23,9 @@ const ICON_COLOURS = { navigate: 'drive', straight: 'drive', hand: 'arm', carry:
 const N = { node: 44, stack: 52, pitchX: 104, pitchY: 92, head: 30, pad: 16, gap: 30, left: 56, right: 12, top: 16,
   bottom: 56, wobble: 12, wave: 12 };
 const N_PHONE = { ...N, pitchX: 78, pitchY: 88, left: 36, gap: 22, wobble: 7, wave: 8 };
-// a phase of 4 to 16 steps is a ring: its steps this far apart (of the slot pitch), the opening at its left (rad)
-const RING = { min: 4, max: 16, spacing: 0.86, phoneSpacing: 1.12, gap: 0.7 };
+// a phase of 4 to 16 steps is a ring: its steps this far apart (of the slot pitch), the least opening at its left
+// (rad), the room between the first and the last node across it (px, on top of a node)
+const RING = { min: 4, max: 16, spacing: 0.86, phoneSpacing: 1.12, gap: 0.7, ends: 20 };
 const LAYOUT_KEY = 'tw-plan-layout';  // localStorage: {mission: {node or phase key: [dx, dy]}}
 const layouts = {};
 const drag = { active: false };  // a drag is on: the status updates do not redraw under it
@@ -32,6 +33,7 @@ const POP_W = 320;     // the step pop-up's width (style.css .pg-pop), the gap t
 const POP_GAP = 12;
 const POP_MIN_H = 260;
 const BREATHE_MS = 2800;  // period of node-breathe for the running step (style.css)
+const WIRE_FLOW_MS = 700;  // period of wire-flow for the arrow into the running step (style.css)
 const PHONE = window.matchMedia('(max-width: 600px)');
 const WARN_STATES = ['timeout', 'canceled', 'skipped'];  // amber chips; failed and rejected are red
 const BANDS_KEY = 'tw-plan-bands';  // localStorage: {mission: {band key: open}}
@@ -381,12 +383,13 @@ const lanesOf = (plan) => [...new Set([...LANES, ...plan.steps.flatMap((s) => s.
 // the operator's drags, per mission: {node or group key: [dx, dy]} on top of the drawn layout (a group's key moves
 // all of its nodes); kept here too, so private mode keeps them until the page reloads
 function storedLayout(mission) {
-  if (!(mission in layouts)) {
+  if (!Object.hasOwn(layouts, mission)) {
     try { layouts[mission] = (JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') || {})[mission] || {}; } catch (_) { layouts[mission] = {}; }
   }
   return layouts[mission];
 }
-function storeLayout(mission, offsets) {
+function storeLayout(mission, offsets, valid) {  // valid: the plan's step and phase keys (old ones are dropped)
+  if (valid) offsets = Object.fromEntries(Object.entries(offsets).filter(([key]) => valid.has(key)));
   layouts[mission] = offsets;
   try {
     const all = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') || {};
@@ -406,6 +409,7 @@ function stackButton(band, info, toggle) {
   const total = band.steps.length;
   const node = el('button', { type: 'button', class: `pg-stack ${info.word}`, 'data-band': band.key,
     'aria-expanded': 'false', title: bandTitle(band, info),
+    'aria-label': `${band.name}: ${info.done} of ${total} done, ${info.word}`,
     style: `--done-share: ${Math.round((info.done / total) * 100)}%` },
   el('span', { class: 'pg-stack-count', text: `${info.done}/${total}` }));
   node.addEventListener('click', toggle);
@@ -455,7 +459,7 @@ function rounded(points, radius) {
 function nodeGraph(bands, ctx, end) {
   const { plan, states, r } = ctx;
   const K = ctx.phone ? N_PHONE : N;
-  const width = Math.max(ctx.width || 0, 300);
+  const width = ctx.width || 300;
   const offsets = storedLayout(ctx.missionName);
   const nodes = new Map();  // key -> {key, x, y, w, h, el, label, moves: [offset keys]}
   const stepKey = [];       // per step: the node that shows it (its own, or its closed phase's)
@@ -469,28 +473,32 @@ function nodeGraph(bands, ctx, end) {
   const addStep = (i, moves) => {
     const step = plan.steps[i];
     const node = chipButton(step, i, ctx);
-    const label = el('span', { class: `pg-label${isLive(states[i]) ? ' now' : ''}` }, el('b', { text: String(i + 1) }),
-      ` ${mainArg(step) || stepTitle(step)}`);
+    const label = el('span', { class: `pg-label${isLive(states[i]) ? ' now' : ''}`, 'aria-hidden': 'true' },
+      el('b', { text: String(i + 1) }), ` ${mainArg(step) || stepTitle(step)}`);
     graph.append(node, label);
     stepKey[i] = step.id;
-    nodes.set(step.id, { key: step.id, w: K.node, h: K.node, el: node, label, moves: [...moves, step.id] });
+    nodes.set(step.id, { key: step.id, w: K.node, h: K.node, el: node, label, moves: [...moves, step.id], outlined: true });
     return step.id;
   };
   const addStack = (band, moves) => {
     const key = `g:${band.key}`;
     const node = stackButton(band, ctx.info.get(band), ctx.toggle(band));
-    const label = el('span', { class: 'pg-label' }, band.name);
+    const label = el('span', { class: 'pg-label', 'aria-hidden': 'true' }, band.name);
     graph.append(node, label);
     band.steps.forEach((i) => { stepKey[i] = key; });
-    nodes.set(key, { key, w: K.stack, h: K.stack, el: node, label, moves: [...new Set([...moves, key])] });
+    nodes.set(key, { key, w: K.stack, h: K.stack, el: node, label, moves: [...new Set([...moves, key])],
+      outlined: moves.length > 1 });  // a closed include inside an open phase
     return key;
   };
-  const addHead = (band, keys, sub, moves) => {
+  const addHead = (band, sub) => {  // before its steps: Tab reaches the control that closes them first
     const head = bandHeader(band, ctx.info.get(band), true, ctx.toggle(band));
     if (sub) head.classList.add('pg-sub');
     graph.append(head);
-    outlines.push({ band, keys, head, sub, moves });
+    return head;
   };
+  const valid = new Set(plan.steps.map((s) => s.id));  // the keys an offset may have
+  const keysOf = (band) => { valid.add(`g:${band.key}`); band.items.forEach((it) => it.sub && keysOf(it.sub)); };
+  bands.forEach(keysOf);
 
   // 1. blocks: a closed phase is one slot, an open one a snake of its steps (an open nested include's steps in it, a
   // closed one a slot)
@@ -499,26 +507,44 @@ function nodeGraph(bands, ctx, end) {
     const group = `g:${band.key}`;
     if (!ctx.isOpen(band)) return { keys: [addStack(band, [group])], cols: 1, rows: 1, head: 0, w: K.pitchX, h: K.pitchY };
     const keys = [];
+    const head = addHead(band, false);
     band.items.forEach((it) => {
       if (!it.sub) { keys.push(addStep(it.step, [group])); return; }
       const moves = [group, `g:${it.sub.key}`];
       if (!ctx.isOpen(it.sub)) { keys.push(addStack(it.sub, moves)); return; }
+      const subHead = addHead(it.sub, true);
       const own = it.sub.items.map((s) => addStep(s.step, moves));
       keys.push(...own);
-      addHead(it.sub, own, true, moves);
+      outlines.push({ band: it.sub, keys: own, head: subHead, sub: true, moves });
     });
-    addHead(band, keys, false, [group]);
-    if (keys.length >= RING.min && keys.length <= RING.max) {  // a loop of its steps round an ellipse
-      const R = (K.pitchX * (ctx.phone ? RING.phoneSpacing : RING.spacing) * (keys.length - 1)) / (2 * Math.PI - RING.gap);  // a circle's radius for them
-      const rx = Math.min(R * 1.25, (width - K.left - K.right - 2 * K.pad - K.pitchX) / 2);
-      const ry = Math.sqrt(Math.max(2 * R * R - rx * rx, R * R * 0.36));  // about the same way round
-      return { keys, ring: { rx, ry }, head: K.head, w: 2 * rx + K.pitchX + 2 * K.pad, h: K.head + 2 * ry + K.pitchY };
-    }
+    outlines.push({ band, keys, head, sub: false, moves: [group] });
+    const ring = ringSize(keys.length);
+    if (ring) return { keys, ring, head: K.head, w: 2 * ring.rx + K.pitchX + 2 * K.pad, h: K.head + 2 * ring.ry + K.pitchY };
     const cols = Math.min(maxCols, keys.length, Math.max(2, Math.round(Math.sqrt(keys.length * 2.2))));
     const rows = Math.ceil(keys.length / cols);
     return { keys, cols, rows, head: K.head, w: cols * K.pitchX + (rows > 1 ? K.pitchX / 2 : 0) + 2 * K.pad,
       h: K.head + rows * K.pitchY };
   });
+  // A ring for count steps round an ellipse about as long as they need, its opening wide enough that the first and
+  // the last node stay apart (settled in a few passes: a wider opening, a bigger ring); null when the box is too
+  // narrow for it (a phone): those phases are snakes
+  function ringSize(count) {
+    if (count < RING.min || count > RING.max) return null;
+    const length = K.pitchX * (ctx.phone ? RING.phoneSpacing : RING.spacing) * (count - 1);
+    const room = (width - K.left - K.right - 2 * K.pad - K.pitchX) / 2;
+    let gap = RING.gap;
+    let size = null;
+    for (let pass = 0; pass < 4; pass += 1) {
+      const R = length / (2 * Math.PI - gap);  // a circle's radius for them
+      const rx = Math.min(R * 1.25, room);
+      const ry = Math.sqrt(Math.max(2 * R * R - rx * rx, R * R * 0.5625));  // about the same way round
+      const need = 2 * Math.asin(Math.min(0.95, (K.node + RING.ends) / (2 * ry)));
+      size = rx >= R * 0.9 ? { rx, ry, gap: Math.max(gap, need) } : null;  // the last pass: opened to what it needs
+      if (need <= gap) break;
+      gap = need;
+    }
+    return size;
+  }
   // 2. the blocks flow across the box in lines, spread over the spare width and set off a little from one another
   const lines = [];
   blocks.forEach((b) => {
@@ -568,10 +594,10 @@ function nodeGraph(bands, ctx, end) {
     const { rx, ry } = b.ring;
     b.ring.cx = b.x + b.w / 2;
     b.ring.cy = b.y + b.head + ry + K.node / 2 + 4;
-    const from = Math.PI + RING.gap / 2;
+    const from = Math.PI + b.ring.gap / 2;
     const pts = [];
     for (let k = 0; k <= 720; k += 1) {
-      const a = from + ((2 * Math.PI - RING.gap) * k) / 720;
+      const a = from + ((2 * Math.PI - b.ring.gap) * k) / 720;
       pts.push([b.ring.cx + rx * Math.cos(a), b.ring.cy + ry * Math.sin(a)]);
     }
     const along = [0];
@@ -584,9 +610,12 @@ function nodeGraph(bands, ctx, end) {
       return pts[j];
     });
   }
+  // the room a node needs round its centre inside the box: its label, and in an open phase its outline and header
+  function roomX(n) { return K.pitchX / 2 + (n.outlined ? K.pad / 2 : 0) + 2; }
+  function roomTop(n) { return n.h / 2 + (n.outlined ? K.head + 14 : 4); }
   function clamp(n) {
-    n.x = Math.max(n.w / 2 + 4, Math.min(width - n.w / 2 - 4, n.x));
-    n.y = Math.max(n.h / 2 + K.top, n.y);
+    n.x = Math.max(roomX(n), Math.min(width - roomX(n), n.x));
+    n.y = Math.max(roomTop(n), n.y);
   }
 
   const replans = plan.steps.map((_, i) => (jumps(r[i], i) ? i : -1)).filter((i) => i >= 0);
@@ -602,6 +631,12 @@ function nodeGraph(bands, ctx, end) {
   const bus = (a, b) => Math.max(K.left / 2 + 8, Math.min(a.x, b.x) - K.pitchX / 2 - K.pad / 2 - 10);
   // draws everything from the nodes' positions: on every build and on every step of a drag
   let height = 0;
+  let drawnReplans = 0;
+  // the graph is rebuilt every second: a flowing wire runs at the phase of a page-wide clock, so it flows on
+  const flowing = (path) => {
+    if (path.classList.contains('now')) path.style.animationDelay = `-${(performance.now() % WIRE_FLOW_MS) / 1000}s`;
+    return path;
+  };
   function paint() {
     const label = 18;  // a node's label under it
     let bottom = 0;
@@ -677,12 +712,14 @@ function nodeGraph(bands, ctx, end) {
       // into a phase further down: out to the left of the outlines, down, and in from the left (rings open there)
       const d = nb.line > na.line ? rounded([[na.x - na.w / 2 - 3, na.y], [bus(na, nb), na.y], [bus(na, nb), nb.y],
         [nb.x - nb.w / 2 - 5, nb.y]], 16) : wire(na, nb, out ? bend * 0.7 * out : bend * (i % 2 ? 1 : -1)).d;
-      wires.append(svg('path', { class: `pg-wire ${cls}`, d, 'marker-end': `url(#pg-head-${cls})` }));
+      wires.append(flowing(svg('path', { class: `pg-wire ${cls}`, d, 'marker-end': `url(#pg-head-${cls})` })));
     }
+    drawnReplans = 0;
     replans.forEach((i) => {
       const a = nodes.get(stepKey[i]);
       const b = nodes.get(stepKey[r[i].replanTo]);
-      if (a === b) return;
+      if (a === b) return;  // both ends in one closed phase
+      drawnReplans += 1;
       const w = wire(a, b, Math.min(70, 26 + Math.hypot(b.x - a.x, b.y - a.y) * 0.25));
       wires.append(svg('path', { class: 'pg-wire fail', d: w.d, 'marker-end': 'url(#pg-head-fail)' }));
       notes.append(svg('text', { class: 'pg-wire-label fail', x: w.mid.x, y: w.mid.y + 4, 'text-anchor': 'middle' }, 'replan'));
@@ -704,11 +741,15 @@ function nodeGraph(bands, ctx, end) {
       const blocked = [...nodes.values()].some((n) => n !== last && n.x < last.x && Math.abs(n.y - last.y) < n.h);
       const way = blocked ? [[last.x, last.y + last.h / 2 + label + 2], [last.x, low], [lx, low]]
         : [[last.x - last.w / 2 - 3, last.y], [lx, last.y]];
-      const mid = (way[way.length - 1][1] + head.y) / 2;
-      wires.append(svg('path', { class: `pg-wire loop${done ? ' now' : ''}`, 'marker-end': 'url(#pg-head-loop)',
-        d: rounded([...way, [lx, head.y], [head.x - head.w / 2 - 5, head.y]], 18) }));
-      notes.append(svg('text', { class: 'pg-wire-label loop', x: lx - 4, y: mid, 'text-anchor': 'middle',
-        transform: `rotate(-90 ${lx - 4} ${mid})` }, end));
+      const from = way[way.length - 1][1];
+      const mid = (from + head.y) / 2;
+      wires.append(flowing(svg('path', { class: `pg-wire loop${done ? ' now' : ''}`, 'marker-end': 'url(#pg-head-loop)',
+        d: rounded([...way, [lx, head.y], [head.x - head.w / 2 - 5, head.y]], 18) })));
+      // its rule along the gutter; when it is longer than the gutter's run, across the bottom
+      notes.append(end.length * 7 < Math.abs(from - head.y) - 24
+        ? svg('text', { class: 'pg-wire-label loop', x: lx - 4, y: mid, 'text-anchor': 'middle',
+          transform: `rotate(-90 ${lx - 4} ${mid})` }, end)
+        : svg('text', { class: 'pg-wire-label loop', x: lx + 8, y: height - 8 }, end));
     } else {  // a final ring beside the last step
       const freeEnd = ([dx, dy]) => [...nodes.values()].every((n) => Math.hypot(n.x - last.x - dx, n.y - last.y - dy) > 40);
       const [ex, ey] = [[62, 0], [0, 66], [-62, 0], [0, -66]].find(freeEnd) || [0, 66];
@@ -721,25 +762,31 @@ function nodeGraph(bands, ctx, end) {
   // drag (mouse or pen; a finger scrolls): a node, a closed phase, or an open phase by its header (all its nodes)
   const grab = (handle, key, keys) => handle.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || e.pointerType === 'touch') return;
+    drag.active = true;  // from the press: a status update must not rebuild the graph under the pointer
     const moving = keys().map((k) => nodes.get(k)).map((n) => ({ n, x: n.x, y: n.y }));
+    // how far the whole lot may go and stay in the box (each node with its outline's and header's room)
+    const minX = Math.max(...moving.map((m) => roomX(m.n) - m.x));
+    const maxX = Math.min(...moving.map((m) => width - roomX(m.n) - m.x));
+    const minY = Math.max(...moving.map((m) => roomTop(m.n) - m.y));
     let on = false;
+    let shift = [0, 0];
     const move = (ev) => {
       const dx = ev.clientX - e.clientX;
       const dy = ev.clientY - e.clientY;
       if (!on && Math.hypot(dx, dy) < 5) return;
-      if (!on) { on = true; drag.active = true; handle.classList.add('dragging'); }
+      if (!on) { on = true; handle.classList.add('dragging'); }
       ev.preventDefault();
-      moving.forEach((m) => { m.n.x = m.x + dx; m.n.y = m.y + dy; clamp(m.n); });
+      shift = [Math.max(minX, Math.min(maxX, dx)), Math.max(minY, dy)];
+      moving.forEach((m) => { m.n.x = m.x + shift[0]; m.n.y = m.y + shift[1]; });
       paint();
     };
     const up = () => {  // pointerup or pointercancel, once
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
-      if (!on) return;
-      const m = moving[0];
+      if (!on) { drag.active = false; return; }  // a press, no drag: its click (if any) redraws
       const was = offsets[key] || [0, 0];
-      storeLayout(ctx.missionName, { ...offsets, [key]: [was[0] + m.n.x - m.x, was[1] + m.n.y - m.y] });
+      storeLayout(ctx.missionName, { ...offsets, [key]: [was[0] + shift[0], was[1] + shift[1]] }, valid);
       // the click that ends a drag is not a pick
       handle.addEventListener('click', (c) => { c.stopImmediatePropagation(); c.preventDefault(); }, { capture: true, once: true });
       setTimeout(() => { drag.active = false; renderGraph(); }, 0);
@@ -756,7 +803,11 @@ function nodeGraph(bands, ctx, end) {
   const wrap = div('pg', graph);
   if (Object.keys(offsets).length) {  // the operator moved something: tidy puts the drawn layout back
     const tidy = el('button', { type: 'button', class: 'btn small pg-tidy', title: 'Tidy the layout', 'aria-label': 'Tidy the layout', text: '↺' });
-    tidy.addEventListener('click', () => { storeLayout(ctx.missionName, {}); renderGraph(); });
+    tidy.addEventListener('click', () => {  // it goes with the offsets: the focus to the first node
+      storeLayout(ctx.missionName, {});
+      renderGraph();
+      $('plan-graph').querySelector('[data-step], [data-band]')?.focus({ preventScroll: true });
+    });
     graph.append(tidy);
   }
   // the picked step's details: on a phone the bottom sheet; on a laptop a pop-up beside its node (right if it fits,
@@ -779,7 +830,7 @@ function nodeGraph(bands, ctx, end) {
     pop.style.top ||= `${Math.max(0, Math.min(n.y - n.h / 2 - 8, height - POP_MIN_H))}px`;
     graph.append(pop);
   }
-  return { node: wrap, replans: replans.length };
+  return { node: wrap, replans: drawnReplans };
 }
 
 function renderGraph() {
