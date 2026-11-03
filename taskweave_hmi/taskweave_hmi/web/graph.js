@@ -1,30 +1,34 @@
 'use strict';
-// taskweave HMI, Run tab: the running plan as a graph of icon chips (G3). Steps run top to bottom, one row each; a
-// step's chip sits in the lane of the resource it holds (base, hands, torso, joints: step.resources); a step on
-// several lanes is a tile centred on a thin track from its first lane to its last. Phases are bands: one per include of the top mission (origin.top +
-// origin.include[0]) and one per run of its own steps, nested includes as sub-bands; each band collapses to one
-// row, remembered per mission. Only exceptions are marked: the band header names the usual failure rule, a step
-// whose rule differs gets a badge (↻2, skip), a replan is the one line (dashed, through the left gutter to the step
-// it replans from: replan_from). A step opens its details in a pop-up beside it. At 600 px and below the lanes collapse into
-// a rail of 44 px chips per band and the card becomes a bottom sheet. Chips are tinted by what moves (--kind-*:
-// drive, arm, grip, wait, other) and show the step's icon (icons.js). Loop rules (stop_when, max_cycles) and band
-// names come from the mission file. Uses $, el, api, state, show, missionOf, shownPlan, pickStart, moveLabel,
+// taskweave HMI, Run tab: the running plan as a state machine (nodeGraph). Steps are icon nodes joined by arrows in
+// run order. Phases are groups: one per include of the top mission (origin.top + origin.include[0]) and one per run of
+// its own steps, nested includes inside them; each collapses to one stack node, remembered per mission. Only
+// exceptions are marked: the phase header names the usual failure rule, a step whose rule differs gets a badge (↻2,
+// skip), a replan is a dashed red arrow to the step it replans from (replan_from). Nodes and phases can be dragged.
+// A step opens its details in a pop-up beside it (a bottom sheet at 600 px and below). Nodes are tinted by what moves
+// (--kind-*: drive, arm, grip, wait, other) and show the step's icon (icons.js). Loop rules (stop_when, max_cycles)
+// and phase names come from the mission file. Uses $, el, api, state, show, missionOf, shownPlan, pickStart, moveLabel,
 // moveParts, carriesByArgs from app.js and skillIcon, iconElement, moveKindOfArgs from icons.js.
 
 const SVG = 'http://www.w3.org/2000/svg';
-const LANES = ['base', 'hands', 'torso', 'joints'];  // core's resource names (PlanStep.resources), left to right
-const FIRST_LANE = 'hands';  // a first step that holds nothing goes here (later ones: the previous step's lane)
+const LANES = ['base', 'hands', 'torso', 'joints'];  // core's resource names (PlanStep.resources), in this order
 // what moves: a move step's kind, else the skill (cell schema 3 names too)
 const KIND_COLOURS = { navigate: 'drive', straight: 'drive', hand: 'arm', posture: 'arm', joints: 'arm' };
 const SKILL_COLOURS = { navigate_to: 'drive', drive_straight: 'drive', move_joints: 'arm', move_gripper: 'arm',
   move_object: 'arm', set_posture: 'arm', grip: 'grip', wait: 'wait' };
 const ICON_COLOURS = { navigate: 'drive', straight: 'drive', hand: 'arm', carry: 'arm', posture: 'arm', joints: 'arm',
   'grip-close': 'grip', 'grip-open': 'grip', wait: 'wait', other: 'other' };
-// the laptop graph (px): number gutter, lane, row pitch, chip, band header, gaps; the replan lines' area left of it
-// (Figma has rows of 34 and bands 14 apart: 32 and 10 let frame_cycle's running phase fit under the sticky header at 768)
-const G = { gutter: 28, lane: 64, row: 32, chip: 28, inset: 4, head: 24, laneHead: 24, bandGap: 10, headGap: 6, subIndent: 12,
-  track: 12, tile: 64, replanArea: 22, replanGap: 6, endGap: 6, endH: 18 };
-const POP_W = 320;     // the step pop-up's width (style.css .pg-pop), the gap to its chip, the least room it gets below
+// the node graph (px): a step node and a closed phase's stack, the slot pitch, a phase's header room and padding, the
+// gap between phases, the box's left gutter (the start dot, the loop arrow) and right margin, the room below (the
+// loop arrow), the most a node is nudged off its slot, the height of the wave a row runs in
+const N = { node: 44, stack: 52, pitchX: 104, pitchY: 92, head: 30, pad: 16, gap: 30, left: 56, right: 12, top: 16,
+  bottom: 56, wobble: 12, wave: 12 };
+const N_PHONE = { ...N, pitchX: 78, pitchY: 88, left: 36, gap: 22, wobble: 7, wave: 8 };
+// a phase of 4 to 16 steps is a ring: its steps this far apart (of the slot pitch), the opening at its left (rad)
+const RING = { min: 4, max: 16, spacing: 0.86, phoneSpacing: 1.12, gap: 0.7 };
+const LAYOUT_KEY = 'tw-plan-layout';  // localStorage: {mission: {node or phase key: [dx, dy]}}
+const layouts = {};
+const drag = { active: false };  // a drag is on: the status updates do not redraw under it
+const POP_W = 320;     // the step pop-up's width (style.css .pg-pop), the gap to its node, the least room it gets below
 const POP_GAP = 12;
 const POP_MIN_H = 260;
 const BREATHE_MS = 2800;  // period of node-breathe for the running step (style.css)
@@ -208,13 +212,11 @@ function bandInfo(band, states, r, steps, lanes) {
 }
 
 // The badge of a step whose rule differs from its band's (retries ↻2, or ↻0 for fewer than the band's none; skip,
-// abort, retry), and on the phone a replan's target ("to 7"; on the laptop that is the line). cls: 'fail' for
-// failure-type badges, 'skip' muted.
-function badgeOf(rule, i, usual, phone) {
+// abort, retry; a replan to another step is its arrow). cls: 'fail' for failure-type badges, 'skip' muted.
+function badgeOf(rule, i, usual) {
   const words = [];
   if (rule.key !== usual && rule.retries !== Number(usual.split('|')[1])) words.push(`↻${Math.max(rule.retries, 0)}`);
-  if (jumps(rule, i)) { if (phone) words.push(`to ${rule.replanTo + 1}`); }
-  else if (rule.key !== usual && rule.onFailure !== usual.split('|')[0]) words.push(rule.onFailure);
+  if (!jumps(rule, i) && rule.key !== usual && rule.onFailure !== usual.split('|')[0]) words.push(rule.onFailure);
   if (!words.length) return null;
   return { text: words.join(' '), cls: words.length === 1 && rule.onFailure === 'skip' && rule.retries <= 0 ? 'skip' : 'fail' };
 }
@@ -236,7 +238,7 @@ function chipButton(step, i, ctx) {
   if (isLive(status)) chip.style.animationDelay = `-${(performance.now() % BREATHE_MS) / 1000}s`;
   if (status === 'succeeded') chip.append(el('span', { class: 'pg-dot ok' }));
   if (isFailed(status)) chip.append(el('span', { class: 'pg-dot bad', text: '✕' }));
-  const badge = badgeOf(r[i], i, ctx.usual[i], ctx.phone);
+  const badge = badgeOf(r[i], i, ctx.usual[i]);
   if (badge) chip.append(el('span', { class: `pg-badge ${badge.cls}`, text: badge.text }));
   chip.addEventListener('click', () => choose(step, pickable));
   return chip;
@@ -268,29 +270,22 @@ document.addEventListener('keydown', (e) => {
     || e.target.closest?.('textarea, select, input, [contenteditable]')) return;
   closeSheet(view.selected);
 });
-// a click outside the pop-up (laptop) closes it; a chip's own click opens or closes as above
+// a click outside the pop-up (laptop) closes it; a node's own click opens or closes as above
 document.addEventListener('pointerdown', (e) => {
-  if (PHONE.matches || !view.selected || e.target.closest?.('.pg-pop, .pg-chip, .pg-band')) return;
+  if (PHONE.matches || !view.selected || e.target.closest?.('.pg-pop, .pg-chip, .pg-band, .pg-stack, .pg-tidy')) return;
   view.selected = null;
   renderGraph();
 });
 
-// A band's header: chevron and name, then open: done/total · fails: rule; closed: the lanes it uses as mini chips,
-// done/total and its state word.
-function bandHeader(band, info, open, toggle, extra) {
-  const total = band.steps.length;
+const bandTitle = (band, info) => `${band.name}${band.include && band.include !== band.name ? ` (${band.include})` : ''}`
+  + `\n${info.done} of ${band.steps.length} done · ${info.word} · fails: ${ruleText(info.rule)}`
+  + `${info.lanes.length ? `\nuses ${info.lanes.join(', ')}` : ''}`;
+// An open phase's header on its outline: chevron and name, done/total · fails: rule; a click closes the phase
+function bandHeader(band, info, open, toggle) {
   const head = el('button', { type: 'button', class: `pg-band${open ? ' open' : ''}`, 'aria-expanded': String(open),
-    'data-band': band.key, title: `${band.name}${band.include && band.include !== band.name ? ` (${band.include})` : ''}`
-      + `\n${info.done} of ${total} done · ${info.word} · fails: ${ruleText(info.rule)}`
-      + `${info.lanes.length ? `\nuses ${info.lanes.join(', ')}` : ''}` },
-  el('span', { class: 'pg-chev', 'aria-hidden': 'true' }), el('span', { class: 'pg-band-name', text: band.name }));
-  if (!open && info.lanes.length) {
-    head.append(el('span', { class: 'pg-minis', 'aria-label': `uses ${info.lanes.join(', ')}` },
-      ...info.lanes.map((lane) => el('i', { text: lane[0] }))));
-  }
-  head.append(el('span', { class: 'pg-band-meta', text: [extra, `${info.done}/${total}`,
-    open ? `fails: ${ruleText(info.rule)}` : ''].filter(Boolean).join(' · ') }));
-  if (!open) head.append(el('span', { class: `pg-band-word ${info.word}`, text: info.word }));
+    'data-band': band.key, title: bandTitle(band, info) },
+  el('span', { class: 'pg-chev', 'aria-hidden': 'true' }), el('span', { class: 'pg-band-name', text: band.name }),
+  el('span', { class: 'pg-band-meta', text: `${info.done}/${band.steps.length} · fails: ${ruleText(info.rule)}` }));
   head.addEventListener('click', toggle);
   return head;
 }
@@ -381,159 +376,416 @@ function loopText(plan, mission, snap) {
   return [`↻ ${until}`, cycle, mission?.max_cycles ? `max ${mission.max_cycles}` : ''].filter(Boolean).join(' · ');
 }
 
-// the rail (phone): per band a header and a wrapping grid of 44 px chips, sub-bands indented; no lines
-function rail(bands, ctx, end) {
-  const section = (band, depth, extra) => {
-    const open = ctx.isOpen(band);
-    const node = el('section', { class: `pg-rband${depth ? ' sub' : ''}` },
-      bandHeader(band, ctx.info.get(band), open, ctx.toggle(band), extra));
-    let grid = null;
-    if (open) band.items.forEach((it) => {
-      if (it.sub) { grid = null; node.append(section(it.sub, depth + 1, '')); return; }
-      if (!grid) { grid = div('pg-rchips'); node.append(grid); }
-      const chip = chipButton(ctx.plan.steps[it.step], it.step, ctx);
-      chip.append(el('span', { class: 'pg-rnum', text: String(it.step + 1) }));
-      grid.append(chip);
-    });
-    return node;
-  };
-  // the sheet for a step the operator picked; the running step is on the status board above (app.js renderBoard)
-  const sheet = view.selected ? ctx.focus : -1;
-  return div(`pg-rail${sheet >= 0 ? ' with-sheet' : ''}`,
-    ...bands.map((band, b) => section(band, 0, b === 0 ? ctx.cycleNote : '')),
-    end ? el('div', { class: 'pg-end', text: end }) : '',
-    ...(sheet >= 0 ? planCard(sheet, ctx, true) : []));
-}
-
-// the lanes: core's resource names in their order, then any other resource a step holds
 const lanesOf = (plan) => [...new Set([...LANES, ...plan.steps.flatMap((s) => s.resources || [])])];
 
-// the laptop graph: rows in lanes, chips, tracks and band headers positioned in a box; lane dividers in an SVG
-// underneath, the replan lines in one on top
-function lanesGraph(bands, ctx, end) {
-  const { plan, states, r } = ctx;
-  const lanes = lanesOf(plan);
-  const laneIndex = (name) => lanes.indexOf(name);
-  const replans = plan.steps.map((_, i) => (jumps(r[i], i) ? i : -1)).filter((i) => i >= 0);
-  const x0 = replans.length ? G.replanArea + G.replanGap * (replans.length - 1) : 0;
-  // the lanes share the plan box's width (at least G.lane each): the graph fills its card
-  const lane = Math.max(G.lane, Math.floor(((ctx.width || 0) - x0 - G.gutter) / lanes.length));
-  const laneX = (l) => x0 + G.gutter + l * lane;
-  const width = laneX(lanes.length);
-  const chipLane = [];
-  let prev = Math.max(0, laneIndex(FIRST_LANE));
-  plan.steps.forEach((step, i) => {  // the leftmost lane it holds, else the previous step's
-    const held = (step.resources || []).map(laneIndex).filter((l) => l >= 0);
-    chipLane[i] = prev = held.length ? Math.min(...held) : prev;
-  });
-  // Every step is a tile (at most G.tile wide, the icon centred): in the middle of its lane, or for a step on several
-  // lanes in the middle of a thin track from its first lane to its last (inset), so it reads as one step holding
-  // those lanes, not as a bar of time.
-  const lastLane = plan.steps.map((step, i) => Math.max(chipLane[i], ...(step.resources || []).map(laneIndex)));
-  const wide = (i) => lastLane[i] > chipLane[i];
-  const spanX = (i) => laneX(chipLane[i]) + G.inset;
-  const spanR = (i) => laneX(lastLane[i] + 1) - G.inset;
-  const chipW = () => Math.min(lane - 2 * G.inset, G.tile);
-  const chipX = (i) => (spanX(i) + spanR(i) - chipW()) / 2;
-  const items = [];  // {band, y, depth, extra, open} and {step, y, owner}
-  const rowY = [];   // per step: its chip's centre (a step of a closed band: the band header's)
-  const shown = new Set();
-  let y = G.laneHead;
-  const place = (band, depth, extra) => {
-    const open = ctx.isOpen(band);
-    items.push({ band, y, depth, extra, open });
-    if (!open) { band.steps.forEach((i) => { rowY[i] ??= y + G.head / 2; }); y += G.head; return; }
-    y += G.head + G.headGap;
-    band.items.forEach((it) => {
-      if (it.sub) { place(it.sub, depth + 1, ''); y += G.headGap; return; }
-      items.push({ step: it.step, y, owner: band });
-      rowY[it.step] = y + G.row / 2;
-      shown.add(it.step);
-      y += G.row;
-    });
-  };
-  bands.forEach((band, b) => { if (b) y += G.bandGap; place(band, 0, b === 0 ? ctx.cycleNote : ''); });
-  const height = y + (end ? G.endGap + G.endH : 0);
-  const under = svg('svg', { class: 'pg-lines', width, height, 'aria-hidden': 'true' });
-  for (let l = 0; l <= lanes.length; l += 1) {
-    under.append(svg('line', { x1: laneX(l), y1: 0, x2: laneX(l), y2: height, class: 'pg-divider' }));
+// the operator's drags, per mission: {node or group key: [dx, dy]} on top of the drawn layout (a group's key moves
+// all of its nodes); kept here too, so private mode keeps them until the page reloads
+function storedLayout(mission) {
+  if (!(mission in layouts)) {
+    try { layouts[mission] = (JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') || {})[mission] || {}; } catch (_) { layouts[mission] = {}; }
   }
-  const graph = el('div', { class: 'pg-graph', style: `width: ${width}px; height: ${height}px`, role: 'group',
-    'aria-label': `Plan ${plan.plan_id}: ${plan.steps.length} steps` }, under,
-  ...lanes.map((name, l) => el('span', { class: 'pg-lane', text: name, style: `left: ${laneX(l)}px; width: ${lane}px` })));
-  items.forEach((it) => {
-    if (it.band) {
-      const indent = it.depth * G.subIndent;
-      const head = bandHeader(it.band, ctx.info.get(it.band), it.open, ctx.toggle(it.band), it.extra);
-      head.style.cssText = `left: ${x0 + indent}px; top: ${it.y}px; width: ${width - x0 - indent}px`;
-      graph.append(head);
-      return;
-    }
-    const i = it.step;
+  return layouts[mission];
+}
+function storeLayout(mission, offsets) {
+  layouts[mission] = offsets;
+  try {
+    const all = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') || {};
+    if (Object.keys(offsets).length) all[mission] = offsets; else delete all[mission];
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(all));
+  } catch (_) { /* private mode */ }
+}
+// a small fixed nudge per node (from its key): the graph looks drawn, not gridded, and the same on every draw
+function wobble(key, amount) {
+  let h = 2166136261;
+  for (let k = 0; k < key.length; k += 1) h = Math.imul(h ^ key.charCodeAt(k), 16777619);
+  return [((h & 255) / 255 - 0.5) * 2 * amount, (((h >>> 8) & 255) / 255 - 0.5) * 2 * amount];
+}
+
+// a closed phase: one node, a stack of cards filled to its share done, its name under it; a click opens it
+function stackButton(band, info, toggle) {
+  const total = band.steps.length;
+  const node = el('button', { type: 'button', class: `pg-stack ${info.word}`, 'data-band': band.key,
+    'aria-expanded': 'false', title: bandTitle(band, info),
+    style: `--done-share: ${Math.round((info.done / total) * 100)}%` },
+  el('span', { class: 'pg-stack-count', text: `${info.done}/${total}` }));
+  node.addEventListener('click', toggle);
+  return node;
+}
+
+// where the line from a node's centre toward (tx, ty) leaves its box, gap px outside it
+function rim(n, tx, ty, gap) {
+  const dx = tx - n.x;
+  const dy = ty - n.y;
+  const s = Math.min((n.w / 2 + gap) / Math.abs(dx || 1e-9), (n.h / 2 + gap) / Math.abs(dy || 1e-9), 1);
+  return { x: n.x + dx * s, y: n.y + dy * s };
+}
+// a transition from node a to node b, bowed sideways by bend px: its path and its middle (for a label)
+function wire(a, b, bend) {
+  const d = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const mx = (a.x + b.x) / 2 - ((b.y - a.y) / d) * bend;
+  const my = (a.y + b.y) / 2 + ((b.x - a.x) / d) * bend;
+  const p = rim(a, mx, my, 3);
+  const q = rim(b, mx, my, 5);
+  return { d: `M${p.x},${p.y} Q${mx},${my} ${q.x},${q.y}`, mid: { x: (p.x + 2 * mx + q.x) / 4, y: (p.y + 2 * my + q.y) / 4 } };
+}
+// a polyline with its corners rounded (radius px)
+function rounded(points, radius) {
+  let d = `M${points[0][0]},${points[0][1]}`;
+  for (let k = 1; k < points.length - 1; k += 1) {
+    const [px, py] = points[k - 1];
+    const [x, y] = points[k];
+    const [nx, ny] = points[k + 1];
+    const r1 = Math.min(radius, Math.hypot(x - px, y - py) / 2);
+    const r2 = Math.min(radius, Math.hypot(nx - x, ny - y) / 2);
+    const a = Math.hypot(x - px, y - py) || 1;
+    const b = Math.hypot(nx - x, ny - y) || 1;
+    d += ` L${x - ((x - px) / a) * r1},${y - ((y - py) / a) * r1} Q${x},${y} ${x + ((nx - x) / b) * r2},${y + ((ny - y) / b) * r2}`;
+  }
+  const [lx, ly] = points[points.length - 1];
+  return `${d} L${lx},${ly}`;
+}
+
+// The plan as a state machine: steps are nodes joined by transitions in run order, a phase an outline round its
+// steps with its header on the edge (a closed phase one stack node: the transitions point at it), a nested include a
+// soft band through its steps. The phases flow across the box and wind inside (a snake, nudged per node); the
+// operator can drag a node or a phase by its header (mouse or pen; stored per mission, the ↺ button tidies). A dot
+// points at the start step, a dashed loop runs from the last step back to the first when the mission repeats (else a
+// final ring), a replan is a dashed red arrow to the step it replans from. Done transitions are solid, the one into
+// the running step flows, those ahead are dotted.
+function nodeGraph(bands, ctx, end) {
+  const { plan, states, r } = ctx;
+  const K = ctx.phone ? N_PHONE : N;
+  const width = Math.max(ctx.width || 0, 300);
+  const offsets = storedLayout(ctx.missionName);
+  const nodes = new Map();  // key -> {key, x, y, w, h, el, label, moves: [offset keys]}
+  const stepKey = [];       // per step: the node that shows it (its own, or its closed phase's)
+  const outlines = [];      // open phases: {band, keys, head, sub}
+  const graph = el('div', { class: 'pg-graph', role: 'group', 'aria-label': `Plan ${plan.plan_id}: ${plan.steps.length} steps` });
+  const back = svg('svg', { class: 'pg-lines', 'aria-hidden': 'true' });
+  const wires = svg('svg', { class: 'pg-lines', 'aria-hidden': 'true' });
+  const notes = svg('svg', { class: 'pg-lines', 'aria-hidden': 'true' });  // the arrows' words, over the nodes
+  graph.append(back, wires);
+
+  const addStep = (i, moves) => {
     const step = plan.steps[i];
-    const top = it.y + (G.row - G.chip) / 2;
-    graph.append(el('span', { class: `pg-num${isLive(states[i]) ? ' now' : ''}`, text: String(i + 1),
-      style: `left: ${x0}px; top: ${it.y}px; width: ${G.gutter}px; height: ${G.row}px` }));
-    if (wide(i)) {
-      graph.append(el('span', { class: `pg-track kind-${colourOf(step)} state-${states[i]}`, 'aria-hidden': 'true',
-        style: `left: ${spanX(i)}px; top: ${top + (G.chip - G.track) / 2}px; width: ${spanR(i) - spanX(i)}px; height: ${G.track}px` }));
+    const node = chipButton(step, i, ctx);
+    const label = el('span', { class: `pg-label${isLive(states[i]) ? ' now' : ''}` }, el('b', { text: String(i + 1) }),
+      ` ${mainArg(step) || stepTitle(step)}`);
+    graph.append(node, label);
+    stepKey[i] = step.id;
+    nodes.set(step.id, { key: step.id, w: K.node, h: K.node, el: node, label, moves: [...moves, step.id] });
+    return step.id;
+  };
+  const addStack = (band, moves) => {
+    const key = `g:${band.key}`;
+    const node = stackButton(band, ctx.info.get(band), ctx.toggle(band));
+    const label = el('span', { class: 'pg-label' }, band.name);
+    graph.append(node, label);
+    band.steps.forEach((i) => { stepKey[i] = key; });
+    nodes.set(key, { key, w: K.stack, h: K.stack, el: node, label, moves: [...new Set([...moves, key])] });
+    return key;
+  };
+  const addHead = (band, keys, sub, moves) => {
+    const head = bandHeader(band, ctx.info.get(band), true, ctx.toggle(band));
+    if (sub) head.classList.add('pg-sub');
+    graph.append(head);
+    outlines.push({ band, keys, head, sub, moves });
+  };
+
+  // 1. blocks: a closed phase is one slot, an open one a snake of its steps (an open nested include's steps in it, a
+  // closed one a slot)
+  const maxCols = Math.max(2, Math.floor((width - K.left - K.right - 2 * K.pad - K.pitchX / 2) / K.pitchX));
+  const blocks = bands.map((band) => {
+    const group = `g:${band.key}`;
+    if (!ctx.isOpen(band)) return { keys: [addStack(band, [group])], cols: 1, rows: 1, head: 0, w: K.pitchX, h: K.pitchY };
+    const keys = [];
+    band.items.forEach((it) => {
+      if (!it.sub) { keys.push(addStep(it.step, [group])); return; }
+      const moves = [group, `g:${it.sub.key}`];
+      if (!ctx.isOpen(it.sub)) { keys.push(addStack(it.sub, moves)); return; }
+      const own = it.sub.items.map((s) => addStep(s.step, moves));
+      keys.push(...own);
+      addHead(it.sub, own, true, moves);
+    });
+    addHead(band, keys, false, [group]);
+    if (keys.length >= RING.min && keys.length <= RING.max) {  // a loop of its steps round an ellipse
+      const R = (K.pitchX * (ctx.phone ? RING.phoneSpacing : RING.spacing) * (keys.length - 1)) / (2 * Math.PI - RING.gap);  // a circle's radius for them
+      const rx = Math.min(R * 1.25, (width - K.left - K.right - 2 * K.pad - K.pitchX) / 2);
+      const ry = Math.sqrt(Math.max(2 * R * R - rx * rx, R * R * 0.36));  // about the same way round
+      return { keys, ring: { rx, ry }, head: K.head, w: 2 * rx + K.pitchX + 2 * K.pad, h: K.head + 2 * ry + K.pitchY };
     }
-    const chip = chipButton(step, i, ctx);
-    chip.style.left = `${chipX(i)}px`;
-    chip.style.top = `${top}px`;
-    chip.style.width = `${chipW(i)}px`;
-    graph.append(chip);
+    const cols = Math.min(maxCols, keys.length, Math.max(2, Math.round(Math.sqrt(keys.length * 2.2))));
+    const rows = Math.ceil(keys.length / cols);
+    return { keys, cols, rows, head: K.head, w: cols * K.pitchX + (rows > 1 ? K.pitchX / 2 : 0) + 2 * K.pad,
+      h: K.head + rows * K.pitchY };
   });
-  // replans: from the step's left edge into the left area, up or down, into the target from the left
-  const over = svg('svg', { class: 'pg-lines over', width, height, 'aria-hidden': 'true' });
-  const marker = svg('marker', { id: 'pg-arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 6, markerHeight: 6,
-    orient: 'auto-start-reverse' });
-  marker.append(svg('path', { d: 'M0,0 L10,5 L0,10 z' }));
-  const defs = svg('defs');
-  defs.append(marker);
-  over.append(defs);
-  replans.forEach((i, k) => {
-    const t = r[i].replanTo;
-    if (!shown.has(i) && !shown.has(t)) return;  // both ends in closed bands
-    const lx = G.replanArea - 6 + G.replanGap * (replans.length - 1 - k);
-    const from = rowY[i] + (shown.has(i) ? 4 : 0);
-    const fromX = shown.has(i) ? chipX(i) : x0;
-    const toX = shown.has(t) ? chipX(t) - 2 : x0 - 2;
-    over.append(svg('path', { d: `M${fromX},${from} L${lx},${from} L${lx},${rowY[t]} L${toX},${rowY[t]}`,
-      class: 'pg-replan', 'marker-end': 'url(#pg-arrow)' }));
-    if (!over.querySelector('text')) {  // one label: the lines run side by side
-      const mid = (from + rowY[t]) / 2;
-      over.append(svg('text', { x: lx - 5, y: mid, class: 'pg-replan-label', 'text-anchor': 'middle',
-        transform: `rotate(-90 ${lx - 5} ${mid})` }, 'replan'));
+  // 2. the blocks flow across the box in lines, spread over the spare width and set off a little from one another
+  const lines = [];
+  blocks.forEach((b) => {
+    const last = lines[lines.length - 1];
+    if (!last || last.w + K.gap + b.w > width - K.left - K.right) lines.push({ blocks: [b], w: b.w });
+    else { last.blocks.push(b); last.w += K.gap + b.w; }
+  });
+  let y = K.top;
+  lines.forEach((line, l) => {
+    line.blocks.forEach((b) => { b.line = l; });
+    const spare = Math.max(0, width - K.left - K.right - line.w);
+    const many = line.blocks.length > 1;
+    let x = K.left + (many ? spare * 0.15 : 0);  // one alone: at the left, by the rings' opening and the loop
+    let bottom = y;
+    line.blocks.forEach((b, k) => {
+      b.x = x;
+      b.y = y + [0, 28, 10, 36][(l + k) % 4];
+      x += b.w + K.gap + (many ? (spare * 0.7) / (line.blocks.length - 1) : 0);
+      bottom = Math.max(bottom, b.y + b.h);
+    });
+    y = bottom + K.gap;
+  });
+  // 3. the nodes: round the ring clockwise from its upper left, evenly by length, the gap left open at the left (the
+  // way in and out); else a snake through the block's rows (every other row back and half a slot over) on a gentle
+  // wave. Each nudged, then the operator's drags.
+  blocks.forEach((b) => {
+    const spots = b.ring ? ringSpots(b, b.keys.length) : null;
+    b.keys.forEach((key, k) => {
+      const [jx, jy] = wobble(key, K.wobble);
+      const n = nodes.get(key);
+      n.line = b.line;
+      const moved = n.moves.reduce((sum, m) => [sum[0] + (offsets[m]?.[0] || 0), sum[1] + (offsets[m]?.[1] || 0)], [0, 0]);
+      if (spots) {
+        n.ring = b.ring;
+        n.x = spots[k][0] + jx * 0.6 + moved[0];
+        n.y = spots[k][1] + jy * 0.6 + moved[1];
+      } else {
+        const row = Math.floor(k / b.cols);
+        const col = row % 2 ? b.cols - 1 - (k % b.cols) : k % b.cols;
+        n.x = b.x + K.pad + (col + 0.5 + (row % 2 ? 0.5 : 0)) * K.pitchX + jx + moved[0];
+        n.y = b.y + b.head + row * K.pitchY + K.pitchY / 2 - 10 + Math.sin(col * 1.25 + row * 2) * K.wave + jy + moved[1];
+      }
+      clamp(n);
+    });
+  });
+  function ringSpots(b, count) {
+    const { rx, ry } = b.ring;
+    b.ring.cx = b.x + b.w / 2;
+    b.ring.cy = b.y + b.head + ry + K.node / 2 + 4;
+    const from = Math.PI + RING.gap / 2;
+    const pts = [];
+    for (let k = 0; k <= 720; k += 1) {
+      const a = from + ((2 * Math.PI - RING.gap) * k) / 720;
+      pts.push([b.ring.cx + rx * Math.cos(a), b.ring.cy + ry * Math.sin(a)]);
     }
+    const along = [0];
+    for (let k = 1; k < pts.length; k += 1) along.push(along[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+    const total = along[along.length - 1];
+    let j = 0;
+    return Array.from({ length: count }, (_, k) => {
+      const want = (total * k) / (count - 1);
+      while (j < along.length - 1 && along[j] < want) j += 1;
+      return pts[j];
+    });
+  }
+  function clamp(n) {
+    n.x = Math.max(n.w / 2 + 4, Math.min(width - n.w / 2 - 4, n.x));
+    n.y = Math.max(n.h / 2 + K.top, n.y);
+  }
+
+  const replans = plan.steps.map((_, i) => (jumps(r[i], i) ? i : -1)).filter((i) => i >= 0);
+  const startAt = Math.max(0, plan.steps.findIndex((s) => s.id === state.startStep));
+  const marker = (name) => {
+    const m = svg('marker', { id: `pg-head-${name}`, class: `pg-head ${name}`, viewBox: '0 0 10 10', refX: 8, refY: 5,
+      markerWidth: 9, markerHeight: 9, markerUnits: 'userSpaceOnUse', orient: 'auto-start-reverse' });
+    m.append(svg('path', { d: 'M0,1 L9,5 L0,9 z' }));
+    return m;
+  };
+
+  // the way down between phases: left of both nodes' outlines, right of the loop
+  const bus = (a, b) => Math.max(K.left / 2 + 8, Math.min(a.x, b.x) - K.pitchX / 2 - K.pad / 2 - 10);
+  // draws everything from the nodes' positions: on every build and on every step of a drag
+  let height = 0;
+  function paint() {
+    const label = 18;  // a node's label under it
+    let bottom = 0;
+    nodes.forEach((n) => {
+      n.el.style.left = `${n.x - n.w / 2}px`;
+      n.el.style.top = `${n.y - n.h / 2}px`;
+      n.label.style.left = `${n.x - K.pitchX / 2 + 4}px`;
+      n.label.style.width = `${K.pitchX - 8}px`;
+      n.label.style.top = `${n.y + n.h / 2 + 3}px`;
+      bottom = Math.max(bottom, n.y + n.h / 2 + label);
+    });
+    back.replaceChildren();
+    outlines.forEach((o) => {
+      const members = o.keys.map((key) => nodes.get(key));
+      if (o.sub) {  // a nested include: a soft band through its steps, its header over the first (in a ring: on
+        // the inner side of the band's middle, in the ring's open middle)
+        const pts = members.map((n) => `${n.x},${n.y}`).join(' ');
+        back.append(svg('polyline', { class: 'pg-subband', points: pts, 'stroke-width': K.node + 18 }));
+        let [hx, hy] = [members[0].x - K.node / 2 - 6, members[0].y - K.node / 2 - 30];
+        if (members[0].ring) {
+          const ring = [...nodes.values()].filter((n) => n.ring === members[0].ring);
+          const [cx, cy] = [ring.reduce((t, n) => t + n.x, 0) / ring.length, ring.reduce((t, n) => t + n.y, 0) / ring.length];
+          const mid = members[Math.floor((members.length - 1) / 2)];
+          const d = Math.hypot(mid.x - cx, mid.y - cy) || 1;
+          const reach = K.node / 2 + 30;
+          hx = mid.x - ((mid.x - cx) / d) * reach;
+          o.head.style.transform = 'translateX(-50%)';  // centred there (not in the page yet: no width to read)
+          hy = mid.y - ((mid.y - cy) / d) * reach - 11;
+        }
+        o.head.style.left = `${hx}px`;
+        o.head.style.top = `${hy}px`;
+        return;
+      }
+      const left = Math.min(...members.map((n) => n.x - Math.max(n.w / 2, K.pitchX / 2 - 4))) - K.pad / 2;
+      const right = Math.max(...members.map((n) => n.x + Math.max(n.w / 2, K.pitchX / 2 - 4))) + K.pad / 2;
+      const top = Math.min(...members.map((n) => n.y - n.h / 2)) - K.head;
+      const low = Math.max(...members.map((n) => n.y + n.h / 2 + label)) + K.pad / 2;
+      back.append(svg('rect', { class: `pg-outline ${ctx.info.get(o.band).word}`, x: left, y: top, width: right - left,
+        height: low - top, rx: 28 }));
+      if (members[0].ring) {  // a ring's open middle: how far the phase is
+        const cx = members.reduce((sum, n) => sum + n.x, 0) / members.length;
+        const cy = members.reduce((sum, n) => sum + n.y, 0) / members.length;
+        back.append(svg('text', { class: 'pg-ring-count', x: cx, y: cy + 12, 'text-anchor': 'middle' },
+          `${ctx.info.get(o.band).done}/${o.band.steps.length}`));
+      }
+      o.head.style.left = `${left + 10}px`;
+      o.head.style.top = `${top - 13}px`;
+      o.head.style.maxWidth = `${right - left - 20}px`;
+      o.box = { left, right, top, low };
+      bottom = Math.max(bottom, low);
+    });
+    height = bottom + (end ? K.bottom : K.bottom / 2);
+    [back, wires, notes].forEach((s) => { s.setAttribute('width', width); s.setAttribute('height', height); });
+    graph.style.cssText = `width: ${width}px; height: ${height}px`;
+
+    const defs = svg('defs');
+    ['done', 'now', 'todo', 'fail', 'loop'].forEach((name) => defs.append(marker(name)));
+    wires.replaceChildren(defs);
+    notes.replaceChildren();
+    const seen = new Set();
+    for (let i = 1; i < plan.steps.length; i += 1) {
+      const a = stepKey[i - 1];
+      const b = stepKey[i];
+      if (a === b || seen.has(`${a}>${b}`)) continue;
+      seen.add(`${a}>${b}`);
+      const cls = isLive(states[i]) ? 'now' : states[i] !== 'pending' ? 'done' : 'todo';
+      const na = nodes.get(a);
+      const nb = nodes.get(b);
+      // round a ring the arrows bow outwards, with it; elsewhere they bow either way in turn
+      const bend = Math.min(28, Math.hypot(nb.x - na.x, nb.y - na.y) * 0.16);
+      const out = na.ring && na.ring === nb.ring
+        ? (((nb.x - na.x) * (na.y + nb.y - 2 * na.ring.cy) - (nb.y - na.y) * (na.x + nb.x - 2 * na.ring.cx)) > 0 ? 1 : -1) : 0;
+      // into a phase further down: out to the left of the outlines, down, and in from the left (rings open there)
+      const d = nb.line > na.line ? rounded([[na.x - na.w / 2 - 3, na.y], [bus(na, nb), na.y], [bus(na, nb), nb.y],
+        [nb.x - nb.w / 2 - 5, nb.y]], 16) : wire(na, nb, out ? bend * 0.7 * out : bend * (i % 2 ? 1 : -1)).d;
+      wires.append(svg('path', { class: `pg-wire ${cls}`, d, 'marker-end': `url(#pg-head-${cls})` }));
+    }
+    replans.forEach((i) => {
+      const a = nodes.get(stepKey[i]);
+      const b = nodes.get(stepKey[r[i].replanTo]);
+      if (a === b) return;
+      const w = wire(a, b, Math.min(70, 26 + Math.hypot(b.x - a.x, b.y - a.y) * 0.25));
+      wires.append(svg('path', { class: 'pg-wire fail', d: w.d, 'marker-end': 'url(#pg-head-fail)' }));
+      notes.append(svg('text', { class: 'pg-wire-label fail', x: w.mid.x, y: w.mid.y + 4, 'text-anchor': 'middle' }, 'replan'));
+    });
+    // the start: a dot beside the start step, where no node is
+    const first = nodes.get(stepKey[startAt]);
+    const free = ([dx, dy]) => [...nodes.values()].every((n) => Math.hypot(n.x - first.x - dx, n.y - first.y - dy) > 40);
+    const [sx, sy] = [[-58, -28], [-58, 26], [0, -64], [58, -30], [0, 64]].find(free) || [-58, -28];
+    const dot = { x: first.x + sx, y: first.y + sy, w: 12, h: 12 };
+    wires.append(svg('circle', { class: 'pg-init', cx: dot.x, cy: dot.y, r: 6 }),
+      svg('path', { class: 'pg-wire done', d: wire(dot, first, 0).d, 'marker-end': 'url(#pg-head-done)' }));
+    const last = nodes.get(stepKey[plan.steps.length - 1]);
+    const head = nodes.get(stepKey[0]);
+    if (end) {  // the loop: from the last step out to the left gutter (under everything when a node is in the way),
+      // up it and into the first step; its rule along the gutter
+      const low = height - K.bottom / 2 - 4;
+      const lx = Math.max(12, Math.min(head.x - head.w / 2 - 26, K.left / 2 - 2));
+      const done = states.every((st) => st !== 'pending') && !states.some(isLive);
+      const blocked = [...nodes.values()].some((n) => n !== last && n.x < last.x && Math.abs(n.y - last.y) < n.h);
+      const way = blocked ? [[last.x, last.y + last.h / 2 + label + 2], [last.x, low], [lx, low]]
+        : [[last.x - last.w / 2 - 3, last.y], [lx, last.y]];
+      const mid = (way[way.length - 1][1] + head.y) / 2;
+      wires.append(svg('path', { class: `pg-wire loop${done ? ' now' : ''}`, 'marker-end': 'url(#pg-head-loop)',
+        d: rounded([...way, [lx, head.y], [head.x - head.w / 2 - 5, head.y]], 18) }));
+      notes.append(svg('text', { class: 'pg-wire-label loop', x: lx - 4, y: mid, 'text-anchor': 'middle',
+        transform: `rotate(-90 ${lx - 4} ${mid})` }, end));
+    } else {  // a final ring beside the last step
+      const freeEnd = ([dx, dy]) => [...nodes.values()].every((n) => Math.hypot(n.x - last.x - dx, n.y - last.y - dy) > 40);
+      const [ex, ey] = [[62, 0], [0, 66], [-62, 0], [0, -66]].find(freeEnd) || [0, 66];
+      const ring = { x: last.x + ex, y: last.y + ey, w: 18, h: 18 };
+      wires.append(svg('path', { class: 'pg-wire todo', d: wire(last, ring, 0).d, 'marker-end': 'url(#pg-head-todo)' }),
+        svg('circle', { class: 'pg-final', cx: ring.x, cy: ring.y, r: 9 }), svg('circle', { class: 'pg-final-dot', cx: ring.x, cy: ring.y, r: 5 }));
+    }
+  }
+
+  // drag (mouse or pen; a finger scrolls): a node, a closed phase, or an open phase by its header (all its nodes)
+  const grab = (handle, key, keys) => handle.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.pointerType === 'touch') return;
+    const moving = keys().map((k) => nodes.get(k)).map((n) => ({ n, x: n.x, y: n.y }));
+    let on = false;
+    const move = (ev) => {
+      const dx = ev.clientX - e.clientX;
+      const dy = ev.clientY - e.clientY;
+      if (!on && Math.hypot(dx, dy) < 5) return;
+      if (!on) { on = true; drag.active = true; handle.classList.add('dragging'); }
+      ev.preventDefault();
+      moving.forEach((m) => { m.n.x = m.x + dx; m.n.y = m.y + dy; clamp(m.n); });
+      paint();
+    };
+    const up = () => {  // pointerup or pointercancel, once
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      if (!on) return;
+      const m = moving[0];
+      const was = offsets[key] || [0, 0];
+      storeLayout(ctx.missionName, { ...offsets, [key]: [was[0] + m.n.x - m.x, was[1] + m.n.y - m.y] });
+      // the click that ends a drag is not a pick
+      handle.addEventListener('click', (c) => { c.stopImmediatePropagation(); c.preventDefault(); }, { capture: true, once: true });
+      setTimeout(() => { drag.active = false; renderGraph(); }, 0);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
   });
-  graph.append(over);
-  if (end) graph.append(el('div', { class: 'pg-end', text: end, style: `left: ${x0}px; top: ${y + G.endGap}px` }));
-  // the picked step's details: a pop-up beside its bar (right of it if it fits, else left), its top at the bar's row
-  // and kept inside the graph's height; with room on neither side (a bar to the last lane, a narrow card) under the
-  // bar, inside the graph's width (renderGraph makes the graph tall enough for it)
+  nodes.forEach((n) => grab(n.el, n.moves[n.moves.length - 1], () => [n.key]));
+  outlines.forEach((o) => grab(o.head, o.moves[o.moves.length - 1], () => o.keys));
+  paint();
+  graph.append(notes);
+
+  const wrap = div('pg', graph);
+  if (Object.keys(offsets).length) {  // the operator moved something: tidy puts the drawn layout back
+    const tidy = el('button', { type: 'button', class: 'btn small pg-tidy', title: 'Tidy the layout', 'aria-label': 'Tidy the layout', text: '↺' });
+    tidy.addEventListener('click', () => { storeLayout(ctx.missionName, {}); renderGraph(); });
+    graph.append(tidy);
+  }
+  // the picked step's details: on a phone the bottom sheet; on a laptop a pop-up beside its node (right if it fits,
+  // else left, else under it; renderGraph makes the graph tall enough for it)
   const picked = view.selected ? plan.steps.findIndex((s) => s.id === view.selected) : -1;
-  if (picked >= 0) {
+  if (picked >= 0 && ctx.phone) {
+    wrap.classList.add('with-sheet');
+    wrap.append(...planCard(picked, ctx, true));
+  } else if (picked >= 0) {
+    const n = nodes.get(stepKey[picked]);
     const pop = planCard(picked, ctx, false);
-    const x = shown.has(picked) ? spanX(picked) : x0 + G.gutter;   // beside the whole step, its track too
-    const right = shown.has(picked) ? spanR(picked) : x;
-    const top = rowY[picked] - G.row / 2;
-    if (width - (right + POP_GAP) >= POP_W) pop.style.left = `${right + POP_GAP}px`;
-    else if (x >= POP_W + POP_GAP) pop.style.left = `${x - POP_W - POP_GAP}px`;
+    const right = n.x + n.w / 2 + POP_GAP;
+    const left = n.x - n.w / 2 - POP_GAP - POP_W;
+    if (right + POP_W <= width) pop.style.left = `${right}px`;
+    else if (left >= 0) pop.style.left = `${left}px`;
     else {
-      pop.style.left = `${Math.max(0, Math.min(x, width - POP_W))}px`;
-      pop.style.top = `${top + G.chip + POP_GAP}px`;
+      pop.style.left = `${Math.max(0, Math.min(n.x - POP_W / 2, width - POP_W))}px`;
+      pop.style.top = `${n.y + n.h / 2 + 22 + POP_GAP}px`;
     }
-    pop.style.top ||= `${Math.max(0, Math.min(top, height - POP_MIN_H))}px`;
+    pop.style.top ||= `${Math.max(0, Math.min(n.y - n.h / 2 - 8, height - POP_MIN_H))}px`;
     graph.append(pop);
   }
-  return { node: div('pg', graph), replans: replans.length };
+  return { node: wrap, replans: replans.length };
 }
 
 function renderGraph() {
   const box = $('plan-graph');
   const snap = state.snapshot;
-  if (!box || box.hidden || !snap) return;
+  if (!box || box.hidden || !snap || drag.active) return;
   const { plan, live } = shownPlan();  // app.js: the live plan, or a preview to pick a start step in
   if (!plan || !plan.steps.length) {
     box.replaceChildren(el('p', { class: 'muted', text: plan?.message || 'No plan yet' }));
@@ -570,27 +822,22 @@ function renderGraph() {
     || (band.key in stored ? stored[band.key] : band.steps.includes(anchor));
   const end = loopText(plan, mission, snap);
   const ctx = { plan, states, r, events: live ? snap.outcomes : {}, snap, usual, info, isOpen, phone: PHONE.matches,
-    width: box.clientWidth,
+    width: box.clientWidth, missionName,
     pickable: snap.status.state !== 'running' && snap.status.state !== 'paused', focus: focusIndex(plan, states),
-    toggle: (band) => () => { storeBand(missionName, band.key, !isOpen(band)); renderGraph(); },
-    cycleNote: end && snap.status.plan_id === plan.plan_id && snap.status.cycle ? `cycle ${snap.status.cycle}` : '' };
+    toggle: (band) => () => { storeBand(missionName, band.key, !isOpen(band)); renderGraph(); } };
   const sheetScroll = box.querySelector('.pg-sheet')?.scrollTop ?? 0;  // the sheet is rebuilt every second: keep its place
-  if (ctx.phone) {
-    box.replaceChildren(rail(bands, ctx, end), legend(plan, ctx.events, false, false));
-    const sheet = box.querySelector('.pg-sheet');
-    if (sheet) sheet.scrollTop = sheetScroll;
-  } else {
-    const drawn = lanesGraph(bands, ctx, end);
-    box.replaceChildren(drawn.node, legend(plan, ctx.events, drawn.replans > 0));
-    // the pop-up is placed over the graph: the graph grows to hold it (one under a low bar, a tall one)
-    const pop = box.querySelector('.pg-pop');
-    const graph = box.querySelector('.pg-graph');
-    if (pop && graph) graph.style.height = `${Math.max(graph.offsetHeight, pop.offsetTop + pop.offsetHeight)}px`;
-  }
+  const drawn = nodeGraph(bands, ctx, end);
+  box.replaceChildren(drawn.node, legend(plan, ctx.events, drawn.replans > 0));
+  const sheet = box.querySelector('.pg-sheet');
+  if (sheet) sheet.scrollTop = sheetScroll;
+  // the pop-up is placed over the graph: the graph grows to hold it (one under a low node, a tall one)
+  const pop = box.querySelector('.pg-pop');
+  const graph = box.querySelector('.pg-graph');
+  if (pop && graph) graph.style.height = `${Math.max(graph.offsetHeight, pop.offsetTop + pop.offsetHeight)}px`;
   if (refocus) (box.querySelector(refocus) || box.querySelector('[data-step]'))?.focus({ preventScroll: true });
 }
 PHONE.addEventListener('change', () => renderGraph());
-// the lanes follow the box's width: drawn again when it changes (a window resize, the Run grid's breakpoint)
+// the layout follows the box's width: drawn again when it changes (a window resize, the Run grid's breakpoint)
 let graphWidth = 0;
 new ResizeObserver(([entry]) => {
   const width = Math.round(entry.contentRect.width);

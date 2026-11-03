@@ -263,24 +263,25 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 - **3D view** (`.viewer3d`): a full-width viewport card, 16:10 on a laptop and 4:3 at 600px and below, dark in both
   themes, 10px radius; a `canvas` child fills it. `.viewer3d-tools` is an overlay toolbar top right for icon buttons
   (`--tap-s` square, light icons; `aria-pressed="true"` in brand fill).
-- **Plan graph** (`.pg`, graph.js): steps top to bottom in resource lanes (base, hands, torso, joints) that share the
-  Plan card's width (at least 64px each; drawn again when the card resizes), rows of 32px, step numbers in Barlow Semi
-  Condensed in a 28px gutter. Every step is a 28px tile (at most 64px wide, its icon from icons.js centred) in the
-  middle of its lane; a step on several lanes sits in the middle of a 12px track (`.pg-track`, a pill from its first lane to its last, 4px inside, the step's colour at 10-35%): it
-  reads as one step holding those lanes, not as a bar of time (the earlier full-width bar looked like a Gantt
-  chart). The track spans a lane between that the step does not hold (base and right arm, the left arm between);
-  the pop-up's Locks row says which it holds. Chips take the skill colour (`--k` from `--kind-*`):
-  filled pastel with no outline (22% done, 11% pending) and a neutral ✓ corner when done, running solid with a 2px
-  ring and the breathing glow (amber ring paused), failed red with a ✕ dot, timeout / canceled / skipped amber.
-  Phases are bands (`.pg-band`, `--surface-field`, 24px) with a chevron, done/total and the usual failure rule;
-  closed, one row with the lanes as mini chips and the state word, remembered per mission. Only exceptions are
-  marked: rule badges on the chip's top edge, a dashed replan line in the left gutter (no parallel-candidate boxes:
-  they were noise). A click on a step (the running one too; the run board shows that one anyway) opens its details in
-  a 320px pop-up beside the step, its track too (`.pg-pop`, right of it if it fits, else left, else under it, the graph growing
-  to hold it; a non-modal dialog with Close; Escape, a click
-  elsewhere or the step again close it, the focus goes to Close and back to the step). At 600px and below: a rail of
-  44px chips per band and a bottom sheet (`.pg-sheet`) for a step the operator taps. It reads `--g-*` tokens mapped
-  onto the global ones.
+- **Plan graph** (`.pg`, graph.js): a state machine, laptop and phone alike (the resource lanes looked like a Gantt
+  chart and spent the width on empty lanes). Steps are 44px icon nodes (14px radius, skill colour `--k`: pastel when
+  done or pending, solid with the breathing ring when running, red when failed, amber timeout / canceled / skipped),
+  their number and target under them, joined by curved arrows in run order: solid (`--text-muted`) where the run has
+  been, flowing lime into the running step, dotted ahead. A phase of 4 to 16 steps is a ring (clockwise from its
+  upper left, open at the left, its done/total big and faint in the middle); a shorter or longer one a snake on a
+  gentle wave. Each node is nudged a few px off its spot (fixed per step), so it reads drawn, not gridded. An open
+  phase has a soft outline (28px radius; lime while it runs, red when it failed) with its header pill on the top
+  edge (name, done/total, usual failure rule); a nested include is a soft band through its steps with a small tag;
+  a closed phase is one stack node (cards, filled from below to its share done), and the arrows point at it.
+  Phases flow across the box in lines; an arrow to a phase further down runs out to the left of the outlines, down
+  and in from the left. A black dot points at the start step; a dashed brand loop runs up the left gutter back to
+  the first step when the mission repeats (its rule along it), else a final ring follows the last step. A replan is
+  a dashed red arrow to the step it replans from, labelled; other rule exceptions are badges on the node's top edge.
+  The operator can drag a node or a phase (by its header or stack) with a mouse or pen, kept per mission
+  (`tw-plan-layout`); ↺ top right puts the drawn layout back. A click on a step opens its details in a 320px pop-up
+  beside it (`.pg-pop`, right if it fits, else left, else under it; Close, Escape, a click elsewhere or the step
+  again close it); at 600px and below a bottom sheet (`.pg-sheet`). It reads `--g-*` tokens mapped onto the global
+  ones.
 
 ## Icons and imagery
 

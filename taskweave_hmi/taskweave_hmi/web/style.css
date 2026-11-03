@@ -777,9 +777,11 @@ li.empty { list-style: none; padding: 6px 2px; }
 .viewer3d-tools svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.75; }
 @media (max-width: 600px) { .viewer3d { aspect-ratio: 4 / 3; } }
 
-/* plan graph (graph.js, G3): icon chips in resource lanes, phases as collapsible bands, the running or selected step
-   in a side card; a rail of 44 px chips and a bottom sheet at 600px and below. Chips take their skill colour (--k,
-   from --kind-*) and show state by fill, ring and corner dot; the graph's own colours are the --g-* tokens. */
+/* plan graph (graph.js): a state machine. Steps are 44 px icon nodes joined by curved arrows, phases soft outlines
+   with their header on the edge (closed: a stack node), a pop-up for a picked step (a bottom sheet at 600px and
+   below). Nodes take their skill colour (--k, from --kind-*) and show state by fill, ring and corner dot; arrows show
+   the way travelled (solid), the step running (flowing lime) and the way ahead (dotted). The graph's own colours are
+   the --g-* tokens. */
 .graph-box { display: grid; gap: var(--sp-3); container: plan / inline-size;
   --g-fail: #e5566b; --g-warn: #d17a12; --g-ok: var(--ok); --g-bad: var(--bad); --g-card: var(--surface-card); }
 @media (prefers-color-scheme: dark) { .graph-box { --g-fail: #ff7385; --g-warn: var(--warn); } }
@@ -787,31 +789,56 @@ li.empty { list-style: none; padding: 6px 2px; }
 .kind-drive { --k: var(--kind-drive); } .kind-arm { --k: var(--kind-arm); } .kind-grip { --k: var(--kind-grip); }
 .kind-wait { --k: var(--kind-wait); } .kind-other { --k: var(--kind-other); }
 .pg { display: block; }
+.pg.with-sheet { padding-bottom: 60vh; }  /* the sheet covers the bottom of the page: the plan scrolls clear of it */
 .pg-graph { position: relative; flex: none; }
+.pg-outline { fill: color-mix(in srgb, var(--surface-field) 55%, transparent); stroke: var(--border); stroke-width: 1.25; }
+.pg-outline.running, .pg-outline.paused { stroke: var(--run-fill); stroke-width: 2; }
+.pg-outline.failed { stroke: color-mix(in srgb, var(--g-bad) 60%, transparent); }
+.pg-subband { fill: none; stroke: color-mix(in srgb, var(--brand-text) 8%, transparent); stroke-linecap: round;
+  stroke-linejoin: round; }
+.pg-wire { fill: none; stroke: var(--text-muted); stroke-width: 1.75; }
+.pg-wire.todo { stroke: var(--border-strong); stroke-dasharray: 1 5; stroke-linecap: round; stroke-width: 2; }
+.pg-wire.now { stroke: var(--run-fill); stroke-width: 2.5; stroke-dasharray: 7 5; animation: wire-flow .7s linear infinite; }
+.pg-wire.fail { stroke: var(--g-fail); stroke-dasharray: 5 4; }
+.pg-wire.loop { stroke: var(--brand-text); stroke-dasharray: 6 5; stroke-width: 1.5; }
+.pg-head path { fill: var(--text-muted); } .pg-head.todo path { fill: var(--border-strong); }
+.pg-head.now path { fill: var(--run-fill); } .pg-head.fail path { fill: var(--g-fail); } .pg-head.loop path { fill: var(--brand-text); }
+.pg-wire-label { font: 600 11.5px var(--sans); paint-order: stroke; stroke: var(--g-card); stroke-width: 4px;
+  stroke-linejoin: round; }
+.pg-wire-label.fail { fill: var(--g-fail); } .pg-wire-label.loop { fill: var(--brand-text); }
+.pg-ring-count { font: 600 34px var(--cond); fill: var(--text-muted); opacity: .45; }
+.pg-init { fill: var(--text); }
+.pg-final { fill: none; stroke: var(--text); stroke-width: 1.5; } .pg-final-dot { fill: var(--text); }
+@keyframes wire-flow { to { stroke-dashoffset: -12; } }
+/* a node's number and target under it */
+.pg-label { position: absolute; text-align: center; font: 11px/1.3 var(--sans); color: var(--text-muted); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.pg-label b { font: 600 12px var(--cond); color: var(--text); }
+.pg-label.now, .pg-label.now b { color: var(--run); font-weight: 700; }
+/* a closed phase: a stack of cards, filled from below to its share done, done/total on it */
+.pg-stack { position: absolute; width: 52px; height: 52px; padding: 0; display: grid; place-items: center; cursor: pointer;
+  border-radius: 14px; border: 1.5px solid var(--border-strong); color: var(--text); font: 700 13px var(--cond);
+  background: linear-gradient(to top, color-mix(in srgb, var(--done) 16%, var(--g-card)) var(--done-share),
+    var(--g-card) var(--done-share));
+  box-shadow: 4px -4px 0 -1.5px var(--g-card), 4px -4px 0 0 var(--border-strong),
+    8px -8px 0 -1.5px var(--g-card), 8px -8px 0 0 var(--border); }
+.pg-stack.running, .pg-stack.paused { border-color: var(--run-fill); border-width: 2px; }
+.pg-stack.failed { border-color: var(--g-bad); color: var(--g-bad); }
+.pg-stack:hover { border-width: 2px; }
+.pg-stack:focus-visible, .pg-tidy:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.pg-chip.dragging, .pg-stack.dragging, .pg-band.dragging { cursor: grabbing; z-index: 2; }
+.pg-tidy { position: absolute; top: 0; right: 0; width: 32px; padding: 0; font-size: 16px; }
 .pg-lines { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
-.pg-divider { stroke: var(--border); stroke-width: 1; }
-.pg-lane { position: absolute; top: 0; height: 24px; display: grid; place-items: center; color: var(--text-muted);
-  font: 600 11px var(--sans); letter-spacing: .06em; text-transform: uppercase; }
-.pg-num { position: absolute; display: grid; place-items: center; font: 12px var(--cond); color: var(--text-muted); }
-.pg-num.now { font-weight: 700; color: var(--run); }
-.pg-replan { fill: none; stroke: var(--g-fail); stroke-width: 1.75; stroke-dasharray: 5 4; stroke-linejoin: round; }
-.pg-lines marker path { fill: var(--g-fail); }
-.pg-replan-label { font: 600 11.5px var(--sans); fill: var(--g-fail); }
-.pg-end { position: absolute; font: 600 var(--fs-xs) var(--sans); color: var(--brand-text); white-space: nowrap; }
 
 /* chips: pending faded, succeeded tinted with a green dot, running solid with a brand ring (breathing), failed red */
 .pg-chip { position: absolute; width: 28px; height: 28px; padding: 0; display: grid; place-items: center; cursor: pointer;
   border-radius: var(--r-s); border: 1.5px solid var(--k); background: color-mix(in srgb, var(--k) 8%, var(--g-card));
   color: var(--k); transition: background-color .3s, border-color .3s; }
 .pg-chip .icon { width: 16px; height: 16px; pointer-events: none; }
-/* the laptop graph: every step a tile (icon centred) in the middle of its lane; a step on several lanes on a thin
-   track across them, in the step's colour (stronger when done or running) */
-.pg-track { position: absolute; border-radius: 999px; pointer-events: none;
-  background: color-mix(in srgb, var(--k) 18%, var(--g-card)); }
-.pg-track.state-pending { background: color-mix(in srgb, var(--k) 10%, var(--g-card)); }
-.pg-track.state-running, .pg-track.state-paused { background: color-mix(in srgb, var(--k) 35%, var(--g-card)); }
-.pg-track.state-failed, .pg-track.state-rejected { background: color-mix(in srgb, var(--g-fail) 22%, var(--g-card)); }
-/* filled pastel bars, no outline (done stronger, pending lighter); running, paused, failed and warn keep theirs */
+/* the graph's nodes: 44 px rounded tiles, filled pastel with no outline (done stronger, pending lighter); running,
+   paused, failed and warn keep theirs */
+.pg-graph .pg-chip { width: 44px; height: 44px; border-radius: 14px; }
+.pg-graph .pg-chip .icon { width: 22px; height: 22px; }
 .pg-graph .pg-chip:not(.state-running, .state-paused, .state-failed, .state-rejected, .state-warn) {
   border-color: transparent; background: color-mix(in srgb, var(--k) 22%, var(--g-card)); }
 .pg-graph .pg-chip.state-pending { background: color-mix(in srgb, var(--k) 11%, var(--g-card)); }
@@ -844,11 +871,13 @@ li.empty { list-style: none; padding: 6px 2px; }
   border: 1px solid color-mix(in srgb, var(--g-bad) 55%, transparent); }
 .pg-badge.skip { color: var(--text-muted); background: var(--surface-field); border-color: var(--border); }
 
-/* band (phase) headers: a full-width row; closed, the lanes it uses as mini chips and its state word */
-.pg-band { position: absolute; display: flex; align-items: center; gap: 6px; height: 24px; min-width: 0;
-  padding: 0 var(--sp-2) 0 6px; border: 0; border-radius: var(--r-s); background: var(--surface-field);
+/* an open phase's header: a pill on its outline's top edge (a nested include's smaller, over its first step) */
+.pg-band { position: absolute; display: flex; align-items: center; gap: 6px; height: 26px; min-width: 0;
+  padding: 0 var(--sp-3) 0 8px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--g-card);
   color: var(--text); cursor: pointer; font: 600 var(--fs-s)/1 var(--sans); text-align: left; }
 .pg-band:hover { background: var(--surface-hover); }
+.pg-band.pg-sub { height: 22px; font-size: var(--fs-xs); }
+.pg-band.pg-sub .pg-band-meta { display: none; }
 .pg-band:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .pg-chev { flex: none; width: 12px; height: 12px; display: grid; place-items: center; color: var(--text-muted);
   transition: transform .15s; }
@@ -857,14 +886,6 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-band.open .pg-chev { transform: rotate(90deg); }
 .pg-band-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pg-band-meta { flex: none; font: 600 var(--fs-xs) var(--sans); color: var(--text-muted); white-space: nowrap; }
-.pg-band-word { flex: none; font: 600 var(--fs-xs) var(--cond); color: var(--text-muted); text-transform: uppercase;
-  letter-spacing: .04em; }
-.pg-band-word.done { color: var(--done); } .pg-band-word.running { color: var(--run); }
-.pg-band-word.failed { color: var(--bad); } .pg-band-word.paused, .pg-band-word.stopped { color: var(--warn); }
-.pg-minis { flex: none; display: flex; gap: 2px; }
-.pg-minis i { width: 14px; height: 14px; display: grid; place-items: center; border-radius: var(--r-xs);
-  border: 1px solid var(--border-strong); color: var(--text-muted); font: 700 9px/1 var(--sans); font-style: normal;
-  text-transform: uppercase; }
 
 /* the side card: the running or selected step */
 .pg-card { flex: 0 1 300px; min-width: 0; margin-top: 24px; display: grid; gap: var(--sp-3); padding: var(--sp-4);
@@ -897,18 +918,6 @@ li.empty { list-style: none; padding: 6px 2px; }
 .legend-item .icon { width: 16px; height: 16px; color: var(--k); }
 .legend-item i.swatch-fail { width: 16px; height: 0; border-top: 2px dashed var(--g-fail); }
 
-/* phone: the rail (lanes collapsed), 44 px chips with the number inside, and the step in a bottom sheet */
-.pg-rail { display: grid; gap: var(--sp-5); }
-.pg-rail.with-sheet { padding-bottom: 60vh; }  /* the sheet covers the bottom of the page: the plan scrolls clear of it */
-.pg-rband { display: grid; gap: var(--sp-3); }
-.pg-rband.sub { margin-left: var(--sp-3); }
-.pg-rail .pg-band { position: static; height: var(--tap-min); padding: 0 var(--sp-3) 0 var(--sp-2); }
-.pg-rail .pg-band-name { font: 700 var(--fs-sm) var(--sans); letter-spacing: .06em; text-transform: uppercase; }
-.pg-rchips { display: flex; flex-wrap: wrap; gap: 10px var(--sp-2); padding-top: 4px; }
-.pg-rail .pg-chip { position: relative; width: 44px; height: 44px; border-radius: var(--r-s); padding-bottom: 10px; }
-.pg-rail .pg-chip .icon { width: 20px; height: 20px; }
-.pg-rnum { position: absolute; bottom: 3px; left: 0; right: 0; font: 10px/1 var(--cond); text-align: center; }
-.pg-rail .pg-end { position: static; }
 .pg-sheet { position: fixed; left: 0; right: 0; bottom: calc(var(--nav) + env(safe-area-inset-bottom, 0px)); z-index: 4; display: grid; gap: var(--sp-4);
   max-height: max(160px, calc(100dvh - var(--top-h, 76px) - var(--nav) - var(--sp-6))); overflow-y: auto; overscroll-behavior: contain;
   padding: 10px var(--sp-5) var(--sp-5); background: var(--surface-card);
@@ -943,7 +952,7 @@ li.empty { list-style: none; padding: 6px 2px; }
 }
 @media (prefers-reduced-motion: reduce) {
   #progress-bar, .card.status, .card.status::before, .mission, .mission::before { transition: none; }
-  .pg-chip.state-running { animation: none; }
+  .pg-chip.state-running, .pg-wire.now { animation: none; }
   .bot, .bot g, .board-say::after { transition: none; }
   .board .bot *, .board .bot-all { animation: none !important; }  /* the poses stay, without the motion */
 }
