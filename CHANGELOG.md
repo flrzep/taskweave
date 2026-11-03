@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **RunSkill `context_json`: the skill sees what follows its step.** The executive sends `{"plan_id", "cycle",
+  "step_index", "ahead": [{"id", "skill", "kind", "args", "resolved"}]}` (the rest of the cycle, placeholders filled
+  from the world where possible, `resolved: false` where not); the skill server hands it to the skill as `ctx.context`
+  (`{}` when none: HMI jog/teach goals and the operator joy send none). A retry sends the same, a replan the new plan's
+  rest. Rebuild `taskweave_interfaces`.
 - **PlanStep carries the plan graph's data:** `origin_json` (`{"include": [names, outermost first], "step": index in the
   innermost mission's own steps}`, empty when the step is not from a mission), `replan_from` and `max_replans`.
 

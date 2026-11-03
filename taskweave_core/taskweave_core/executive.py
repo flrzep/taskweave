@@ -56,8 +56,9 @@ ACTIVE = (State.RUNNING, State.PAUSED)
 
 
 class Dispatcher(Protocol):
-    def dispatch(self, token: int, step: Step, attempt: int) -> None:
-        """Start ``step`` (arguments resolved); report back via ``Executive.on_result(token, ...)``."""
+    def dispatch(self, token: int, step: Step, attempt: int, context: dict | None = None) -> None:
+        """Start ``step`` (arguments resolved); report back via ``Executive.on_result(token, ...)``. ``context``: what
+        follows the step in its cycle (``Executive._context``), sent to the skill."""
 
     def cancel(self, token: int) -> None:
         """Cancel the step started with ``token``. The skill must still report a result (normally CANCELED)."""
@@ -247,7 +248,24 @@ class Executive:
         self.status.step_status, self.status.step_progress = 'dispatched', -1.0
         self._episode('step_started')
         self.on_status(self.status)
-        self.dispatcher.dispatch(self._token, resolved, self.status.attempt)
+        self.dispatcher.dispatch(self._token, resolved, self.status.attempt, self._context())
+
+    def _context(self) -> dict:
+        """For the skill of the current step: {plan_id, cycle, step_index, ahead: [{id, skill, kind, args, resolved}]},
+        the steps after it to the end of the cycle. ``args`` have their placeholders filled from the world now;
+        ``resolved`` is False (args as written) where one has no value yet."""
+        world, ahead = self.world.snapshot(), []
+        for step in self.plan.steps[self.status.step_index + 1:]:
+            try:
+                args, done = placeholders.resolve(step.args, world), True
+            except placeholders.PlaceholderError:
+                args, done = step.args, False
+            kind = step.kind
+            if done and args != step.args and self.annotate is not None:
+                kind = self.annotate(replace(step, args=args))[0]
+            ahead.append({'id': step.id, 'skill': step.skill, 'kind': kind, 'args': args, 'resolved': done})
+        return {'plan_id': self.plan.plan_id, 'cycle': self.status.cycle, 'step_index': self.status.step_index,
+                'ahead': ahead}
 
     def _advance(self) -> None:
         if self.status.step_index + 1 < len(self.plan.steps):

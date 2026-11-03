@@ -76,19 +76,19 @@ class RosDispatcher:
         self.pending_cancel: set[int] = set()
         self.lock = threading.Lock()
 
-    def dispatch(self, token: int, step: Step, attempt: int) -> None:
+    def dispatch(self, token: int, step: Step, attempt: int, context: dict | None = None) -> None:
         info = self.node.catalog.get(step.skill)
         if info is None:
             self._report(token, Outcome.REJECTED, f'skill {step.skill!r} is not in the catalog')
             return
         client = self.client_for(info.action_name)
         if client.server_is_ready():
-            self._send(token, step, client)
+            self._send(token, step, client, context)
             return
         # Discovery has not matched yet. Wait off the caller's thread: dispatch runs inside the executive's lock, in an
         # executor callback, and blocking there would stall abort/pause and the timers. A cancel in the meantime is kept
         # in pending_cancel and applied when the goal is accepted.
-        threading.Thread(target=self._wait_and_send, args=(token, step, client), daemon=True).start()
+        threading.Thread(target=self._wait_and_send, args=(token, step, client, context), daemon=True).start()
 
     def client_for(self, action_name: str) -> ActionClient:
         with self.lock:
@@ -103,7 +103,7 @@ class RosDispatcher:
         for info in catalog.values():
             self.client_for(info.action_name)
 
-    def _wait_and_send(self, token: int, step: Step, client: ActionClient) -> None:
+    def _wait_and_send(self, token: int, step: Step, client: ActionClient, context: dict | None) -> None:
         wait_s = max(0.0, float(self.node.get_parameter('server_wait_s').value))
         try:
             ready = client.wait_for_server(timeout_sec=wait_s)
@@ -120,11 +120,12 @@ class RosDispatcher:
         if canceled:
             self._report(token, Outcome.CANCELED, 'canceled before the goal was sent')
             return
-        self._send(token, step, client)
+        self._send(token, step, client, context)
 
-    def _send(self, token: int, step: Step, client: ActionClient) -> None:
+    def _send(self, token: int, step: Step, client: ActionClient, context: dict | None) -> None:
         goal = RunSkill.Goal(step_id=step.id, skill=step.skill, instruction=step.instruction,
-                             args_json=json.dumps(step.args), timeout_s=float(step.timeout_s))
+                             args_json=json.dumps(step.args), timeout_s=float(step.timeout_s),
+                             context_json=json.dumps(context) if context else '')
         future = client.send_goal_async(
             goal, feedback_callback=lambda msg: self.node.executive.on_feedback(
                 token, msg.feedback.progress, msg.feedback.status))

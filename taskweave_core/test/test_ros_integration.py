@@ -18,6 +18,8 @@ from taskweave_core.task_handler import TaskHandler  # noqa: E402
 from taskweave_interfaces.msg import TaskStatus  # noqa: E402
 from taskweave_interfaces.srv import DescribeRobot, ListSkills, StartMission  # noqa: E402
 
+SEEN = []   # (target, ctx.context) of every Move goal
+
 
 class Move(Skill):
     name = 'move'
@@ -27,6 +29,7 @@ class Move(Skill):
                                          'x-taskweave-target-kinds': ['base']}}}
 
     def execute(self, ctx, args):
+        SEEN.append((args['to'], ctx.context))
         ctx.feedback(1.0, 'arrived')
         return SkillResult.succeeded(world_state={'robot_at': args['to']})
 
@@ -271,3 +274,45 @@ def test_operator_button_runs_a_skill_only_when_no_mission_is_active(system, ope
     time.sleep(0.5)  # a negative check: give the press time to be (wrongly) acted on
     assert not operator.running  # ignored while the mission runs
     call(client, Trigger, names.ABORT, Trigger.Request())
+
+
+def test_a_mission_step_gets_what_follows_it_as_context(system):
+    handler, client, _, _ = system
+    SEEN.clear()
+    assert call(client, StartMission, names.START_MISSION, StartMission.Request(mission='patrol')).accepted
+    assert wait_for(handler, {'SUCCEEDED', 'FAILED'}).state.name == 'SUCCEEDED'
+    first, last = SEEN
+    assert first[1]['step_index'] == 0 and first[1]['plan_id'] == handler.executive.status.plan_id
+    assert [(a['skill'], a['resolved']) for a in first[1]['ahead']] == [('wait', True), ('move', True)]
+    assert first[1]['ahead'][1]['args'] == {'to': 'home'}
+    assert last[1]['step_index'] == 2 and last[1]['ahead'] == []
+
+
+def send_move(client, **goal):
+    import json
+
+    from rclpy.action import ActionClient
+
+    from taskweave_interfaces.action import RunSkill
+
+    action = ActionClient(client, RunSkill, names.skill_action('move'))
+    assert action.wait_for_server(timeout_sec=30)
+    future = action.send_goal_async(RunSkill.Goal(step_id='t', skill='move', args_json=json.dumps({'to': 'home'}),
+                                                  **goal))
+    wait_until(future.done, what='the goal answer')
+    assert future.result().accepted
+    result = future.result().get_result_async()
+    wait_until(result.done, what='the result')
+    return result.result().result
+
+
+def test_goals_without_or_with_unusable_context_are_still_accepted(system):
+    from taskweave_interfaces.action import RunSkill
+
+    _, client, _, _ = system
+    SEEN.clear()
+    for goal in ({}, {'context_json': 'not json'}, {'context_json': '[1]'}):
+        assert send_move(client, **goal).outcome == RunSkill.Result.SUCCEEDED
+    assert [context for _, context in SEEN] == [{}, {}, {}]
+    assert send_move(client, context_json='{"ahead": []}').outcome == RunSkill.Result.SUCCEEDED
+    assert SEEN[-1][1] == {'ahead': []}
