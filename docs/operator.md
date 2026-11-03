@@ -205,11 +205,11 @@ The Teach tab shows the robot's position at the top and one list at a time. Ever
 
 | List | What it stores | How to teach it |
 |---|---|---|
-| **Locations** | Base targets of the cell (`cell/targets.yaml`) | Drive the robot there (pad, or a mission step), **+ Location**, a name, **Set from robot**, **Save**. **Drive here** drives to a saved one. |
-| **Stances** | Base targets on a type of object: where the robot stands at it, relative to it, per robot (`robots/<robot>/objects/<type>.yaml`) | In the card of the object type: drive the robot to where it should stand at one of the placed objects, choose that object, **Set from robot**, **Save**. Every placed object of the type follows. A per-object override is for the one object that needs another stance. The card's **Placed** view lists the placed objects (read-only: they come from `cell/objects.yaml`). |
+| **Locations** | Base targets of the cell (`cell/targets.yaml`) | Drive the robot there (pad, or a mission step), **+ Location**, a name, **Set from robot**, **Save**: the teach node saves where the robot stands then, and refuses a stale pose or one right after a sim clock jump. A number you edit after **Set from robot** is saved as typed. **Drive here** drives to a saved one. The pad's teach press does not save locations. |
+| **Stances** | Base targets on a type of object: where the robot stands at it, relative to it, per robot (`robots/<robot>/objects/<type>.yaml`) | In the card of the object type: drive the robot to where it should stand at one of the placed objects, choose that object (the line under it names it, its distance from the robot, and turns red when another one is nearer), **Set from robot**, **Save** (through the teach node, as for a location). Every placed object of the type follows. A per-object override is for the one object that needs another stance. The card's **Placed** view lists the placed objects (read-only: they come from `cell/objects.yaml`). |
 | **Poses** | Hand and joint targets of the robot itself (`robots/<robot>/targets.yaml`): arm shapes relative to the robot, such as `home` | Put the arms there with the pad, **+ Pose**, a name, then **Capture from robot** (or the pad's L1 + L3). **Move here** moves the robot into it. |
-| **Points** | Hand targets on an object: where a gripper goes on it (a grasp, a place), relative to the object type (`objects/<type>.yaml`) | Choose at which placed object to teach (**at**: the nearest one by default), put the gripper there with the pad, **+ Point**, **Capture from robot** or L1 + L3. **Go here** drives the gripper there. |
-| **Carry poses** | Object targets in the robot's base frame: how the robot carries an object it holds (`carry`) | Typed in as joint values and waypoints; **Test** needs the robot holding such an object. |
+| **Points** | Hand targets on an object: where a gripper goes on it (a grasp, a place), relative to the object type (`objects/<type>.yaml`) | Choose at which placed object to teach (**at**: the nearest one by default; the line under it names the one used and its distance), put the gripper there with the pad, **+ Point**, **Capture from robot** or L1 + L3. **Only for the object it is taught at** saves an override of the point for that one placed object. **Go here** drives the gripper there. |
+| **Carry poses** | Object targets in the robot's base frame: how the robot carries an object it holds (`carry`) | Typed in as joint values and waypoints; **Test** needs the robot holding such an object. **Capture from robot** is greyed out: teaching a held object is not built yet. |
 
 The same targets can be taught from a terminal: `taskweave teach base NAME` or `INSTANCE/NAME` (the robot's base pose),
 `taskweave teach hand NAME` or `INSTANCE/NAME` (the tools' poses) and `taskweave teach joints NAME` (the joint values of
@@ -220,7 +220,10 @@ Every entry shows which missions use it; one that a mission uses cannot be renam
 edits the stored values, **Advanced** a hand target's elbow side, straight approach and finger opening. In a number field
 ↑ / ↓ (on a laptop also the small arrows at its right end) change a position by 1 mm and an angle by 1°, with Shift
 by 10 mm or 10°; decimals are written with a dot in every browser language (a typed comma becomes one). **Delete**
-needs a second tap. Saved values are used from the next move or mission start.
+needs a second tap. A **Save** or **Capture from robot** that would overwrite a taught pose first shows the change (how
+far each hand or the base moves and turns, each joint's change) and saves on a second tap. After a save, a line under
+the entry says what was saved, where, and offers **Undo**: it puts the files back as they were before that save, until
+they change again (another save, the pad, an editor). Saved values are used from the next move or mission start.
 
 While a move started here runs (**Drive here**, **Move here**, **Go here**, a carry pose's **Test**), a bar in the top
 bar shows what it goes to and for how long, on every tab. Its red **Abort** stops it at once with one press, as does

@@ -154,3 +154,18 @@ def test_a_point_preview_takes_each_tcp_relative_to_the_object_from_tf(serve, co
     assert hands['left']['moved_mm'] == pytest.approx(20.0, abs=0.2)
     assert hands['right']['moved_mm'] == pytest.approx(0.0, abs=0.2)
     assert hands['left']['turned_deg'] == pytest.approx(0.0, abs=0.1)
+
+
+def test_the_pads_teach_target_carries_the_instance_override_to_the_capture(serve, config):  # noqa: F811
+    from types import SimpleNamespace
+
+    bridge = teach_bridge(config, None)
+    published, captured = [], []
+    bridge.teach_target_pub = bridge.notice_pub = SimpleNamespace(publish=published.append)
+    request = serve(bridge)
+    target = {'scope': 'frame_type2', 'name': 'rails_top', 'at': 'bay_1_stack_1_front', 'form': None,
+              'instance_override': True}
+    assert request('PUT', '/api/teach/target', target) == (200, {'target': target})
+    bridge.capture = lambda scope, name, body: captured.append(body) or {'file': 'f', 'message': '', 'undo': None}
+    bridge._teach_request(SimpleNamespace(data='{}'))
+    assert captured[0]['instance_override'] is True and captured[0]['at'] == 'bay_1_stack_1_front'

@@ -3,11 +3,13 @@
 // takes a held object: some joints first (e.g. the body), then the object's origin along straight lines through the waypoints
 // (in the robot's base frame). Typed in, not captured: a held object cannot be jogged. Uses app.js ($, el, api, message,
 // DEG, NAME_RE, STEP_M, STEP_DEG), robot.js (JOINT_SKIP) and teach.js (teach, showJoint, unshowJoint, jointUnit, jointStep,
-// numberInput, failText). A carry pose the config cannot read (a problem in the file, joints the robot has no group for)
-// is listed with its problem, to fix it here. Capture asks the teach node (the object kind); while that is not built it
-// answers why, and the answer is shown.
+// numberInput, failText) and app.js's noteSaved / savedNote (the last save, Undo). A carry pose the config cannot read (a problem in the file, joints the robot has no group for)
+// is listed with its problem, to fix it here. Capture asks the teach node (the object kind); that is not built yet, so
+// the button is disabled with the node's reason (CAPTURE_NOT_BUILT); the code path stays for when it is.
 
-const heldOpen = new Set();  // `${type}/${name}` of the open editors, kept over reloads
+const heldOpen = new Set();
+// teach.py NOT_BUILT: the teach node refuses every capture of a held pose until it is built
+const CAPTURE_NOT_BUILT = 'Not built yet: a held object in the base frame cannot be taught yet. Type the joints and waypoints here.';  // `${type}/${name}` of the open editors, kept over reloads
 
 function renderHeld() {
   const data = teach.data;
@@ -109,13 +111,17 @@ function heldItem(h, isNew = false) {
   const nameInput = el('input', { autocomplete: 'off', spellcheck: 'false', placeholder: 'e.g. carry_high' });
   nameInput.value = h.name;
   const test = el('button', { class: 'btn', text: 'Test (holding one)', 'data-edit': '' });
-  const capture = el('button', { class: 'btn', text: 'Capture from robot', 'data-edit': '' });
+  // disabled for good (no data-edit: the busy state must not enable it), the reason as tooltip and next to it
+  const capture = el('button', { class: 'btn', text: 'Capture from robot', title: CAPTURE_NOT_BUILT });
+  capture.disabled = true;
   capture.hidden = isNew;
+  const captureNote = el('span', { class: 'muted small-text', text: CAPTURE_NOT_BUILT });
+  captureNote.hidden = isNew;
   const save = el('button', { class: 'btn primary', text: 'Save', 'data-edit': '' });
   const remove = el('button', { class: 'btn danger', text: isNew ? 'Cancel' : 'Delete', 'data-edit': '' });
   test.hidden = isNew;
   const edit = el('div', { class: 'point-edit' },
-    el('div', { class: 'row gap' }, test, capture),
+    el('div', { class: 'row gap' }, test, capture), captureNote,
     el('div', { class: 'field' }, el('label', { text: 'Name' }), nameInput),
     el('div', { class: 'joint-group' }, el('label', { text: 'Joints, moved first' }), jointBox, jointPicker),
     el('p', { class: 'muted small-text', text: `Then the held ${h.object_type}'s origin moves along straight lines through `
@@ -167,6 +173,7 @@ function heldItem(h, isNew = false) {
     if (!ok) { message(msg, failText(result, 'not saved'), true); return; }
     heldOpen.delete(key);
     heldOpen.add(`${h.object_type}/${name}`);
+    noteSaved(`held:${h.object_type}/${name}`, `Saved ${name} → ${result.file}`, result.undo);
     await loadArm();
   });
   let armed = null;
@@ -184,7 +191,7 @@ function heldItem(h, isNew = false) {
     await loadArm();
   });
 
-  const item = el('li', { class: `point${isNew ? ' held-new' : ''}` }, head, edit);
+  const item = el('li', { class: `point${isNew ? ' held-new' : ''}` }, head, isNew ? '' : savedNote(`held:${key}`), edit);
   const open = (opened) => {
     edit.hidden = !opened;
     head.setAttribute('aria-expanded', String(opened));

@@ -2,10 +2,13 @@
 // taskweave HMI, Teach tab: Poses (relative to the robot, targets.yaml) and Points (on objects, objects/<type>.yaml),
 // one editor for both (the server's arm positions, arm.py). A pose or point that is open receives the pad's teach
 // press (L1 + L3); Capture does the same from here.
-// Uses helpers and state from app.js ($, el, api, message, show, state, DEG, NAME_RE, fillSelect, STEP_M, STEP_DEG).
+// Capture on an existing one shows what it would change first (POST .../preview) and saves on a second tap; the last
+// save shows under its entry with Undo (app.js noteSaved / savedNote).
+// Uses helpers and state from app.js ($, el, api, message, show, state, DEG, NAME_RE, fillSelect, STEP_M, STEP_DEG,
+// atHint, noteSaved, savedNote, confirmOverwrite).
 
 const ROBOT_SCOPE = 'robot';
-const teach = { data: null, open: null };
+const teach = { data: null, open: null, override: {} };  // override: per position, "only for the object it is taught at"
 const OPEN_ITEMS = '#pose-list li.point.pad-target, #point-list li.point.pad-target';
 
 const keyOf = (p) => `${p.scope}/${p.name}`;
@@ -58,11 +61,16 @@ function atPicker(scope) {
   select.replaceChildren(el('option', { value: '', text: 'nearest placed' }),
     ...(teach.data.placed[scope] || []).map((name) => el('option', { value: name, text: name })));
   select.value = teach.at[scope] || '';
+  const hint = atHint(() => select.value, scope);
   select.addEventListener('change', () => {
     teach.at[scope] = select.value;
-    if (teach.open?.startsWith(`${scope}/`)) setTeachTarget({ scope, name: teach.open.slice(scope.length + 1), at: select.value || null });
+    hint._update();
+    if (teach.open?.startsWith(`${scope}/`)) {
+      const item = document.querySelector(OPEN_ITEMS);
+      setTeachTarget({ scope, name: teach.open.slice(scope.length + 1), at: select.value || null, instance_override: !!item?._override?.() });
+    }
   });
-  return el('label', { class: 'row gap-s muted small-text' }, 'at', select);
+  return el('div', { class: 'at-picker' }, el('label', { class: 'row gap-s muted small-text' }, 'at', select), hint);
 }
 
 function summary(p) {
@@ -99,13 +107,39 @@ function positionItem(p) {
 
   const capture = el('button', { class: 'btn primary', text: 'Capture from robot', 'data-edit': '' });
   const test = el('button', { class: 'btn', text: robotScope ? 'Move here' : 'Go here', 'data-edit': '' });
+  // a point for one placed object only (instance_override): the others keep the type's point
+  const override = el('input', { type: 'checkbox' });
+  const overrideField = robotScope ? '' : el('div', {},
+    el('label', { class: 'check' }, override, 'Only for the object it is taught at'),
+    el('p', { class: 'muted small-text', text: `Saves an override of ${p.name} for that one placed ${p.scope} (the "at" choice); `
+      + `every other ${p.scope} keeps this point. For one object that sits differently.` }));
+  override.checked = !!teach.override[keyOf(p)];  // kept over reloads, as the pad's target keeps it
+  override.addEventListener('change', () => {
+    teach.override[keyOf(p)] = override.checked;
+    if (capture._armed) { confirmOverwrite(capture, msg, 'Capture from robot', ''); message(msg, ''); }  // compared without it
+    if (teach.open === keyOf(p)) setTeachTarget({ scope: p.scope, name: p.name, at: at(), instance_override: override.checked });
+  });
+  const url = `/api/teach/arm/${encodeURIComponent(p.scope)}/${encodeURIComponent(p.name)}`;
   capture.addEventListener('click', async () => {
+    const body = { at: at(), instance_override: override.checked };
+    // the "at" choice or the override changed since the comparison: compare again
+    if (capture._armed && capture._for !== JSON.stringify(body)) confirmOverwrite(capture, msg, 'Capture from robot', '');
+    capture._for = JSON.stringify(body);
+    if (!capture._armed) {  // first tap: what it would change, then a second tap saves
+      busy(capture, 'Comparing the robot now with the saved one…');
+      const { ok, data: preview } = await api('POST', `${url}/preview`, body);
+      capture.disabled = false;
+      const where = preview.at ? ` at ${preview.at}` : '';
+      if (ok && !preview.exists) message(msg, '');  // nothing saved yet to overwrite
+      else if (confirmOverwrite(capture, msg, 'Capture from robot', ok ? `Overwrites ${p.name}${where}: ${changeText(preview)}`
+        : `Cannot compare with the saved one (${failText(preview, 'no answer')}). Tap again to overwrite anyway.`)) return;
+    } else confirmOverwrite(capture, msg, 'Capture from robot', '');
     busy(capture, 'Saving the robot\'s current arm…');
-    const { ok, data: result } = await api('POST', `/api/teach/arm/${encodeURIComponent(p.scope)}/${encodeURIComponent(p.name)}/capture`, { at: at() });
+    const { ok, data: result } = await api('POST', `${url}/capture`, body);
     capture.disabled = false;
     if (!ok) { message(msg, failText(result, 'not captured'), true); return; }
+    noteSaved(`arm:${keyOf(p)}`, takenText(p.name, result), result.undo);
     await loadArm();
-    padNotice({ text: `taught ${result.message || p.name} -> ${result.file}`, ok: true });  // the teach node's answer
   });
   test.addEventListener('click', async () => {
     busy(test, robotScope ? `Moving to ${p.name}…` : `Going to ${p.name}${at() ? ` at ${at()}` : ' at the nearest placed one'}…`);
@@ -165,7 +199,7 @@ function positionItem(p) {
   const save = el('button', { class: 'btn primary', text: 'Save', 'data-edit': '' });
   const remove = el('button', { class: 'btn danger', text: 'Delete', 'data-edit': '' });
   const edit = el('div', { class: 'point-edit' },
-    el('div', { class: 'row gap' }, capture, test),
+    el('div', { class: 'row gap' }, capture, test), overrideField,
     el('div', { class: 'field' }, el('label', { text: 'Name' }), nameInput),
     numbers, advanced, msg, el('div', { class: 'row gap' }, remove, save));
   edit.hidden = true;
@@ -205,6 +239,7 @@ function positionItem(p) {
     const { ok, data: result } = await api('PUT', `/api/teach/arm/${encodeURIComponent(p.scope)}/${encodeURIComponent(p.name)}`, body);
     if (!ok) { message(msg, failText(result, 'not saved'), true); return; }
     if (name !== p.name) teach.open = `${p.scope}/${name}`;
+    noteSaved(`arm:${p.scope}/${name}`, `Saved ${name} as typed → ${result.file}`, result.undo);
     await loadArm();
   });
   let armed = null;
@@ -220,7 +255,7 @@ function positionItem(p) {
     await loadArm();
   });
 
-  const item = el('li', { class: 'point' }, head, edit);
+  const item = el('li', { class: 'point' }, head, savedNote(`arm:${keyOf(p)}`), edit);
   const open = (opened) => {
     edit.hidden = !opened;
     head.setAttribute('aria-expanded', String(opened));
@@ -231,9 +266,10 @@ function positionItem(p) {
     document.querySelectorAll(OPEN_ITEMS).forEach((other) => { if (other !== item) other._open(false); });
     open(opening);
     teach.open = opening ? keyOf(p) : null;
-    setTeachTarget(opening ? { scope: p.scope, name: p.name, at: at() } : null);
+    setTeachTarget(opening ? { scope: p.scope, name: p.name, at: at(), instance_override: override.checked } : null);
   });
   item._open = open;
+  item._override = () => override.checked;
   if (teach.open === keyOf(p)) open(true);
   return item;
 }
@@ -280,7 +316,7 @@ function newPosition(kind) {
     const { ok, data } = await api('POST', `/api/teach/arm/${encodeURIComponent(t.scope)}/${encodeURIComponent(t.name)}/capture`, t);
     capture.disabled = false;
     if (!ok) { message(msg, failText(data, 'not captured'), true); return; }
-    if (data.message) padNotice({ text: `taught ${data.message} -> ${data.file}`, ok: true });
+    noteSaved(`arm:${keyOf(t)}`, takenText(t.name, data), data.undo);
     box.remove();
     teach.open = keyOf(t);
     await loadArm();
@@ -295,6 +331,22 @@ function newPosition(kind) {
 }
 $('btn-add-pose').addEventListener('click', () => newPosition('pose'));
 $('btn-add-point').addEventListener('click', () => newPosition('point'));
+
+// What a capture would change (its preview) in one line: per hand how far it moves and turns, per joint the change.
+function changeText(preview) {
+  const hands = preview.hands.map((h) => (h.old && h.new ? `${h.tool} hand moves ${h.moved_mm} mm, turns ${h.turned_deg}°`
+    : `${h.tool} hand ${h.new ? 'added' : 'kept'}`));
+  const joints = preview.joints.filter((j) => j.change == null || Math.abs(j.change) >= (j.unit === 'm' ? 0.0005 : 0.05))
+    .map((j) => (j.change == null ? `${j.joint} ${j.new == null ? 'kept' : 'added'}`
+      : `${j.joint} ${j.change > 0 ? '+' : ''}${j.change}${j.unit === 'm' ? ' m' : '°'}`));
+  return [...hands, ...(joints.length ? joints : preview.joints.length ? ['joints unchanged'] : [])].join('; ') || 'no change';
+}
+// A capture's answer as the line under the entry: where it was taught (the placed object and the robot's distance from
+// it) and the teach node's answer.
+function takenText(name, result) {
+  const where = result.at ? ` at ${result.at}${result.distance_m != null ? `, ${result.distance_m} m from the robot` : ''}` : '';
+  return `Taught ${name}${where}${result.message ? `: ${result.message}` : ''} → ${result.file}`;
+}
 
 // A pad teach press saved a position: show the new numbers.
 function teachTaught() { if (pointsVisible) loadArm(); }

@@ -307,6 +307,8 @@ h2 { margin: 0; font: 600 var(--fs-xl)/1.2 var(--sans); letter-spacing: -.01em; 
 .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 60%, var(--border)); background: var(--surface-card); }
 .btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 9%, var(--surface-card)); }
 .btn.danger.confirm, .btn.danger.confirm:hover:not(:disabled) { background: var(--bad); border-color: var(--bad); color: var(--on-fill); }
+/* a save that would overwrite a pose asks first: amber until the second tap (confirmOverwrite) */
+.btn.confirm:not(.danger), .btn.confirm:not(.danger):hover:not(:disabled) { background: var(--warn); border-color: var(--warn); color: var(--on-fill); }
 /* solid from the first press: a one-press stop (the manual skill's Abort) */
 .btn.danger.solid { background: var(--bad); border-color: var(--bad); color: var(--on-fill); }
 .btn.danger.solid:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 85%, var(--text)); }
@@ -477,6 +479,11 @@ li.empty { list-style: none; padding: 6px 2px; }
 .point-edit input:invalid { border-color: var(--bad); background-color: color-mix(in srgb, var(--bad) 8%, var(--surface-field)); }
 .point details { border-top: 1px solid var(--border); padding-top: var(--sp-1); }
 .point details summary { font: var(--fs-sm) var(--mono); color: var(--text-muted); }
+/* the last Teach save under its entry (what, where measured, Undo) and which placed object a teach uses */
+.point > .saved-note { margin: 0 var(--sp-3) var(--sp-3); overflow-wrap: anywhere; }
+.saved-note .btn { margin-left: var(--sp-2); vertical-align: middle; }
+.at-picker { display: grid; gap: 2px; justify-items: end; }
+.at-hint.bad { color: var(--bad); }
 .placed li { font: var(--fs-sm)/1.5 var(--mono); border-bottom: 1px solid var(--border); padding: var(--sp-1) 0; overflow-wrap: anywhere; }
 .placed { gap: 0; }
 

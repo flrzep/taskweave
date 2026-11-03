@@ -97,7 +97,7 @@ HTTP API (JSON):
                                    turned_deg}], joints: [{joint, old, new, unit, change}]} (arm.capture_changes)
   POST /api/teach/arm/<robot|type>/<name>/test {at}  move there now (a robot pose as /api/robot/move; an object point:
                                    move_gripper to <at>/<name>, at the placed object <at>)
-  PUT  /api/teach/target {scope, name, at, form} or {}   the position a pad teach press saves into
+  PUT  /api/teach/target {scope, name, at, form, instance_override} or {}   where a pad teach press saves
   PUT  /api/teach/held/<type>/<name> {joints, path, rename}; DELETE the same   held poses (move_object to: {pose})
   POST /api/teach/held/<type>/<name>/test   move the held object there now (move_object; move {to} once served)
   POST /api/teach/held/<type>/<name>/capture   teach it from the held object (targets layout: the teach node's object
@@ -763,8 +763,9 @@ class Bridge(Node):
         tools = json.loads(msg.data or '{}').get('tools') or []
         label = f'{target["scope"]} {target["name"]}'
         try:
-            result = self.capture(target['scope'], target['name'], {'at': target.get('at'), 'tools': tools,
-                                                                    'form': target.get('form')})
+            body = {'at': target.get('at'), 'tools': tools, 'form': target.get('form'),
+                    'instance_override': bool(target.get('instance_override'))}
+            result = self.capture(target['scope'], target['name'], body)
             notice = {'text': f'taught {result["message"] or label} -> {result["file"]}', 'ok': True,
                       'taught': target, 'undo': result.get('undo')}
             self.points_changed()
@@ -1354,7 +1355,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(arm.overview(bridge.config, bridge.robot))
             if method == 'PUT' and route == ['teach', 'target']:
                 body = self._body()
-                target = {k: body.get(k) for k in ('scope', 'name', 'at', 'form')} if body.get('name') else None
+                keys = ('scope', 'name', 'at', 'form', 'instance_override')
+                target = {k: body.get(k) for k in keys} if body.get('name') else None
                 bridge.set_teach_target(target)
                 return self._json({'target': target})
             if len(route) >= 4 and route[:2] == ['teach', 'arm']:
