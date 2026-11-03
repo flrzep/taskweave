@@ -672,7 +672,7 @@ li.empty { list-style: none; padding: 6px 2px; }
 @media (max-width: 600px) { .graph-box { container-type: normal; } }  /* no containment: the sheet is fixed to the screen */
 .kind-drive { --k: var(--kind-drive); } .kind-arm { --k: var(--kind-arm); } .kind-grip { --k: var(--kind-grip); }
 .kind-wait { --k: var(--kind-wait); } .kind-other { --k: var(--kind-other); }
-.pg { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: var(--sp-6); }
+.pg { display: block; }
 .pg-graph { position: relative; flex: none; }
 .pg-lines { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
 .pg-divider { stroke: var(--border); stroke-width: 1; }
@@ -680,10 +680,6 @@ li.empty { list-style: none; padding: 6px 2px; }
   font: 600 11px var(--sans); letter-spacing: .06em; text-transform: uppercase; }
 .pg-num { position: absolute; display: grid; place-items: center; font: 12px var(--cond); color: var(--text-muted); }
 .pg-num.now { font-weight: 700; color: var(--run); }
-.pg-span line { stroke: color-mix(in srgb, var(--k) 45%, transparent); stroke-width: 4; stroke-linecap: round; }
-.pg-span circle { fill: var(--k); }
-.pg-span.state-pending line { stroke: color-mix(in srgb, var(--k) 25%, transparent); }
-.pg-span.state-pending circle { fill: color-mix(in srgb, var(--k) 50%, var(--g-card)); }
 .pg-pair { fill: none; stroke: var(--border-strong); stroke-width: 1.25; stroke-dasharray: 4 3; }
 .pg-replan { fill: none; stroke: var(--g-fail); stroke-width: 1.75; stroke-dasharray: 5 4; stroke-linejoin: round; }
 .pg-lines marker path { fill: var(--g-fail); }
@@ -695,6 +691,14 @@ li.empty { list-style: none; padding: 6px 2px; }
   border-radius: var(--r-s); border: 1.5px solid var(--k); background: color-mix(in srgb, var(--k) 8%, var(--g-card));
   color: var(--k); transition: background-color .3s, border-color .3s; }
 .pg-chip .icon { width: 16px; height: 16px; pointer-events: none; }
+/* the laptop graph (Figma B): a bar across the step's lanes, the icon at its left end */
+.pg-graph .pg-chip { place-items: center start; padding-left: 8px; }
+/* filled pastel bars, no outline (done stronger, pending lighter); running, paused, failed and warn keep theirs */
+.pg-graph .pg-chip:not(.state-running, .state-paused, .state-failed, .state-rejected, .state-warn) {
+  border-color: transparent; background: color-mix(in srgb, var(--k) 22%, var(--g-card)); }
+.pg-graph .pg-chip.state-pending { background: color-mix(in srgb, var(--k) 11%, var(--g-card)); }
+.pg-graph .pg-chip:not(.state-running, .state-paused, .state-failed, .state-rejected, .state-warn):hover {
+  border-width: 1.5px; border-color: color-mix(in srgb, var(--k) 60%, transparent); }
 .pg-chip:hover { border-width: 2px; }
 .pg-chip:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .pg-chip.state-pending { background: var(--g-card); border-color: color-mix(in srgb, var(--k) 40%, transparent);
@@ -765,7 +769,9 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-card.state-paused .pg-eyebrow, .pg-card.state-timeout .pg-eyebrow, .pg-card.state-canceled .pg-eyebrow { color: var(--warn); }
 .pg-card.state-pending:not(.marked) .pg-eyebrow { color: var(--text-muted); }
 /* too narrow for graph and card side by side (601 to about 670px): the card goes under the graph, full width */
-@container plan (max-width: 607px) { .pg-card { flex-basis: 100%; margin-top: 0; } }
+/* the step pop-up (laptop): beside the picked chip, over the graph */
+.pg-pop { position: absolute; z-index: 3; width: 320px; max-width: calc(100% - 8px); margin: 0; box-shadow: var(--shadow-2); }
+.pg-pop-foot { justify-content: flex-end; }
 
 .legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px var(--sp-4); font-size: var(--fs-sm); color: var(--text-muted); }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }

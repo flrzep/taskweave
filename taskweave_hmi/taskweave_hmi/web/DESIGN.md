@@ -193,7 +193,7 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 - **Step sheet** (phone, `.pg-sheet`): a tap on a step's chip (also the running one) opens a bottom sheet over a
   scrim (`.pg-scrim`, 45% ink; under the status bar, so Pause and Abort stay in reach, and the bottom nav): a 44 × 5
   handle, the step's tile (52px) with its state and number over the instruction (20px, 600), the step's progress
-  while it runs, the side card's rows (command, target, locks, on failure, status; 96px labels), each note in an amber
+  while it runs, the pop-up's rows (command, target, locks, on failure, status; 96px labels), each note in an amber
   box (`.pg-sheet-note`), and a full-width Close (48px). A non-modal dialog (`role="dialog"`, labelled by the title):
   focus goes to Close when it opens (idle too, where the tap also picks the start step: Close keeps it, a second tap
   on the chip unpicks it), Tab stays on Close, and focus goes back to the chip when it closes (Close, the scrim,
@@ -239,18 +239,20 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 - **3D view** (`.viewer3d`): a full-width viewport card, 16:10 on a laptop and 4:3 at 600px and below, dark in both
   themes, 10px radius; a `canvas` child fills it. `.viewer3d-tools` is an overlay toolbar top right for icon buttons
   (`--tap-s` square, light icons; `aria-pressed="true"` in brand fill).
-- **Plan graph** (`.pg`, graph.js): steps top to bottom as 28px icon chips (icons.js) in resource lanes (base, hands,
-  torso, joints; a bar with dots across the other lanes a step holds), rows of 32px, step numbers in Barlow Semi
-  Condensed in a 28px gutter. Chips are tinted by skill colour (`--k` from `--kind-*`): pending faded, succeeded an
-  8% tint with a green corner dot, running solid with a 2px brand ring and the breathing glow (amber ring paused),
-  failed red with a ✕ dot, timeout / canceled / skipped amber. Phases are bands (`.pg-band`, `--surface-field`, 24px)
-  with a chevron, done/total and the usual failure rule; closed, one row with the lanes as mini chips and the state
-  word, remembered per mission. Only exceptions are marked: rule badges on the chip's top edge, a dashed replan line
-  in the left gutter, dashed boxes round parallel candidates. The running or selected step opens in a 300px side
-  card (`.pg-card`, 2px brand border); below 608px of card width it goes under the graph. At 600px and below: a
-  rail of 44px chips per band and a bottom sheet (`.pg-sheet`) for a step the operator taps (the running step is on
-  the status board). It reads `--g-*` tokens mapped onto the global
-  ones.
+- **Plan graph** (`.pg`, graph.js): steps top to bottom in resource lanes (base, hands, torso, joints) that share the
+  Plan card's width (at least 64px each; drawn again when the card resizes), rows of 32px, step numbers in Barlow Semi
+  Condensed in a 28px gutter. Each step is one 28px bar (Figma B) across the lanes it holds, from its first to its
+  last, 4px inside them, its icon (icons.js) at the left end. Bars take the skill colour (`--k` from `--kind-*`):
+  filled pastel with no outline (22% done, 11% pending) and a neutral ✓ corner when done, running solid with a 2px
+  ring and the breathing glow (amber ring paused), failed red with a ✕ dot, timeout / canceled / skipped amber.
+  Phases are bands (`.pg-band`, `--surface-field`, 24px) with a chevron, done/total and the usual failure rule;
+  closed, one row with the lanes as mini chips and the state word, remembered per mission. Only exceptions are
+  marked: rule badges on the bar's top edge, a dashed replan line in the left gutter, dashed boxes round parallel
+  candidates. A click on a step (the running one too; the status board shows that one anyway) opens its details in
+  a 320px pop-up beside its bar (`.pg-pop`, right of it, else left; a non-modal dialog with Close; Escape, a click
+  elsewhere or the step again close it, the focus goes to Close and back to the step). At 600px and below: a rail of
+  44px chips per band and a bottom sheet (`.pg-sheet`) for a step the operator taps. It reads `--g-*` tokens mapped
+  onto the global ones.
 
 ## Icons and imagery
 

@@ -23,8 +23,11 @@ const ICON_COLOURS = { navigate: 'drive', straight: 'drive', hand: 'arm', carry:
   'grip-close': 'grip', 'grip-open': 'grip', wait: 'wait', other: 'other' };
 // the laptop graph (px): number gutter, lane, row pitch, chip, band header, gaps; the replan lines' area left of it
 // (Figma has rows of 34 and bands 14 apart: 32 and 10 let frame_cycle's running phase fit under the sticky header at 768)
-const G = { gutter: 28, lane: 64, row: 32, chip: 28, head: 24, laneHead: 24, bandGap: 10, headGap: 6, subIndent: 12,
+const G = { gutter: 28, lane: 64, row: 32, chip: 28, inset: 4, head: 24, laneHead: 24, bandGap: 10, headGap: 6, subIndent: 12,
   pairOut: 3, replanArea: 22, replanGap: 6, endGap: 6, endH: 18 };
+const POP_W = 320;     // the step pop-up's width (style.css .pg-pop), the gap to its chip, the least room it gets below
+const POP_GAP = 12;
+const POP_MIN_H = 260;
 const BREATHE_MS = 2800;  // period of node-breathe for the running step (style.css)
 const PHONE = window.matchMedia('(max-width: 600px)');
 const WARN_STATES = ['timeout', 'canceled', 'skipped'];  // amber chips; failed and rejected are red
@@ -229,19 +232,22 @@ function choose(step, pickable) {
     view.selected = opening ? step.id : null;
     pickStart(step);
   } else {
-    const running = state.snapshot?.status.step?.id === step.id && !PHONE.matches;
-    opening = view.selected !== step.id && !running;
+    opening = view.selected !== step.id;
     view.selected = opening ? step.id : null;
     renderGraph();
   }
-  if (opening && PHONE.matches) $('plan-graph').querySelector('[data-sheet-close]')?.focus();  // into the sheet
+  if (opening) $('plan-graph').querySelector('[data-sheet-close]')?.focus({ preventScroll: true });  // into the sheet or pop-up
 }
 // Escape: on the Run tab it closes the card or sheet, but not while a manual skill runs: then Escape aborts that skill
 // (app.js) and nothing else
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || !view.selected || $('view-run').hidden || state.snapshot?.manual
     || e.target.closest?.('textarea, select, input, [contenteditable]')) return;
-  if (PHONE.matches) { closeSheet(view.selected); return; }
+  closeSheet(view.selected);
+});
+// a click outside the pop-up (laptop) closes it; a chip's own click opens or closes as above
+document.addEventListener('pointerdown', (e) => {
+  if (PHONE.matches || !view.selected || e.target.closest?.('.pg-pop, .pg-chip, .pg-band')) return;
   view.selected = null;
   renderGraph();
 });
@@ -302,10 +308,17 @@ function planCard(i, ctx, phone) {
     sheet.addEventListener('keydown', (e) => { if (e.key === 'Tab') { e.preventDefault(); close.focus(); } });  // stays in
     return [scrim, sheet];
   }
-  return el('aside', { class: `pg-card state-${status}${live || start || view.selected === step.id ? ' marked' : ''}`,
-    'aria-live': 'polite' },
-  div('pg-card-head', tile, div('pg-card-titles', eyebrow, el('div', { class: 'pg-card-title', text: step.instruction }))),
-  progress, rows(true));
+  // the laptop: a pop-up beside the step's chip (a non-modal dialog; Close, Escape, a click elsewhere or the chip
+  // again close it)
+  const close = el('button', { type: 'button', class: 'btn small pg-pop-close', 'data-sheet-close': '', text: 'Close' });
+  close.addEventListener('click', () => closeSheet(step.id));
+  const pop = el('aside', { class: `pg-card pg-pop state-${status}${live || start ? ' marked' : ''}`, role: 'dialog',
+    'aria-labelledby': 'pg-pop-title' },
+  div('pg-card-head', tile, div('pg-card-titles', eyebrow,
+    el('div', { class: 'pg-card-title', id: 'pg-pop-title', text: `${i + 1} · ${step.instruction}` }))),
+  progress, rows(true), el('div', { class: 'row pg-pop-foot' }, close));
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Tab') { e.preventDefault(); close.focus(); } });  // stays in
+  return pop;
 }
 // the sheet closes: nothing selected, the keyboard focus back on the step's chip
 function closeSheet(id) {
@@ -379,7 +392,9 @@ function lanesGraph(bands, ctx, end) {
   const laneIndex = (name) => lanes.indexOf(name);
   const replans = plan.steps.map((_, i) => (jumps(r[i], i) ? i : -1)).filter((i) => i >= 0);
   const x0 = replans.length ? G.replanArea + G.replanGap * (replans.length - 1) : 0;
-  const laneX = (l) => x0 + G.gutter + l * G.lane;
+  // the lanes share the plan box's width (at least G.lane each): the graph fills its card
+  const lane = Math.max(G.lane, Math.floor(((ctx.width || 0) - x0 - G.gutter) / lanes.length));
+  const laneX = (l) => x0 + G.gutter + l * lane;
   const width = laneX(lanes.length);
   const chipLane = [];
   let prev = Math.max(0, laneIndex(FIRST_LANE));
@@ -387,7 +402,11 @@ function lanesGraph(bands, ctx, end) {
     const held = (step.resources || []).map(laneIndex).filter((l) => l >= 0);
     chipLane[i] = prev = held.length ? Math.min(...held) : prev;
   });
-  const chipX = (i) => laneX(chipLane[i]) + (G.lane - G.chip) / 2;
+  // Figma B: a step is one bar across the lanes it holds, from its first to its last (a step on one lane: one lane
+  // wide), inset in its lanes; the icon at its left end
+  const lastLane = plan.steps.map((step, i) => Math.max(chipLane[i], ...(step.resources || []).map(laneIndex)));
+  const chipX = (i) => laneX(chipLane[i]) + G.inset;
+  const chipW = (i) => laneX(lastLane[i] + 1) - laneX(chipLane[i]) - 2 * G.inset;
   const items = [];  // {band, y, depth, extra, open} and {step, y, owner}
   const rowY = [];   // per step: its chip's centre (a step of a closed band: the band header's)
   const shown = new Set();
@@ -413,7 +432,7 @@ function lanesGraph(bands, ctx, end) {
   }
   const graph = el('div', { class: 'pg-graph', style: `width: ${width}px; height: ${height}px`, role: 'group',
     'aria-label': `Plan ${plan.plan_id}: ${plan.steps.length} steps` }, under,
-  ...lanes.map((lane, l) => el('span', { class: 'pg-lane', text: lane, style: `left: ${laneX(l)}px; width: ${G.lane}px` })));
+  ...lanes.map((name, l) => el('span', { class: 'pg-lane', text: name, style: `left: ${laneX(l)}px; width: ${lane}px` })));
   const rows = [];
   items.forEach((it) => {
     if (it.band) {
@@ -429,18 +448,10 @@ function lanesGraph(bands, ctx, end) {
     rows.push({ i, top, owner: it.owner });
     graph.append(el('span', { class: `pg-num${isLive(states[i]) ? ' now' : ''}`, text: String(i + 1),
       style: `left: ${x0}px; top: ${it.y}px; width: ${G.gutter}px; height: ${G.row}px` }));
-    // a step on several lanes: a bar from its chip to the last lane it holds, a dot on each of the others
-    const more = [...new Set((step.resources || []).map(laneIndex).filter((l) => l > chipLane[i]))];
-    if (more.length) {
-      const cy = top + G.chip / 2;
-      const bar = svg('g', { class: `pg-span kind-${colourOf(step)} state-${states[i]}` });
-      bar.append(svg('line', { x1: chipX(i) + G.chip, y1: cy, x2: laneX(Math.max(...more)) + G.lane / 2, y2: cy }),
-        ...more.map((l) => svg('circle', { cx: laneX(l) + G.lane / 2, cy, r: 4 })));
-      under.append(bar);
-    }
     const chip = chipButton(step, i, ctx);
     chip.style.left = `${chipX(i)}px`;
     chip.style.top = `${top}px`;
+    chip.style.width = `${chipW(i)}px`;
     graph.append(chip);
   });
   // parallel candidates: neighbouring shown steps of one band on disjoint resources, paired left to right
@@ -451,7 +462,7 @@ function lanesGraph(bands, ctx, end) {
     const rb = plan.steps[b.i].resources || [];
     if (a.owner !== b.owner || b.i !== a.i + 1 || !ra.length || !rb.length || ra.some((x) => rb.includes(x))) continue;
     const left = Math.min(chipX(a.i), chipX(b.i)) - G.pairOut;
-    const right = Math.max(chipX(a.i), chipX(b.i)) + G.chip + G.pairOut;
+    const right = Math.max(chipX(a.i) + chipW(a.i), chipX(b.i) + chipW(b.i)) + G.pairOut;
     under.append(svg('rect', { x: left, y: a.top - G.pairOut, width: right - left, height: b.top - a.top + G.chip + 2 * G.pairOut, rx: 7,
       class: 'pg-pair' }));
     pairs += 1;
@@ -482,7 +493,18 @@ function lanesGraph(bands, ctx, end) {
   });
   graph.append(over);
   if (end) graph.append(el('div', { class: 'pg-end', text: end, style: `left: ${x0}px; top: ${y + G.endGap}px` }));
-  return { node: div('pg', graph, planCard(ctx.focus, ctx, false)), pairs, replans: replans.length };
+  // the picked step's details: a pop-up beside its chip (right of it, else left), its top at the chip's row, kept
+  // inside the graph's height
+  const picked = view.selected ? plan.steps.findIndex((s) => s.id === view.selected) : -1;
+  if (picked >= 0) {
+    const pop = planCard(picked, ctx, false);
+    const x = shown.has(picked) ? chipX(picked) : x0 + G.gutter;
+    const right = shown.has(picked) ? x + chipW(picked) : x;
+    pop.style.left = `${width - (right + POP_GAP) >= POP_W || x < POP_W + POP_GAP ? right + POP_GAP : x - POP_W - POP_GAP}px`;
+    pop.style.top = `${Math.max(0, Math.min(rowY[picked] - G.row / 2, height - POP_MIN_H))}px`;
+    graph.append(pop);
+  }
+  return { node: div('pg', graph), pairs, replans: replans.length };
 }
 
 function renderGraph() {
@@ -525,6 +547,7 @@ function renderGraph() {
     || (band.key in stored ? stored[band.key] : band.steps.includes(anchor));
   const end = loopText(plan, mission, snap);
   const ctx = { plan, states, r, events: live ? snap.outcomes : {}, snap, usual, info, isOpen, phone: PHONE.matches,
+    width: box.clientWidth,
     pickable: snap.status.state !== 'running' && snap.status.state !== 'paused', focus: focusIndex(plan, states),
     toggle: (band) => () => { storeBand(missionName, band.key, !isOpen(band)); renderGraph(); },
     cycleNote: end && snap.status.plan_id === plan.plan_id && snap.status.cycle ? `cycle ${snap.status.cycle}` : '' };
@@ -540,6 +563,12 @@ function renderGraph() {
   if (refocus) (box.querySelector(refocus) || box.querySelector('[data-step]'))?.focus({ preventScroll: true });
 }
 PHONE.addEventListener('change', () => renderGraph());
+// the lanes follow the box's width: drawn again when it changes (a window resize, the Run grid's breakpoint)
+let graphWidth = 0;
+new ResizeObserver(([entry]) => {
+  const width = Math.round(entry.contentRect.width);
+  if (width && width !== graphWidth) { graphWidth = width; renderGraph(); }
+}).observe($('plan-graph'));
 
 function setPlanView(view) {
   try { localStorage.setItem('tw-plan-view', view); } catch (_) { /* private mode */ }
