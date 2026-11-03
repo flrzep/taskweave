@@ -1154,7 +1154,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _body(self) -> dict:
         length = int(self.headers.get('Content-Length') or 0)
-        body = json.loads(self.rfile.read(length) or b'{}')
+        return json.loads(self.rfile.read(length) or b'{}')
+
+    def _object_body(self) -> dict:
+        """The body of a Teach request: a JSON object, else BadRequest (400)."""
+        body = self._body()
         if not isinstance(body, dict):
             raise BadRequest('the request body must be a JSON object')
         return body
@@ -1346,15 +1350,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({**answer, 'undo': saved} if method == 'PUT' else answer)
             if method == 'POST' and len(route) >= 4 and route[0] == 'points' and route[-1] == 'preview':
                 kind, address = route[1], [unquote(p) for p in route[2:-1]]
-                return self._json(bridge.base_preview(kind, address, self._body()))
+                return self._json(bridge.base_preview(kind, address, self._object_body()))
             if method == 'POST' and len(route) >= 4 and route[0] == 'points' and route[-1] == 'teach':
                 kind, address = route[1], [unquote(p) for p in route[2:-1]]
-                result = bridge.teach_base(kind, address, self._body())
+                result = bridge.teach_base(kind, address, self._object_body())
                 bridge.get_logger().info(f'HMI taught {kind} {"/".join(address)} -> {result["file"]}')
                 bridge.points_changed()
                 return self._json(result)
             if method == 'POST' and route == ['teach', 'undo']:
-                return self._json(bridge.undo(text_arg(self._body(), 'id') or ''))
+                return self._json(bridge.undo(text_arg(self._object_body(), 'id') or ''))
             if method == 'GET' and route == ['robot_pose']:
                 return self._json(points.relative_poses(bridge.config, bridge.robot_pose()))
             if method == 'GET' and route == ['robot']:
@@ -1444,14 +1448,14 @@ class Handler(BaseHTTPRequestHandler):
                     bridge.points_changed()
                     return self._json({'file': file, 'undo': saved})
                 if len(route) == 5 and method == 'POST' and route[4] == 'capture':
-                    result = bridge.capture(scope, name, self._body())
+                    result = bridge.capture(scope, name, self._object_body())
                     bridge.get_logger().info(f'HMI captured arm position {scope}/{name} -> {result["file"]}')
                     bridge.points_changed()
                     return self._json(result)
                 if len(route) == 5 and method == 'POST' and route[4] == 'test':
                     return self._json(bridge.test_position(scope, name, self._body()))
                 if len(route) == 5 and method == 'POST' and route[4] == 'preview':
-                    return self._json(bridge.capture_preview(scope, name, self._body()))
+                    return self._json(bridge.capture_preview(scope, name, self._object_body()))
             if len(route) >= 4 and route[:2] == ['teach', 'held']:
                 obj, name = unquote(route[2]), unquote(route[3])
                 if len(route) == 4 and method in ('PUT', 'DELETE'):
