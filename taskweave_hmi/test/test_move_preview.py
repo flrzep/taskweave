@@ -171,7 +171,7 @@ def test_no_preview_while_a_manual_skill_runs_and_no_manual_skill_during_one(sto
                                daemon=True)
     preview.start()
     assert held.wait(5)
-    with pytest.raises(Busy, match='another manual skill is running'):
+    with pytest.raises(Busy, match='a move preview is running; run it when that has finished'):
         bridge.run_skill('move', {'to': 'home'})
     gate.set()
     preview.join(5)
@@ -200,7 +200,8 @@ def test_no_mission_starts_while_a_preview_or_a_manual_skill_holds_the_lock(stor
     request = serve(bridge)
     bridge.skill_lock.acquire()     # a preview solving, or a manual skill running
     status, answer = request('POST', '/api/start', {'mission': 'cycle'})
-    assert status == 409 and 'move preview is running' in answer['problems'][0] and started == []
+    assert status == 409 and 'a manual skill, a move preview or a mission start is running' in answer['problems'][0]
+    assert started == []
     bridge.skill_lock.release()
     assert request('POST', '/api/start', {'mission': 'cycle'}) == (200, {'accepted': True, 'message': 'ok',
                                                                        'plan_id': 'p1'})
@@ -214,6 +215,26 @@ def test_a_start_holds_the_manual_skill_lock_while_it_asks_the_task_handler(stor
                                                            SimpleNamespace(accepted=True, message='ok', plan_id='p'))[1]
     assert serve(bridge)('POST', '/api/start', {'mission': 'cycle'})[0] == 200
     assert held == [True] and not bridge.skill_lock.locked()
+
+
+def test_while_a_mission_starts_the_others_are_told_so(store, serve):  # noqa: F811
+    bridge = preview_bridge(store, AnsweringAction())
+    bridge.start_client, answers, gate = object(), [], threading.Event()
+    request = serve(bridge)
+
+    def call(_client, _request, _timeout=None):   # the task handler checks the plan: slow
+        answers.append(request('POST', '/api/start', {'mission': 'cycle'}))      # a double click
+        answers.append(request('POST', '/api/skills/move/dry_run', {'args': {'to': 'home'}}))
+        with pytest.raises(Busy, match='a mission is starting; run it when that has finished'):
+            bridge.run_skill('move', {'to': 'home'})
+        gate.set()
+        return SimpleNamespace(accepted=True, message='ok', plan_id='p')
+    bridge.call = call
+    assert request('POST', '/api/start', {'mission': 'cycle'})[0] == 200 and gate.is_set()
+    assert [status for status, _ in answers] == [409, 409]
+    assert 'a mission is starting; start the mission when that has finished' in answers[0][1]['problems'][0]
+    assert 'a mission is starting; preview a move when that has finished' in answers[1][1]['problems'][0]
+    assert bridge.skill_holder == '' and not bridge.skill_lock.locked()
 
 
 def test_a_preview_whose_answer_cannot_be_read_says_so(store, serve, monkeypatch):  # noqa: F811

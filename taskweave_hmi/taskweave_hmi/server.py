@@ -161,6 +161,7 @@ from . import arm, held, missions, points, recording, robot, scene, targets, und
 WEB = Path(__file__).parent / 'web'
 STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
 CALL_TIMEOUT_S = 5.0
+AFTER_JUMP_S = 2.0  # the teach node's default after_jump_s: it refuses a teach this long after a sim clock jump
 START_TIMEOUT_S = 30.0  # start_mission answers once the plan is checked: seconds on a large cell (0.3.1 took minutes)
 STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'icons.js', 'graph.js', 'record.js', 'viewer3d.js',
                 'style.css', 'viewer3d-demo.html')  # the 3D viewer alone, full window: for testing it
@@ -349,7 +350,8 @@ class Bridge(Node):
         self.param_clients = {
             node: self.create_client(SetParameters, f'{node}/set_parameters', callback_group=self.group)
             for node in [*self.get_parameter('nav_costmaps').value, self.get_parameter('nav_controller').value]}
-        self.skill_lock = threading.Lock()  # one manual skill at a time
+        self.skill_lock = threading.Lock()  # one manual skill at a time (take_skill_lock)
+        self.skill_holder = ''              # what holds it, for the Busy answer of the others
         # the running manual skill, for the browser and for Abort (under self.lock): what it is, its goal handle once
         # the skill server accepted it, and whether Abort was pressed (also before the handle exists)
         self.manual: dict | None = None
@@ -487,8 +489,13 @@ class Bridge(Node):
                 (t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w))
 
     def tf_stale(self, stamps: list) -> str:
-        """Why TF read with these stamps is too old to compare with, as the teach node words it ('' when it is not):
-        older than MAX_POSE_AGE_S (the node's default max_tf_age_s), static transforms (stamp 0) left out."""
+        """Why TF read with these stamps cannot be compared with, as the teach node words it ('' when it can): a sim
+        clock jump less than AFTER_JUMP_S ago, or TF older than MAX_POSE_AGE_S (static transforms, stamp 0, left out).
+        The node's defaults: a node started with other after_jump_s / max_tf_age_s decides differently, and it checks
+        again (with its base pose and joint states too) when it saves."""
+        watcher = getattr(self, 'clock_jump', None)   # tf_util.buffer's (a bridge without a node has none)
+        if watcher is not None and watcher.recent(AFTER_JUMP_S):
+            return f'the sim clock jumped less than {AFTER_JUMP_S:g} s ago (clock jump); wait and try again'
         oldest = min((stamp for stamp in stamps if stamp), default=None)
         if oldest is None:
             return ''
@@ -658,8 +665,7 @@ class Bridge(Node):
         """Run one skill directly (no mission), e.g. move to a joint pose to check it. Blocks until it ends; shown to
         the browser meanwhile (``label``: what it goes to, default the args) and stopped by ``abort_skill``."""
         self.check_idle()
-        if not self.skill_lock.acquire(blocking=False):
-            raise Busy('another manual skill is running')
+        self.take_skill_lock('a manual skill is running', 'run it when that has finished')
         try:
             with self.lock:
                 self.manual = {'skill': skill, 'label': label or args_text(args), 'since': time.time()}
@@ -696,7 +702,7 @@ class Bridge(Node):
             with self.lock:
                 self.manual, self.manual_handle, self.manual_abort = None, None, False
             self._broadcast('manual', None)
-            self.skill_lock.release()
+            self.release_skill_lock()
 
     def _skill_action(self, skill: str):
         """The RunSkill action client of ``skill`` once its server is there; TimeoutError when it is not served."""
@@ -729,8 +735,7 @@ class Bridge(Node):
         manual skill: not in the manual strip, nothing to abort."""
         args = targets.dry_run_args(args)
         self.check_idle('preview a move')
-        if not self.skill_lock.acquire(blocking=False):
-            raise Busy('a manual skill is running; preview a move when it has finished')
+        self.take_skill_lock('a move preview is running', 'preview a move when that has finished')
         try:
             action = self._skill_action(targets.MOVE)
             goal = RunSkill.Goal(step_id='hmi-preview', skill=targets.MOVE, args_json=json.dumps(args),
@@ -751,19 +756,31 @@ class Bridge(Node):
             return targets.dry_run_answer(self.config, self.robot, OUTCOMES[outcome.outcome], outcome.message,
                                           data if isinstance(data, dict) else {})
         finally:
-            self.skill_lock.release()
+            self.release_skill_lock()
 
     def start_mission(self, mission: str, start_step: str = ''):
         """Ask the task handler to start ``mission`` (POST /api/start). Holds the manual-skill lock for the call:
         no manual skill or move preview (dry_run_move) starts between the check and the mission's start, and none runs
         while it is asked; Busy when one runs."""
-        if not self.skill_lock.acquire(blocking=False):  # no mission move beside a manual skill's or a preview's
-            raise Busy('a manual skill or a move preview is running; start the mission when it has finished')
+        # no mission move beside a manual skill's or a preview's; a second start (a double click) waits for the first
+        self.take_skill_lock('a mission is starting', 'start the mission when that has finished')
         try:
             return self.call(self.start_client, StartMission.Request(mission=mission, start_step=start_step),
                              START_TIMEOUT_S)
         finally:
-            self.skill_lock.release()
+            self.release_skill_lock()
+
+    def take_skill_lock(self, holder: str, then: str) -> None:
+        """Take the manual-skill lock for a manual skill, a move preview or a mission start (``holder``: how the
+        others are told it runs), or Busy with what holds it and ``then``: what to do instead."""
+        if not self.skill_lock.acquire(blocking=False):
+            busy = getattr(self, 'skill_holder', '') or 'a manual skill, a move preview or a mission start is running'
+            raise Busy(f'{busy}; {then}')
+        self.skill_holder = holder
+
+    def release_skill_lock(self) -> None:
+        self.skill_holder = ''
+        self.skill_lock.release()
 
     def manual_view(self) -> dict | None:
         """The running manual skill as the browser shows it (call under self.lock). elapsed_s lets the browser count
@@ -911,7 +928,7 @@ class Bridge(Node):
             position, quaternion = self.tcp_in_cell(frames[tool], stamps)
             pose = handled.relative_pose(position, quaternion)
             hands[tool] = {'xyz': list(pose.xyz), 'rpy': list(pose.rpy)}
-        if reason := self.tf_stale(stamps):   # the node would refuse it: no comparison with old numbers
+        if reason := self.tf_stale(stamps):   # the node would refuse it now: no comparison with old numbers
             raise TimeoutError(reason)
         return {'exists': True, 'at': at, **arm.capture_changes(old_hands, hands, {}, {}, linear)}
 

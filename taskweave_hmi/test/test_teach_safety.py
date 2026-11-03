@@ -299,6 +299,25 @@ def test_a_point_preview_refuses_stale_tf_as_the_node_would(serve, config):  # n
     assert status == 503 and data['error'].startswith('TF is stale (2.5 s old, limit 1 s)')
 
 
+def test_a_point_preview_refuses_right_after_a_clock_jump_as_the_node_would(serve, config):  # noqa: F811
+    from types import SimpleNamespace
+
+    profile = config.root / 'robots' / ROBOT / 'profile.yaml'
+    profile.write_text(profile.read_text() + TOOL_FRAMES)
+    config.reload()
+    bridge = teach_bridge(config, None)
+    bridge.robot_pose = lambda: Pose2D(5.0, 1.0, 0.0)
+    bridge.now_s = lambda: 100.0
+    bridge.frame_pose = lambda link, stamps=None: (stamps.append(100.0), ((6.0, 1.0, 0.5), (0.0, 0.0, 0.0, 1.0)))[1]
+    bridge.clock_jump = SimpleNamespace(recent=lambda within_s: within_s == 2.0)   # jumped within the last 2 s
+    request = serve(bridge)
+    body = {'at': 'bay_1_stack_1_front'}
+    status, data = request('POST', '/api/teach/arm/frame_type2/rails_top/preview', body)
+    assert status == 503 and 'clock jumped less than 2 s ago' in data['error']
+    bridge.clock_jump = SimpleNamespace(recent=lambda within_s: False)
+    assert request('POST', '/api/teach/arm/frame_type2/rails_top/preview', body)[0] == 200
+
+
 def node_writes_hand(config):
     """The teach node's answer to a hand request: it saves a left tool pose as asked."""
     from taskweave_interfaces.srv import TeachPoint

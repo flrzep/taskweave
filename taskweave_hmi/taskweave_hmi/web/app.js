@@ -1695,10 +1695,12 @@ setInterval(() => { if ((pointsVisible || robotVisible) && !document.hidden) ref
 
 // Which placed object a teach uses, before it saves: its name and how far the robot is from it (the operator should
 // stand at it), with the nearest one when that is another. pick() -> instance name, or '' for the nearest of `type`.
-// One robot-pose listener for all of them; a hint the page no longer shows is dropped at the next pose.
+// One robot-pose listener for all of them, holding them weakly: a hint is updated while it is on the page (also when
+// it is put there later or moved), and drops out once the page has let go of it.
 const atHints = new Set();
-document.addEventListener('robot-pose', () => atHints.forEach((node) => {
-  if (node.isConnected) node._update(); else atHints.delete(node);
+document.addEventListener('robot-pose', () => atHints.forEach((ref) => {
+  const node = ref.deref();
+  if (!node) atHints.delete(ref); else if (node.isConnected) node._update();
 }));
 function atHint(pick, type) {
   const node = el('span', { class: 'muted small-text at-hint' });
@@ -1713,7 +1715,7 @@ function atHint(pick, type) {
   };
   node._update = update;
   update();
-  setTimeout(() => atHints.add(node), 0);  // once it is on the page (the caller inserts it after this returns)
+  atHints.add(new WeakRef(node));
   return node;
 }
 
@@ -1728,7 +1730,7 @@ function savedNote(key) {
   if (!saved) return '';
   const warnings = saved.warnings || [];
   const box = el('div', { class: `msg saved-note${warnings.length ? ' warn' : ''}` }, el('span', { text: saved.text }),
-    ...warnings.map((text) => el('div', { text: text.charAt(0).toUpperCase() + text.slice(1) + '.' })));
+    ...warnings.map((text) => el('div', { text: text.charAt(0).toUpperCase() + text.slice(1) + (/[.!?]$/.test(text) ? '' : '.') })));
   if (saved.undo) {
     const button = el('button', { class: 'btn small', text: 'Undo', title: `Put ${saved.undo.files.join(', ')} back as before this save`, 'data-edit': '' });
     button.addEventListener('click', async () => {
@@ -1885,7 +1887,7 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
   const [xField, xInput] = input('x (m)', String(pose.x), { type: 'number', step: STEP_M, inputmode: 'decimal' });
   const [yField, yInput] = input('y (m)', String(pose.y), { type: 'number', step: STEP_M, inputmode: 'decimal' });
   const [yawField, yawInput] = input('yaw (°)', String(+(pose.yaw * DEG).toFixed(2)), { type: 'number', step: STEP_DEG, inputmode: 'decimal' });
-  const msg = el('div', { class: 'msg', hidden: '' });
+  const msg = el('div', { class: 'msg', role: 'status', hidden: '' });
   const robotButton = el('button', { class: 'btn small', text: 'Set from robot' });
   const driveButton = el('button', { class: 'btn small', text: 'Drive here', 'data-edit': '' });
   const saveButton = el('button', { class: 'btn primary', text: 'Save', 'data-edit': '' });
@@ -1943,8 +1945,14 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
     message(msg, 'Filled in from the robot. Save has the teach node store where the robot stands then (it refuses a '
       + 'stale or jumped pose); edit a number to save it as typed instead.');
   });
+  // one save at a time: a tap while it compares or saves does nothing (a double click would arm and save at once; the
+  // line under it says what it is doing). aria-disabled, not disabled: the button keeps the keyboard focus
   saveButton.addEventListener('click', async () => {
-    if (saveButton.getAttribute('aria-disabled') === 'true') return;  // its compare is still being asked
+    if (saveButton.getAttribute('aria-disabled') === 'true') return;
+    saveButton.setAttribute('aria-disabled', 'true');
+    try { await save(); } finally { saveButton.removeAttribute('aria-disabled'); }
+  });
+  async function save() {
     const newName = nameInput.value.trim();
     if (!NAME_RE.test(newName)) { message(msg, 'Names use letters, digits, "_" and "-", starting with a letter.', true); return; }
     const values = [xInput.value, yInput.value, yawInput.value].map(Number);
@@ -1957,11 +1965,8 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
     const change = isNew ? '' : poseChange(pose, body);
     let confirm = change ? `Overwrites ${name}: ${change}` : '';
     if (fromRobotRead && !isNew) {  // the node saves the robot's pose at Save: compare that one, asked at each tap
-      // no second tap while it is asked (a double click would arm and save at once); aria-disabled, not disabled: the
-      // button keeps the keyboard focus
-      saveButton.setAttribute('aria-disabled', 'true');
-      const { ok, data: preview } = await api('POST', `/api/points/${address.map(encodeURIComponent).join('/')}/preview`, { at: where })
-        .finally(() => saveButton.removeAttribute('aria-disabled'));
+      if (!saveButton._armed) message(msg, 'Comparing the robot now with the saved one…');
+      const { ok, data: preview } = await api('POST', `/api/points/${address.map(encodeURIComponent).join('/')}/preview`, { at: where });
       confirm = !ok ? `Cannot compare with the saved ${name} (${(preview.problems || [preview.error || 'no answer']).join('; ')}). `
         + 'Tap again to overwrite anyway; the teach node still checks the pose when it saves.'
         : preview.exists && poseChange(preview.old, preview.new) ? `Overwrites ${name}: ${poseChange(preview.old, preview.new)}` : '';
@@ -1973,6 +1978,7 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
     if (!isNew && newName !== name) body.rename = newName;
     if (isNew) body.create = true;
     const key = target.slice(0, -1).concat(body.rename || target[target.length - 1]).join('/');
+    message(msg, 'Saving…');
     if (fromRobotRead) {  // through the teach node: it reads the pose now, with its checks
       const { ok, data } = await api('POST', `/api/points/${target.map(encodeURIComponent).join('/')}/teach`,
         { at: where, create: body.create, rename: body.rename });
@@ -1990,7 +1996,7 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
       noteSaved(key, `Saved ${key.split('/').pop()} as typed → ${data.file}`, data.undo);
     }
     await loadPoints();
-  });
+  }
   let armed = null;
   deleteButton.addEventListener('click', async () => {
     if (isNew) { item.remove(); return; }

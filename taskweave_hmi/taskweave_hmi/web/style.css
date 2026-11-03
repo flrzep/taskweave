@@ -299,11 +299,11 @@ h2 { margin: 0; font: 600 var(--fs-xl)/1.2 var(--sans); letter-spacing: -.01em; 
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: var(--tap);
        padding: 0 var(--sp-5); border-radius: var(--r-s); border: 1px solid var(--border-strong); background: var(--surface-field);
        color: var(--text); font: 600 var(--fs-base) var(--sans); cursor: pointer; transition: background .15s, border-color .15s; }
-.btn:hover:not(:disabled) { background: var(--surface-hover); }
+.btn:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--surface-hover); }
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled, .btn[aria-disabled="true"] { opacity: .45; cursor: default; }
 .btn.primary { background: var(--brand); border-color: var(--brand-edge); color: var(--on-brand); }
-.btn.primary:hover:not(:disabled) { background: var(--brand-hover); }
+.btn.primary:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--brand-hover); }
 .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 60%, var(--border)); background: var(--surface-card); }
 .btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 9%, var(--surface-card)); }
 .btn.danger.confirm, .btn.danger.confirm:hover:not(:disabled) { background: var(--bad); border-color: var(--bad); color: var(--on-fill); }
