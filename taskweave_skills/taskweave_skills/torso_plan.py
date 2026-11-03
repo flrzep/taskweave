@@ -18,22 +18,30 @@ Search: best-first over (step, height, state) in that order, with lazy checks: a
 plan is the best open one (``Check.cost`` must not be negative). So a window the current height serves costs one step
 check per step and no ride (the keep check); when the current height fails at a step, changes at that step are tried
 first, nearest height first, then one step earlier. A node (step, height) is closed once per distinct state the later
-checks depend on (``Checks.relevant``, rounded), up to ``branches`` states: a later check that fails from one arm
-branch is tried from the others. A failure (bound, or a ``lasting`` step failure) rules its height out for that step
-whatever the state. Heights: the profile grid (ik.torso.candidates) and the current height; grid heights within half a
-grid step of the current one are the current one (as solve_with_torso).
+checks depend on (``Checks.relevant``; states within ``match`` of each other are the same), up to ``branches``
+states: a later check that fails from one arm branch is tried from the others. A failure (bound, or a ``lasting``
+step failure) rules its height out for that step whatever the state. Heights: the profile grid (ik.torso.candidates)
+and the current height; grid heights within half a grid step of the current one are the current one (as
+solve_with_torso).
 
-Checks are local (repeatable). Before a certain step is given up, it is rescued once: from the best plan that reached
-it, each height its rule allows is checked again with ``rescue=True`` (``SkillChecks``: the global IK search, as
-solve_with_torso falls back to); a height that passes only so is planned and listed in ``Plan.rescued``.
+Checks are local (repeatable). A certain step is rescued once, as soon as every height its rule allows has failed
+from the first (best) plan that reached it, before any earlier change is explored (as solve_with_torso falls back to
+the global search at the same step): each of those heights is checked again with ``rescue=True`` (``SkillChecks``:
+the global IK search), the local checks already made not repeated; a height that passes only so is planned and listed
+in ``Plan.rescued``. The rescue keeps ``max_changes``.
+
+``Plan.outcome``: planned, cut, infeasible (the search finished and found nothing), capped (``max_checks``) or stopped
+(``should_stop``). ``Plan.certain``: infeasible with nothing left out by ``branches`` or ``max_changes``, so only then
+is the hold known to be impossible; a capped or stopped plan says nothing about the hold.
 
 No sequence works: the plan fails naming the blocking step (the furthest the search got), the heights it works at and
 the constraint that kept the torso off them, with a table per step (heights that worked, reasons for the others). The
 blocking step is uncertain (``WindowStep.certain`` False): the plan covers the steps before it instead (``cut``).
 
 ``memory`` (kept across plans by the owner, e.g. until a restart) remembers each step and ride check by the step's
-``key``, the heights and the relevant state rounded (the held arms and the torso, not the idle arm or the wheels): a
-later cycle with the same steps makes no calls for them.
+``key`` and the heights, for the relevant states it was made from (``SkillChecks``: the arms, idle one included, and
+the torso; not the wheels); a check from a state within ``match`` of a remembered one is answered from it: a later
+cycle with the same steps makes no calls for them.
 
 ``SkillChecks`` gives the real checks from a carry skill: the reach bound (``IkClient._unreachable``), a step as
 solve_with_torso checks one height (``IkClient.check_height``: IK of every target, collisions, lines walked with
@@ -122,8 +130,10 @@ class Plan:
     [{at, from, to}]; ``states``: step id -> predicted joints after the step (seeds for its move); ``checks``: calls
     made (rides and steps, rescues included; memory hits in ``remembered``); ``rescued``: [{at, height}] that passed
     only with the rescue; ``cut``: why the plan ends before the window does; ``message`` and ``table`` (per step:
-    heights that worked, reasons for the others) on failure."""
+    heights that worked, reasons for the others) on failure; ``outcome`` and ``certain``: see the module doc."""
     ok: bool
+    outcome: str = 'planned'
+    exhaustive: bool = False
     window: list = field(default_factory=list)
     heights: dict = field(default_factory=dict)
     changes: list = field(default_factory=list)
@@ -136,14 +146,20 @@ class Plan:
     remembered: int = 0
     planned_s: float = 0.0
 
+    @property
+    def certain(self) -> bool:
+        """The hold is impossible (not just unplanned): the search finished, nothing left out."""
+        return self.outcome == 'infeasible' and self.exhaustive
+
     def report(self) -> dict:
         """``data.torso_plan`` of the step that planned."""
-        out = {'window': self.window, 'heights': {k: round(v, 4) for k, v in self.heights.items()},
-               'changes': self.changes, 'source': 'memory' if self.checks == 0 and self.remembered else 'planned',
+        out = {'outcome': self.outcome, 'window': self.window,
+               'heights': {k: round(v, 4) for k, v in self.heights.items()}, 'changes': self.changes,
+               'source': 'memory' if self.checks == 0 and self.remembered else 'planned',
                'checks': self.checks, 'planned_s': round(self.planned_s, 2)}
         out |= {'rescued': self.rescued} if self.rescued else {}
         out |= {'cut': self.cut} if self.cut else {}
-        out |= {'message': self.message, 'table': self.table} if not self.ok else {}
+        out |= {'message': self.message, 'table': self.table, 'certain': self.certain} if not self.ok else {}
         return out
 
 
@@ -159,16 +175,19 @@ class _Node:
 class TorsoPlan:
     """Plans the torso heights of a hold window (module doc). ``grid``: the profile's ik.torso.candidates;
     ``tolerance``: heights closer than this are the same (a pin at the current height is no change); ``memory``: the
-    cross-cycle memory (kept by the owner; the newest ``kept`` entries); ``digits``: the rounding of the states in its
-    keys and in the closed set; ``branches``: distinct states kept per (step, height); ``max_changes``: torso changes a
+    cross-cycle memory (kept by the owner; the newest ``kept`` checks, ``variants`` states each); ``match``: states
+    whose joints all differ by at most this (rad, m) are the same, in the memory and the closed set; ``branches``:
+    distinct states kept per (step, height); ``max_changes``: torso changes a
     plan may have (None: any; each more multiplies the search of an infeasible window); ``max_checks``: give up after
     this many calls (None: never); ``rescue``: the one-time rescue of a blocking step (module doc)."""
 
-    def __init__(self, grid, tolerance: float = 1e-3, memory: dict | None = None, kept: int = 512, digits: int = 2,
-                 branches: int = 2, max_changes: int | None = 2, max_checks: int | None = 150, rescue: bool = True):
+    def __init__(self, grid, tolerance: float = 1e-3, memory: dict | None = None, kept: int = 512, variants: int = 8,
+                 match: float = 0.01, branches: int = 3, max_changes: int | None = 2, max_checks: int | None = 150,
+                 rescue: bool = True):
         self.grid = sorted({round(float(h), 6) for h in grid})
         self.spacing = min((b - a for a, b in zip(self.grid, self.grid[1:], strict=False)), default=0.0)
-        self.tolerance, self.kept, self.digits, self.max_checks = tolerance, kept, digits, max_checks
+        self.tolerance, self.kept, self.variants, self.match = tolerance, kept, variants, match
+        self.max_checks = max_checks
         self.branches, self.max_changes, self.rescue = max(1, int(branches)), max_changes, rescue
         self.memory = {} if memory is None else memory
 
@@ -182,11 +201,27 @@ class TorsoPlan:
         """The heights for ``steps`` from the torso at ``start`` and the joints ``state`` (module doc)."""
         return _Search(self, steps, round(float(start), 6), checks, name, should_stop).run(state)
 
-    def remember(self, key: str, check: Check) -> None:
-        self.memory.pop(key, None)                 # newest last: the oldest go beyond ``kept``
-        self.memory[key] = check
+    def recall(self, key: str, state: dict) -> Check | None:
+        """The remembered check of ``key`` made from a state within ``match`` of ``state``, or None."""
+        return next((check for seen, check in self.memory.get(key, ()) if near(seen, state, self.match)), None)
+
+    def remember(self, key: str, state: dict, check: Check) -> None:
+        entries = [*self.memory.pop(key, []), (dict(state), check)][-self.variants:]
+        self.memory[key] = entries                 # newest last: the oldest go beyond ``kept``
         for old in list(self.memory)[:-self.kept] if len(self.memory) > self.kept else ():
             self.memory.pop(old, None)
+
+
+def near(a: dict, b: dict, match: float) -> bool:
+    """The same joints, every number within ``match``, everything else equal."""
+    if a.keys() != b.keys():
+        return False
+    for name, value in a.items():
+        other = b[name]
+        numbers = isinstance(value, int | float) and isinstance(other, int | float)
+        if (abs(float(value) - float(other)) > match) if numbers else value != other:
+            return False
+    return True
 
 
 class _Search:
@@ -200,7 +235,12 @@ class _Search:
         self.dead = {}                                     # (step, height) -> reason, whatever the state
         self.bounds = {}                                   # (step, height) -> bound reason or None
         self.rescued, self.rescues = set(), []             # steps rescued; [{at, height}] passed only so
+        self.saved = set()                                 # (step, height) the rescue passed: rescued again there
         self.hopeless = None                               # a step every height of which is ruled out
+        self.pruned = []                                   # what branches / max_changes left out (not exhaustive)
+        self.tried = {}                                    # (node, height, kind) -> Check made from that node
+        self.watch = set()                                 # first nodes of a step whose edges are not settled
+        self.pending = []                                  # watched nodes whose best edge failed: sweep due
         self.began = time.monotonic()
 
     # ---- the search
@@ -215,47 +255,96 @@ class _Search:
         while True:
             if self.hopeless is not None:                  # a step no height can serve whatever the state
                 return self._done(self._failure(first, self.hopeless))
-            if not heap and not self._rescue(first, heap, order):
+            if not heap and not self.pending and not self._rescue(first[max(first)], heap, order):
                 return self._done(self._failure(first))
             if self.should_stop():
-                return self._done(Plan(False, message='torso plan stopped'))
+                return self._done(Plan(False, 'stopped', message='torso plan stopped'))
+            due = [p for p in self.pending if self._due(p, heap)]
+            if due:                                        # before more changes or an earlier one: sweep, rescue
+                self.pending = [p for p in self.pending if p not in due]
+                for pending in due:
+                    self._sweep(pending, closed, heap, order)
+                continue
             key, _, node, height = heapq.heappop(heap)
             if height is None:                             # a checked node: close it, open its next step
-                states = closed.setdefault((node.k, node.h), set())
-                mark = self._mark(node)
-                if mark in states or len(states) >= self.o.branches:
+                states = closed.setdefault((node.k, node.h), [])
+                mark = self._relevant(self._step_of(node), node.state)
+                if any(near(mark, seen, self.o.match) for seen in states):
                     continue
-                states.add(mark)
-                first.setdefault(node.k, node)
+                if len(states) >= self.o.branches:
+                    self.pruned.append('branches')
+                    continue
+                states.append(mark)
                 if node.k == n:
                     return self._done(self._success(node))
-                for h in self._allowed(node.k, node.h):
-                    edge = self._edge_key(node, h)
-                    if (node.k, h) not in self.dead and not self._full(closed, node.k + 1, h) and (
-                            self.o.max_changes is None or edge[0] <= self.o.max_changes):
-                        heapq.heappush(heap, (edge, next(order), node, h))
+                pushed = 0
+                for h in self._allowed(node, record=True):
+                    if (node.k, h) not in self.dead and not self._full(closed, node.k + 1, h):
+                        heapq.heappush(heap, (self._edge_key(node, h), next(order), node, h))
+                        pushed += 1
+                if first.setdefault(node.k, node) is node:     # the first plan that reaches the step
+                    if pushed:
+                        self.watch.add(node)
+                    else:                                  # nothing to try from it: rescue at once
+                        self._rescue(node, heap, order)
                 continue
             if self._full(closed, node.k + 1, height):     # an unchecked edge whose end is settled already
+                self.pruned.append('branches')
+                self.watch.discard(node)
                 continue
             if self._spent():
                 return self._done(self._failure(first, gave_up=True))
             check = self._try(node, height)
             if check is not None:
                 self._push(heap, order, node, height, key, check)
+                self.watch.discard(node)
+            elif node in self.watch:
+                self.watch.discard(node)
+                self.pending.append(node)
+
+    @staticmethod
+    def _due(pending: _Node, heap: list) -> bool:
+        """The next item would add a change or change at an earlier step than ``pending``'s."""
+        if not heap:
+            return True
+        key, _, node, height = heap[0]
+        return key[0] > pending.key[0] or (height is not None and height != node.h and node.k < pending.k)
+
+    def _sweep(self, node: _Node, closed: dict, heap, order) -> None:
+        """The best edge from the first node of a step failed and the search would move on to more or earlier
+        changes: the step's other heights from it now (local, best first, until one passes), and if none passes, the
+        step's rescue from it (as the per-step search falls back to the global search at the same step)."""
+        self.watch.discard(node)
+        for h in sorted(self._allowed(node), key=lambda h: self._edge_key(node, h)):
+            if self._spent() or self.should_stop():
+                return
+            if (node.k, h) in self.dead or self._full(closed, node.k + 1, h):
+                continue
+            check = self._try(node, h)
+            if check is not None:
+                self._push(heap, order, node, h, self._edge_key(node, h), check)
+                return
+        self._rescue(node, heap, order)
+
+    def _step_of(self, node: _Node) -> WindowStep:
+        return self.steps[node.k - 1] if node.k else self.steps[0]
 
     def _push(self, heap, order, node, height, key, check):
         done = _Node(node.k + 1, height, check.state, (*key[:3], round(key[3] + check.cost, 9), key[4]), node)
         heapq.heappush(heap, (done.key, next(order), done, None))
 
-    def _rescue(self, first: dict, heap: list, order) -> bool:
-        """Nothing open: the furthest step, if certain and not rescued yet, tried again with rescue=True from the best
-        plan that reached it, at every height its rule allows. True if anything passed (the search goes on)."""
-        d = max(first)
+    def _rescue(self, node: _Node, heap: list, order) -> bool:
+        """Step ``node.k`` failed locally at every height from ``node`` (the first plan that reached it): if certain
+        and not rescued yet, every height its rule allows (within max_changes) is tried again with rescue=True.
+        True if anything passed."""
+        d = node.k
         if not self.o.rescue or d >= len(self.steps) or d in self.rescued or not self.steps[d].certain:
             return False
         self.rescued.add(d)
-        node, passed = first[d], False
-        for h in self._allowed(d, node.h):
+        passed = False
+        for h in self._allowed(node):
+            if (d, h) in self.dead:
+                continue
             if self._spent() or self.should_stop():
                 break
             check = self._try(node, h, rescue=True)
@@ -270,17 +359,20 @@ class _Search:
     def _full(self, closed: dict, k: int, h: float) -> bool:
         return len(closed.get((k, h), ())) >= self.o.branches
 
-    def _mark(self, node: _Node) -> str:
-        step = self.steps[node.k - 1] if node.k else self.steps[0]
-        return json.dumps(self._state_key(step, node.state), sort_keys=True, default=str)
-
-    def _allowed(self, k: int, h: float) -> list[float]:
-        step = self.steps[k]
+    def _allowed(self, node: _Node, record: bool = False) -> list[float]:
+        """The heights step ``node.k`` may take after ``node``: its rule, within max_changes (``record``: note what
+        that left out)."""
+        step, h = self.steps[node.k], node.h
         if step.torso == KEEP or step.drive:
             return [h]
         if isinstance(step.torso, int | float):
-            return [h] if abs(float(step.torso) - h) <= self.o.tolerance else [round(float(step.torso), 6)]
-        return sorted(set(self.all) | {h})
+            heights = [h] if abs(float(step.torso) - h) <= self.o.tolerance else [round(float(step.torso), 6)]
+        else:
+            heights = sorted(set(self.all) | {h})
+        room = self.o.max_changes is None or node.key[0] < self.o.max_changes
+        if not room and record and any(x != h for x in heights):
+            self.pruned.append('max_changes')
+        return [x for x in heights if x == h or room]
 
     @staticmethod
     def _edge_key(node: _Node, h: float) -> tuple:
@@ -290,6 +382,12 @@ class _Search:
             changes, late, travel = changes + 1, (-node.k, *late), round(travel + abs(h - node.h), 6)
         return changes, late, travel, cost, (*path, h)
 
+    def _once(self, node: _Node, h: float, kind: str, call) -> Check:
+        """A check from ``node`` made at most once per search (the rescue does not repeat the local ones)."""
+        if (node, h, kind) not in self.tried:
+            self.tried[(node, h, kind)] = call()
+        return self.tried[(node, h, kind)]
+
     def _try(self, node: _Node, h: float, rescue: bool = False) -> Check | None:
         """The edge: ride to ``h`` if it changes, then step ``node.k`` at ``h`` (``rescue``: each local failure tried
         once more with rescue=True). The passing check or None."""
@@ -298,18 +396,22 @@ class _Search:
             return None
         state, saved = node.state, False
         if h != node.h:
-            ride = self._call('ride', step, node.h, h, state, lambda: self.checks.ride(step, state, h))
+            ride = self._once(node, h, 'ride', lambda: self._call(
+                'ride', step, node.h, h, node.state, lambda: self.checks.ride(step, node.state, h)))
             if not ride.ok and rescue:
-                ride = self._call('ride+', step, node.h, h, state,
-                                  lambda: self.checks.ride(step, state, h, rescue=True))
+                ride = self._once(node, h, 'ride+', lambda: self._call(
+                    'ride+', step, node.h, h, node.state, lambda: self.checks.ride(step, node.state, h, rescue=True)))
                 saved = ride.ok
             if not ride.ok:
                 self.out[k].setdefault(h, f'ride {node.h:g}->{h:g}: {ride.reason}')
                 return None
             state = ride.state
-        check = self._call('step', step, h, h, state, lambda: self.checks.step(step, h, state))
-        if not check.ok and rescue and not check.lasting:
-            check = self._call('step+', step, h, h, state, lambda: self.checks.step(step, h, state, rescue=True))
+        kind = 'step' if not saved else 'step after ride+'
+        check = self._once(node, h, kind, lambda: self._call(
+            'step', step, h, h, state, lambda: self.checks.step(step, h, state)))
+        if not check.ok and (rescue or (k, h) in self.saved) and not check.lasting and self.o.rescue:
+            check = self._once(node, h, kind + '+', lambda: self._call(
+                'step+', step, h, h, state, lambda: self.checks.step(step, h, state, rescue=True)))
             saved = saved or check.ok
         if not check.ok:
             self.out[k].setdefault(h, check.reason)
@@ -318,6 +420,7 @@ class _Search:
             return None
         self.works[k].add(h)
         if saved:
+            self.saved.add((k, h))
             self.rescues.append({'at': step.id, 'height': round(h, 4)})
         return check
 
@@ -332,28 +435,24 @@ class _Search:
         return self.bounds[(k, h)]
 
     def _call(self, kind: str, step: WindowStep, h_from: float, h: float, state: dict, call) -> Check:
-        """A check, from the memory when the step has a key and the relevant state matches: a remembered state is
-        laid over this one (its relevant joints; the idle arm and the wheels stay as they are now)."""
-        key = None if step.key is None else json.dumps(
-            [kind, step.key, round(h_from, 4), round(h, 4), self._state_key(step, state)], sort_keys=True, default=str)
-        if key is not None and key in self.o.memory:
+        """A check, from the memory when the step has a key and a remembered relevant state is within ``match`` of
+        this one: the remembered relevant joints are laid over this state (the wheels stay as they are now)."""
+        key = None if step.key is None else json.dumps([kind, step.key, round(h_from, 4), round(h, 4)])
+        relevant = self._relevant(step, state)
+        hit = self.o.recall(key, relevant) if key is not None else None
+        if hit is not None:
             self.remembered += 1
-            hit = self.o.memory[key]
             after = None if hit.state is None else {**state, **self._relevant(step, hit.state)}
             return Check(hit.ok, after, hit.cost, hit.reason, hit.lasting)
         self.calls += 1
         check = call()
         if key is not None:
-            self.o.remember(key, check)
+            self.o.remember(key, relevant, check)
         return check
 
     def _relevant(self, step: WindowStep, state: dict) -> dict:
         relevant = getattr(self.checks, 'relevant', None)
         return dict(state or {}) if relevant is None else relevant(step, state or {})
-
-    def _state_key(self, step: WindowStep, state: dict):
-        return {n: round(float(v), self.o.digits) if isinstance(v, int | float) else v
-                for n, v in sorted(self._relevant(step, state).items())}
 
     # ---- the answers
 
@@ -365,7 +464,7 @@ class _Search:
         return nodes[::-1]
 
     def _success(self, node: _Node, cut: str = '') -> Plan:
-        plan = Plan(True, cut=cut)
+        plan = Plan(True, 'cut' if cut else 'planned', cut=cut)
         for done in self._path(node):
             step = self.steps[done.k - 1]
             plan.heights[step.id], plan.states[step.id] = done.h, done.state
@@ -426,7 +525,11 @@ class _Search:
         else:
             text = f'{what} works at no height ({self._reasons(d)})'
         why = f'gave up after {self.calls} checks (max_checks), got to ' if gave_up else 'no heights work: '
-        return Plan(False, message=self._head() + why + text, table=self._table())
+        if 'max_changes' in self.pruned and not gave_up:
+            text += f' (plans with more than {self.o.max_changes} torso changes were not searched: max_changes)'
+        exhaustive = blocking is not None or not self.pruned
+        return Plan(False, 'capped' if gave_up else 'infeasible', exhaustive and not gave_up,
+                    message=self._head() + why + text, table=self._table())
 
     def _table(self) -> list[dict]:
         rescued = {(r['at'], r['height']) for r in self.rescues}
@@ -471,25 +574,28 @@ class SkillChecks:
     ik.torso and the URDF chains), ``skill._state_at``, ``skill._walk_lines``, ``skill._ahead_check``. A step's joints
     after it: the end of its lines (mode linear), else the IK solution of its main target. Local IK only, except with
     ``rescue`` (the global search, as solve_with_torso falls back to). ``ride_sample_m``: the ride's sample spacing
-    (default: ik.torso.line_sample_m, at most half the grid step, so a collision between grid heights is seen)."""
+    (default: ik.torso.line_sample_m, at most half the grid's usual step, so a collision between grid heights is
+    seen)."""
 
     def __init__(self, skill, should_stop: Callable[[], bool] = lambda: False, ride_sample_m: float | None = None):
         from .ik import LINE_SAMPLE_M
 
         self.skill, self.ik, self.should_stop = skill, skill.ik, should_stop
         self.joint = self.ik.torso['joint']
-        grid = sorted({float(v) for v in self.ik.torso.get('candidates', ())})
-        half = min((b - a for a, b in zip(grid, grid[1:], strict=False)), default=math.inf) / 2
+        grid = sorted({round(float(v), 6) for v in self.ik.torso.get('candidates', ())})
+        gaps = [round(b - a, 6) for a, b in zip(grid, grid[1:], strict=False)]
+        half = max(gaps, key=lambda g: (gaps.count(g), -g)) / 2 if gaps else math.inf    # the grid's usual step
         self.ride_sample = ride_sample_m or min(float(self.ik.torso.get('line_sample_m', LINE_SAMPLE_M)), half)
 
     def _hands(self, step: WindowStep) -> list[str]:
         return list(step.hands) or list(self.ik.groups)
 
     def relevant(self, step: WindowStep, state: dict) -> dict:
-        """The torso and the held arms' joints: what the later checks start from (not the idle arm, not the wheels)."""
+        """The torso and every arm's joints: what the later checks start from and collide with (the idle arm too:
+        IK and the rides check it), not the wheels or the base."""
         import re
 
-        patterns = [re.compile(self.ik.joint_pattern.format(tool=t)) for t in self._hands(step)]
+        patterns = [re.compile(self.ik.joint_pattern.format(tool=t)) for t in self.ik.groups]
         return {n: v for n, v in state.items() if n == self.joint or any(p.fullmatch(n) for p in patterns)}
 
     def bound(self, step: WindowStep, height: float) -> str | None:

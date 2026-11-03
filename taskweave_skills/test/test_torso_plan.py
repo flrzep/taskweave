@@ -81,8 +81,8 @@ def test_top_stack_gives_exactly_one_change_at_the_hook():
     assert [plan.heights[i] for i in TOP] == [LIVE] * 5 + [0.3, 0.3]
     assert plan.states['s2_s6']['trail'] == tuple((i, plan.heights[i]) for i in TOP)     # chained step by step
     assert ('s2_s5', LIVE, 0.4) in fake.ridden and ('s2_s5', LIVE, 0.3) in fake.ridden  # nearest first, at the hook
-    assert all(step == 's2_s5' for step, _, _ in fake.ridden)                          # no earlier change tried
-    assert plan.checks <= 15 and plan.report()['changes'] == plan.changes
+    assert {step for step, _, _ in fake.ridden} <= {'s2_s5', 's2_s6'}                  # no earlier change tried
+    assert plan.checks <= 18 and plan.report()['changes'] == plan.changes and plan.outcome == 'planned'
 
 
 def test_a_change_moves_one_step_earlier_only_when_no_ride_at_the_late_step_works():
@@ -224,26 +224,130 @@ def test_a_blocking_step_is_rescued_once_before_the_plan_fails():
 
 
 class Held(Fake):
-    """Later checks depend on the held arm and the torso only (as SkillChecks.relevant)."""
+    """Later checks depend on the arms (the idle one too: IK and rides check it) and the torso, not the wheels (as
+    SkillChecks.relevant)."""
 
     def relevant(self, step, state):
-        return {n: v for n, v in state.items() if n in ('lift', 'left_j1')}
+        return {n: v for n, v in state.items() if n in ('lift', 'left_j1', 'right_j1')}
 
 
-def test_memory_hits_with_the_idle_arm_and_the_wheels_changed():
-    """Review I4: the key is the held arm and the torso, rounded; the rest of the state is today's."""
+def test_memory_hits_with_the_wheels_changed_and_noise_but_not_with_the_idle_arm_moved():
+    """Review I4, N5, N6: matched within ``match`` (a noisy joint across a rounding boundary still hits), the wheels
+    left out, the idle arm in (a remembered pass must not hide a collision with it)."""
     planner, steps = TorsoPlan(GRID), window()
     for step in steps:
         step.key = f'{step.id}@pose'
-    first = {'lift': LIVE, 'left_j1': 0.3, 'right_j1': 1.0, 'wheel_l': 12.0, 'trail': ()}
+    first = {'lift': LIVE, 'left_j1': 0.3049, 'right_j1': 1.0, 'wheel_l': 12.0, 'trail': ()}
     cold = planner.plan(steps, LIVE, first, Held(TOP))
     fake = Held(TOP)
-    later = {**first, 'left_j1': 0.3012, 'right_j1': -0.4, 'wheel_l': 873.5, 'trail': ('cycle 2',)}
+    later = {**first, 'left_j1': 0.3051, 'right_j1': 1.002, 'wheel_l': 873.5, 'trail': ('cycle 2',)}
     warm = planner.plan(steps, LIVE, later, fake)
     assert warm.ok and warm.heights == cold.heights and warm.checks == 0 and fake.steps == []
-    assert warm.states['s2_s6']['wheel_l'] == 873.5 and warm.states['s2_s6']['right_j1'] == -0.4
-    other = planner.plan(steps, LIVE, {**later, 'left_j1': 0.9}, Held(TOP))     # the held arm differs: checked again
-    assert other.checks > 0
+    assert warm.states['s2_s6']['wheel_l'] == 873.5 and warm.states['s2_s6']['trail'] == ('cycle 2',)
+    idle = planner.plan(steps, LIVE, {**later, 'right_j1': -0.4}, Held(TOP))      # the idle arm moved: checked again
+    assert idle.checks > 0
+    held = planner.plan(steps, LIVE, {**later, 'left_j1': 0.9}, Held(TOP))        # the held arm differs: checked again
+    assert held.checks > 0
+
+
+def test_states_within_match_are_one_branch():
+    from taskweave_skills.torso_plan import near
+    assert near({'a': 0.3049, 'b': 'x'}, {'a': 0.3051, 'b': 'x'}, 0.01)
+    assert not near({'a': 0.30}, {'a': 0.32}, 0.01) and not near({'a': 0.3}, {'a': 0.3, 'b': 1.0}, 0.01)
+
+    class Noisy(Held):
+        """Three plans reach (b, 0.3): two leave the held arm at 0.305 +- noise (across a rounding boundary), the
+        third (a at 0.4) another branch (0.9), the only one c works from."""
+
+        def step(self, step, height, state, rescue=False):
+            check = super().step(step, height, state, rescue)
+            if check.ok and step.id == 'b':
+                trail = check.state['trail']
+                check.state['left_j1'] = 0.9 if ('a', 0.4) in trail else 0.3049 if ('a', 0.5) in trail else 0.3051
+            return check
+    works = {'a': band((0.3, 0.5)), 'b': band((0.3, 0.3)),
+             'c': lambda h, st: abs(h - 0.3) < 1e-6 and st['left_j1'] == 0.9}
+    state = {**start(0.5), 'left_j1': 0.3, 'right_j1': 1.0}
+    plan = TorsoPlan(GRID, branches=2).plan(window(works=works), 0.5, state, Noisy(works, lasting=False))
+    assert plan.ok and plan.heights == {'a': 0.4, 'b': 0.3, 'c': 0.3}       # the noisy pair took one slot only
+    exact = TorsoPlan(GRID, branches=2, match=0.0).plan(window(works=works), 0.5, state, Noisy(works, lasting=False))
+    assert not exact.ok                                                      # matched exactly, they take both
+
+
+# ---- fix round 2: the rescue within the default budget, branches 3, max_changes, outcomes
+
+GRID_S1 = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75]
+
+
+def high_rides(step, a, b):
+    """The carry is high: any ride from >= 0.6 down to <= 0.25 collides, at every step."""
+    return f'ride collides at {b:g}' if a >= 0.6 and b <= 0.25 + 1e-6 else None
+
+
+@pytest.mark.parametrize('before', [3, 4, 5])
+def test_a_long_set_down_window_is_rescued_well_under_the_default_cap(before):
+    """Review N1: carry steps that work at 0.6-0.75, then a set-down that works locally at 0.2-0.25 only (rides
+    collide there) and at 0.3 only with the rescue: 4, 5 and 6 steps, at the default max_checks."""
+    works = {**{f'c{i}': band((0.6, 0.75)) for i in range(before)}, 'set_down': band((0.2, 0.25))}
+    fake = Fake(works, rides=high_rides, lasting=False, rescue={'set_down': band((0.3, 0.3))})
+    plan = TorsoPlan(GRID_S1).plan(window(works=works), 0.7, start(0.7), fake)
+    assert plan.ok and plan.heights['set_down'] == 0.3 and plan.rescued == [{'at': 'set_down', 'height': 0.3}]
+    assert plan.changes == [{'at': 'set_down', 'from': 0.7, 'to': 0.3}]
+    assert plan.checks <= 23 + before and len(fake.rescues) <= len(GRID_S1)       # n checks + one sweep
+
+
+def test_the_top_stack_with_the_hook_only_by_the_rescue_is_planned_under_the_default_cap():
+    works = {**TOP, 's2_s6': band()}
+    fake = Fake(works, lasting=False, rescue={'s2_s6': band((0.3, 0.3))})
+    plan = TorsoPlan(GRID).plan(window(works=works), LIVE, start(), fake)
+    assert plan.ok and plan.changes == [{'at': 's2_s5', 'from': LIVE, 'to': 0.3}]
+    assert {'at': 's2_s6', 'height': 0.3} in plan.rescued and plan.checks <= 40
+
+
+def test_a_third_arm_branch_is_tried_with_the_default_branches():
+    """s2_s6 works at 0.3 only from the branch a change at s2_s2 leaves (after the ones at s2_s5 and s2_s3)."""
+    works = {**TOP, 's2_s6': lambda h, st: abs(h - 0.3) < 1e-6 and ('s2_s2', 0.3) in st['trail']}
+    plan = TorsoPlan(GRID).plan(window(works=works), LIVE, start(), Fake(works, lasting=False))
+    assert plan.ok and plan.changes == [{'at': 's2_s2', 'from': LIVE, 'to': 0.3}] and plan.checks <= 90
+    assert not TorsoPlan(GRID, branches=2).plan(window(works=works), LIVE, start(), Fake(works, lasting=False)).ok
+
+
+def test_max_changes_is_kept_by_the_rescue_and_named():
+    """Review N2: a hold that needs 4 changes is refused with max_changes 2, even when a rescue would pass."""
+    works = {'a': band((0.0, 0.1)), 'b': band((0.6, 0.7)), 'c': band((0.0, 0.1)), 'd': band((0.6, 0.7))}
+    fake = Fake(works, lasting=False, rescue={'d': band((0.0, 0.7))})
+    plan = TorsoPlan(GRID).plan(window(works=works), 0.3, start(0.3), fake)
+    assert not plan.ok and 'more than 2 torso changes were not searched: max_changes' in plan.message
+    assert plan.outcome == 'infeasible' and not plan.certain           # left out by max_changes: not known impossible
+    plan = TorsoPlan(GRID, max_changes=None).plan(window(works=works), 0.3, start(0.3), Fake(works, lasting=False))
+    assert plan.ok and len(plan.changes) == 4 and plan.rescued == []
+
+
+def test_the_rescue_does_not_repeat_local_checks():
+    """Review N4: from one state, each local check is made once, the rescue included."""
+    works = {**{f'c{i}': band((0.6, 0.75)) for i in range(3)}, 'set_down': band((0.2, 0.25))}
+    fake = Fake(works, rides=high_rides, lasting=False, rescue={'set_down': band((0.3, 0.3))})
+    TorsoPlan(GRID_S1).plan(window(works=works), 0.7, start(0.7), fake)
+    local = [(step, h, trail) for (step, h), (_, trail) in zip(fake.steps, fake.seen, strict=True)]
+    assert len(local) == len(set(local)) and len(fake.rescues) == len(set(fake.rescues))
+
+
+def test_the_outcome_says_whether_the_hold_is_impossible_or_only_unplanned():
+    """T4's ruling: only a finished search that found nothing (certain) fails the first held step; capped or
+    stopped falls back to the per-step choice."""
+    assert TorsoPlan(GRID).plan(window(), LIVE, start(), Fake(TOP)).outcome == 'planned'
+    nowhere = {**TOP, 's2_s6': band()}
+    plan = TorsoPlan(GRID).plan(window(works=nowhere), LIVE, start(), Fake(nowhere))
+    assert plan.outcome == 'infeasible' and plan.certain and plan.report()['certain'] is True
+    plan = TorsoPlan(GRID).plan(window(works=nowhere), LIVE, start(), Fake(nowhere, lasting=False))
+    assert plan.outcome == 'capped' and not plan.certain and 'gave up after 150 checks' in plan.message
+    calls = iter(range(1000))
+    plan = TorsoPlan(GRID).plan(window(works=nowhere), LIVE, start(), Fake(nowhere, lasting=False),
+                                should_stop=lambda: next(calls) > 5)
+    assert plan.outcome == 'stopped' and not plan.certain and plan.report()['outcome'] == 'stopped'
+    steps = window(works=nowhere)
+    steps[-1].certain = False
+    assert TorsoPlan(GRID).plan(steps, LIVE, start(), Fake(nowhere)).outcome == 'cut'
 
 
 def test_a_base_move_keeps_the_torso():
