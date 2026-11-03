@@ -178,7 +178,7 @@ def preview_plan(config: ConfigStore, mission: str, robot: str, catalog: dict | 
 
 
 def teach_fields() -> set[str]:
-    """The request fields of the teach service as built (TeachPoint before cell schema 4 has no instance_override)."""
+    """The request fields of the teach service as built (an older TeachPoint has no instance_override)."""
     return set(TeachPoint.Request.get_fields_and_field_types())
 
 
@@ -513,12 +513,6 @@ class Bridge(Node):
         if state in ('running', 'paused'):
             raise Busy(f'a mission is {state}; change settings when it has finished or was aborted')
 
-    def pose_args(self) -> set:
-        try:
-            return robot.pose_args(self.catalog())
-        except TimeoutError:
-            return robot.DEFAULT_POSE_ARGS
-
     def apply_navigation(self, settings: dict) -> dict[str, str]:
         """Set clearance and driving on the running path planner; node -> 'applied' or the reason it was not."""
         values = nav2_parameters(settings, self.config.robot(self.robot).base)
@@ -679,10 +673,10 @@ class Bridge(Node):
 
     def teach(self, kind: str, name: str, tools=(), instance_override: bool = False):
         """Ask the teach node to save the robot's current pose as target ``name`` of ``kind`` (base, hand, joints,
-        object): the request of the cell's layout (targets.teach_request). Refused: an ArmError with the node's
-        message (``hand 'tray_1/H05': ...``)."""
+        object): targets.teach_request. Refused: an ArmError with the node's message (``hand 'tray_1/H05':
+        ...``)."""
         try:
-            fields = targets.teach_request(self.config, teach_fields(), kind, name, tools, instance_override)
+            fields = targets.teach_request(teach_fields(), kind, name, tools, instance_override)
         except ValueError as error:
             raise arm.ArmError(str(error)) from error
         response = self.call(self.teach_client, TeachPoint.Request(**fields))
@@ -725,7 +719,7 @@ class Bridge(Node):
             except TimeoutError:
                 tool_targets = None
             return {'file': arm.capture_pose(self.config, self.robot, name, body, self.joint_positions(),
-                                             tool_targets, self.pose_args()), 'message': ''}
+                                             tool_targets), 'message': ''}
         at = body.get('at') or self.nearest_placed(scope)
         instance = self.config.object_instances().get(at)
         if instance is None or instance.object != scope:
@@ -741,8 +735,6 @@ class Bridge(Node):
         """Teach a held pose (an object target in the base frame) from where the held object is now: the teach
         node's ``object`` kind, which answers that it cannot be taught yet (the HMI shows its message)."""
         self.check_idle()
-        if not targets.active(self.config):
-            raise held.HeldError('a held pose cannot be captured: type in its numbers and try it with Test')
         try:
             response = self.teach('object', name)
         except arm.ArmError as error:
@@ -789,8 +781,8 @@ class Bridge(Node):
         return self.run_skill('move_gripper', {'to': {'point': f'{at}/{name}'}}, label=f'{at}/{name}')
 
     def point_names(self) -> dict[str, list[str]]:
-        """Named points for argument pickers (points.picker_names): the store's lists, held poses, via targets and,
-        on a targets cell, the target groups."""
+        """Named points for argument pickers (points.picker_names): the store's lists, held poses, via targets and
+        the target groups."""
         return points.picker_names(self.config, self.robot)
 
     def serves_move(self) -> bool:
@@ -1092,7 +1084,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'GET' and route == ['robot_pose']:
                 return self._json(points.relative_poses(bridge.config, bridge.robot_pose()))
             if method == 'GET' and route == ['robot']:
-                return self._json(robot.overview(bridge.config, bridge.robot, bridge.pose_args()))
+                return self._json(robot.overview(bridge.config, bridge.robot))
             if method == 'GET' and route == ['robot', 'joints']:
                 return self._json(bridge.joint_positions())
             if method == 'GET' and route == ['robot', 'tools']:
@@ -1111,9 +1103,9 @@ class Handler(BaseHTTPRequestHandler):
                 bridge.check_idle()
                 name = unquote(route[2])
                 if method == 'PUT':
-                    file = robot.save_pose(bridge.config, bridge.robot, name, self._body(), bridge.pose_args())
+                    file = robot.save_pose(bridge.config, bridge.robot, name, self._body())
                 else:
-                    file = robot.delete_pose(bridge.config, bridge.robot, name, bridge.pose_args())
+                    file = robot.delete_pose(bridge.config, bridge.robot, name)
                 bridge.get_logger().info(f'HMI {"saved" if method == "PUT" else "deleted"} pose {name} -> {file}')
                 bridge.points_changed()
                 return self._json({'pose': name, 'file': file})
@@ -1148,7 +1140,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'PUT' and route == ['robot', 'joints']:
                 return self._json({'sent': bridge.send_joints(self._body().get('joints') or {})})
             if method == 'GET' and route == ['teach', 'arm']:
-                return self._json(arm.overview(bridge.config, bridge.robot, bridge.pose_args()))
+                return self._json(arm.overview(bridge.config, bridge.robot))
             if method == 'PUT' and route == ['teach', 'target']:
                 body = self._body()
                 target = {k: body.get(k) for k in ('scope', 'name', 'at', 'form')} if body.get('name') else None
@@ -1159,9 +1151,9 @@ class Handler(BaseHTTPRequestHandler):
                 if len(route) == 4 and method in ('PUT', 'DELETE'):
                     bridge.check_idle()
                     if method == 'PUT':
-                        file = arm.save(bridge.config, bridge.robot, scope, name, self._body(), bridge.pose_args())
+                        file = arm.save(bridge.config, bridge.robot, scope, name, self._body())
                     else:
-                        file = arm.delete(bridge.config, bridge.robot, scope, name, bridge.pose_args())
+                        file = arm.delete(bridge.config, bridge.robot, scope, name)
                     bridge.get_logger().info(f'HMI {"saved" if method == "PUT" else "deleted"} arm position '
                                              f'{scope}/{name} -> {file}')
                     bridge.points_changed()

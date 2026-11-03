@@ -70,6 +70,9 @@ class FakeStore:
     def held_poses(self, _robot):
         return {'frame': {'up': {}, 'carry': {}}, 'box': {'up': {}}}
 
+    def target_names(self, _robot):
+        return {'joint targets': ['home', 'reach']}
+
 
 def test_a_pose_test_runs_move_joints_or_move_gripper_and_pickers_list_held_poses_and_via_targets():
     bridge = bridge_with()
@@ -85,6 +88,7 @@ def test_a_pose_test_runs_move_joints_or_move_gripper_and_pickers_list_held_pose
     names = bridge.point_names()
     assert names['held poses'] == ['carry', 'up']
     assert names['via targets'] == ['pose:home', 'pose:reach', 'bin_a/grasp']
+    assert names['joint targets'] == ['home', 'reach']
 
 
 def test_a_planning_scene_answer_replaces_the_cached_collision_objects():

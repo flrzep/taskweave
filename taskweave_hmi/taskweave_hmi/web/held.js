@@ -1,11 +1,11 @@
 'use strict';
-// taskweave HMI, Teach tab, Carry poses: held poses (robots/<robot>/held_poses.yaml), where `move_object to: {pose: <name>}` takes
-// a held object: some joints first (e.g. the body), then the object's origin along straight lines through the waypoints (in
-// the robot's base frame). Typed in, not captured: a held object cannot be jogged. Uses app.js ($, el, api, message,
+// taskweave HMI, Teach tab, Carry poses: held poses (object targets in robots/<robot>/targets.yaml), where `move {to: <name>}`
+// takes a held object: some joints first (e.g. the body), then the object's origin along straight lines through the waypoints
+// (in the robot's base frame). Typed in, not captured: a held object cannot be jogged. Uses app.js ($, el, api, message,
 // DEG, NAME_RE, STEP_M, STEP_DEG), robot.js (JOINT_SKIP) and teach.js (teach, showJoint, unshowJoint, jointUnit, jointStep,
-// numberInput, failText). A carry pose the config cannot read (targets layout: a problem in the file, joints the robot
-// has no group for) is listed with its problem, to fix it here. On the targets layout Capture asks the teach node (the
-// object kind); while that is not built it answers why, and the answer is shown.
+// numberInput, failText). A carry pose the config cannot read (a problem in the file, joints the robot has no group for)
+// is listed with its problem, to fix it here. Capture asks the teach node (the object kind); while that is not built it
+// answers why, and the answer is shown.
 
 const heldOpen = new Set();  // `${type}/${name}` of the open editors, kept over reloads
 
@@ -110,7 +110,7 @@ function heldItem(h, isNew = false) {
   nameInput.value = h.name;
   const test = el('button', { class: 'btn', text: 'Test (holding one)', 'data-edit': '' });
   const capture = el('button', { class: 'btn', text: 'Capture from robot', 'data-edit': '' });
-  capture.hidden = isNew || !teach.data.targets_layout;
+  capture.hidden = isNew;
   const save = el('button', { class: 'btn primary', text: 'Save', 'data-edit': '' });
   const remove = el('button', { class: 'btn danger', text: isNew ? 'Cancel' : 'Delete', 'data-edit': '' });
   test.hidden = isNew;

@@ -1,5 +1,5 @@
 'use strict';
-// taskweave HMI, Teach tab: Poses (relative to the robot, poses.yaml) and Points (on objects, objects/<type>.yaml),
+// taskweave HMI, Teach tab: Poses (relative to the robot, targets.yaml) and Points (on objects, objects/<type>.yaml),
 // one editor for both (the server's arm positions, arm.py). A pose or point that is open receives the pad's teach
 // press (L1 + L3); Capture does the same from here.
 // Uses helpers and state from app.js ($, el, api, message, show, state, DEG, NAME_RE, fillSelect, STEP_M, STEP_DEG).

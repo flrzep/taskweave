@@ -1,103 +1,57 @@
-"""Robot settings for the HMI: named joint poses and navigation clearance. No ROS dependency.
+"""Robot settings for the HMI: named poses and navigation clearance. No ROS dependency.
 
-Joint poses live in ``robots/<robot>/poses.yaml`` (joint -> rad, or m for the profile's ``joints.linear``). A pose that
-a mission uses cannot be renamed or deleted; which skill arguments name a pose comes from the skill catalog (the point
-kinds in POSE_KINDS, at any depth: move_joints ``pose``, move_gripper ``to.pose``; a dotted path names a nested one).
+A pose is a target in ``robots/<robot>/targets.yaml``: a joint target (``moves: joints``, joint values as the
+profile's joint groups; rad, or m for the profile's ``joints.linear``) or a hand target in the base frame (``moves:
+hand``, each tool as xyz / rpy, plus elbow and a joints part); missions name it as ``move {to: <name>}`` (and the old
+skills' args until the switch). The API keeps its shape: joints as {joint: value}, tools as {tcp, approach, closing}.
+A pose that a mission uses cannot be renamed or deleted.
+
 Navigation clearance lives in ``robots/<robot>/navigation.yaml`` (see ``schemas.NAVIGATION``); the server applies
 saved values to the running path planner. Arm solutions: the profile's ``ik.choose`` (preferred elbow side, how much
 joint-limit room and move size count); skills read it before every solve.
-
-On a cell pack in the targets layout (cell schema 4) a pose is a target in ``robots/<robot>/targets.yaml``: a joint
-target (``moves: joints``, joint values as the profile's joint groups) or a hand target in the base frame (``moves:
-hand``, each tool as xyz / rpy, plus elbow and a joints part); missions name it as ``move {to: <name>}`` (and the old
-skills' args until the switch). The API keeps its shape: joints as {joint: value}, tools as {tcp, approach, closing}.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 
 from jsonschema import Draft202012Validator
 
-from taskweave_core.config import ConfigError, ConfigStore, schemas
-from taskweave_core.config.limits import joint_groups_of, joint_limits, joint_problems, mimic_joints, pose_problems
+from taskweave_core.config import ConfigStore, schemas
+from taskweave_core.config.limits import joint_groups_of, joint_limits, joint_problems, mimic_joints
 from taskweave_core.config.targets import GroupError
 
 from . import targets
 
 HMI_NOTE = 'edited in the HMI'
-POSE_KINDS = ('joint_pose', 'joint_pose_only', 'tool_pose')    # x-taskweave-point kinds that name a pose of poses.yaml
-DEFAULT_POSE_ARGS = {('move_joints', 'pose'), ('move_gripper', 'to.pose')}
+POSES_FILE = 'targets'    # the robot file the poses are in (without .yaml)
 
 
 class RobotSettingsError(ValueError):
     """A robot setting cannot be changed; the message says why."""
 
 
-def _pose_paths(schema: Mapping, prefix: str = '') -> set[str]:
-    """Dotted paths of the properties of ``schema`` (also in oneOf / anyOf / allOf branches) that name a pose."""
-    found = set()
-    for branch in (schema, *(b for key in ('oneOf', 'anyOf', 'allOf') for b in schema.get(key, []))):
-        for arg, spec in (branch.get('properties') or {}).items():
-            path = f'{prefix}{arg}'
-            if spec.get('x-taskweave-point') in POSE_KINDS:
-                found.add(path)
-            found |= _pose_paths(spec, f'{path}.')
-    return found
+def pose_usage(store: ConfigStore) -> dict[str, list[str]]:
+    """Pose name -> missions that use it: the plain names the missions' steps name (``move {to}``, ``via``, the old
+    skills' args)."""
+    return {name: users for name, users in targets.references(store).items()
+            if targets.SEPARATOR not in name and not name.startswith(targets.STANCE)}
 
 
-def pose_args(catalog: Iterable[dict] | None) -> set[tuple[str, str]]:
-    """(skill, argument path) pairs whose value names a pose, from the skill catalog."""
-    found = {(skill['name'], path) for skill in catalog or [] for path in _pose_paths(skill.get('args_schema', {}))}
-    return found or DEFAULT_POSE_ARGS
-
-
-def _value(args, path: str):
-    """The value at the dotted ``path`` in a step's args, None if absent."""
-    for key in path.split('.'):
-        args = args.get(key) if isinstance(args, Mapping) else None
-    return args
-
-
-def pose_usage(store: ConfigStore, args: set[tuple[str, str]]) -> dict[str, list[str]]:
-    """Pose name -> missions that use it. On a targets cell: the plain names the missions' steps name (``move
-    {to}``, ``via``, the old skills' args), whatever ``args`` says."""
-    if targets.active(store):
-        return {name: users for name, users in targets.references(store).items()
-                if targets.SEPARATOR not in name and not name.startswith(targets.STANCE)}
-    result: dict[str, list[str]] = {}
-    for mission_name in store.mission_names():
-        try:
-            steps = store.expanded_mission(mission_name).get('steps', [])
-        except ConfigError:
-            continue
-        used = {_value(step.get('args', {}), arg) for step in steps
-                for skill, arg in args if step.get('skill') == skill}
-        for name in used - {None}:
-            if isinstance(name, str):
-                result.setdefault(name, []).append(mission_name)
-    return result
-
-
-def overview(store: ConfigStore, robot: str, args: set[tuple[str, str]]) -> dict:
+def overview(store: ConfigStore, robot: str) -> dict:
     store.reload()
     profile = store.robot(robot)
     joints = profile.data.get('joints', {})
-    used = pose_usage(store, args)
+    used = pose_usage(store)
     mimics = mimic_joints(store, robot)
-    if targets.active(store):
-        poses = [{'name': name, 'joints': pose['joints'], 'tools': pose['tools'], 'elbow': pose['elbow'],
-                  'used_by': used.get(name, []), 'problems': pose['problems']}
-                 for name, pose in targets.robot_poses(store, robot).items()]
-    else:
-        poses = [{'name': name, **store.named_pose(robot, name), 'used_by': used.get(name, []),
-                  'problems': pose_problems(store, robot, name)}    # e.g. copied from another robot
-                 for name in store.joint_poses(robot)]     # joints set directly, tools solved by IK
+    poses = [{'name': name, 'joints': pose['joints'], 'tools': pose['tools'], 'elbow': pose['elbow'],
+              'used_by': used.get(name, []), 'problems': pose['problems']}
+             for name, pose in targets.robot_poses(store, robot).items()]
     return {
         'robot': robot,
         'files': {name: store.display_path(store.robot_save_path(robot, f'{file}.yaml'))  # where edits go
-                  for name, file in (('poses', poses_file(store)), ('navigation', 'navigation'))},
+                  for name, file in (('poses', POSES_FILE), ('navigation', 'navigation'))},
         'linear_joints': list(joints.get('linear', [])),
         'poses': poses,
         # joint -> [lower, upper] (rad or m; null = unbounded) for the editor's input ranges and checks; mimic joints
@@ -112,11 +66,6 @@ def overview(store: ConfigStore, robot: str, args: set[tuple[str, str]]) -> dict
         'limits': profile.base.get('limits', {}),       # linear (m/s), angular (rad/s): caps for the driving speeds
         'ik_choice': ik_choice(profile.data.get('ik', {})),
     }
-
-
-def poses_file(store: ConfigStore) -> str:
-    """The robot file the poses are in (without .yaml): targets on a targets cell, else poses."""
-    return 'targets' if targets.active(store) else 'poses'
 
 
 def grippers(spec: Mapping) -> dict:
@@ -210,13 +159,11 @@ def _check_values(values, allow_empty: bool = False) -> dict[str, float]:
     return result
 
 
-def save_pose(store: ConfigStore, robot: str, name: str, body: Mapping, args: set[tuple[str, str]]) -> str:
+def save_pose(store: ConfigStore, robot: str, name: str, body: Mapping) -> str:
     """Create or update a pose. ``body``: joints {name: value}, optional tools {tool: {tcp, approach, closing}}
     (base frame, solved by IK when used), rename and create (no overwrite)."""
     store.reload()
-    new = targets.active(store)
-    exists = targets.plain_kind(store, robot, name) is not None if new else name in store.joint_poses(robot)
-    if body.get('create') and exists:
+    if body.get('create') and targets.plain_kind(store, robot, name) is not None:
         raise RobotSettingsError(f'pose {name!r} already exists')
     rename = body.get('rename') or None
     if rename == name:
@@ -230,43 +177,24 @@ def save_pose(store: ConfigStore, robot: str, name: str, body: Mapping, args: se
     if problems:
         raise RobotSettingsError('outside the joint limits of this robot: ' + '; '.join(problems))
     if rename:
-        users = pose_usage(store, args).get(name, [])
+        users = pose_usage(store).get(name, [])
         if users:
             raise RobotSettingsError(f'pose {name} is used by {", ".join(users)}; change those missions first')
-    if new:
-        return _save_pose_target(store, robot, name, body, joints, elbow, rename)
-    try:
-        tools = body.get('tools') or None
-        if tools:
-            allowed = list(store.robot(robot).data.get('ik', {}).get('groups', {}))
-            path = store.set_named_pose(robot, name, joints,
-                                        _check_tools(tools, allowed), rename=rename, note=HMI_NOTE, elbow=elbow)
-        else:
-            path = store.set_named_pose(robot, name, joints, rename=rename, note=HMI_NOTE)
-    except ValueError as error:
-        raise RobotSettingsError(str(error)) from error
-    return store.display_path(path)
+    return _save_pose_target(store, robot, name, body, joints, elbow, rename)
 
 
-def delete_pose(store: ConfigStore, robot: str, name: str, args: set[tuple[str, str]]) -> str:
+def delete_pose(store: ConfigStore, robot: str, name: str) -> str:
     store.reload()
-    users = pose_usage(store, args).get(name, [])
+    users = pose_usage(store).get(name, [])
     if users:
         raise RobotSettingsError(f'pose {name} is used by {", ".join(users)}; change those missions first')
-    if targets.active(store):
-        _pose_kind(store, robot, name, exists=True)
-        try:
-            return store.display_path(store.delete_target(name, robot)[0])
-        except targets.REFUSED as error:
-            raise RobotSettingsError(str(error)) from error
+    _pose_kind(store, robot, name, exists=True)
     try:
-        path = store.delete_point(f'robots/{robot}/poses.yaml', [name])
-    except ValueError as error:
+        return store.display_path(store.delete_target(name, robot)[0])
+    except targets.REFUSED as error:
         raise RobotSettingsError(str(error)) from error
-    return store.display_path(path)
 
 
-# ---- the same on a targets cell (cell schema 4) ---------------------------------------------------------------------
 def _pose_kind(store: ConfigStore, robot: str, name: str, exists: bool = False) -> str | None:
     """What the target ``name`` moves when it can be a pose (joints, or a hand in the base frame), None if there is
     none (``exists``: refused then too); refused for a target that is not a pose."""
@@ -283,10 +211,10 @@ def _pose_kind(store: ConfigStore, robot: str, name: str, exists: bool = False) 
 
 def _save_pose_target(store: ConfigStore, robot: str, name: str, body: Mapping, joints: dict, elbow: str | None,
                       rename: str | None) -> str:
-    """save_pose() on a targets cell: a joint target, or with tools a hand target in the base frame, in
+    """save_pose()'s write: a joint target, or with tools a hand target in the base frame, in
     robots/<robot>/targets.yaml. Keys the editor does not show (approach_m, grip_m, a path's earlier waypoints, a
-    torso ``auto`` / ``keep``) are kept; tools and elbow are as given, as poses.yaml had them. An update is marked
-    ``edited in the HMI`` as set_named_pose marked it (a new target gets the store's ``saved <date>``)."""
+    torso ``auto`` / ``keep``) are kept; tools and elbow are as given. An update is marked ``edited in the HMI`` (a
+    new target gets the store's ``saved <date>``)."""
     kind = _pose_kind(store, robot, name)
     entry = targets.plain_entry(store, robot, name)
     try:

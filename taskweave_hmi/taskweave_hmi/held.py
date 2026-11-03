@@ -1,14 +1,13 @@
-"""Held poses for the HMI Teach tab: where the robot holds an object of a type (robots/<robot>/held_poses.yaml),
-used by move_object ``to: {pose: <name>}``. No ROS dependency.
+"""Held poses for the HMI Teach tab: where the robot holds an object of a type. No ROS dependency.
 
 A held pose moves some joints first (e.g. the torso lift; the object moves with the arms), then the held object's
 origin in straight lines through the waypoints (base frame: x y z in m, roll pitch yaw in rad). It cannot be captured
 by jogging (a held object needs both hands moving together), so it is edited as numbers and tried with Test.
 
-On a cell pack in the targets layout (cell schema 4) a held pose is an object target in the base frame in
-``robots/<robot>/targets.yaml`` (``moves: object``, ``type: <object type>``, ``path``, joints as joint groups), named
-by ``move {to: <name>}``; a target without a type is listed under the object type ``*``. Test runs ``move`` when the
-skill catalog has it.
+A held pose is an object target in the base frame in ``robots/<robot>/targets.yaml`` (``moves: object``, ``type:
+<object type>``, ``path``, joints as joint groups), named by ``move {to: <name>}``; a target without a type is listed
+under the object type ``*``. Test runs ``move`` when the skill catalog has it, else move_object ``to: {pose:
+<name>}``.
 """
 
 from __future__ import annotations
@@ -37,40 +36,21 @@ def test_request(name: str, move: bool) -> tuple[str, dict]:
     return (targets.MOVE, targets.move_args(name)) if move else (SKILL, args(name))
 
 
-def pose_of(step_args) -> str | None:
-    """The held pose a move_object step names (None: it names none, or a placeholder)."""
-    to = (step_args or {}).get('to')
-    pose = to.get('pose') if isinstance(to, Mapping) else None
-    return pose if isinstance(pose, str) and '{' not in pose else None
-
-
 class HeldError(ValueError):
     """A held pose cannot be changed; the message says why."""
 
 
 def used_names(store: ConfigStore) -> dict[str, list[str]]:
     """Held pose name -> missions using it. A step names only the pose (its object type is whichever the robot holds
-    then), so a name counts for every object type that has a pose of that name. On a targets cell: the plain names
-    the steps name (``move {to}``, and move_object's ``to.pose`` until the switch)."""
-    if targets.active(store):
-        return {name: users for name, users in targets.references(store).items()
-                if targets.SEPARATOR not in name and not name.startswith(targets.STANCE)}
-    names: dict[str, list[str]] = {}
-    for mission_name in store.mission_names():
-        try:
-            steps = store.expanded_mission(mission_name).get('steps', [])
-        except ConfigError:
-            continue
-        for step in steps:
-            pose = pose_of(step.get('args')) if step.get('skill') == SKILL else None
-            if pose is not None and mission_name not in names.setdefault(pose, []):
-                names[pose].append(mission_name)
-    return names
+    then), so a name counts for every object type that has a pose of that name: the plain names the steps name
+    (``move {to}``, and move_object's ``to.pose`` until the switch)."""
+    return {name: users for name, users in targets.references(store).items()
+            if targets.SEPARATOR not in name and not name.startswith(targets.STANCE)}
 
 
 def overview(store: ConfigStore, robot: str) -> list[dict]:
-    """Every held pose of the robot, with the missions using it and ``problems`` (empty for a readable one). On a
-    targets cell an object target the store cannot read (``target_store.pose_target_problems``: a problem in the
+    """Every held pose of the robot, with the missions using it and ``problems`` (empty for a readable one). An
+    object target the store cannot read (``target_store.pose_target_problems``: a problem in the
     file, joints the robot has no group for) is listed too, with its problem and the waypoints as written, so it can
     be fixed here."""
     used = used_names(store)
@@ -78,9 +58,7 @@ def overview(store: ConfigStore, robot: str) -> list[dict]:
                'path': [{'xyz': list(p['xyz']), 'rpy': list(p['rpy'])} for p in entry.get('path') or []],
                'used_by': used.get(name, []), 'problems': []}
               for obj, entries in store.held_poses(robot).items() for name, entry in entries.items()]
-    if targets.active(store):
-        result += _unreadable(store, robot, used, {item['name'] for item in result})
-    return result
+    return result + _unreadable(store, robot, used, {item['name'] for item in result})
 
 
 def _waypoints(entry: Mapping) -> list[dict]:
@@ -122,7 +100,7 @@ def save(store: ConfigStore, robot: str, obj: str, name: str, body: Mapping) -> 
     """Save the editor's numbers: ``joints`` {joint: value}, ``path`` [{xyz, rpy}] (at least one), ``rename``."""
     store.reload()
     try:
-        if not (obj == ANY_TYPE and targets.active(store)):
+        if obj != ANY_TYPE:
             store.object(obj)
     except ConfigError as error:
         raise HeldError(f'no object type {obj!r} (objects/{obj}.yaml)') from error
@@ -151,13 +129,7 @@ def save(store: ConfigStore, robot: str, obj: str, name: str, body: Mapping) -> 
         users = used_names(store).get(name, [])
         if users:
             raise HeldError(f'{name} is used by {", ".join(users)}; change those missions first')
-    if targets.active(store):
-        return _save_object_target(store, robot, obj, name, joints, path, rename)
-    try:
-        file = store.save_held_pose(robot, obj, name, joints, path, rename)
-    except ValueError as error:
-        raise HeldError(str(error)) from error
-    return str(file.relative_to(store.root))
+    return _save_object_target(store, robot, obj, name, joints, path, rename)
 
 
 def delete(store: ConfigStore, robot: str, obj: str, name: str) -> str:
@@ -165,19 +137,13 @@ def delete(store: ConfigStore, robot: str, obj: str, name: str) -> str:
     users = used_names(store).get(name, [])
     if users:
         raise HeldError(f'{name} is used by {", ".join(users)}; change those missions first')
-    if targets.active(store):
-        _held_entry(store, robot, obj, name, exists=True)
-        try:
-            return store.delete_target(name, robot)[0].relative_to(store.root).as_posix()
-        except targets.REFUSED as error:
-            raise HeldError(str(error)) from error
+    _held_entry(store, robot, obj, name, exists=True)
     try:
-        return str(store.delete_point(f'robots/{robot}/held_poses.yaml', [obj, name]).relative_to(store.root))
-    except ValueError as error:
+        return store.delete_target(name, robot)[0].relative_to(store.root).as_posix()
+    except targets.REFUSED as error:
         raise HeldError(str(error)) from error
 
 
-# ---- the same on a targets cell (cell schema 4) ---------------------------------------------------------------------
 def _held_entry(store: ConfigStore, robot: str, obj: str, name: str, exists: bool = False) -> dict:
     """The object target ``name`` of the robot as written ({} if there is none; refused with ``exists``), refused when
     the name is another kind of target or a held pose for another object type."""
@@ -198,7 +164,7 @@ def _held_entry(store: ConfigStore, robot: str, obj: str, name: str, exists: boo
 
 def _save_object_target(store: ConfigStore, robot: str, obj: str, name: str, joints: dict, path: list[dict],
                         rename: str | None) -> str:
-    """save() on a targets cell: an object target in the base frame in robots/<robot>/targets.yaml. Keys the editor
+    """save()'s write: an object target in the base frame in robots/<robot>/targets.yaml. Keys the editor
     does not show (reference, a torso ``auto`` / ``keep``) are kept; a single pose stays one while it is one."""
     entry = _held_entry(store, robot, obj, name)
     try:

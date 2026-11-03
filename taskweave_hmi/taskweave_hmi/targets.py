@@ -1,16 +1,14 @@
-"""The HMI on a cell pack in the targets layout (cell schema 4). No ROS dependency.
+"""The HMI on a cell pack in the targets layout (cell schema 4 and later). No ROS dependency.
 
-The HMI's API stays as it was (locations, stances, object points, robot poses, held poses); on a schema 4 cell the
-modules points, arm, robot and held read and write targets through the store (``save_target``, ``delete_target``,
-``rename_target``; a type's own targets with ``type=``, so nothing needs to be placed) instead of the old point
-files. This module holds what they share: which target an old point is, the entries as written (so a save keeps the
-keys the HMI does not edit), the robot poses as the HMI lists them, the missions that name a target, and the manual
-skill requests (``move {to}`` when the skill catalog has ``move``).
+The HMI's API keeps its shape (locations, stances, object points, robot poses, held poses); the modules points, arm,
+robot and held read and write targets through the store (``save_target``, ``delete_target``, ``rename_target``; a
+type's own targets with ``type=``, so nothing needs to be placed). This module holds what they share: which target a
+point is, the entries as written (so a save keeps the keys the HMI does not edit), the robot poses as the HMI lists
+them, the missions that name a target, and the manual skill requests (``move {to}`` when the skill catalog has
+``move``).
 
 A write the store refuses is a TargetWriteError (``REFUSED``): the modules answer it as their own error (422). A
 target that is not there is a TargetError (a KeyError): the modules let it through and the server answers 404.
-
-On a schema 3 cell none of this is used: the modules keep their old calls.
 """
 
 from __future__ import annotations
@@ -42,13 +40,6 @@ ROUND = 4
 # a write the store refuses: TargetWriteError, and the plain ValueError of the file's schema check after the edit
 # (ConfigStore._edit_yaml -> store._check, not a TargetWriteError yet)
 REFUSED = (TargetWriteError, ValueError)
-
-
-def active(store: ConfigStore) -> bool:
-    """The cell pack is in the targets layout: write targets, never the old point files. A stand-in store without
-    the method (tests of the old layout) is the old layout."""
-    check = getattr(store, 'targets_format', None)
-    return bool(check()) if check is not None else False
 
 
 # ---- names and entries --------------------------------------------------------------------------------------------
@@ -249,33 +240,21 @@ def module_config(store: ConfigStore, old_skill: str, part: str) -> dict:
 
 # ---- teach requests -----------------------------------------------------------------------------------------------
 TEACH_KINDS = ('base', 'hand', 'joints', 'object')
-OLD_TEACH_KINDS = {'hand': 'object_point'}    # cell schema 3: the kind the teach node took (base: location, stance)
 
 
-def teach_request(store: ConfigStore, fields: Iterable[str], kind: str, name: str, tools: Iterable[str] = (),
+def teach_request(fields: Iterable[str], kind: str, name: str, tools: Iterable[str] = (),
                   instance_override: bool = False) -> dict:
     """The TeachPoint request fields that save the robot's current pose as ``name`` of ``kind`` (base, hand, joints,
-    object). Cell schema 4: the target reference and the kind, ``instance_override`` for an ``<instance>/<name>``.
-    Before schema 4 the old kinds (hand: object_point; base: location, stance, stance_instance), and no
-    instance_override. ``fields``: the request's fields as built (an older service has no instance_override; it
-    cannot teach a targets cell). A request that cannot be made is a ValueError with the reason."""
+    object): the target reference and the kind, ``instance_override`` for an ``<instance>/<name>``. ``fields``: the
+    request's fields as built (an older service has no instance_override; it cannot teach a targets cell). A request
+    that cannot be made is a ValueError with the reason."""
     if kind not in TEACH_KINDS:
         raise ValueError(f'unknown teach kind {kind!r} (it is one of {", ".join(TEACH_KINDS)})')
-    request = {'name': name, 'kind': kind, 'tools': [str(tool) for tool in tools]}
-    if active(store):
-        if 'instance_override' not in set(fields):
-            raise ValueError('the teach service is older than this cell pack (schema 4, targets): rebuild '
-                             'taskweave_interfaces and restart the teach node')
-        return {**request, 'instance_override': bool(instance_override)}
-    if kind == 'base':
-        request['kind'] = 'location' if SEPARATOR not in name else ('stance_instance' if instance_override
-                                                                    else 'stance')
-    elif kind in OLD_TEACH_KINDS:
-        request['kind'] = OLD_TEACH_KINDS[kind]
-    else:
-        raise ValueError(f'{kind} {name!r}: this cell is in the layout before schema 4 (taskweave config migrate): '
-                         f'{kind} targets need the targets layout')
-    return request
+    if 'instance_override' not in set(fields):
+        raise ValueError('the teach service is older than this cell pack (schema 4, targets): rebuild '
+                         'taskweave_interfaces and restart the teach node')
+    return {'name': name, 'kind': kind, 'tools': [str(tool) for tool in tools],
+            'instance_override': bool(instance_override)}
 
 
 # ---- the move skill in the catalog ---------------------------------------------------------------------------------

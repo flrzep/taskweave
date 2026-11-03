@@ -45,8 +45,5 @@ def test_bad_held_poses_are_refused(store):
         held.delete(store, ROBOT, 'box', 'carry')
 
 
-def test_the_held_pose_a_step_names_is_read_from_to_pose_and_the_run_args_nest_it():
+def test_the_run_args_nest_the_held_pose():
     assert held.args('carry') == {'to': {'pose': 'carry'}}
-    assert held.pose_of({'to': {'pose': 'carry'}}) == 'carry'
-    assert held.pose_of({'to': {'by': [0, 0, 1]}}) is None and held.pose_of({'to': {'pose': '{p}'}}) is None
-    assert held.pose_of({}) is None and held.pose_of(None) is None

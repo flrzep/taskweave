@@ -65,33 +65,21 @@ def test_a_base_that_is_not_holonomic_cannot_drive_sideways():
     assert robot.check_navigation({**settings, 'driving': {'sideways': False}}, {'type': 'differential'})
 
 
-def test_pose_args_fall_back_when_the_catalog_names_none():
-    assert robot.pose_args([]) == robot.DEFAULT_POSE_ARGS == {('move_joints', 'pose'), ('move_gripper', 'to.pose')}
-
-
-def test_pose_args_find_nested_pose_arguments_in_every_variant():
-    catalog = [{'name': 'move_gripper', 'args_schema': {'properties': {'to': {'oneOf': [
-        {'properties': {'point': {'x-taskweave-point': 'instance_point'}}},
-        {'properties': {'pose': {'x-taskweave-point': 'tool_pose'}}}]}, 'hands': {'type': 'string'}}}},
-        {'name': 'move_joints', 'args_schema': {'properties': {'pose': {'x-taskweave-point': 'joint_pose_only'}}}}]
-    assert robot.pose_args(catalog) == {('move_gripper', 'to.pose'), ('move_joints', 'pose')}
-
-
 def test_a_pose_a_nested_argument_names_counts_as_used(store):
     (store.root / 'missions' / 'reach.yaml').write_text(
         'goal: Reach\nsteps:\n- instruction: Reach out\n  skill: move_gripper\n  args: {to: {pose: reach}}\n')
-    used = robot.pose_usage(store, robot.DEFAULT_POSE_ARGS)
+    used = robot.pose_usage(store)
     assert used['reach'] == ['reach'] and used['carry'] == ['carry']
 
 
 def test_the_ik_choice_is_shown_with_defaults_and_saved(store):
-    assert robot.overview(store, ROBOT, robot.DEFAULT_POSE_ARGS)['ik_choice'] is None   # demo_bot has no ik
+    assert robot.overview(store, ROBOT)['ik_choice'] is None   # demo_bot has no ik
     profile = store.root / 'robots' / ROBOT / 'profile.yaml'
     profile.write_text(profile.read_text() + "ik:\n  groups: {left: left_arm}\n  joints: 'left_j[1-7]'\n")
-    choice = robot.overview(store, ROBOT, robot.DEFAULT_POSE_ARGS)['ik_choice']
+    choice = robot.overview(store, ROBOT)['ik_choice']
     assert not choice['enabled'] and choice['elbow'] is None and choice['weights']['limits'] == 2.0
     robot.save_ik_choice(store, ROBOT, {'elbow': 'down', 'limit_margin_deg': 30, 'weights': {'motion': 0.5}})
-    choice = robot.overview(store, ROBOT, robot.DEFAULT_POSE_ARGS)['ik_choice']
+    choice = robot.overview(store, ROBOT)['ik_choice']
     assert choice['enabled'] and choice['elbow'] == 'down' and choice['limit_margin_deg'] == 30
     assert choice['weights'] == {'limits': 2.0, 'elbow': 1.0, 'motion': 0.5, 'symmetry': 0.5}
     with pytest.raises(robot.RobotSettingsError, match='elbow'):

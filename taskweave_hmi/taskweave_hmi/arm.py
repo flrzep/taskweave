@@ -1,16 +1,12 @@
 """Arm positions for the HMI: one list for everywhere the arms are taught to go. No ROS dependency.
 
-A position is relative to the robot (a named pose in ``robots/<robot>/poses.yaml``: hand targets in the base frame
-solved by IK, or joint values) or to an object type (a point in ``objects/<type>.yaml``: hand targets in the object's
-frame, e.g. a grasp). The files and the skills that use them (move_joints, move_gripper) stay as they are; this module
-shows both the same way: each hand as x y z (m) and roll pitch yaw (rad) of its canonical TCP (z = approach,
+A position is relative to the robot (a joint or hand target in ``robots/<robot>/targets.yaml``, robot.py: hand
+targets in the base frame solved by IK, or joint values) or to an object type (a hand target of the type, points.py:
+in the object's frame, e.g. a grasp); renames and deletes go through the store's rename_target / delete_target. This
+module shows both the same way: each hand as x y z (m) and roll pitch yaw (rad) of its canonical TCP (z = approach,
 y = closing), plus joints (robot positions), elbow side and straight approach (object positions).
 
 Scopes in addresses: ``robot`` or an object type name.
-
-On a cell pack in the targets layout (cell schema 4) a robot position is a joint or hand target in
-``robots/<robot>/targets.yaml`` (robot.py) and an object position a hand target of the type (points.py); renames and
-deletes go through the store's rename_target / delete_target. The editor's shape stays.
 """
 
 from __future__ import annotations
@@ -21,8 +17,8 @@ from collections.abc import Mapping
 import numpy as np
 
 from taskweave_core.config import ConfigError, ConfigStore, schemas
-from taskweave_core.config.limits import joint_limits, mimic_joints, pose_problems
-from taskweave_skills.ik import rpy_matrix, tcp_matrix
+from taskweave_core.config.limits import joint_limits, mimic_joints
+from taskweave_skills.ik import rpy_matrix
 
 from . import held, points, robot
 from . import targets as layout
@@ -32,13 +28,6 @@ ROBOT = 'robot'
 
 class ArmError(ValueError):
     """An arm position cannot be changed; the message says why."""
-
-
-def hand_from_target(target: Mapping) -> dict:
-    """{tcp, approach, closing} (a named pose's tool target) -> {xyz, rpy}."""
-    m = tcp_matrix(target)
-    rpy = [math.atan2(m[2, 1], m[2, 2]), math.asin(max(-1.0, min(1.0, -m[2, 0]))), math.atan2(m[1, 0], m[0, 0])]
-    return {'xyz': [round(float(v), 4) for v in m[:3, 3]], 'rpy': [round(v, 4) + 0.0 for v in rpy]}
 
 
 def target_from_hand(hand: Mapping) -> dict:
@@ -52,25 +41,17 @@ def object_types(store: ConfigStore) -> list[str]:
     return sorted(path.stem for path in (store.root / 'objects').glob('*.yaml'))
 
 
-def overview(store: ConfigStore, robot_name: str, pose_args: set) -> dict:
+def overview(store: ConfigStore, robot_name: str) -> dict:
     """Every arm position, with the missions using it, and what the editor needs to show them."""
     store.reload()
     profile = store.robot(robot_name)
-    pose_used = robot.pose_usage(store, pose_args)
+    pose_used = robot.pose_usage(store)
     point_used = points.usage(store, robot_name)
     positions = []
-    if layout.active(store):   # hand targets keep their xyz / rpy as written
-        for name, pose in layout.robot_poses(store, robot_name).items():
-            positions.append({
-                'scope': ROBOT, 'name': name, 'joints': pose['joints'], 'elbow': pose['elbow'], 'approach_m': None,
-                'hands': pose['hands'], 'used_by': pose_used.get(name, []), 'problems': pose['problems']})
-    else:
-        for name in store.joint_poses(robot_name):
-            pose = store.named_pose(robot_name, name)
-            positions.append({
-                'scope': ROBOT, 'name': name, 'joints': pose['joints'], 'elbow': pose['elbow'], 'approach_m': None,
-                'hands': {tool: hand_from_target(target) for tool, target in pose['tools'].items()},
-                'used_by': pose_used.get(name, []), 'problems': pose_problems(store, robot_name, name)})
+    for name, pose in layout.robot_poses(store, robot_name).items():   # hand targets keep their xyz / rpy as written
+        positions.append({
+            'scope': ROBOT, 'name': name, 'joints': pose['joints'], 'elbow': pose['elbow'], 'approach_m': None,
+            'hands': pose['hands'], 'used_by': pose_used.get(name, []), 'problems': pose['problems']})
     types = object_types(store)
     for object_type in types:
         for point in points.object_points(store, object_type, point_used, robot_name):
@@ -82,7 +63,6 @@ def overview(store: ConfigStore, robot_name: str, pose_args: set) -> dict:
     mimics = mimic_joints(store, robot_name)
     return {
         'robot': robot_name,
-        'targets_layout': layout.active(store),   # cell schema 4: points are hand targets, held poses object targets
         'positions': positions,
         'held': held.overview(store, robot_name),   # held poses (move_object pose:), edited as numbers
         'grip_range_m': grip_ranges(store, robot_name),   # finger openings each gripper can be set to (grip_m)
@@ -94,7 +74,7 @@ def overview(store: ConfigStore, robot_name: str, pose_args: set) -> dict:
                          for joint, bounds in joint_limits(store, robot_name).items() if joint not in mimics},
         'elbow_sides': schemas.ELBOW_SIDES,
         'approach_default': layout.approach_default(store),
-        'files': {'poses': store.display_path(store.robot_save_path(robot_name, f'{robot.poses_file(store)}.yaml')),
+        'files': {'poses': store.display_path(store.robot_save_path(robot_name, f'{robot.POSES_FILE}.yaml')),
                   'objects': 'objects/<type>.yaml'},
     }
 
@@ -111,7 +91,7 @@ def _hands(body: Mapping) -> dict:
     return hands
 
 
-def save(store: ConfigStore, robot_name: str, scope: str, name: str, body: Mapping, pose_args: set) -> str:
+def save(store: ConfigStore, robot_name: str, scope: str, name: str, body: Mapping) -> str:
     """Update a position from the editor's numbers: ``hands`` {tool: {xyz, rpy}}, ``joints`` (robot), ``elbow``,
     ``approach_m`` (object), optional ``rename``. New positions are made by capturing the robot (capture)."""
     store.reload()
@@ -121,13 +101,11 @@ def save(store: ConfigStore, robot_name: str, scope: str, name: str, body: Mappi
         rename = None
     if scope == ROBOT:
         request = {'joints': body.get('joints') or {}, 'rename': rename}
-        if hands:
+        if hands:   # written as xyz / rpy: the editor's numbers as they are
             request.update(tools={tool: target_from_hand(hand) for tool, hand in hands.items()},
-                           elbow=body.get('elbow') or None)
-            if layout.active(store):   # written as xyz / rpy: the editor's numbers as they are
-                request['hands'] = hands
+                           elbow=body.get('elbow') or None, hands=hands)
         try:
-            return robot.save_pose(store, robot_name, name, request, pose_args)
+            return robot.save_pose(store, robot_name, name, request)
         except robot.RobotSettingsError as error:
             raise ArmError(str(error)) from error
     _object_type(store, scope)
@@ -141,20 +119,14 @@ def save(store: ConfigStore, robot_name: str, scope: str, name: str, body: Mappi
         if users:
             raise ArmError(f'{scope} {name} is used by {", ".join(users)}; change those missions first '
                            '(the numbers were saved)')
-        if layout.active(store):
-            return _target_change(
-                store, robot_name, lambda target: store.rename_target(target, rename, robot_name, type=scope), scope,
-                name)
-        try:
-            file = str(store.rename_object_point(scope, name, rename).relative_to(store.root))
-        except ValueError as error:
-            raise ArmError(str(error)) from error
+        return _target_change(
+            store, robot_name, lambda target: store.rename_target(target, rename, robot_name, type=scope), scope, name)
     return file
 
 
 def _target_change(store: ConfigStore, robot_name: str, change, object_type: str, name: str) -> str:
     """Rename or delete (``change(name)``, the store's call with ``type=object_type``: nothing needs to be placed)
-    the hand target ``name`` of a type on a targets cell; the first file written."""
+    the hand target ``name`` of a type; the first file written."""
     if layout.type_kinds(store, robot_name, object_type).get(name) != 'hand':
         raise ArmError(f'object {object_type!r} has no point {name!r}')
     try:
@@ -164,24 +136,19 @@ def _target_change(store: ConfigStore, robot_name: str, change, object_type: str
     return paths[0].relative_to(store.root).as_posix() if paths else ''
 
 
-def delete(store: ConfigStore, robot_name: str, scope: str, name: str, pose_args: set) -> str:
+def delete(store: ConfigStore, robot_name: str, scope: str, name: str) -> str:
     store.reload()
     if scope == ROBOT:
         try:
-            return robot.delete_pose(store, robot_name, name, pose_args)
+            return robot.delete_pose(store, robot_name, name)
         except robot.RobotSettingsError as error:
             raise ArmError(str(error)) from error
     _object_type(store, scope)
     users = points.usage(store, robot_name).get(('object_point', scope, name), [])
     if users:
         raise ArmError(f'{scope} {name} is used by {", ".join(users)}; change those missions first')
-    if layout.active(store):
-        return _target_change(store, robot_name, lambda target: store.delete_target(target, robot_name, type=scope),
-                              scope, name)
-    try:
-        return str(store.delete_point(f'objects/{scope}.yaml', ['points', name]).relative_to(store.root))
-    except ValueError as error:
-        raise ArmError(str(error)) from error
+    return _target_change(store, robot_name, lambda target: store.delete_target(target, robot_name, type=scope),
+                          scope, name)
 
 
 def _object_type(store: ConfigStore, scope: str) -> None:
@@ -192,17 +159,14 @@ def _object_type(store: ConfigStore, scope: str) -> None:
 
 
 def capture_pose(store: ConfigStore, robot_name: str, name: str, body: Mapping, joints: dict[str, float],
-                 targets: dict | None, pose_args: set) -> str:
+                 targets: dict | None) -> str:
     """Save the robot's current arm as the robot position ``name``. ``joints``: current joint states; ``targets``:
     current tool targets (forward kinematics), None if unavailable. An existing position keeps its form (hands or
     joints) and its joint set; ``body.tools`` limits a hand capture to those hands (the others are kept). A new one
     takes ``body.form`` ('hands' or 'joints')."""
     store.reload()
-    if layout.active(store):   # read as the Robot tab lists them (a target that cannot be read does not stop it)
-        named = layout.robot_poses(store, robot_name)
-        poses, pose_of = list(named), named.__getitem__
-    else:
-        poses, pose_of = store.joint_poses(robot_name), lambda n: store.named_pose(robot_name, n)
+    named = layout.robot_poses(store, robot_name)  # as the Robot tab lists them (an unreadable one does not stop it)
+    poses, pose_of = list(named), named.__getitem__
     existing = pose_of(name) if name in poses else None
     profile_tools = list(store.robot(robot_name).data.get('ik', {}).get('groups', {}))
     if existing is not None:
@@ -227,7 +191,7 @@ def capture_pose(store: ConfigStore, robot_name: str, name: str, body: Mapping, 
         request.update(tools={**kept, **{tool: targets[tool] for tool in only}},
                        elbow=(existing or {}).get('elbow'))
     try:
-        return robot.save_pose(store, robot_name, name, request, pose_args)
+        return robot.save_pose(store, robot_name, name, request)
     except robot.RobotSettingsError as error:
         raise ArmError(str(error)) from error
 

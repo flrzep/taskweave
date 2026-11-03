@@ -1,31 +1,27 @@
 """Points for the HMI: list, edit, rename and delete locations and stances. No ROS dependency.
 
-Locations live in ``cell/locations.yaml`` (cell frame). Stances live in ``robots/<robot>/stances.yaml`` as offsets
-in the object's frame, per object type (``objects``) or per placed instance (``instances``, overrides). Placed
-objects (``cell/objects.yaml``) are read-only here: the scene is built from the same layout.
+The API reads and writes targets (targets.py): a location is a base target in ``cell/targets.yaml`` (cell frame), a
+stance variant a base target of the type in ``robots/<robot>/objects/<type>.yaml`` (an offset in the object's frame;
+an override for one placed instance: its ``instances`` entry), an object point a hand target in
+``objects/<type>.yaml`` with the robot's settings (elbow, grip_m) in the robot's objects file. Placed objects
+(``cell/objects.yaml``) are read-only here: the scene is built from the same layout.
 
-Every point lists the missions that refer to it. A point that a mission needs cannot be renamed or deleted; a
-stance override can be deleted when the object type has the same variant to fall back on. Placeholders such as
+Every point lists the missions that refer to it: they name them as ``<name>`` and ``<instance>/<name>`` (``move
+{to}``); the old skills' forms count too. A point that a mission needs cannot be renamed or deleted; a stance
+override can be deleted when the object type has the same variant to fall back on. Placeholders such as
 ``{fullest_stack}`` are resolved at run time and are not counted.
-
-On a cell pack in the targets layout (cell schema 4) the same API reads and writes targets (targets.py): a location
-is a base target in ``cell/targets.yaml``, a stance variant a base target of the type in
-``robots/<robot>/objects/<type>.yaml`` (an override: its ``instances`` entry), an object point a hand target in
-``objects/<type>.yaml`` with the robot's settings (elbow, grip_m) in the robot's objects file. Missions name them as
-``<name>`` and ``<instance>/<name>`` (``move {to}``); the old skills' forms count too.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 
-from taskweave_core.config import ConfigError, ConfigStore, Pose2D, TargetError, schemas, target_store
-from taskweave_core.config.store import LOCATION_PREFIX, STANCE_PREFIX, TOOL_SUFFIX, VARIANT_SEPARATOR
+from taskweave_core.config import ConfigStore, Pose2D, TargetError, schemas, target_store
+from taskweave_core.config.store import STANCE_PREFIX, TOOL_SUFFIX, VARIANT_SEPARATOR
 
 from . import targets
 
-LOCATIONS = 'cell/locations.yaml'
 CELL_TARGETS = 'cell/targets.yaml'
 SCOPES = ('objects', 'instances')
 
@@ -34,17 +30,13 @@ class PointError(ValueError):
     """A point cannot be changed; the message says why."""
 
 
-def stances_file(robot: str) -> str:
-    return f'robots/{robot}/stances.yaml'
-
-
 def robot_objects_file(robot: str, object_type: str = '<type>') -> str:
     return f'robots/{robot}/objects/{object_type}.yaml'
 
 
 def stance_offsets(store: ConfigStore, robot: str) -> dict:
-    """The robot's stances in the shape of stances.yaml (on a targets cell the store's reader of its base targets on
-    object types: an instance override is merged with the type's layers, so one may give only some keys)."""
+    """The robot's stances in the shape of the old stances.yaml (the store's reader of its base targets on object
+    types: an instance override is merged with the type's layers, so one may give only some keys)."""
     return store.stance_offsets(robot)
 
 
@@ -52,82 +44,22 @@ def pose_dict(pose: Pose2D) -> dict:
     return {'x': round(pose.x, 4), 'y': round(pose.y, 4), 'yaw': round(pose.yaw, 4)}
 
 
-def _strings(value) -> Iterator[str]:
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, Mapping):
-        for item in value.values():
-            yield from _strings(item)
-    elif isinstance(value, list):
-        for item in value:
-            yield from _strings(item)
-
-
-def _stance_source(store: ConfigStore, robot: str, reference: str) -> tuple[str, str, str] | None:
-    """The stances.yaml entry a ``stance:`` reference resolves to: (scope, owner, variant), or None."""
-    name, _, variant = reference.partition(VARIANT_SEPARATOR)
-    instance = store.object_instances().get(name)
-    if instance is None:
-        return None
-    variants = store.stance_variants(robot, instance)
-    variant = variant or next(iter(variants), '')
-    if variant not in variants:
-        return None
-    overrides = stance_offsets(store, robot).get('instances', {})
-    if variant in overrides.get(name, {}):
-        return 'instances', name, variant
-    return 'objects', instance.object, variant
-
-
-def usage(store: ConfigStore, robot: str) -> dict[tuple, list[str]]:
-    """Which missions use which point: ('location', name), (scope, owner, variant) or ('object_point', type,
-    point) -> mission names."""
-    if targets.active(store):
-        return _target_usage(store, robot)
-    result: dict[tuple, list[str]] = {}
-    locations = store.locations()
-    instances = store.object_instances()
-    for mission_name in store.mission_names():
-        try:
-            mission = store.expanded_mission(mission_name)  # steps of included missions count too
-        except ConfigError:
-            continue
-        used = set()
-        for step in mission.get('steps', []):
-            for text in _strings(step.get('args', {})):
-                if '{' in text:
-                    continue
-                if text.startswith(STANCE_PREFIX):
-                    source = _stance_source(store, robot, text[len(STANCE_PREFIX):])
-                    if source:
-                        used.add(source)
-                else:
-                    name = text[len(LOCATION_PREFIX):] if text.startswith(LOCATION_PREFIX) else text
-                    if name in locations:
-                        used.add(('location', name))
-                    owner, _, point = text.partition(VARIANT_SEPARATOR)
-                    if point and owner in instances:
-                        used.add(('object_point', instances[owner].object, point))
-        for key in used:
-            result.setdefault(key, []).append(mission_name)
-    return result
-
-
 def picker_names(store: ConfigStore, robot: str) -> dict[str, list[str]]:
     """Named points for argument pickers (GET /api/points): the store's lists, plus held poses (any object type:
-    the held type is known at run time) and via targets (``pose:<joint pose>`` or a placed object point). On a
-    targets cell also the target groups (base / hand / object / joint targets, placed objects) that fields with
-    ``x-taskweave-target-kinds`` pick from."""
+    the held type is known at run time), via targets (``pose:<joint pose>`` or a placed object point) and the target
+    groups (base / hand / object / joint targets, placed objects) that fields with ``x-taskweave-target-kinds`` pick
+    from."""
     names = store.point_names(robot)
     names['held poses'] = sorted({name for poses in store.held_poses(robot).values() for name in poses})
     names['via targets'] = [f'pose:{pose}' for pose in names.get('joint poses', [])] + \
         list(names.get('placed object points', []))
-    return targets.picker_names(store, robot, names) if targets.active(store) else names
+    return targets.picker_names(store, robot, names)
 
 
-def _target_usage(store: ConfigStore, robot: str) -> dict[tuple, list[str]]:
-    """usage() on a targets cell: the references the missions name (``<name>``, ``<instance>/<name>``, and the old
-    skills' forms) as the same keys."""
+def usage(store: ConfigStore, robot: str) -> dict[tuple, list[str]]:
+    """Which missions use which point: ('location', name), (scope, owner, variant) or ('object_point', type,
+    point) -> mission names, from the references the missions name (``<name>``, ``<instance>/<name>``, and the old
+    skills' forms)."""
     result: dict[tuple, list[str]] = {}
     cell = target_store.cell_targets(store)
     instances = store.object_instances()
@@ -185,11 +117,9 @@ def overview(store: ConfigStore, robot: str) -> dict:
                           'used_by': used.get(('objects', object_type, v), [])} for v, p in variants.items()],
             'instances': placed,
         })
-    new = targets.active(store)
     return {
         'robot': robot,
-        'files': {'locations': CELL_TARGETS if new else LOCATIONS,
-                  'stances': robot_objects_file(robot) if new else stances_file(robot), 'objects': 'cell/objects.yaml'},
+        'files': {'locations': CELL_TARGETS, 'stances': robot_objects_file(robot), 'objects': 'cell/objects.yaml'},
         'locations': [{'name': n, 'pose': pose_dict(p), 'used_by': used.get(('location', n), [])}
                       for n, p in store.locations().items()],
         'objects': objects,
@@ -200,29 +130,8 @@ def overview(store: ConfigStore, robot: str) -> dict:
 
 
 def object_points(store: ConfigStore, object_type: str, used: dict, robot: str | None = None) -> list[dict]:
-    """Points on an object type (objects/<type>.yaml): tool poses in the object's frame, approach and (with
-    ``robot``) that robot's elbow side and gripper openings when closed there (grip_m) for it."""
-    if targets.active(store):
-        return _hand_targets(store, object_type, used, robot)
-    try:
-        points = store.object(object_type).get('points', {})
-    except ConfigError:
-        return []
-    result = []
-    for name in points:
-        point = store.object_point(object_type, name, robot)
-        result.append({
-            'name': name, 'approach_m': point.get('approach_m'), 'elbow': point.get('elbow'),
-            'grip_m': dict(point.get('grip_m') or {}),
-            'tools': {key[:-len(TOOL_SUFFIX)]: {'xyz': list(pose.xyz), 'rpy': list(pose.rpy)}
-                      for key, pose in point.items() if key.endswith(TOOL_SUFFIX) and pose is not None},
-            'used_by': used.get(('object_point', object_type, name), []),
-        })
-    return result
-
-
-def _hand_targets(store: ConfigStore, object_type: str, used: dict, robot: str | None) -> list[dict]:
-    """object_points() on a targets cell: the type's hand targets, with the robot's settings on them."""
+    """Points on an object type: its hand targets (tool poses in the object's frame), approach and (with ``robot``)
+    that robot's elbow side and gripper openings when closed there (grip_m) for it."""
     result = []
     for name, moves in targets.type_kinds(store, robot, object_type).items():
         if moves != 'hand':
@@ -285,17 +194,7 @@ def save_object_point(store: ConfigStore, object_type: str, point: str, body: Ma
             raise PointError(f'{tool}: xyz and rpy need three numbers each') from None
         if any(len(v) != 3 or not all(math.isfinite(x) for x in v) for v in poses[tool].values()):
             raise PointError(f'{tool}: xyz and rpy need three numbers each')
-    if targets.active(store):
-        return _save_hand_target(store, object_type, point, settings, poses, robot)
-    try:
-        path = store.save_object_point_settings(object_type, point, settings, robot) if settings else None
-        if poses:
-            path = store.save_object_point_poses(object_type, point, poses)
-    except ValueError as error:
-        raise PointError(str(error)) from error
-    if path is None:
-        raise PointError('nothing to save')
-    return str(path.relative_to(store.root))
+    return _save_hand_target(store, object_type, point, settings, poses, robot)
 
 
 def parse_pose(body: Mapping, frame: str) -> Pose2D:
@@ -308,66 +207,24 @@ def parse_pose(body: Mapping, frame: str) -> Pose2D:
     return Pose2D(x, y, yaw, frame)
 
 
-def _keys(store: ConfigStore, kind: str, path: list[str]) -> tuple[str, list[str], str]:
-    """(file, keys, frame) for a point address: location/<name> or stance/<scope>/<owner>/<variant>."""
+def _frame(store: ConfigStore, kind: str, path: list[str]) -> str:
+    """The frame of a point address: location/<name> or stance/<scope>/<owner>/<variant>."""
     if kind == 'location' and len(path) == 1:
-        return LOCATIONS, path, 'cell'
+        return 'cell'
     if kind == 'stance' and len(path) == 3 and path[0] in SCOPES:
         scope, owner, _ = path
         if scope == 'instances':
             instance = store.object_instances().get(owner)
             if instance is None:
                 raise PointError(f'no object {owner!r} in cell/objects.yaml')
-            frame = instance.object
-        else:
-            frame = owner
-        return '', path, frame
+            return instance.object
+        return owner
     raise PointError(f'unknown point address {"/".join([kind, *path])!r}')
 
 
 def _users(store: ConfigStore, robot: str, kind: str, path: list[str]) -> list[str]:
     key = ('location', path[0]) if kind == 'location' else tuple(path)
     return usage(store, robot).get(key, [])
-
-
-def save(store: ConfigStore, robot: str, kind: str, path: list[str], body: Mapping) -> str:
-    """Create or update a point. ``body``: x, y, yaw (radians); optional ``rename`` (new last path element) and
-    ``create`` (refuse to overwrite an existing point)."""
-    if targets.active(store):
-        return _save_base_target(store, robot, kind, path, body)
-    file, keys, frame = _keys(store, kind, path)
-    file = file or stances_file(robot)
-    store.reload()
-    if body.get('create') and _exists(store, robot, kind, path):
-        raise PointError(f'{"/".join(path)} already exists')
-    rename = body.get('rename') or None
-    if rename == keys[-1]:
-        rename = None
-    if rename:
-        users = _users(store, robot, kind, path)
-        if users:
-            raise PointError(f'{"/".join(path)} is used by {", ".join(users)}; change those missions first')
-    try:
-        store.update_point(file, keys, parse_pose(body, frame), rename=rename)
-    except ValueError as error:
-        raise PointError(str(error)) from error
-    return file
-
-
-def delete(store: ConfigStore, robot: str, kind: str, path: list[str]) -> str:
-    if targets.active(store):
-        return _delete_base_target(store, robot, kind, path)
-    file, keys, _ = _keys(store, kind, path)
-    file = file or stances_file(robot)
-    store.reload()
-    users = _users(store, robot, kind, path)
-    if users and not (kind == 'stance' and path[0] == 'instances' and _type_has_variant(store, robot, path)):
-        raise PointError(f'{"/".join(path)} is used by {", ".join(users)}; change those missions first')
-    try:
-        store.delete_point(file, keys)
-    except ValueError as error:
-        raise PointError(str(error)) from error
-    return file
 
 
 def _exists(store: ConfigStore, robot: str, kind: str, path: list[str]) -> bool:
@@ -384,16 +241,15 @@ def _type_has_variant(store: ConfigStore, robot: str, path: list[str]) -> bool:
     return path[2] in stances.get('objects', {}).get(instance.object, {})
 
 
-# ---- the same on a targets cell (cell schema 4) ---------------------------------------------------------------------
 def _written(store: ConfigStore, paths) -> str:
     return paths[0].relative_to(store.root).as_posix() if paths else ''
 
 
 def _target_address(store: ConfigStore, robot: str, kind: str, path: list[str]) -> tuple[str, bool, str | None, str]:
-    """(reference, instance override, ``type=`` of the store's target calls, frame) of a point address on a targets
-    cell: a location is its name, a stance of the type the bare variant with ``type=<type>`` (nothing needs to be
-    placed), an override ``<instance>/<variant>``."""
-    _, _, frame = _keys(store, kind, path)
+    """(reference, instance override, ``type=`` of the store's target calls, frame) of a point address: a location is
+    its name, a stance of the type the bare variant with ``type=<type>`` (nothing needs to be placed), an override
+    ``<instance>/<variant>``."""
+    frame = _frame(store, kind, path)
     if kind == 'location':
         moves = targets.plain_kind(store, robot, path[0])
         if moves is not None and (moves != 'base' or path[0] not in target_store.cell_targets(store)):
@@ -411,10 +267,11 @@ def _target_address(store: ConfigStore, robot: str, kind: str, path: list[str]) 
     return variant, False, owner, frame
 
 
-def _save_base_target(store: ConfigStore, robot: str, kind: str, path: list[str], body: Mapping) -> str:
-    """save() on a targets cell: a location is a base target in cell/targets.yaml, a stance variant a base target of
-    the type in the robot's objects file (an override: its instances entry). Keys the editor does not show (joints, a
-    path's earlier waypoints) are kept."""
+def save(store: ConfigStore, robot: str, kind: str, path: list[str], body: Mapping) -> str:
+    """Create or update a point. ``body``: x, y, yaw (radians); optional ``rename`` (new last path element) and
+    ``create`` (refuse to overwrite an existing point). A location is a base target in cell/targets.yaml, a stance
+    variant a base target of the type in the robot's objects file (an override: its instances entry). Keys the editor
+    does not show (joints, a path's earlier waypoints) are kept."""
     store.reload()
     reference, override, on_type, frame = _target_address(store, robot, kind, path)
     if body.get('create') and _exists(store, robot, kind, path):
@@ -443,9 +300,9 @@ def _save_base_target(store: ConfigStore, robot: str, kind: str, path: list[str]
     return _written(store, paths)
 
 
-def _delete_base_target(store: ConfigStore, robot: str, kind: str, path: list[str]) -> str:
-    """delete() on a targets cell. A stance of the type that instance overrides with only settings still refer to is
-    refused by the store, its message listing them (delete those first: the HMI offers no cascade)."""
+def delete(store: ConfigStore, robot: str, kind: str, path: list[str]) -> str:
+    """Delete a point. A stance of the type that instance overrides with only settings still refer to is refused by
+    the store, its message listing them (delete those first: the HMI offers no cascade)."""
     store.reload()
     reference, override, on_type, _ = _target_address(store, robot, kind, path)
     users = _users(store, robot, kind, path)
@@ -460,7 +317,7 @@ def _delete_base_target(store: ConfigStore, robot: str, kind: str, path: list[st
 
 def _save_hand_target(store: ConfigStore, object_type: str, point: str, settings: dict, poses: dict,
                       robot: str | None) -> str:
-    """save_object_point() on a targets cell: the hand target ``point`` of the type, addressed with ``type=`` (nothing
+    """save_object_point()'s write: the hand target ``point`` of the type, addressed with ``type=`` (nothing
     needs to be placed). The target as the type's and the robot's layers give it (``type_target``) with the editor's
     changes; the store writes each key back to the layer it is in (a new elbow or grip_m to the robot's file), so keys
     the editor does not show and a target defined in the robot's file stay where they are."""

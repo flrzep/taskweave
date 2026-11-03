@@ -5,12 +5,10 @@ from pathlib import Path
 import pytest
 
 from taskweave_core.config import ConfigStore
-from taskweave_hmi import arm, robot
+from taskweave_hmi import arm, targets
 
 FIXTURE = Path(__file__).resolve().parents[2] / 'taskweave_core' / 'test' / 'fixtures' / 'config'
 ROBOT = 'demo_bot'
-CATALOG = [{'name': 'move_joints', 'args_schema': {'properties': {'pose': {'x-taskweave-point': 'joint_pose_only'}}}}]
-ARGS = robot.pose_args(CATALOG)
 POSES = """home: {lift: 0.0, j1: 0.0, j2: 0.0}
 reach:
   joints: {lift: 0.3}
@@ -30,13 +28,13 @@ def store(tmp_path):
 
 def test_hand_numbers_convert_both_ways():
     target = {'tcp': [0.6, 0.2, 0.4], 'approach': [1, 0, 0], 'closing': [0, 1, 0]}
-    hand = arm.hand_from_target(target)
+    hand = targets.hand_from_axes(target)
     assert hand['xyz'] == [0.6, 0.2, 0.4] and math.isclose(hand['rpy'][1], math.pi / 2, abs_tol=1e-3)
     back = arm.target_from_hand(hand)
     for key in ('tcp', 'approach', 'closing'):
         assert all(math.isclose(a, b, abs_tol=1e-3) for a, b in zip(back[key], target[key], strict=True))
     tilted = {'tcp': [0.1, 0.0, 0.2], 'approach': [0, 0.7071, -0.7071], 'closing': [1, 0, 0]}
-    again = arm.target_from_hand(arm.hand_from_target(tilted))
+    again = arm.target_from_hand(targets.hand_from_axes(tilted))
     assert all(math.isclose(a, b, abs_tol=1e-3) for a, b in zip(again['approach'], tilted['approach'], strict=True))
 
 

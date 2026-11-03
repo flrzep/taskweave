@@ -177,7 +177,7 @@ def test_a_stance_cannot_take_the_name_of_a_hand_target_of_the_type(store):
 def test_an_object_point_is_saved_with_the_robot_settings_in_the_robot_file(store):
     hand = {'xyz': [-0.05, 0.25, 0.08], 'rpy': [-1.9, 0.0, -1.5]}
     file = arm.save(store, ROBOT, 'frame_type2', 'rails_top',
-                    {'hands': {'left': hand}, 'approach_m': 0.12, 'elbow': 'out', 'grip_m': {'left': 0.05}}, set())
+                    {'hands': {'left': hand}, 'approach_m': 0.12, 'elbow': 'out', 'grip_m': {'left': 0.05}})
     assert file == 'objects/frame_type2.yaml'
     again = fresh(store)
     own = targets.type_layer(again, 'frame_type2', 'rails_top')
@@ -197,24 +197,24 @@ def test_an_object_point_is_saved_with_the_robot_settings_in_the_robot_file(stor
 
 
 def test_an_object_point_is_renamed_and_deleted_through_the_store(store):
-    arm.save(store, ROBOT, 'frame_type2', 'rails_top_steep', {'approach_m': 0.1, 'rename': 'steep'}, set())
+    arm.save(store, ROBOT, 'frame_type2', 'rails_top_steep', {'approach_m': 0.1, 'rename': 'steep'})
     names = fresh(store).object_target_names(ROBOT)['frame_type2']
     assert 'steep' in names and 'rails_top_steep' not in names
     with pytest.raises(arm.ArmError, match="has a target 'rails_top' already"):   # the store's TargetWriteError
-        arm.save(store, ROBOT, 'frame_type2', 'steep', {'approach_m': 0.1, 'rename': 'rails_top'}, set())
-    arm.save(store, ROBOT, 'karakuri_hanger', 'knob', {'elbow': 'up', 'rename': 'latch'}, set())
+        arm.save(store, ROBOT, 'frame_type2', 'steep', {'approach_m': 0.1, 'rename': 'rails_top'})
+    arm.save(store, ROBOT, 'karakuri_hanger', 'knob', {'elbow': 'up', 'rename': 'latch'})
     assert targets.robot_layer(fresh(store), ROBOT, 'karakuri_hanger', ['targets', 'latch']) == {'elbow': 'up'}
-    arm.delete(store, ROBOT, 'frame_type2', 'steep', set())
+    arm.delete(store, ROBOT, 'frame_type2', 'steep')
     assert 'steep' not in fresh(store).object_target_names(ROBOT)['frame_type2']
     with pytest.raises(arm.ArmError, match='has no point'):
-        arm.delete(store, ROBOT, 'frame_type2', 'hook_plate', set())   # an object target, not a point
+        arm.delete(store, ROBOT, 'frame_type2', 'hook_plate')   # an object target, not a point
 
 
 def test_a_robot_layer_key_stays_in_the_robot_file_after_a_save(store):
     robot_file = store.root / 'robots' / ROBOT / 'objects' / 'karakuri_hanger.yaml'
     robot_file.write_text(robot_file.read_text().replace('knob: {elbow: out}', 'knob: {elbow: out, approach_m: 0.05}'))
     hand = {'xyz': [0.09, -0.01, 0.43], 'rpy': [1.5708, 0.0, -1.5708]}
-    file = arm.save(store, ROBOT, 'karakuri_hanger', 'knob', {'hands': {'right': hand}, 'elbow': 'up'}, set())
+    file = arm.save(store, ROBOT, 'karakuri_hanger', 'knob', {'hands': {'right': hand}, 'elbow': 'up'})
     assert file == 'objects/karakuri_hanger.yaml'
     again = fresh(store)
     mine = targets.robot_layer(again, ROBOT, 'karakuri_hanger', ['targets', 'knob'])
@@ -222,7 +222,7 @@ def test_a_robot_layer_key_stays_in_the_robot_file_after_a_save(store):
     own = targets.type_layer(again, 'karakuri_hanger', 'knob')
     assert own['right_tool'] == hand and own['approach_m'] == 0.08 and 'elbow' not in own
     assert again.type_target('karakuri_hanger', 'knob', ROBOT).data['approach_m'] == 0.05
-    arm.save(store, ROBOT, 'karakuri_hanger', 'knob', {'approach_m': 0.06}, set())   # set where it is: the robot's
+    arm.save(store, ROBOT, 'karakuri_hanger', 'knob', {'approach_m': 0.06})   # set where it is: the robot's
     assert targets.robot_layer(fresh(store), ROBOT, 'karakuri_hanger', ['targets', 'knob'])['approach_m'] == 0.06
     assert targets.type_layer(fresh(store), 'karakuri_hanger', 'knob')['approach_m'] == 0.08
 
@@ -233,7 +233,7 @@ def test_a_hand_target_defined_in_the_robot_file_is_edited_there(store):
                           '    moves: hand\n    left_tool: {xyz: [0.0, 0.1, 0.05], rpy: [1.5708, 0.0, 0.0]}\n')
     type_text = (store.root / 'objects' / 'part_box.yaml').read_text()
     hand = {'xyz': [0.0, 0.12, 0.05], 'rpy': [1.5708, 0.0, 0.0]}
-    file = arm.save(store, ROBOT, 'part_box', 'side_grasp', {'hands': {'left': hand}, 'elbow': 'up'}, set())
+    file = arm.save(store, ROBOT, 'part_box', 'side_grasp', {'hands': {'left': hand}, 'elbow': 'up'})
     assert file == f'robots/{ROBOT}/objects/part_box.yaml'
     mine = targets.robot_layer(fresh(store), ROBOT, 'part_box', ['targets', 'side_grasp'])
     assert mine == {'moves': 'hand', 'left_tool': hand, 'elbow': 'up'}
@@ -247,7 +247,7 @@ def test_a_new_key_of_a_hand_target_defined_in_the_robot_file_goes_there(store):
     robot_file = store.root / 'robots' / ROBOT / 'objects' / 'part_box.yaml'
     robot_file.write_text(robot_file.read_text() + '  side_grasp:\n    moves: hand\n'
                           '    left_tool: {xyz: [0.0, 0.1, 0.05], rpy: [1.5708, 0.0, 0.0]}\n')
-    arm.save(store, ROBOT, 'part_box', 'side_grasp', {'approach_m': 0.04}, set())
+    arm.save(store, ROBOT, 'part_box', 'side_grasp', {'approach_m': 0.04})
     assert targets.robot_layer(fresh(store), ROBOT, 'part_box', ['targets', 'side_grasp'])['approach_m'] == 0.04
 
 
@@ -255,15 +255,15 @@ def test_a_hand_target_of_a_type_nothing_is_placed_for_is_saved_renamed_and_dele
     (store.root / 'objects' / 'pallet.yaml').write_text(
         'name: pallet\ntargets:\n  corner: {moves: hand, left_tool: {xyz: [0.1, 0.0, 0.1], rpy: [0.0, 3.1416, 0.0]}}\n')
     hand = {'xyz': [0.2, 0.0, 0.1], 'rpy': [0.0, 3.1416, 0.0]}
-    assert arm.save(store, ROBOT, 'pallet', 'corner', {'hands': {'left': hand}, 'elbow': 'out'}, set()) == \
+    assert arm.save(store, ROBOT, 'pallet', 'corner', {'hands': {'left': hand}, 'elbow': 'out'}) == \
         'objects/pallet.yaml'
     again = fresh(store)
     assert targets.type_layer(again, 'pallet', 'corner')['left_tool'] == hand
     assert targets.robot_layer(again, ROBOT, 'pallet', ['targets', 'corner']) == {'elbow': 'out'}
-    arm.save(store, ROBOT, 'pallet', 'corner', {'elbow': 'up', 'rename': 'edge'}, set())
+    arm.save(store, ROBOT, 'pallet', 'corner', {'elbow': 'up', 'rename': 'edge'})
     names = fresh(store).object_target_names(ROBOT)['pallet']
     assert names == ['edge'] and targets.robot_layer(fresh(store), ROBOT, 'pallet', ['targets', 'edge'])
-    arm.delete(store, ROBOT, 'pallet', 'edge', set())
+    arm.delete(store, ROBOT, 'pallet', 'edge')
     assert fresh(store).object_target_names(ROBOT).get('pallet', []) == []
 
 
@@ -273,52 +273,52 @@ def test_deleting_a_hand_target_that_instance_settings_refer_to_shows_the_refusa
         'bay_2_stack_2_back: {pick: {x: -1.528, y: 0.0, yaw: 0.0}}',
         'bay_2_stack_2_back: {pick: {x: -1.528, y: 0.0, yaw: 0.0}, rails_top_steep: {elbow: out}}'))
     with pytest.raises(arm.ArmError) as refused:
-        arm.delete(store, ROBOT, 'frame_type2', 'rails_top_steep', set())
+        arm.delete(store, ROBOT, 'frame_type2', 'rails_top_steep')
     assert 'instances.bay_2_stack_2_back.rails_top_steep' in str(refused.value)
     assert 'rails_top_steep' in fresh(store).object_target_names(ROBOT)['frame_type2']   # nothing written
 
 
 # ---- robot poses: joint and hand targets in the robot's targets.yaml -------------------------------------------------
 def test_a_joint_pose_is_written_as_joint_groups(store):
-    file = robot.save_pose(store, ROBOT, 'lift_high', {'joints': {'body_joint': 0.65}}, set())
+    file = robot.save_pose(store, ROBOT, 'lift_high', {'joints': {'body_joint': 0.65}})
     assert Path(file) == Path(f'robots/{ROBOT}/targets.yaml')
     assert fresh(store).target('lift_high', ROBOT).data == {'moves': 'joints', 'joints': {'torso': 0.65}}
-    robot.save_pose(store, ROBOT, 'look', {'joints': {'head_joint2': -0.3}, 'create': True}, set())
+    robot.save_pose(store, ROBOT, 'look', {'joints': {'head_joint2': -0.3}, 'create': True})
     assert fresh(store).target('look', ROBOT).joints == {'head': [None, -0.3]}   # the other head joint left alone
     assert fresh(store).named_pose(ROBOT, 'look')['joints'] == {'head_joint2': -0.3}
     with pytest.raises(robot.RobotSettingsError, match='already exists'):
-        robot.save_pose(store, ROBOT, 'look', {'joints': {'head_joint2': 0.0}, 'create': True}, set())
-    robot.save_pose(store, ROBOT, 'look', {'joints': {'head_joint2': -0.3}, 'rename': 'look_down'}, set())
-    robot.delete_pose(store, ROBOT, 'look_down', set())
+        robot.save_pose(store, ROBOT, 'look', {'joints': {'head_joint2': 0.0}, 'create': True})
+    robot.save_pose(store, ROBOT, 'look', {'joints': {'head_joint2': -0.3}, 'rename': 'look_down'})
+    robot.delete_pose(store, ROBOT, 'look_down')
     assert 'look_down' not in fresh(store).target_names(ROBOT)['joint targets']
     with pytest.raises(robot.RobotSettingsError, match='no such joint'):
-        robot.save_pose(store, ROBOT, 'odd', {'joints': {'wheel_joint': 1.0}}, set())
+        robot.save_pose(store, ROBOT, 'odd', {'joints': {'wheel_joint': 1.0}})
 
 
 def test_a_tool_pose_is_a_hand_target_in_the_base_frame(store):
     hand = {'xyz': [0.5, 0.3, 0.6], 'rpy': [0.0, 1.5708, 0.0]}
     arm.save(store, ROBOT, 'robot', 'frame_grasp_approach',
              {'hands': {'right': hand}, 'joints': {'body_joint': 0.45, 'head_joint1': -0.3491, 'head_joint2': 0.0},
-              'elbow': 'up'}, set())
+              'elbow': 'up'})
     target = fresh(store).target('frame_grasp_approach', ROBOT)
     assert target.kind == 'hand' and target.data['right_tool'] == hand and 'left_tool' not in target.data
     assert target.joints == {'torso': 0.45, 'head': [-0.3491, 0.0]} and target.data['elbow'] == 'up'
     text = (store.root / 'robots' / ROBOT / 'targets.yaml').read_text()
     assert text.startswith('# base-frame and joint targets') and '# joint angles, not tool targets' in text
-    by_name = {p['name']: p for p in robot.overview(fresh(store), ROBOT, set())['poses']}
+    by_name = {p['name']: p for p in robot.overview(fresh(store), ROBOT)['poses']}
     assert by_name['frame_grasp_approach']['tools']['right']['tcp'] == [0.5, 0.3, 0.6]
     assert by_name['frame_grasp_approach']['tools']['right']['approach'] == pytest.approx([1.0, 0.0, 0.0], abs=1e-4)
-    positions = {p['name']: p for p in arm.overview(fresh(store), ROBOT, set())['positions'] if p['scope'] == 'robot'}
+    positions = {p['name']: p for p in arm.overview(fresh(store), ROBOT)['positions'] if p['scope'] == 'robot'}
     assert positions['frame_grasp_approach']['hands']['right'] == hand
 
 
 def test_a_capture_writes_the_current_joints_and_hands(store):
     joints = {'body_joint': 0.3, 'head_joint1': 0.1, 'head_joint2': 0.2, 'wheel': 5.0}
-    arm.capture_pose(store, ROBOT, 'lift_low', {}, joints, None, set())
+    arm.capture_pose(store, ROBOT, 'lift_low', {}, joints, None)
     assert fresh(store).target('lift_low', ROBOT).joints == {'torso': 0.3}
     tools = {'left': {'tcp': [0.4, 0.2, 0.5], 'approach': [1, 0, 0], 'closing': [0, 1, 0]},
              'right': {'tcp': [0.4, -0.2, 0.5], 'approach': [1, 0, 0], 'closing': [0, -1, 0]}}
-    arm.capture_pose(store, ROBOT, 'frame_grasp_approach', {'tools': ['left']}, joints, tools, set())
+    arm.capture_pose(store, ROBOT, 'frame_grasp_approach', {'tools': ['left']}, joints, tools)
     target = fresh(store).target('frame_grasp_approach', ROBOT)
     assert target.data['left_tool']['xyz'] == [0.4, 0.2, 0.5]
     assert target.data['right_tool']['xyz'] == [0.48, 0.295, 0.6]          # the other hand kept
@@ -327,26 +327,26 @@ def test_a_capture_writes_the_current_joints_and_hands(store):
 def test_a_used_pose_cannot_be_renamed_or_deleted(store):
     missions(store, MISSION)       # ends with a move to lift_high
     with pytest.raises(robot.RobotSettingsError, match='used by m0'):
-        robot.delete_pose(store, ROBOT, 'lift_high', set())
+        robot.delete_pose(store, ROBOT, 'lift_high')
     with pytest.raises(robot.RobotSettingsError, match='used by m0'):
-        robot.save_pose(store, ROBOT, 'lift_high', {'joints': {'body_joint': 0.2}, 'rename': 'high'}, set())
-    robot.save_pose(store, ROBOT, 'lift_mid', {'joints': {'body_joint': 0.2}, 'create': True}, set())
-    robot.save_pose(store, ROBOT, 'lift_mid', {'joints': {'body_joint': 0.2}, 'rename': 'low'}, set())
-    robot.delete_pose(store, ROBOT, 'low', set())
+        robot.save_pose(store, ROBOT, 'lift_high', {'joints': {'body_joint': 0.2}, 'rename': 'high'})
+    robot.save_pose(store, ROBOT, 'lift_mid', {'joints': {'body_joint': 0.2}, 'create': True})
+    robot.save_pose(store, ROBOT, 'lift_mid', {'joints': {'body_joint': 0.2}, 'rename': 'low'})
+    robot.delete_pose(store, ROBOT, 'low')
 
 
 def test_a_pose_outside_the_joint_limits_is_refused(store):
     limit = robot.joint_limits(store, ROBOT)['body_joint']
     assert limit[1] < 100
     with pytest.raises(robot.RobotSettingsError, match='outside the joint limits'):
-        robot.save_pose(store, ROBOT, 'lift_far', {'joints': {'body_joint': limit[1] + 1.0}, 'create': True}, set())
+        robot.save_pose(store, ROBOT, 'lift_far', {'joints': {'body_joint': limit[1] + 1.0}, 'create': True})
 
 
 def test_a_pose_cannot_take_the_name_of_another_kind_of_target(store):
     with pytest.raises(robot.RobotSettingsError, match='moves object'):
-        robot.save_pose(store, ROBOT, 'carry', {'joints': {'body_joint': 0.3}}, set())
+        robot.save_pose(store, ROBOT, 'carry', {'joints': {'body_joint': 0.3}})
     with pytest.raises(robot.RobotSettingsError, match='moves base'):
-        robot.save_pose(store, ROBOT, 'waiting', {'joints': {'body_joint': 0.3}}, set())
+        robot.save_pose(store, ROBOT, 'waiting', {'joints': {'body_joint': 0.3}})
 
 
 # ---- held poses: object targets in the base frame -------------------------------------------------------------------
@@ -388,7 +388,7 @@ def test_missions_using_a_target_are_found_in_move_steps_and_old_steps(store):
     assert used[('instances', 'bay_1_stack_1_back', 'pick')] == ['m1']       # stance:<instance>: its first variant
     assert used[('object_point', 'frame_type2', 'rails_top')] == ['m0']
     assert used[('object_point', 'karakuri_hanger', 'knob')] == ['m1']
-    poses = robot.pose_usage(store, set())
+    poses = robot.pose_usage(store)
     assert poses['lift_high'] == ['m0'] and poses['frame_grasp_approach'] == ['m0'] and poses['home'] == ['m1']
     assert held.used_names(store)['carry'] == ['m0'] and held.used_names(store)['set_down_held'] == ['m1']
     assert not any('{' in key for key in targets.references(store))
@@ -398,12 +398,12 @@ def test_missions_using_a_target_are_found_in_move_steps_and_old_steps(store):
         points.save(store, ROBOT, 'stance', ['objects', 'frame_type2', 'pick'], {'x': 0, 'y': 0, 'yaw': 0,
                                                                                 'rename': 'grab'})
     with pytest.raises(arm.ArmError, match='used by m0'):
-        arm.delete(store, ROBOT, 'frame_type2', 'rails_top', set())
+        arm.delete(store, ROBOT, 'frame_type2', 'rails_top')
     with pytest.raises(robot.RobotSettingsError, match='used by m1'):
-        robot.delete_pose(store, ROBOT, 'home', set())
+        robot.delete_pose(store, ROBOT, 'home')
     with pytest.raises(held.HeldError, match='used by m0'):
         held.delete(store, ROBOT, 'frame_type2', 'carry')
-    by_name = {p['name']: p for p in robot.overview(store, ROBOT, set())['poses']}
+    by_name = {p['name']: p for p in robot.overview(store, ROBOT)['poses']}
     assert by_name['lift_high']['used_by'] == ['m0']
     frame = next(o for o in points.overview(store, ROBOT)['objects'] if o['object'] == 'frame_type2')
     assert frame['variants'][0]['used_by'] == ['m0']
@@ -464,11 +464,11 @@ def test_the_lists_read_merged_targets_and_name_a_bad_one_instead_of_failing(sto
     frame = next(o for o in points.overview(again, ROBOT)['objects'] if o['object'] == 'frame_type2')
     back = next(i for i in frame['instances'] if i['name'] == 'bay_2_stack_2_back')
     assert back['overrides'][0]['offset'] == {'x': -1.6, 'y': 0.0, 'yaw': 0.0}
-    by_name = {p['name']: p for p in robot.overview(again, ROBOT, set())['poses']}
+    by_name = {p['name']: p for p in robot.overview(again, ROBOT)['poses']}
     assert 'has 2 joints' in by_name['bad']['problems'][0] and by_name['home']['problems'] == []
     assert by_name['bad']['problems'][0] == target_store.pose_target_problems(again, ROBOT)['bad']
     assert list(by_name)[-1] == 'bad' and by_name['bad']['joints'] == {}         # file order, listed with its problem
-    positions = {p['name']: p for p in arm.overview(again, ROBOT, set())['positions'] if p['scope'] == 'robot'}
+    positions = {p['name']: p for p in arm.overview(again, ROBOT)['positions'] if p['scope'] == 'robot'}
     assert 'has 2 joints' in positions['bad']['problems'][0]
     listed = {p['name']: p for p in held.overview(again, ROBOT)}     # the store's reader skips it: listed with it
     assert listed['carry']['problems'] == [] and 'has 2 joints' in listed['bad_held']['problems'][0]
@@ -479,8 +479,8 @@ def test_the_lists_read_merged_targets_and_name_a_bad_one_instead_of_failing(sto
 
 
 def test_a_pose_update_is_marked_edited_in_the_hmi_and_a_new_one_saved(store):
-    robot.save_pose(store, ROBOT, 'lift_high', {'joints': {'body_joint': 0.62}}, set())
-    robot.save_pose(store, ROBOT, 'look', {'joints': {'head_joint2': -0.3}, 'create': True}, set())
+    robot.save_pose(store, ROBOT, 'lift_high', {'joints': {'body_joint': 0.62}})
+    robot.save_pose(store, ROBOT, 'look', {'joints': {'head_joint2': -0.3}, 'create': True})
     lines = {line.split(':')[0]: line for line in (store.root / 'robots' / ROBOT / 'targets.yaml').read_text()
              .splitlines() if line and not line.startswith((' ', '#'))}
     assert lines['lift_high'].endswith('# edited in the HMI') and '0.62' in lines['lift_high']

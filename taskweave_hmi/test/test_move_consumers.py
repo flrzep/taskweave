@@ -138,17 +138,17 @@ def test_schema_errors_of_a_step_have_places_too(store):
 
 
 # ---- teach requests --------------------------------------------------------------------------------------------------
-def test_a_teach_on_a_targets_cell_sends_the_kind_and_the_target(store):
-    request = targets.teach_request(store, NEW_FIELDS, 'hand', 'part_box_1/top_grasp', ['left'])
+def test_a_teach_on_a_targets_cell_sends_the_kind_and_the_target():
+    request = targets.teach_request(NEW_FIELDS, 'hand', 'part_box_1/top_grasp', ['left'])
     assert request == {'name': 'part_box_1/top_grasp', 'kind': 'hand', 'tools': ['left'], 'instance_override': False}
-    assert targets.teach_request(store, NEW_FIELDS, 'base', 'bay_2_stack_2_back/pick',
+    assert targets.teach_request(NEW_FIELDS, 'base', 'bay_2_stack_2_back/pick',
                                  instance_override=True)['instance_override'] is True
-    assert targets.teach_request(store, NEW_FIELDS, 'joints', 'home')['kind'] == 'joints'
-    assert targets.teach_request(store, NEW_FIELDS, 'object', 'carry')['kind'] == 'object'
+    assert targets.teach_request(NEW_FIELDS, 'joints', 'home')['kind'] == 'joints'
+    assert targets.teach_request(NEW_FIELDS, 'object', 'carry')['kind'] == 'object'
     with pytest.raises(ValueError, match='older than this cell pack'):
-        targets.teach_request(store, OLD_FIELDS, 'hand', 'part_box_1/top_grasp')
+        targets.teach_request(OLD_FIELDS, 'hand', 'part_box_1/top_grasp')
     with pytest.raises(ValueError, match='unknown teach kind'):
-        targets.teach_request(store, NEW_FIELDS, 'object_point', 'part_box_1/top_grasp')
+        targets.teach_request(NEW_FIELDS, 'object_point', 'part_box_1/top_grasp')
 
 
 # ---- the move skill in the catalog ---------------------------------------------------------------------------------
@@ -194,5 +194,5 @@ def test_an_unreadable_held_pose_is_listed_with_its_problem(store):
     bad = listed['tilted']
     assert bad['object_type'] == 'frame_type2' and bad['problems'] and 'nope' in bad['problems'][0]
     assert bad['path'] == [{'xyz': [1.0, 0.0, 0.4], 'rpy': [0.0, 0.0, 0.0]}] and bad['joints'] == {}
-    teach = arm.overview(ConfigStore(store.root), ROBOT, set())    # the Teach tab: listed, and Capture offered
-    assert teach['targets_layout'] is True and 'tilted' in {item['name'] for item in teach['held']}
+    teach = arm.overview(ConfigStore(store.root), ROBOT)    # the Teach tab: listed, and Capture offered
+    assert 'tilted' in {item['name'] for item in teach['held']}
