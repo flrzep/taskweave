@@ -131,7 +131,9 @@ function argsText(args) { return Object.entries(args || {}).map(([k, v]) => `${k
 
 // ---------- tabs ----------
 document.querySelectorAll('.tabs button').forEach((button) => button.addEventListener('click', () => {
-  document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-selected', String(b === button)));
+  document.querySelectorAll('.tabs button').forEach((b) => {
+    if (b === button) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  });
   document.querySelectorAll('.view').forEach((view) => show(view, view.id === `view-${button.dataset.view}`));
   document.body.classList.toggle('on-run', button.dataset.view === 'run');  // the board shows the run: the bar keeps its controls
   if (button.dataset.view === 'missions') { if (state.editing) refreshCatalog(); else loadMissions(); }
@@ -436,6 +438,7 @@ function renderSpeed() {
   box.classList.toggle('off', !usable);
   box.classList.toggle('test', !!s?.test_mode);
   $('speed-value').textContent = s?.percent != null ? `${s.percent} %` : '–';
+  $('speed-open').setAttribute('aria-label', `Speed ${s?.percent != null ? `${s.percent} %` : 'unknown'}${s?.test_mode ? ', test mode' : ''}`);
   if (!speedUi.dragging && s?.percent != null) $('speed-range').value = s.percent;
   if (s && !$('speed-presets').children.length) {  // made once: the presets come with the override
     $('speed-presets').append(...s.presets.map((p) => {
@@ -507,8 +510,11 @@ $('speed-open').addEventListener('click', () => openSpeed($('speed-panel').hidde
 document.addEventListener('pointerdown', (e) => {
   if (!$('speed-panel').hidden && !e.target.closest('#speed-panel, #speed-open')) openSpeed(false);
 });
-$('speed-panel').addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { openSpeed(false); $('speed-open').focus(); }
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || $('speed-panel').hidden) return;
+  const inside = $('speed-panel').contains(document.activeElement);
+  openSpeed(false);
+  if (inside) $('speed-open').focus();
 });
 
 // ---------- manual skill: Abort ----------
@@ -1512,7 +1518,9 @@ function dragStep(card, e) {
   };
   const scroll = () => {
     const top = document.querySelector('.top').getBoundingClientRect().bottom + DRAG_EDGE;
-    const bottom = window.innerHeight - $('editor').querySelector('.sticky-actions').offsetHeight - DRAG_EDGE;
+    const rail = document.querySelector('.rail').getBoundingClientRect();
+    const floor = rail.top > window.innerHeight / 2 ? rail.top : window.innerHeight;  // the phone's bottom nav, else the window
+    const bottom = Math.min(floor, $('editor').querySelector('.sticky-actions').getBoundingClientRect().top) - DRAG_EDGE;
     const speed = y < top ? -Math.min(top - y, DRAG_EDGE) : y > bottom ? Math.min(y - bottom, DRAG_EDGE) : 0;
     if (speed) { window.scrollBy(0, speed / 4); mark(); }
     frame = requestAnimationFrame(scroll);

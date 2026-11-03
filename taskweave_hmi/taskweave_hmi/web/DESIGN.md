@@ -122,8 +122,8 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   `aria-selected`) is raised on the card surface in brand text with a strong ring. `.choice` and `.teach-panes`
   wrap and share the width.
 - **Shell**: the section rail (`.rail`, 92px, sticky, full height) at the left: the P3 mark and "taskweave", the
-  sections (`.tabs`, `role="tablist"`: a 22px stroke icon over the name, 64px high, the selected one in brand text on
-  `--brand-soft`), the robot's name at the foot. The page beside it, the sticky top (`.top`: status bar, manual skill
+  sections (`.tabs`, buttons: a 22px stroke icon over the name, 64px high, the selected one in brand text on
+  `--brand-soft`, `aria-current="page"`), the robot's name at the foot. The page beside it, the sticky top (`.top`: status bar, manual skill
   strip) over the views. At 600px and below the rail is a bottom nav (60px, fixed, the selected section with a 3px
   brand rule on top) without mark and robot; the step sheet sits above it.
 - **Status bar** (`.mission`, the one bar on every tab, 76px): the mission, then Speed, Pause / Abort and the pad
@@ -138,7 +138,8 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   the next start). From 601 to 1000px: badge, step n/N, Speed, Pause, Abort in one row, the instruction under it, no
   goal; the pad mode shows only while it jogs an arm (also on a phone). On a phone: badge, step n/N, the speed and the
   connection in one row, the instruction and progress under it, then Pause and Abort side by side, full width; idle:
-  badge, speed, then picker and Start. A pad press's answer floats under the bar for a while (`.pad-notice`).
+  badge, speed, then picker and Start. A pad press's answer is a line in the bar for a while (`.pad-notice`, in the
+  flow: it never covers the manual skill strip).
 - **Status board** (`.board`, Run tab): the andon panel of the run, read from a few metres. A 10px rail in the state
   colour (striped amber when paused) on a 5% tint; the state word (Barlow Semi Condensed 36px, caps, in the state's
   text colour: "done" for succeeded), the mission and cycle; the step number at 60px with "/ N", the instruction at
@@ -152,7 +153,7 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 - **Speed override** (`.speed`): in the status bar, a small button "Speed 60 %" (the value in Barlow Semi Condensed
   20px; amber with "TEST" while test mode caps it; greyed out without the task handler; on a phone the value only).
   It opens a panel under the bar (`aria-expanded`, focus to its first control; a click elsewhere or Escape closes
-  it): − / + around a range slider in brand colour, the presets as a segmented control, and the test mode toggle,
+  it, and Escape still aborts a manual skill as everywhere): − / + around a range slider in brand colour, the presets as a segmented control, and the test mode toggle,
   amber while on. The handler's message on a clamped or refused request under the bar, for 8 s.
 - **Manual skill** (`.manual`): a strip in the sticky top below the status bar, on every tab, only while a skill
   started from the HMI outside a mission runs (Drive here, Move here, Go here, a carry pose's Test). "Running
