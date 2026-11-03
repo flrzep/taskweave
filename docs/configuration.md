@@ -60,7 +60,7 @@ installed to `share/taskweave_robots/<model>/`):
 
 ```
 <model>/
-  pack.yaml              name (= the model), version, schema_version (2), description, optional requires: {taskweave: ">=0.3,<0.4"} (install.md, "Pack versions")
+  pack.yaml              name (= the model), version, schema_version (2), description, optional requires: {taskweave: ">=0.4,<0.5"} (install.md, "Pack versions")
   profile.yaml           how the hardware is reached: roles -> topics, joints, frames, controllers
   embodiment.yaml        what the robot is and can do: capabilities, tools, reach, cameras, action spaces
   targets.yaml           targets of the robot itself: base-frame tool poses, carry poses, joint poses (home, lift_high)

@@ -184,7 +184,7 @@ versions it works with, a [PEP 440](https://peps.python.org/pep-0440/#version-sp
 ```yaml
 version: 1.4.0
 requires:
-  taskweave: ">=0.3,<0.4"
+  taskweave: ">=0.4,<0.5"
 ```
 
 `taskweave check` and every load refuse a pack that does not admit the installed taskweave, with a message naming the

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-11-03
 
 - **move from the operator's view: five commands, cell schema 5.** A move step's kind (`data.kind`, the plan's
   `Step.kind`, smoke keys `move.<kind>`) is one of `navigate`, `straight`, `hand`, `posture`, `joints` (labels "navigate
