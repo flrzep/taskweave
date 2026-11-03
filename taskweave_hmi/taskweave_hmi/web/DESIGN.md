@@ -192,7 +192,9 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   (a gripper outline per placed object), placed objects (a triad). A pick opens the entry in its pane with a brand
   line on top, "At <object> · saves to <file>" (`.pick-where`); a placed object opens a card under the view
   (`.teach-pick`) with its stances and grasp points as buttons and two primary ones, "Teach a stance here" and "Teach
-  a grasp point here". Opening an entry highlights and focuses its marker (and follows its "at" choice, which also takes the note away);
+  a grasp point here". Stance markers on one spot (within 5 cm: an override where a neighbour's type stance is)
+  open the same card as "Stances on this spot" with one button per stance. One `.pick-where` in the tab, on the
+  entry picked last. Opening an entry highlights and focuses its marker (and follows its "at" choice, which also takes the note away);
   the points event redraws the markers and the object card. The teach-here buttons are off while a mission runs.
 - **Robot dashboard** (`.robot-grid`): up to 1179px one column, 3D view, base, grippers, joints, settings. From
   1180px 7 : 5 up to 1600px wide: the base over the joints at the left, the 3D view (16 : 11) over the grippers at the

@@ -29,6 +29,7 @@ async function reloadScenes() {
 // ---------- 3D -> the lists ----------
 function picked(info) {
   hidePick();
+  if (info.here) { showSpot(info.here); return; }  // several stances on one spot: which one
   if (info.kind !== 'placed') teachViewer?.setHighlight(info);
   if (info.kind === 'location') openLocation(info.name);
   else if (info.kind === 'stance') openStance(info);
@@ -42,10 +43,11 @@ const fileOf = {
   point: (type) => (teach.data?.files.objects || 'objects/<type>.yaml').replace('<type>', type),
 };
 
-// The entry opened from 3D says where it saves: the object (for a stance or point) and the file. Another object
-// chosen in its picker (the stance's "Measure at", the type's "at") takes the note away: it would name the old one.
+// The entry opened from 3D says where it saves: the object (for a stance or point) and the file; one note in the tab,
+// on the entry picked last. Another object chosen in its picker (the stance's "Measure at", the type's "at") takes
+// the note away: it would name the old one.
 function noteWhere(item, at, file, picker = null) {
-  item.querySelector('.pick-where')?.remove();
+  document.querySelectorAll('#view-points .pick-where').forEach((old) => old.remove());
   const text = `${at ? `At ${at} · ` : ''}saves to ${file}`;
   const note = el('p', { class: 'pick-where', text });
   (item.classList.contains('point-edit') ? item : item.querySelector('.point-edit'))?.prepend(note);
@@ -110,6 +112,19 @@ function openPoint(type, name, placed) {
 }
 
 // ---------- a placed object: what it has, and teach new here ----------
+// a button of the card under the view: closes it, then acts
+function pickButton(text, onClick, cls = 'btn small', edits = false) {
+  // the teach-new buttons are off while a mission runs, as + Point and + Variant (setPointsBusy, data-edit)
+  const node = el('button', { type: 'button', class: cls, text, ...(edits ? { 'data-edit': '' } : {}) });
+  node.disabled = edits && !!pointsBusy;
+  node.addEventListener('click', () => { hidePick(); onClick(); });
+  return node;
+}
+function closeButton() {
+  const close = el('button', { type: 'button', class: 'icon', 'aria-label': 'Close', text: '✕' });
+  close.addEventListener('click', hidePick);
+  return close;
+}
 let pickedObject = null;  // the object whose menu is open: listed again after a save
 function showPick(info, focus = true) {
   const { name, object } = info;
@@ -117,31 +132,35 @@ function showPick(info, focus = true) {
   const scene = teachViewer?.sceneData || {};
   const stances = (scene.stances || []).filter((s) => s.instance === name);
   const pointsOf = (scene.points || []).filter((p) => p.object_type === object);
-  const button = (text, onClick, cls = 'btn small', edits = false) => {
-    // the teach-new buttons are off while a mission runs, as + Point and + Variant (setPointsBusy, data-edit)
-    const node = el('button', { type: 'button', class: cls, text, ...(edits ? { 'data-edit': '' } : {}) });
-    node.disabled = edits && !!pointsBusy;
-    node.addEventListener('click', () => { hidePick(); onClick(); });
-    return node;
-  };
-  const close = el('button', { type: 'button', class: 'icon', 'aria-label': 'Close', text: '✕' });
-  close.addEventListener('click', hidePick);
+  const close = closeButton();
   const group = (title, nodes, none) => el('div', { class: 'pick-group' }, el('div', { class: 'sub', text: title }),
     nodes.length ? el('div', { class: 'row wrap' }, ...nodes) : el('p', { class: 'muted small-text', text: none }));
   $('teach-pick').replaceChildren(
     el('div', { class: 'row between' }, el('b', { text: `${name} · ${object}` }), close),
-    group('Where the robot stands', stances.map((s) => button(`${s.variant}${s.override ? ' (this one)' : ''}`,
+    group('Where the robot stands', stances.map((s) => pickButton(`${s.variant}${s.override ? ' (this one)' : ''}`,
       () => openStance({ name: s.variant, placed: name, object, override: s.override }))), 'No stance yet.'),
-    group('Where a hand grasps', pointsOf.map((p) => button(p.name, () => openPoint(object, p.name, name))), 'No grasp point yet.'),
+    group('Where a hand grasps', pointsOf.map((p) => pickButton(p.name, () => openPoint(object, p.name, name))), 'No grasp point yet.'),
     el('div', { class: 'row wrap' },
-      button('Teach a stance here', () => newStanceAt(object, name), 'btn small primary', true),
-      button('Teach a grasp point here', () => newPointAt(object, name), 'btn small primary', true)));
+      pickButton('Teach a stance here', () => newStanceAt(object, name), 'btn small primary', true),
+      pickButton('Teach a grasp point here', () => newPointAt(object, name), 'btn small primary', true)));
   show($('teach-pick'), true);
   if (!focus) return;
   teachViewer?.setHighlight({ kind: 'placed', name });
   close.focus();
 }
 function hidePick() { show($('teach-pick'), false); pickedObject = null; }
+
+// several stance markers on one spot (an object's override where a neighbour's type stance is): one button each
+function showSpot(here) {
+  const close = closeButton();
+  $('teach-pick').replaceChildren(
+    el('div', { class: 'row between' }, el('b', { text: 'Stances on this spot' }), close),
+    el('div', { class: 'row wrap' }, ...here.map((stance) => pickButton(
+      `${stance.placed} · ${stance.name}${stance.override ? ' (this one)' : ''}`,
+      () => { teachViewer?.setHighlight(stance); openStance(stance); }))));
+  show($('teach-pick'), true);
+  close.focus();
+}
 
 // a new stance variant of the type, measured at this object (the stance card's + Variant, its picker set to it)
 function newStanceAt(object, placed) {

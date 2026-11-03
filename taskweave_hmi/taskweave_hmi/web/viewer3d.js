@@ -30,6 +30,7 @@ const ONE = new THREE.Vector3(1, 1, 1);
 const NEUTRAL = 0x5a6878;      // markers and arrows when not highlighted
 const BOX_COLOUR = 0x8a96a3;   // collision objects
 const SCENE_POLL_MS = 2000;    // the scene changes rarely: re-read it now and then, rebuild only when 'updated' moves
+const SAME_SPOT_M = 0.05;      // stance markers this close are one spot (an override at a neighbour's type stance)
 const DEFAULT_VIEW = new THREE.Vector3(1, -1.2, 0.9);  // camera direction from the target: front right, from above
 
 // ---------- ROS pose helpers ----------
@@ -653,7 +654,16 @@ export class Viewer3D {
     return this._raycaster.intersectObjects(this._pickables, false)[0]?.object.userData.pick || null;
   }
 
-  _emitPick(info) { this._pickCallbacks.forEach((callback) => callback({ ...info })); }
+  // A stance marker that shares its spot with others (SAME_SPOT_M) comes with all of them in `here`, to choose from:
+  // the ray only ever hits the first.
+  _emitPick(info) {
+    const picked = { ...info };
+    const at = info.kind === 'stance' ? this._markers.find((m) => this._matches(m, info))?.root.position : null;
+    const here = at ? this._markers.filter((m) => m.kind === 'stance'
+      && Math.hypot(m.root.position.x - at.x, m.root.position.y - at.y) <= SAME_SPOT_M) : [];
+    if (here.length > 1) picked.here = here.map((m) => ({ ...m.info }));
+    this._pickCallbacks.forEach((callback) => callback({ ...picked }));
+  }
 
   // ---------- camera ----------
   // Frames the robot and the scene (not the grid). The collision objects by the bounds kept when building them: Box3
