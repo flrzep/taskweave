@@ -59,10 +59,11 @@ class SkillContext:
 
     def __init__(self, now: Callable[[], float], timeout_s: float, is_canceled: Callable[[], bool],
                  publish_feedback: Callable[[float, str], None], instruction: str = '', logger=None,
-                 speed: SpeedOverride | None = None):
+                 speed: SpeedOverride | None = None, context: dict | None = None):
         self.now, self.timeout_s, self.instruction, self.logger = now, timeout_s, instruction, logger
         self._is_canceled, self._publish = is_canceled, publish_feedback
         self.speed = speed
+        self.context = context or {}   # the executive's look-ahead (RunSkill context_json), {} when none
         self.started = now()
         self.work = WorkClock(self.started, speed.fraction if speed else None)
 

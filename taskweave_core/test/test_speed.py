@@ -153,7 +153,7 @@ class Dispatcher:
     def __init__(self):
         self.started, self.canceled = [], []
 
-    def dispatch(self, token, step, attempt):
+    def dispatch(self, token, step, attempt, context=None):
         self.started.append(token)
 
     def cancel(self, token):

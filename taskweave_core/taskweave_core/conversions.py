@@ -25,6 +25,8 @@ def step_to_msg(step: Step | None) -> PlanStep:
         msg.origin_json = json.dumps({'include': origin['include'], 'step': origin['inner_step'],
                                       'top': origin['step']}) if origin else ''
         msg.replan_from, msg.max_replans = step.replan_from or '', int(step.max_replans)
+    if hasattr(msg, 'notes'):   # (older installs lack it)
+        msg.notes = list(step.notes)
     return msg
 
 

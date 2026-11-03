@@ -10,10 +10,11 @@ from taskweave_core.world_state import WorldState
 
 class FakeDispatcher:
     def __init__(self):
-        self.started, self.canceled = [], []
+        self.started, self.canceled, self.contexts = [], [], []
 
-    def dispatch(self, token, step, attempt):
+    def dispatch(self, token, step, attempt, context=None):
         self.started.append((token, step, attempt))
+        self.contexts.append(context)
 
     def cancel(self, token):
         self.canceled.append(token)
@@ -299,3 +300,87 @@ def test_an_exception_while_the_start_is_prepared_ends_in_failed_with_the_error(
     assert (status.plan_id, status.step_count, status.step_status) == ('', 0, '')
     assert d.started == []
     ex.start()   # a new start is not refused
+
+
+def ahead(context):
+    return [(a['id'], a['resolved']) for a in context['ahead']]
+
+
+def test_context_on_first_run_lists_the_rest_of_the_cycle():
+    ex, d, _, _ = make([step('a'), step('b', args={'n': 1}, skill='move'), step('c')])
+    ex.start()
+    assert d.contexts[0] == {'plan_id': 'p1', 'cycle': 1, 'step_index': 0, 'ahead': [
+        {'id': 'b', 'skill': 'move', 'kind': None, 'args': {'n': 1}, 'resolved': True},
+        {'id': 'c', 'skill': 'wait', 'kind': None, 'args': {}, 'resolved': True}]}
+    finish(ex, d)
+    finish(ex, d)
+    assert [ahead(c) for c in d.contexts] == [[('b', True), ('c', True)], [('c', True)], []]
+    assert [c['step_index'] for c in d.contexts] == [0, 1, 2]
+
+
+def test_context_is_the_same_on_retry():
+    ex, d, _, _ = make([step('a', retries=1), step('b')])
+    ex.start()
+    finish(ex, d, Outcome.FAILED)
+    assert [s.id for _, s, _ in d.started] == ['a', 'a'] and d.contexts[0] == d.contexts[1]
+
+
+def test_context_after_replan_is_the_new_plans_rest():
+    class Swap(ListPlanner):
+        def replan(self, plan, failed_index, reason, world):
+            return Plan('r1', 'goal', 'bot', [step('x'), step('y'), step('z')]), 1
+
+    d = FakeDispatcher()
+    ex = Executive(Swap([step('a', on_failure='replan'), step('b')]), d, WorldState(), clock=lambda: 0.0)
+    ex.start()
+    finish(ex, d, Outcome.FAILED)
+    assert d.last[1].id == 'y'
+    assert d.contexts[-1]['plan_id'] == 'r1' and ahead(d.contexts[-1]) == [('z', True)]
+
+
+def test_context_on_start_mid_plan_is_the_rest_from_that_step():
+    ex, d, _, _ = make([step('a'), step('b'), step('c'), step('d')])
+    ex.start('b')
+    assert d.contexts[0]['step_index'] == 1 and ahead(d.contexts[0]) == [('c', True), ('d', True)]
+
+
+def test_context_resolves_placeholders_and_flags_open_ones():
+    ex, d, _, _ = make([step('a'), step('b', args={'lane': '{lane}'}), step('c', args={'to': '{later}'})],
+                       world={'lane': 2})
+    ex.start()
+    by_id = {a['id']: a for a in d.contexts[0]['ahead']}
+    assert by_id['b']['args'] == {'lane': 2} and by_id['b']['resolved'] is True
+    assert by_id['c']['args'] == {'to': '{later}'} and by_id['c']['resolved'] is False
+
+
+def test_context_kind_is_annotated_once_a_placeholder_is_filled():
+    ex, d, _, _ = make([step('a'), step('b', args={'k': '{k}'})], world={'k': 'hand'})
+    ex.annotate = lambda s: (s.args['k'], [])
+    ex.start()
+    assert d.contexts[0]['ahead'][0]['kind'] == 'hand'
+
+
+def test_a_failing_context_never_stops_the_step():
+    calls = []
+
+    def boom(s):   # fails for the look-ahead; the step itself, when it runs, annotates fine
+        calls.append(s.id)
+        if len(calls) == 1:
+            raise TypeError('malformed step')
+        return None, []
+
+    ex, d, _, _ = make([step('a'), step('b', args={'k': '{k}'})], world={'k': 1})
+    ex.annotate = boom
+    ex.start()
+    assert [s.id for _, s, _ in d.started] == ['a'] and d.contexts == [{}]
+    assert ex.status.state == State.RUNNING and any('no look-ahead' in line for line in ex.status.log)
+    finish(ex, d)
+    assert d.contexts[-1] == {'plan_id': 'p1', 'cycle': 1, 'step_index': 1, 'ahead': []}
+
+
+def test_step_finished_keeps_carrying_kind_and_module():
+    ex, d, _, episodes = make([step('a')])
+    ex.start()
+    finish(ex, d, data={'carrying': 'frame_1', 'kind': 'hand', 'module': 'carry', 'other': 1})
+    done = [e for e in episodes if e['event'] == 'step_finished'][0]
+    assert done['data'] == {'carrying': 'frame_1', 'kind': 'hand', 'module': 'carry'}
