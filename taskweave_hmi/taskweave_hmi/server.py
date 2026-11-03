@@ -667,10 +667,11 @@ class Bridge(Node):
     def dry_run_move(self, args) -> dict:
         """A move step's preview (POST /api/skills/move/dry_run): the step's args with ``dry_run`` on the skill server,
         nothing moves; ``targets.dry_run_answer``. Refused (Busy) while a mission runs or is paused and while a manual
-        skill runs, as a manual skill is: the skill server runs goals side by side on its one ``move``, and a dry run
-        that does not succeed has the server call ``move.stop()``, which stops the parts of the move that runs. So it
-        holds the manual-skill lock while it runs (no manual skill starts meanwhile), but it is not a manual skill:
-        not in the manual strip, nothing to abort."""
+        skill runs, as a manual skill is: the skill server runs goals side by side on its one ``move``, which keeps
+        the parts it uses on the instance, so a dry run beside a move would leave that move's ``stop()`` without its
+        parts (the server no longer stops a skill after a dry run, but a stop of the move that runs would miss). So
+        it holds the manual-skill lock while it runs (no manual skill or mission starts meanwhile), but it is not a
+        manual skill: not in the manual strip, nothing to abort."""
         args = targets.dry_run_args(args)
         self.check_idle('preview a move')
         if not self.skill_lock.acquire(blocking=False):
