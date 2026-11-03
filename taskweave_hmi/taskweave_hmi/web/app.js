@@ -165,7 +165,12 @@ window.addEventListener('viewer3d-ready', startRunViewer);  // Run is the tab th
 // ---------- live state ----------
 function connect() {
   const source = new EventSource('/api/events');
-  const link = (on) => { $('conn').classList.toggle('on', on); $('conn').setAttribute('aria-label', on ? 'Connected' : 'Not connected'); };
+  const link = (on) => {
+    $('conn').classList.toggle('on', on);
+    $('conn').setAttribute('aria-label', on ? 'Connected' : 'Not connected');
+    $('btn-start').disabled = !canStart();  // no server: nothing to start (the next snapshot sets it again)
+    syncBoardAct();
+  };
   source.onopen = () => link(true);
   source.onerror = () => { link(false); renderSpeed(); };
   source.onmessage = (event) => {
@@ -219,6 +224,7 @@ function renderRun() {
   if (startIndex < 0) state.startStep = null;  // another mission, or the step is gone
   renderBoard(s, plan, outcomes, startIndex);
   $('btn-start').textContent = !active && startIndex >= 0 ? `Start at step ${startIndex + 1}` : 'Start';
+  const pickable = !active && !!plan?.steps.length;  // a step of the plan can be picked to start there
   setPointsBusy(active ? `A mission is ${s.state}. Points and robot settings can be changed when it has finished or was aborted.` : '');
 
   const list = $('plan');
@@ -331,8 +337,19 @@ function renderMission(s) {
   $('btn-pause').disabled = !active;
   $('btn-pause').textContent = s.state === 'paused' ? 'Resume' : 'Pause';
   $('btn-abort').disabled = !active;
-  $('btn-start').disabled = active;
+  $('btn-start').disabled = !canStart();
   return active;
+}
+// Start can start a run now: none active, a mission picked, no manual skill running, the server connected. The bar's
+// Start and the run board's start actions (Start, Retry, Run again) follow it; the board's Resume follows Pause.
+function canStart() {
+  const s = state.snapshot?.status.state;
+  return s !== 'running' && s !== 'paused' && !!$('mission-select').value && !state.snapshot?.manual
+    && $('conn').classList.contains('on');
+}
+function syncBoardAct() {
+  $('board-act').disabled = board.kind === 'resume' ? $('btn-pause').disabled || !$('conn').classList.contains('on')
+    : !canStart();
 }
 // ---------- run board (Run tab) ----------
 // The run as a little robot walking the mission: its floor is the phases (the plan graph's bands, as wide as their
@@ -342,7 +359,8 @@ function renderMission(s) {
 // and the next move as one button: Start (or Start at step N), Resume, Retry step N, Run again.
 const BOARD_WORDS = { idle: 'idle', planning: 'planning', running: 'running', paused: 'paused', succeeded: 'done',
   failed: 'failed', aborted: 'aborted' };
-const board = { phases: null, error: null, act: null };  // the phases' last arguments, the error shown, the button's action
+// the phases' last arguments, the error shown, the button's action and its kind ('start' or 'resume')
+const board = { phases: null, error: null, act: null, kind: null };
 $('board-act').addEventListener('click', () => board.act?.());
 // a step that ended without success (the failed band, where a stopped run stopped)
 const NOT_DONE = ['FAILED', 'REJECTED', 'CANCELED', 'TIMEOUT'];
@@ -367,7 +385,12 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
   $('board-cycle').title = $('board-cycle').textContent ? `cycle ${s.cycle}` : '';
   const total = plan?.steps.length || s.step_count || 0;
   const at = s.step_index >= 0 ? s.step_index + 1 : null;
-  const start = (step) => () => { state.startStep = step; $('btn-start').click(); };
+  // a start from the board: the start step set only when the start happens (canStart, as the bar's Start)
+  const start = (step) => () => {
+    if (!canStart()) return;
+    state.startStep = step;
+    $('btn-start').click();
+  };
   const startPicked = picked ? ['Start', start(null)] : null;
   let count = '–', of = '', text = '', detail = '', progress = 0, act = null;
   if (planning) {
@@ -414,8 +437,10 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
   $('board-detail').textContent = detail;
   $('board').style.setProperty('--p', Math.max(0, Math.min(1, progress)).toFixed(4));
   board.act = act?.[1] || null;
+  board.kind = s.state === 'paused' ? 'resume' : 'start';
   show($('board-act'), !!act);
   if (act) $('board-act').textContent = act[0];
+  syncBoardAct();
   // the last error, as the bar shows it off the Run tab (not after a success). Rewritten only when it changed, so a
   // screen reader announces it once. No dismiss here: the Run tab is where the error stays until the next start (the
   // bar's close button hides only the bar's copy); the button beside it is how to go on
