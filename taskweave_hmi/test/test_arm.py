@@ -108,3 +108,20 @@ def test_reach_targets_turn_a_symmetric_object_to_the_robots_side(cell):
     assert set(only) == {'rails_top'}
     with pytest.raises(arm.ArmError, match='no placed object'):
         arm.reach_targets(cell, 'bot_two_arm', 'nowhere', None, base)
+
+
+def test_reach_targets_report_a_broken_point_and_check_the_rest(cell, monkeypatch):
+    from taskweave_core.config import TargetError
+
+    base = {'xyz': [7.0, 1.0, 0.0], 'quat': [1.0, 0.0, 0.0, 0.0]}
+    real = cell.target
+
+    def target(reference, robot, near=None, **kw):
+        if reference.endswith('/rails_top_steep'):
+            raise TargetError("'bay_2_stack_2_front/rails_top_steep': left_tool needs xyz")
+        return real(reference, robot, near, **kw)
+
+    monkeypatch.setattr(cell, 'target', target)
+    found, _ = arm.reach_targets(cell, 'bot_two_arm', 'bay_2_stack_2_front', None, base)
+    assert found['rails_top_steep'] == {'error': "'bay_2_stack_2_front/rails_top_steep': left_tool needs xyz"}
+    assert set(found['rails_top']) == {'left', 'right'}

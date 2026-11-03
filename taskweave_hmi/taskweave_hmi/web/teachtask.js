@@ -188,11 +188,27 @@ async function snapshotNow() {
       { at: flow.at });
     return ok ? { base: data.new, exists: data.exists, old: data.old } : { error: data.error || (data.problems || []).join('; ') };
   }
+  if (flow.job !== 'pose') {
+    const { ok, data } = await api('GET', '/api/robot/tools');
+    return ok ? { tools: data } : { error: data.error || 'no robot hands' };
+  }
+  // a pose: its joints (those a pose of its form stores), and the hands when it is stored as hands
+  const joints = await api('GET', '/api/robot/joints');
+  if (!joints.ok) return { error: joints.data.error || 'no joint states' };
+  const watched = poseJoints();
+  const all = joints.data.joints || joints.data;
+  const shot = { tools: {}, joints: Object.fromEntries(Object.entries(all).filter(([name]) => !watched || watched.has(name))) };
+  if (poseForm() !== 'hands') return shot;
   const { ok, data } = await api('GET', '/api/robot/tools');
-  if (!ok) return { error: data.error || 'no robot hands' };
-  if (flow.job !== 'pose') return { tools: data };
-  const joints = await api('GET', '/api/robot/joints');  // a pose saves every joint: watch them all
-  return joints.ok ? { tools: data, joints: joints.data.joints || joints.data } : { error: joints.data.error || 'no joint states' };
+  return ok ? { ...shot, tools: data } : { error: data.error || 'no robot hands' };
+}
+// the joints a new pose stores: those of the robot's poses of the same form (the server copies the first one's
+// list); null when there is none yet (all are watched). Wheels and fingers stay out, so their jitter is no "move".
+function poseJoints() {
+  const hands = poseForm() === 'hands';
+  const same = (teach.data?.positions || []).filter((p) => p.scope === ROBOT_SCOPE
+    && Object.keys(p.hands || {}).length > 0 === hands);
+  return same.length ? new Set(same.flatMap((p) => Object.keys(p.joints || {}))) : null;
 }
 // the angle between two direction vectors, degrees
 function turnedDeg(a, b) {
@@ -476,12 +492,14 @@ function liveNodes() {
   if (check.error) return [el('div', { class: 'flow-reach off' }, el('b', { text: 'No reach check' }), el('span', { text: check.error }))];
   const entries = Object.entries(check.points || {});
   if (!entries.length) return [el('div', { class: 'flow-reach' }, el('b', { text: 'No grasp points yet' }))];
-  const good = entries.filter(([, tools]) => Object.values(tools).every((t) => t.ok)).length;
+  const reached = (tools) => !tools.error && Object.values(tools).length > 0 && Object.values(tools).every((t) => t.ok);
+  const good = entries.filter(([, tools]) => reached(tools)).length;
   return [el('div', { class: `flow-reach ${good === entries.length ? 'ok' : good ? 'some' : 'off'}` },
     el('b', { text: `Reaches ${good} of ${entries.length}` }),
     el('div', { class: 'flow-points' }, ...entries.map(([point, tools]) => el('span', { class: 'flow-point',
-      title: Object.entries(tools).map(([t, e]) => `${t}: ${e.ok ? 'reaches' : e.message}`).join('\n') },
-    el('b', { text: point }), ...Object.entries(tools).map(([tool, e]) => el('i', { class: e.ok ? 'ok' : 'bad', role: 'img',
+      title: tools.error || Object.entries(tools).map(([t, e]) => `${t}: ${e.ok ? 'reaches' : e.message}`).join('\n') },
+    el('b', { text: point }), tools.error ? el('i', { class: 'bad', role: 'img', text: '!', 'aria-label': tools.error })
+      : '', ...Object.entries(tools.error ? {} : tools).map(([tool, e]) => el('i', { class: e.ok ? 'ok' : 'bad', role: 'img',
       text: `${tool[0].toUpperCase()}${e.ok ? '✓' : '✕'}`, 'aria-label': `${tool} ${e.ok ? 'reaches' : 'does not reach'}` }))))))];
 }
 function capturedNodes() {

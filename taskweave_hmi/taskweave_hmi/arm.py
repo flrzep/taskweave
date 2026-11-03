@@ -16,7 +16,7 @@ from collections.abc import Iterable, Mapping
 
 import numpy as np
 
-from taskweave_core.config import ConfigError, ConfigStore, schemas
+from taskweave_core.config import ConfigError, ConfigStore, TargetError, schemas
 from taskweave_core.config.limits import joint_limits, mimic_joints
 from taskweave_skills.ik import rpy_matrix
 
@@ -76,17 +76,22 @@ def reach_targets(store: ConfigStore, robot_name: str, at: str, near, base: Mapp
     target}}, point_targets), and where the object is handled ({x, y, top_z, yaw}). Each point is resolved as a move
     resolves ``<at>/<name>``: the type's and the robot's layers and the object's own override merged, a stack at its
     top item, a symmetric object turned to the side the robot works it from (``near``: its base pose in the cell,
-    ConfigStore.handling_instance). ``wanted``: those points only (default all)."""
+    ConfigStore.handling_instance). ``wanted``: those points only (default all). A point that does not resolve (a
+    broken entry) is ``{'error': why}`` instead of its targets: the others are still checked."""
     instances = store.object_instances()
     if at not in instances:
         raise ArmError(f'no placed object {at!r}')
     placed = instances[at]
-    names = [name for name, moves in layout.type_kinds(store, robot_name, placed.object).items()
+    names = [name for name, moves in layout.type_kinds(store, robot_name, placed.object, at).items()
              if moves == 'hand' and (wanted is None or name in wanted)]
     handled = store.handling_instance(placed, robot_name, near)
     found = {}
     for name in names:
-        target = store.target(f'{at}/{name}', robot_name, near)
+        try:
+            target = store.target(f'{at}/{name}', robot_name, near)
+        except (TargetError, ConfigError, ValueError) as error:
+            found[name] = {'error': str(error).strip('"')}
+            continue
         handled = target.instance or handled
         tools = {key[:-len(layout.TOOL_SUFFIX)]: {'xyz': list(pose.xyz), 'rpy': list(pose.rpy)}
                  for key, pose in target.tools.items()}

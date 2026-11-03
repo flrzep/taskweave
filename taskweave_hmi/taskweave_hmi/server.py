@@ -90,7 +90,8 @@ HTTP API (JSON):
                                    with tool targets); returns the outcome when it ends
   POST /api/robot/reach {joints, tools, search: [tool]}   per tool: ok, message, warnings, nearest reachable target
   POST /api/robot/reach {at, points[, search]}   from where the robot stands now, at placed object <at>: per point of
-                                   its type (all, or those named) per tool the same entry, and per tool how far its TCP
+                                   its type (all, or those named) per tool the same entry ({error} for a point that
+                                   does not resolve), and per tool how far its TCP
                                    is from the object now {at, points: {point: {tool: entry}}, hands: {tool: m}}
                                    (Teach's live check; arm.point_targets)
   PUT  /api/robot/joints {joints: {name: value}}  send joint targets now (no mission running; within the limits)
@@ -670,7 +671,8 @@ class Bridge(Node):
         base = self.base_transform()
         found, where = arm.reach_targets(self.config, self.robot, at, self.robot_pose(), base, body.get('points'))
         search = body.get('search', [])
-        result = {name: self.reach_tools({'joints': body.get('joints'), 'tools': tools, 'search': search})
+        result = {name: {'error': tools['error']} if 'error' in tools
+                  else self.reach_tools({'joints': body.get('joints'), 'tools': tools, 'search': search})
                   for name, tools in found.items()}
         try:
             hands = arm.hand_distances(base, where, self.tool_targets())

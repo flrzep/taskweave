@@ -216,8 +216,8 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   suggested: stand_n, pick_n, pose_n, spot_n; "exists: Save overwrites" in amber), what Capture took (amber "Moved
   since: capture again" when the robot moved 5 mm or 0.5° since: the base, each saved hand's TCP and its approach and
   closing, a pose's joints; checked again at the Save tap, Save off then), and Capture / Save as 56px buttons. The live
-  check pauses ("Paused while a mission runs") and the pad target is cleared while a mission runs or the tab is left;
-  Escape closes the flow.
+  check pauses while a mission runs ("Paused while a mission runs"; a capture is refused then anyway) and stops, with
+  the pad target cleared, when the tab is left; Escape closes the flow.
   Saved: a lime card with a tick, where and into which file, then Preview (dry run) / Go here / Undo and Teach
   another / Done. Saves go through the lists' endpoints (teach node, overwrite confirm, Undo); a pad teach press for
   this grasp or pose shows as "Taught by the pad".
