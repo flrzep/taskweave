@@ -34,7 +34,8 @@ HTTP API (JSON):
   POST /api/speed {percent, test_mode, test_percent}  set it through the task handler (each key optional; also while
                                    a mission runs): {ok, message, percent}, 422 when refused (e.g. out of range)
   POST /api/start {mission[, start_step]}  start a mission (at a step id: the first cycle begins there, robot and
-                                   objects as they are); POST /api/pause | /api/resume | /api/abort
+                                   objects as they are; 409 while a manual skill or a move preview runs);
+                                   POST /api/pause | /api/resume | /api/abort
   GET  /api/skills                 skill catalog (move: x-taskweave-move, the options per form, the labels)
   GET  /api/points                 named points for argument pickers (the store's
                                    lists plus 'held poses' and 'via targets'; on a cell pack in the targets layout
@@ -1110,6 +1111,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(result, HTTPStatus.OK if result['ok'] else HTTPStatus.UNPROCESSABLE_ENTITY)
             if method == 'POST' and route == ['start']:
                 body = self._body()
+                if bridge.skill_lock.locked():  # no mission move beside a manual skill's or a preview's (dry_run_move)
+                    raise Busy('a manual skill or a move preview is running; start the mission when it has finished')
                 response = bridge.call(bridge.start_client, StartMission.Request(
                     mission=body['mission'], start_step=str(body.get('start_step') or '')), START_TIMEOUT_S)
                 status = HTTPStatus.OK if response.accepted else HTTPStatus.UNPROCESSABLE_ENTITY
@@ -1187,10 +1190,12 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'POST' and route == ['points', 'drive']:
                 return self._json(bridge.drive(str(self._body()['target'])))
             if method == 'POST' and route == ['skills', 'move', 'dry_run']:
+                body = self._body()
                 try:
-                    return self._json(bridge.dry_run_move(self._body().get('args')))
-                except ValueError as error:  # a placeholder in the args, or no args
+                    args = targets.dry_run_args(body.get('args') if isinstance(body, dict) else None)
+                except ValueError as error:  # no args object, or a placeholder in them
                     return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)
+                return self._json(bridge.dry_run_move(args))
             if method == 'POST' and route == ['skill', 'abort']:
                 aborted = bridge.abort_skill()
                 if aborted is None:

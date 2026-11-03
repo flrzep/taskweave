@@ -111,7 +111,9 @@ def preview_bridge(store, action, state='idle'):
 
 def test_a_preview_answers_the_skills_result_and_is_not_a_manual_skill(store, serve):  # noqa: F811
     data = {'dry_run': True, 'kind': 'hand', 'module': 'move.hand', 'target': 'tray/place', 'hands': ['left'],
-            'joint_goal': {'left_arm_joint1': 0.0, 'lift_joint': 0.25}, 'legs': [{}, {}]}
+            'joint_goal': {'left_arm_joint1': 0.0, 'lift_joint': 0.25},
+            'legs': [{'label': 'tray/place (approach)', 'joint_goal': {'left_arm_joint1': 0.1}},
+                     {'label': 'tray/place', 'joint_goal': {'left_arm_joint1': 0.0, 'lift_joint': 0.25}}]}
     action = AnsweringAction('succeeded', 'move to target · tray/place (left): tray/place: IK solved (nothing moved)',
                              data)
     bridge = preview_bridge(store, action)
@@ -183,3 +185,23 @@ def test_a_placeholder_is_refused_before_anything_is_sent(store, serve):  # noqa
     assert status == 422 and '{next_stack}/grasp is filled at run time' in answer['problems'][0]
     status, answer = request('POST', '/api/skills/move/dry_run', {})
     assert status == 422 and action.goals == []
+    for body in ([{'to': 'home'}], 'home'):   # a body that is JSON but not an object
+        status, answer = request('POST', '/api/skills/move/dry_run', body)
+        assert status == 422 and 'arguments as an object' in answer['problems'][0]
+    assert action.goals == []
+
+
+def test_no_mission_starts_while_a_preview_or_a_manual_skill_holds_the_lock(store, serve):  # noqa: F811
+    bridge = preview_bridge(store, AnsweringAction())
+    bridge.start_client, started = object(), []
+    bridge.call = lambda _client, request, _timeout=None: (started.append(request.mission),
+                                                           SimpleNamespace(accepted=True, message='ok',
+                                                                           plan_id='p1'))[1]
+    request = serve(bridge)
+    bridge.skill_lock.acquire()     # a preview solving, or a manual skill running
+    status, answer = request('POST', '/api/start', {'mission': 'cycle'})
+    assert status == 409 and 'move preview is running' in answer['problems'][0] and started == []
+    bridge.skill_lock.release()
+    assert request('POST', '/api/start', {'mission': 'cycle'}) == (200, {'accepted': True, 'message': 'ok',
+                                                                       'plan_id': 'p1'})
+    assert started == ['cycle']

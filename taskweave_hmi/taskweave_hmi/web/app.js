@@ -581,7 +581,7 @@ function stepCard(step, index, steps, expanded) {
   const preview = movePreview(() => card._read());
   argsBox.after(preview);
   q('skill').addEventListener('change', () => { renderArgs({}); markDirty(); });
-  ['input', 'change'].forEach((type) => card.addEventListener(type, () => { preview._clear(); preview._update(); }));
+  ['input', 'change'].forEach((type) => card.addEventListener(type, () => { preview._clear(); preview._refresh(); }));
   card.addEventListener('input', markDirty);
   card.addEventListener('change', markDirty);
   ['input', 'change'].forEach((type) => card.addEventListener(type, () => stepSummary(card)));
@@ -634,7 +634,7 @@ function stepCard(step, index, steps, expanded) {
   };
   setExpanded(card, expanded);
   stepSummary(card);
-  preview._update();
+  preview._refresh();
   return card;
 }
 
@@ -664,24 +664,34 @@ function movePreview(read) {
   const out = el('div', { class: 'preview-out', hidden: '' });
   const node = el('div', { class: 'step-preview' }, el('div', { class: 'row wrap' }, button, why), out);
   let busy = false;
+  let step = { skill: '', args: {} };  // the step as last read: _refresh on its edits, _update on status events
   node._update = () => {
-    const step = read();
     const move = step.skill === PREVIEW_SKILL;
     show(node, move);
     const blocked = move ? previewBlocked(step.args) : '';
     button.disabled = busy || !!blocked;
     why.textContent = busy ? 'Solving… nothing moves.' : blocked ? `No preview: ${blocked}.` : '';
   };
+  node._refresh = () => { step = read(); node._update(); };
   node._clear = () => { out.replaceChildren(); show(out, false); };
   button.addEventListener('click', async () => {
+    const sent = JSON.stringify(step.args);
     busy = true;
     node._clear();
     node._update();
-    const { ok, data } = await api('POST', `/api/skills/${PREVIEW_SKILL}/dry_run`, { args: read().args });
-    busy = false;
-    node._update();
-    out.replaceChildren(...(ok ? previewAnswer(data)
-      : [el('div', { class: 'msg bad', text: (data.problems || [data.error || 'no answer']).join('\n') })]));
+    let answer;
+    try {
+      const { ok, data } = await api('POST', `/api/skills/${PREVIEW_SKILL}/dry_run`, { args: step.args });
+      answer = ok ? previewAnswer(data)
+        : [el('div', { class: 'msg bad', text: (data.problems || [data.error || 'no answer']).join('\n') })];
+    } catch (error) {  // no connection (the HMI restarting): say so, never stick on "Solving"
+      answer = [el('div', { class: 'msg bad', text: `no answer from the HMI: ${error.message || error}` })];
+    } finally {
+      busy = false;
+      node._update();
+    }
+    if (JSON.stringify(step.args) !== sent) return;  // edited while it solved: the answer is for other args
+    out.replaceChildren(...answer);
     show(out, true);
   });
   return node;
@@ -705,7 +715,8 @@ function previewAnswer(answer) {
   return [el('div', { class: 'msg preview-answer' }, el('div', { text: answer.message }),
     el('dl', { class: 'preview-goal' }, rows.flatMap(([label, text, tip]) => [el('dt', { text: label }), el('dd', tip ? { text, title: tip } : { text })])))];
 }
-// the previews follow the mission and the manual skill (a mission start turns them off)
+// the previews follow the mission and the manual skill (a mission start turns them off); each from the step as last
+// read, so a status event reads no fields
 function updatePreviews() { document.querySelectorAll('#step-editor .step-preview').forEach((node) => node._update()); }
 
 // ---------- folded steps ----------
