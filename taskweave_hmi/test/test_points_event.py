@@ -73,3 +73,27 @@ def test_a_pad_teach_press_announces_the_new_point():
     bridge.capture = lambda *_: (_ for _ in ()).throw(TimeoutError('no joint states'))
     bridge._teach_request(SimpleNamespace(data='{}'))
     assert bridge.sent == [] and 'failed' in notices[1].data
+
+
+def test_a_pad_teach_press_passes_on_the_notes_and_a_late_failures_undo():
+    import json
+    from types import SimpleNamespace
+
+    bridge = points_bridge(None)
+    bridge.teach_target = {'scope': 'frame_type2', 'name': 'rails_top'}
+    notices = []
+    bridge.notice_pub = SimpleNamespace(publish=notices.append)
+    bridge.capture = lambda *_: {'file': 'f', 'message': '', 'undo': {'id': 'u1'}, 'notes': ['grip opening not saved']}
+    bridge._teach_request(SimpleNamespace(data='{}'))
+    assert json.loads(notices[0].data)['notes'] == ['grip opening not saved']
+
+    def late(*_):
+        error = TimeoutError('the gripper table did not answer')
+        error.undo = {'id': 'u2', 'files': ['f']}
+        raise error
+    bridge.capture = late
+    bridge.sent.clear()
+    bridge._teach_request(SimpleNamespace(data='{}'))
+    notice = json.loads(notices[1].data)
+    assert notice['ok'] is False and notice['undo']['id'] == 'u2' and notice['taught'] == bridge.teach_target
+    assert bridge.sent == [('points', None)]

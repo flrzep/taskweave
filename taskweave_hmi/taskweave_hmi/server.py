@@ -820,10 +820,13 @@ class Bridge(Node):
                     'instance_override': bool(target.get('instance_override'))}
             result = self.capture(target['scope'], target['name'], body)
             notice = {'text': f'taught {result["message"] or label} -> {result["file"]}', 'ok': True,
-                      'taught': target, 'undo': result.get('undo')}
+                      'taught': target, 'undo': result.get('undo'), 'notes': result.get('notes') or []}
             self.points_changed()
         except (arm.ArmError, Busy, TimeoutError, KeyError, ConfigError) as error:
             notice = {'text': f'teach {label} failed: {error}', 'ok': False}
+            if getattr(error, 'undo', None):   # failed after the node saved: the browsers offer its undo
+                notice.update(taught=target, undo=error.undo)
+                self.points_changed()
         self.notice_pub.publish(String(data=json.dumps(notice)))
 
     def points_changed(self) -> None:

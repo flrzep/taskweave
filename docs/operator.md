@@ -90,7 +90,8 @@ means the task handler or skill servers are not running), and `taskweave status`
 
 The **status board** at the top of the Run tab is the run in large type, readable from a few metres: the state
 (RUNNING, PAUSED, DONE, FAILED, ...), the step number out of the total, the step's instruction, and under it, while a step runs, how long it has run. An error shows under it; when the mission
-stopped, with the step it stopped at and how to go on. The strip at its foot shows the
+stopped, with the step it stopped at and how to go on. It stays on the board until the next start: the bar's ✕ hides
+only the bar's copy. The strip at its foot shows the
 mission's phases (its included missions): done in green, the current one ringed. While a mission runs, the mission bar on the Run tab
 keeps only the state, Pause and Abort.
 

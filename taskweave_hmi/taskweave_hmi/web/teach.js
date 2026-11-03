@@ -139,7 +139,7 @@ function positionItem(p) {
       return;
     }
     if (!ok) { message(msg, failText(result, 'not captured'), true); return; }
-    noteSaved(`arm:${keyOf(p)}`, takenText(p.name, result), result.undo);
+    noteSaved(`arm:${keyOf(p)}`, takenText(p.name, result), result.undo, result.notes);
     await loadArm();
   });
   test.addEventListener('click', async () => {
@@ -317,7 +317,7 @@ function newPosition(kind) {
     const { ok, data } = await api('POST', `/api/teach/arm/${encodeURIComponent(t.scope)}/${encodeURIComponent(t.name)}/capture`, t);
     capture.disabled = false;
     if (!ok) { message(msg, failText(data, 'not captured'), true); return; }
-    noteSaved(`arm:${keyOf(t)}`, takenText(t.name, data), data.undo);
+    noteSaved(`arm:${keyOf(t)}`, takenText(t.name, data), data.undo, data.notes);
     box.remove();
     teach.open = keyOf(t);
     await loadArm();
@@ -346,8 +346,7 @@ function changeText(preview) {
 // it) and the teach node's answer.
 function takenText(name, result) {
   const where = result.at ? ` at ${result.at}${result.distance_m != null ? `, ${result.distance_m} m from the robot` : ''}` : '';
-  const notes = (result.notes || []).map((note) => ` (${note})`).join('');
-  return `Taught ${name}${where}${result.message ? `: ${result.message}` : ''} → ${result.file}${notes}`;
+  return `Taught ${name}${where}${result.message ? `: ${result.message}` : ''} → ${result.file}`;
 }
 
 // A pad teach press saved a position: show the new numbers.

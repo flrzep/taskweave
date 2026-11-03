@@ -169,7 +169,7 @@ function connect() {
     else if (type === 'manual') { state.snapshot.manual = data; renderManual(); return; }
     else if (type === 'notice') {
       padNotice(data);
-      if (data.taught) { noteSaved(`arm:${data.taught.scope}/${data.taught.name}`, data.text, data.undo); teachTaught(); }
+      if (data.taught) { noteSaved(`arm:${data.taught.scope}/${data.taught.name}`, data.text, data.undo, data.notes); teachTaught(); }
       return;
     }
     else if (type === 'plan') { if (state.snapshot.plan?.plan_id !== data.plan_id) state.snapshot.outcomes = {}; state.snapshot.plan = data; }
@@ -296,6 +296,8 @@ function renderMission(s) {
 const BOARD_WORDS = { idle: 'idle', planning: 'planning', running: 'running', paused: 'paused', succeeded: 'done',
   failed: 'failed', aborted: 'aborted' };
 const board = { phases: null, error: null };  // the phases' last arguments, the error text shown
+// a step that ended without success (the failed band, where a stopped run stopped)
+const NOT_DONE = ['FAILED', 'REJECTED', 'CANCELED', 'TIMEOUT'];
 // graph.js (bandsOf) loads after this file: draw the phases once more when every script is there
 window.addEventListener('load', () => { if (board.phases) renderPhases(...board.phases); });
 // plan / outcomes: what the Run tab shows (the picked mission's preview while idle); the board shows the run itself
@@ -311,7 +313,7 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
   const plan = run ? state.snapshot.plan : shown;
   const outcomes = run ? state.snapshot.outcomes || {} : shownOutcomes;
   const picked = $('mission-select').value;
-  const next = ended && picked && picked !== missionOf(plan) ? ` Next: ${picked}, Start in the bar above.` : '';
+  const next = ended && plan && picked && picked !== missionOf(plan) ? ` Next: ${picked}, Start in the bar above.` : '';
   $('board-goal').textContent = run ? s.goal || '' : missionOf(plan) || '';
   $('board-cycle').textContent = s.plan_id && (active || ended) ? `cycle ${s.cycle} · ${s.plan_id}` : '';
   const total = plan?.steps.length || s.step_count || 0;
@@ -335,8 +337,7 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
   } else if ((s.state === 'failed' || s.state === 'aborted') && s.plan_id) {
     // where it stopped: the status's step, else the last step that finished without success
     const steps = plan?.steps || [];
-    const last = [...steps.keys()].reverse().find((i) => ['FAILED', 'REJECTED', 'CANCELED', 'TIMEOUT']
-      .includes(outcomes[steps[i].id]?.outcome));
+    const last = [...steps.keys()].reverse().find((i) => NOT_DONE.includes(outcomes[steps[i].id]?.outcome));
     const index = at ? at - 1 : last ?? -1;
     count = index >= 0 ? String(index + 1) : '–'; of = total ? `/ ${total}` : '';
     text = (s.step || steps[index])?.instruction || (s.state === 'aborted' ? 'Aborted' : 'The mission stopped');
@@ -355,7 +356,8 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
   $('board-instruction').title = text;
   $('board-detail').textContent = detail;
   // the last error, as the bar shows it off the Run tab (not after a success); how to go on once it stopped. Rewritten
-  // only when it changed, so a screen reader announces it once
+  // only when it changed, so a screen reader announces it once. No dismiss here: the Run tab is where the error stays
+  // until the next start (the bar's close button hides only the bar's copy)
   const stopped = s.state === 'failed' || s.state === 'aborted';
   const error = s.last_error && s.state !== 'succeeded' ? s.last_error : '';
   const key = error ? `${stopped}|${error}` : '';
@@ -378,7 +380,7 @@ function renderPhases(s, plan, outcomes, active) {
   list.replaceChildren(...bands.map((band) => {
     const done = band.steps.filter((i) => outcomes[plan.steps[i].id]?.event === 'step_finished').length;
     const now = active && band.steps.includes(s.step_index);
-    const failed = band.steps.some((i) => ['FAILED', 'REJECTED'].includes(outcomes[plan.steps[i].id]?.outcome));
+    const failed = band.steps.some((i) => NOT_DONE.includes(outcomes[plan.steps[i].id]?.outcome));
     const item = el('li', { class: `${now ? 'now' : ''}${failed ? ' failed' : ''}`,
       'aria-label': `${band.name}: ${done} of ${band.steps.length} steps done${now ? ', running' : ''}` },
     el('div', { class: 'ph-bar' }, el('i')), el('div', { class: 'name' }, el('span', { text: band.name }),
@@ -1693,11 +1695,14 @@ setInterval(() => { if ((pointsVisible || robotVisible) && !document.hidden) ref
 
 // Which placed object a teach uses, before it saves: its name and how far the robot is from it (the operator should
 // stand at it), with the nearest one when that is another. pick() -> instance name, or '' for the nearest of `type`.
+// One robot-pose listener for all of them; a hint the page no longer shows is dropped at the next pose.
+const atHints = new Set();
+document.addEventListener('robot-pose', () => atHints.forEach((node) => {
+  if (node.isConnected) node._update(); else atHints.delete(node);
+}));
 function atHint(pick, type) {
   const node = el('span', { class: 'muted small-text at-hint' });
   const update = () => {
-    if (!node.isConnected && node.dataset.drawn) { document.removeEventListener('robot-pose', update); return; }
-    node.dataset.drawn = '1';
     const relative = (state.robotPose?.relative || []).filter((r) => r.object === type);
     const nearest = relative[0];
     const chosen = pick() ? relative.find((r) => r.instance === pick()) : nearest;
@@ -1706,19 +1711,22 @@ function atHint(pick, type) {
     node.textContent = `at ${chosen.instance}, ${chosen.distance} m from the robot${other}`;
     node.classList.toggle('bad', !!other);
   };
-  document.addEventListener('robot-pose', update);
   node._update = update;
   update();
+  setTimeout(() => atHints.add(node), 0);  // once it is on the page (the caller inserts it after this returns)
   return node;
 }
 
 // The last Teach save (from this browser or the pad), shown under its entry until the next one: what was saved, where it
 // was measured, and Undo (POST /api/teach/undo: the files as they were before that save; refused once they changed).
-function noteSaved(key, text, undo) { state.lastSaved = { key, text, undo: undo || null }; }
+// warnings: what the save left out (the server's notes), each on its own line and the note amber.
+function noteSaved(key, text, undo, warnings = []) { state.lastSaved = { key, text, undo: undo || null, warnings }; }
 function savedNote(key) {
   const saved = state.lastSaved;
   if (!saved || saved.key !== key) return '';
-  const box = el('div', { class: 'msg saved-note' }, el('span', { text: saved.text }));
+  const warnings = saved.warnings || [];
+  const box = el('div', { class: `msg saved-note${warnings.length ? ' warn' : ''}` }, el('span', { text: saved.text }),
+    ...warnings.map((text) => el('div', { text: text.charAt(0).toUpperCase() + text.slice(1) + '.' })));
   if (saved.undo) {
     const button = el('button', { class: 'btn small', text: 'Undo', title: `Put ${saved.undo.files.join(', ')} back as before this save`, 'data-edit': '' });
     button.addEventListener('click', async () => {
@@ -1934,6 +1942,7 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
       + 'stale or jumped pose); edit a number to save it as typed instead.');
   });
   saveButton.addEventListener('click', async () => {
+    if (saveButton.getAttribute('aria-disabled') === 'true') return;  // its compare is still being asked
     const newName = nameInput.value.trim();
     if (!NAME_RE.test(newName)) { message(msg, 'Names use letters, digits, "_" and "-", starting with a letter.', true); return; }
     const values = [xInput.value, yInput.value, yawInput.value].map(Number);
@@ -1943,16 +1952,22 @@ function pointItem({ title, pose, usedBy, name, address, isNew = false, nameLabe
     const target = isNew ? [...address.slice(0, -1), newName] : address;
     const body = { x: values[0], y: values[1], yaw: values[2] / DEG };
     const where = at();
-    let change = isNew ? '' : poseChange(pose, body);
+    const change = isNew ? '' : poseChange(pose, body);
+    let confirm = change ? `Overwrites ${name}: ${change}` : '';
     if (fromRobotRead && !isNew) {  // the node saves the robot's pose at Save: compare that one, asked at each tap
-      const { ok, data: preview } = await api('POST', `/api/points/${address.map(encodeURIComponent).join('/')}/preview`, { at: where });
-      change = !ok ? `cannot compare with the saved one (${(preview.problems || [preview.error || 'no answer']).join('; ')}): tap again to save anyway`
-        : preview.exists ? poseChange(preview.old, preview.new) : '';
+      // no second tap while it is asked (a double click would arm and save at once); aria-disabled, not disabled: the
+      // button keeps the keyboard focus
+      saveButton.setAttribute('aria-disabled', 'true');
+      const { ok, data: preview } = await api('POST', `/api/points/${address.map(encodeURIComponent).join('/')}/preview`, { at: where })
+        .finally(() => saveButton.removeAttribute('aria-disabled'));
+      confirm = !ok ? `Cannot compare with the saved ${name} (${(preview.problems || [preview.error || 'no answer']).join('; ')}). `
+        + 'Tap again to overwrite anyway; the teach node still checks the pose when it saves.'
+        : preview.exists && poseChange(preview.old, preview.new) ? `Overwrites ${name}: ${poseChange(preview.old, preview.new)}` : '';
       if (ok) {  // the form shows what will be saved
         xInput.value = preview.new.x; yInput.value = preview.new.y; yawInput.value = +(preview.new.yaw * DEG).toFixed(2);
       }
     }
-    if (overwriteAsked(saveButton, msg, 'Save', change ? `Overwrites ${name}: ${change}` : '')) return;
+    if (overwriteAsked(saveButton, msg, 'Save', confirm)) return;
     if (!isNew && newName !== name) body.rename = newName;
     if (isNew) body.create = true;
     const key = target.slice(0, -1).concat(body.rename || target[target.length - 1]).join('/');
