@@ -1,11 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-11-03
 
 - **PlanStep carries the plan graph's data:** `origin_json` (`{"include": [names, outermost first], "step": index in the
-  innermost mission's own steps}`, empty when the step is not from a mission), `replan_from` and `max_replans`.
-
-## 0.4.0 — 2026-11-03
+  innermost mission's own steps, "top": index in the top mission's own steps}`, empty when the step is not from a
+  mission), `replan_from` and `max_replans`.
 
 - **move from the operator's view: five commands, cell schema 5.** A move step's kind (`data.kind`, the plan's
   `Step.kind`, smoke keys `move.<kind>`) is one of `navigate`, `straight`, `hand`, `posture`, `joints` (labels "navigate
