@@ -764,6 +764,7 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-rows { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 6px var(--sp-3); margin: 0; font-size: var(--fs-s); }
 .pg-rows dt { color: var(--text-muted); }
 .pg-rows dd { margin: 0; overflow-wrap: anywhere; }
+.pg-rows dd.bad { color: var(--bad); }
 .pg-card.state-failed .pg-eyebrow, .pg-card.state-rejected .pg-eyebrow { color: var(--bad); }
 .pg-card.state-succeeded .pg-eyebrow { color: var(--done); }
 .pg-card.state-paused .pg-eyebrow, .pg-card.state-timeout .pg-eyebrow, .pg-card.state-canceled .pg-eyebrow { color: var(--warn); }

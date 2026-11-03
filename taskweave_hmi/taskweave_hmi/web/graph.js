@@ -108,6 +108,27 @@ function carrying(step, event) {
   if (found) return found;
   return done?.data?.module === 'move.carry' || carriesByArgs(step.args) ? true : null;
 }
+// The torso line of a step (the side card, the phone's sheet): from the look-ahead's report (data.torso_plan of a
+// finished carry step: TorsoPlan.report() in taskweave_skills torso_plan.py) whose window holds the step, and the
+// height the step ran at (data.torso). Planned: "Torso 0.35 m · planned change at this step (from 0.494)" or
+// "Torso 0.494 m · kept (plan)"; cut, capped or stopped: "chosen per step"; infeasible and certain: its message, red.
+// A step that ran a planned change on a state that differed says "replanned". null: no report covers the step.
+const metres = (v) => `${+Number(v).toFixed(3)} m`;
+function torsoLine(step, events) {
+  const reports = Object.values(events || {}).map((e) => e?.data?.torso_plan).filter((p) => p?.window?.includes(step.id));
+  const own = events?.[step.id]?.data;
+  const plan = own?.torso_plan?.window?.includes(step.id) ? own.torso_plan : reports.at(-1);
+  if (!plan) return null;
+  const height = own?.torso ?? plan.heights?.[step.id];
+  const at = height != null ? `Torso ${metres(height)}` : 'Torso';
+  const replanned = own?.torso_plan?.source === 'replanned'
+    ? ` · replanned${own.torso_plan.message ? `: ${own.torso_plan.message}` : ''}` : '';
+  if (plan.outcome === 'infeasible' && plan.certain) return { text: `${at} · ${plan.message || 'no torso height fits the hold'}`, bad: true };
+  if (plan.outcome !== 'planned') return { text: `${at} · chosen per step (${plan.outcome})${replanned}`, bad: false };
+  const change = (plan.changes || []).find((c) => c.at === step.id);
+  return { text: change ? `Torso ${metres(change.to)} · planned change at this step (from ${+Number(change.from).toFixed(3)})${replanned}`
+    : `${at} · kept (plan)${replanned}`, bad: false };
+}
 const colourOf = (step) => KIND_COLOURS[step.kind || (step.skill === 'move' ? moveKindOfArgs(step.args) : '')]
   || SKILL_COLOURS[step.skill] || 'other';
 function iconOf(step, event) {
@@ -291,7 +312,9 @@ function planCard(i, ctx, phone) {
   const tile = div(`pg-tile kind-${colourOf(step)}`, iconElement(iconOf(step, event)));
   const progress = live ? div('pg-progress', el('i', { style: `width: ${Math.max(0, Math.min(1, s.step_progress)) * 100}%` })) : '';
   const row = (label, value, cls = '') => (value ? [el('dt', { text: label }), el('dd', { class: cls, text: value })] : []);
+  const torso = torsoLine(step, events);
   const rows = (notes) => el('dl', { class: 'pg-rows' }, ...row('command', command), ...row('target', mainArg(step), 'mono'),
+    ...row('torso', torso?.text, torso?.bad ? 'bad' : ''),
     ...row('locks', (step.resources || []).join(', ') || '–'), ...row('on failure', failureText(r[i])),
     ...row('status', statusText, live ? 'mono' : ''), ...(notes ? (step.notes || []).flatMap((note) => row('note', note)) : []));
   if (phone) {

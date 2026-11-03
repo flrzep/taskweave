@@ -190,6 +190,11 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   right (sticky under the top), the settings full width under both. The base as a readout (`.readout`: x, y, yaw in
   Barlow Semi Condensed 24px over muted 13px names), the nearest placed object under it in muted monospace, or in
   red why there is no pose.
+- **Torso line** (side card and step sheet, a `torso` row after the target): what the carry's torso look-ahead
+  planned for the step (`data.torso_plan` of a finished carry step whose window holds it, and the step's own
+  `data.torso`): "Torso 0.35 m · planned change at this step (from 0.494)", "Torso 0.494 m · kept (plan)", "chosen per
+  step (cut)" when the plan did not cover the hold, ", replanned: …" when the real state differed, and a certain
+  infeasible plan's message in `--bad`. No row without a report.
 - **Step sheet** (phone, `.pg-sheet`): a tap on a step's chip (also the running one) opens a bottom sheet over a
   scrim (`.pg-scrim`, 45% ink; under the status bar, so Pause and Abort stay in reach, and the bottom nav): a 44 × 5
   handle, the step's tile (52px) with its state and number over the instruction (20px, 600), the step's progress
