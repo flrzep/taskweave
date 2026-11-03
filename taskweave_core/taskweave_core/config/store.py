@@ -434,7 +434,7 @@ class ConfigStore:
     # ``target()`` (target_store.legacy_*), until the HMI has moved to targets (P7).
     def targets_format(self) -> bool:
         """Always True: the store reads cell packs in the targets layout only (older ones: taskweave config migrate).
-        Kept for the HMI's ``targets.active(store)``."""
+        The migration tool's reader (tools/dump_targets.py OldLayoutStore) answers False for an unmigrated cell."""
         return True
 
     def locations(self) -> dict[str, Pose2D]:
