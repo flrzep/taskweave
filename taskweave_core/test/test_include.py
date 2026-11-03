@@ -123,8 +123,15 @@ def test_the_plan_message_carries_origin_replan_from_and_max_replans():
         pytest.skip('taskweave_interfaces without origin_json')
     assert [s.step_id for s in msg.steps] == ['s1', 's2_s1', 's2_s2_s1', 's2_s2_g', 's3']
     assert [json.loads(s.origin_json) for s in msg.steps] == [
-        {'include': [], 'step': 0}, {'include': ['mid'], 'step': 0}, {'include': ['mid', 'pick'], 'step': 0},
-        {'include': ['mid', 'pick'], 'step': 1}, {'include': [], 'step': 2}]
+        {'include': [], 'step': 0, 'top': 0}, {'include': ['mid'], 'step': 0, 'top': 1},
+        {'include': ['mid', 'pick'], 'step': 0, 'top': 1}, {'include': ['mid', 'pick'], 'step': 1, 'top': 1},
+        {'include': [], 'step': 2, 'top': 2}]
+    twice = {'goal': 'twice', 'steps': [{'instruction': 'a', 'include': 'pick', 'with': {'frame': 'f'}},
+                                        {'instruction': 'b', 'include': 'pick', 'with': {'frame': 'g'}}]}
+    steps = plan_to_msg(Plan.from_mission(expand_includes(twice, load_nested), 'p')).steps
+    assert [json.loads(s.origin_json) for s in steps] == [
+        {'include': ['pick'], 'step': 0, 'top': 0}, {'include': ['pick'], 'step': 1, 'top': 0},
+        {'include': ['pick'], 'step': 0, 'top': 1}, {'include': ['pick'], 'step': 1, 'top': 1}]
     assert [s.replan_from for s in msg.steps] == ['', '', '', 's2_s2_g', '']
     assert [s.max_replans for s in msg.steps] == [1, 1, 3, 3, 1]
 
