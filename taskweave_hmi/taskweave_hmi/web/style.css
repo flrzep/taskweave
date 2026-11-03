@@ -21,6 +21,7 @@
   --sans: "Barlow", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --cond: "Barlow Semi Condensed", "Barlow", system-ui, sans-serif;
   --fs-xs: 12px; --fs-sm: 13px; --fs-s: 14px; --fs-base: 16px; --fs-md: 18px; --fs-lg: 20px; --fs-xl: 24px; --fs-2xl: 30px;
+  --fs-3xl: 36px; --fs-4xl: 60px;  /* the Run tab's status board, read from a few metres */
 
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-12: 48px;
   --r-xs: 3px; --r-s: 6px; --r-m: 10px; --r-pill: 999px;
@@ -121,6 +122,67 @@ button, input, select, textarea { font-family: inherit; }
   .mission .chip { min-width: 0; }
   .mission-controls .btn { padding: 0 var(--sp-3); white-space: normal; line-height: 1.15; max-width: 7.5em; }  /* "Tap again to abort" in two lines */
 }
+/* run board: the Run tab's status board (an andon panel). A 10px rail and the state word in the state colour, the
+   mission and cycle, the step number big with "/ N", the instruction at 24px (two lines), the command and time under
+   it, an error panel when it stopped, and a strip of the phases (bands of the plan graph) sized by their steps. On the
+   Run tab the bar above keeps only the badge and the controls, so the words are not shown twice. */
+.board { --state: var(--idle); position: relative; overflow: hidden; gap: var(--sp-3);
+         padding: var(--sp-4) var(--sp-6) var(--sp-5) calc(var(--sp-6) + 10px);
+         background: color-mix(in srgb, var(--state) 5%, var(--surface-card)); transition: background .4s; }
+.board::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 10px; background: var(--state); transition: background .4s; }
+.board.state-running, .board.state-planning { --state: var(--brand); }
+.board.state-paused { --state: var(--warn); }
+.board.state-paused::before { background: repeating-linear-gradient(-45deg, var(--warn) 0 8px,
+                              color-mix(in srgb, var(--warn) 35%, var(--surface-card)) 8px 16px); }
+.board.state-succeeded { --state: var(--ok); }
+.board.state-failed, .board.state-aborted { --state: var(--bad); }
+.board-head { display: flex; align-items: baseline; gap: var(--sp-4); min-width: 0; }
+.board-state { flex: none; font: 700 var(--fs-3xl)/1 var(--cond); letter-spacing: .04em; text-transform: uppercase; color: var(--state-text); }
+.board { --state-text: var(--text-muted); }
+.board.state-running, .board.state-planning { --state-text: var(--brand-text); }
+.board.state-paused { --state-text: var(--warn); } .board.state-succeeded { --state-text: var(--ok); }
+.board.state-failed, .board.state-aborted { --state-text: var(--bad); }
+.board-goal { min-width: 0; font: 600 var(--fs-lg)/1.25 var(--cond); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-cycle { margin-left: auto; flex: none; color: var(--text-muted); white-space: nowrap; }
+.board-main { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-6); align-items: center; }
+.board-count { display: flex; align-items: baseline; gap: var(--sp-2); white-space: nowrap; }
+#board-step { font: 700 var(--fs-4xl)/1 var(--cond); }
+.board-of { font: 600 var(--fs-2xl)/1 var(--cond); color: var(--text-muted); }
+.board-instruction { font: 500 var(--fs-xl)/1.3 var(--sans); display: -webkit-box; -webkit-box-orient: vertical;
+                     -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.board-detail { margin-top: var(--sp-1); color: var(--text-muted); }
+.board-error { padding: var(--sp-3) var(--sp-4); border-radius: var(--r-s); font-size: var(--fs-md); font-weight: 500;
+               background: color-mix(in srgb, var(--bad) 9%, var(--surface-card)); box-shadow: inset 4px 0 0 var(--bad); }
+.board-error small { display: block; margin-top: var(--sp-1); font-size: var(--fs-s); font-weight: 400; color: var(--text-muted); }
+.board-phases { display: flex; gap: var(--sp-2); margin: var(--sp-1) 0 0; padding: 0; list-style: none; }
+.board-phases li { flex: var(--steps) 1 0; min-width: 0; display: grid; gap: var(--sp-1); }
+.board-phases .ph-bar { height: 10px; border-radius: var(--r-pill); overflow: hidden;
+                     background: color-mix(in srgb, var(--text-muted) 16%, var(--surface-card)); }
+.board-phases .ph-bar i { display: block; height: 100%; width: var(--done); background: var(--ok); border-radius: inherit; }
+.board-phases li.now .ph-bar { outline: 2px solid var(--state); outline-offset: 2px; }
+.board-phases li.now .ph-bar i { background: var(--state); }
+.board-phases li.failed .ph-bar i { background: var(--bad); }
+.board-phases .name { display: flex; gap: var(--sp-2); font-size: var(--fs-s); color: var(--text-muted); min-width: 0; }
+.board-phases .name span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-phases .name b { flex: none; margin-left: auto; font: 600 var(--fs-s) var(--cond); color: var(--text); }
+.board-phases li.now .name { color: var(--text); font-weight: 600; }
+body.on-run .mission.active .mission-goal, body.on-run .mission.active .mission-step,
+body.on-run .mission.active .mission-meta, body.on-run .mission.active .progress, body.on-run .mission .error { display: none; }
+body.on-run .mission.active .mission-row { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "state . ctrl"; }
+@media (max-width: 600px) {
+  .board { padding: var(--sp-3) var(--sp-4) var(--sp-4) calc(var(--sp-4) + 8px); }
+  .board::before { width: 8px; }
+  .board-head { flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
+  .board-state { font-size: var(--fs-2xl); }
+  .board-goal { font-size: var(--fs-md); }
+  .board-cycle { display: none; }
+  .board-main { grid-template-columns: 1fr; gap: var(--sp-2); }
+  #board-step { font-size: 44px; }
+  .board-of { font-size: var(--fs-xl); }
+  .board-instruction { font-size: var(--fs-lg); -webkit-line-clamp: 3; }
+  .board-phases .name b { display: none; }
+}
+
 @media (pointer: coarse), (max-width: 600px) {  /* the ✕ grows to a touch target into the message's padding */
   #last-error-close { width: var(--tap-min); height: var(--tap-min); margin: calc(-1 * var(--sp-2)) calc(-1 * var(--sp-3)) calc(-1 * var(--sp-2)) 0; }
 }

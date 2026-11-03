@@ -72,7 +72,9 @@ network may have no internet). `font-variant-numeric: tabular-nums` throughout, 
 | `--fs-md` | 18px | brand name, state badge (700, uppercase), record stats |
 | `--fs-lg` | 20px / 1.35 | current step instruction |
 | `--fs-xl` | 24px / 1.2 | `h2` |
-| `--fs-2xl` | 30px / 1.12 | speed value, recording headline (26px on a phone) |
+| `--fs-2xl` | 30px / 1.12 | speed value, recording headline (26px on a phone), the board's "/ N" |
+| `--fs-3xl` | 36px | the status board's state word (30px on a phone) |
+| `--fs-4xl` | 60px | the status board's step number (44px on a phone) |
 
 Weights: 400 body, 500 instruction, 600 titles and buttons, 700 badges and the brand name.
 
@@ -123,6 +125,15 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   Start's answer (`.msg`, idle only) and the last error (`.error` with a ✕ that hides that error until another one or
   the next start). On a phone: badge, step n/N, Pause, Abort in one row (44px targets, "Tap again to abort" wraps),
   the instruction under it, no goal or detail; idle: badge, picker, Start.
+- **Status board** (`.board`, Run tab): the andon panel of the run, read from a few metres. A 10px rail in the state
+  colour (striped amber when paused) on a 5% tint; the state word (Barlow Semi Condensed 36px, caps, in the state's
+  text colour: "done" for succeeded), the mission and cycle; the step number at 60px with "/ N", the instruction at
+  24px (two lines, three on a phone), and under it the command, status, seconds and attempt. Planning, idle ("26 steps ·
+  Ready to start", or the chosen start step), done, failed (the failed step, from the outcomes when the status has no
+  step) and aborted each have their own words. When it stopped, the error in a red-ruled panel with how to go on. Under
+  it the phases: the plan graph's bands as one bar each, as wide as their steps, done in green, the current one ringed
+  in the state colour, name and done/total under it. On the Run tab the mission bar keeps only the badge and the
+  controls (`body.on-run`), so the words are not shown twice, and its error hides (the board shows it).
 - **Tabs** (`.tabs`): in the sticky top bar with the header (`.top` wraps both). Uppercase 14px, 48px high, equal
   width; the selected one in brand text with a 3px underline. At 400px and below they drop the uppercase so all six
   fit; if they still do not, they scroll inside the bar, never the page.
@@ -181,7 +192,8 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   word, remembered per mission. Only exceptions are marked: rule badges on the chip's top edge, a dashed replan line
   in the left gutter, dashed boxes round parallel candidates. The running or selected step opens in a 300px side
   card (`.pg-card`, 2px brand border); below 608px of card width it goes under the graph. At 600px and below: a
-  rail of 44px chips per band and a bottom sheet (`.pg-sheet`). It reads `--g-*` tokens mapped onto the global
+  rail of 44px chips per band and a bottom sheet (`.pg-sheet`) for a step the operator taps (the running step is on
+  the status board). It reads `--g-*` tokens mapped onto the global
   ones.
 
 ## Icons and imagery

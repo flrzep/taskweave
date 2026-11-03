@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="on-run">
 <div class="top">
 <header class="bar">
   <div class="brand">
@@ -82,6 +82,24 @@
 <main>
   <!-- RUN -->
   <section id="view-run" class="view">
+    <!-- the status board: what the robot is doing, readable from a few metres; the bar above keeps the controls -->
+    <section id="board" class="card board" aria-label="Mission status">
+      <div class="board-head" aria-live="polite">
+        <span id="board-state" class="board-state">idle</span>
+        <b id="board-goal" class="board-goal"></b>
+        <span id="board-cycle" class="board-cycle mono"></span>
+      </div>
+      <div class="board-main">
+        <div class="board-count"><span id="board-step">–</span><span id="board-total" class="board-of"></span></div>
+        <div class="board-now">
+          <div id="board-instruction" class="board-instruction" aria-live="polite"></div>
+          <div id="board-detail" class="board-detail"></div>
+        </div>
+      </div>
+      <div id="board-error" class="board-error" role="alert" hidden></div>
+      <ol id="board-phases" class="board-phases" aria-label="Phases" hidden></ol>
+    </section>
+
     <div id="viewer3d-run" class="viewer3d" role="region" aria-label="3D view: the robot live in its cell"></div>
 
     <div class="card">
