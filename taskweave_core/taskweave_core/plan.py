@@ -36,14 +36,15 @@ def _with_origin(step: dict, origin: dict) -> dict:
 
 def _fill(value, values: dict):
     """``value`` with ``{param}`` replaced by ``values[param]``; other placeholders (world state) stay. A string that
-    is just one placeholder takes the value's type."""
+    is just one placeholder takes the value's type. A step keeps its origin (the planner fills its facts in with it)."""
     if isinstance(value, str):
         whole = re.fullmatch(r'\{(\w+)\}', value)
         if whole and whole.group(1) in values:
             return copy.deepcopy(values[whole.group(1)])
         return re.sub(r'\{(\w+)\}', lambda m: str(values[m.group(1)]) if m.group(1) in values else m.group(0), value)
     if isinstance(value, dict):
-        return {k: _fill(v, values) for k, v in value.items()}
+        filled = {k: _fill(v, values) for k, v in value.items()}
+        return _with_origin(filled, value.origin) if isinstance(value, _OriginStep) else filled
     if isinstance(value, list):
         return [_fill(v, values) for v in value]
     return value

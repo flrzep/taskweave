@@ -113,6 +113,21 @@ steps:
     assert plan is None and cycle == 4                                           # all front stacks empty: done
 
 
+def test_the_planner_keeps_each_steps_origin(config_dir):
+    """The planner fills a mission's facts into its steps: the steps keep where they came from (the plan graph's
+    phases)."""
+    from taskweave_core.planner import MissionFilePlanner
+    missions = config_dir / 'missions'
+    missions.mkdir(exist_ok=True)
+    (missions / 'rest.yaml').write_text('goal: r\nsteps:\n- {instruction: a, skill: wait, args: {seconds: 1}}\n')
+    (missions / 'twice.yaml').write_text('goal: t\nsteps:\n- {instruction: x, skill: wait, args: {seconds: 1}}\n'
+                                         '- {instruction: one, include: rest}\n- {instruction: two, include: rest}\n')
+    plan = MissionFilePlanner(ConfigStore(config_dir), 'twice').make_plan({}, 1)
+    assert [s.origin for s in plan.steps] == [{'step': 0, 'include': [], 'inner_step': 0},
+                                              {'step': 1, 'include': ['rest'], 'inner_step': 0},
+                                              {'step': 2, 'include': ['rest'], 'inner_step': 0}]
+
+
 def test_the_plan_message_carries_origin_replan_from_and_max_replans():
     pytest.importorskip('taskweave_interfaces.msg')
     import json
