@@ -253,13 +253,14 @@ body.on-run .mission.active .mission-row { grid-template-columns: auto minmax(0,
 .top:has(.speed.off) .speed-msg:not(.bad) { color: var(--text-muted); }
 /* a pad press's answer, for a while: a toast at the page's foot (above the phone's bottom nav). It lets taps through
    and is never in the bar, so the bar keeps its height and the manual skill's Abort stays clear */
-.pad-notice { position: fixed; z-index: 5; left: calc(var(--rail) + var(--sp-6)); bottom: var(--sp-6); max-width: min(70ch, 60vw);
+.pad-notice { position: fixed; z-index: 6; right: var(--sp-6); top: calc(var(--top-h, 76px) + var(--sp-3)); max-width: min(70ch, 50vw);
               padding: var(--sp-2) var(--sp-3); border-radius: var(--r-s); background: var(--surface-card); box-shadow: var(--shadow-2);
               border-left: 4px solid currentColor; pointer-events: none; font: 500 var(--fs-sm) var(--cond); color: var(--ok);
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 600px) {
-  .pad-notice { left: var(--sp-3); right: var(--sp-3); max-width: none; bottom: calc(var(--nav) + env(safe-area-inset-bottom, 0px) + var(--sp-2)); }
-  .top { max-height: 70dvh; overflow-y: auto; }  /* speed panel, manual strip and an error together: the page stays in sight */
+  .pad-notice { left: var(--sp-3); right: var(--sp-3); top: auto; max-width: none; bottom: calc(var(--nav) + env(safe-area-inset-bottom, 0px) + var(--sp-2)); }
+  /* a long error scrolls in its own box: the top keeps the mission's and the manual skill's Abort in sight */
+  .mission .error { max-height: 25dvh; overflow-y: auto; }
 }
 .pad-notice.bad { color: var(--bad); }
 @media (max-width: 600px) {

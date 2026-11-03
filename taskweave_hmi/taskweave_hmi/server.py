@@ -327,8 +327,8 @@ class Bridge(Node):
         self.outcomes: dict[str, dict] = {}   # step id -> latest step event for the current plan and cycle
         self.events: deque = deque(maxlen=200)
         self.event_seq = 0
-        self.run_from_seq = 0      # the last step event before the run shown began (_plan)
-        self.run_from_next = None  # where a run that turned running begins, until its plan arrives (_status)
+        self.run_from_seq = 0      # the last step event before the run shown began (_episode)
+        self.run_armed = False     # a run turned running and has no step event yet (_status)
         self.listeners: list[queue.Queue] = []
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(TaskStatus, names.STATUS, self._status, latched, callback_group=self.group)
@@ -416,16 +416,19 @@ class Bridge(Node):
                     listener.put_nowait(None)
 
     def _status(self, msg: TaskStatus) -> None:
-        """The task handler's status. A run begins when the state turns running from idle or an end (not on Resume):
-        where its step events will begin is kept for its plan (_plan), so a start refused while planning leaves the
-        plan shown and its run as they were."""
+        """The task handler's status, with ``run_from_seq``: the last step event before the run shown began, so the
+        browser can tell this run's events from an earlier run of the same mission (plan ids start again at -0001 on
+        each start). A run is armed when the state turns running from idle or an end (not on Resume) and begins with
+        its first step event (_episode): independent of the plan's arrival, and a start refused while planning (no
+        step event) leaves the last run as it was."""
         status = status_dict(msg)
         with self.lock:
             before = (self.status or {}).get('state')
             if status['state'] in ACTIVE and before not in ACTIVE:
-                self.run_from_next = self.event_seq
+                self.run_armed = True
             elif status['state'] not in ACTIVE:
-                self.run_from_next = None   # it ended (or was refused) before a plan came
+                self.run_armed = False   # it ended (or was refused) before a step ran
+            status['run_from_seq'] = getattr(self, 'run_from_seq', 0)
             self.status = status
         self._broadcast('status', status)
 
@@ -435,12 +438,6 @@ class Bridge(Node):
         with self.lock:
             if self.plan is None or self.plan['plan_id'] != plan['plan_id']:
                 self.outcomes = {}
-            # ``run_from_seq``: the last step event before this plan's run began, so the browser can tell this run's
-            # events from an earlier run of the same mission (plan ids start again at -0001 on each start); a new
-            # plan within a run (a replan) keeps it
-            if getattr(self, 'run_from_next', None) is not None:
-                self.run_from_seq, self.run_from_next = self.run_from_next, None
-            plan['run_from_seq'] = getattr(self, 'run_from_seq', 0)
             self.plan = plan
         self._broadcast('plan', plan)
 
@@ -1155,8 +1152,12 @@ class Bridge(Node):
             if event.get('event') == 'step_started' and event.get('step_id') in self.outcomes \
                     and self.outcomes[event['step_id']].get('cycle') != event.get('cycle'):
                 self.outcomes = {}  # a new cycle starts over
+            if getattr(self, 'run_armed', False):   # the first step event of a run: it begins here
+                self.run_from_seq, self.run_armed = self.event_seq, False
+                self.status = {**(self.status or {}), 'run_from_seq': self.run_from_seq}
             self.event_seq += 1
             event['seq'] = self.event_seq
+            event['run_from_seq'] = getattr(self, 'run_from_seq', 0)   # the browser follows at once (app.js)
             self.outcomes[event.get('step_id')] = event
             self.events.append(event)
         if getattr(self, 'recorder', None) is not None:

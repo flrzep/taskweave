@@ -184,6 +184,7 @@ function connect() {
     }
     else if (type === 'plan') { if (state.snapshot.plan?.plan_id !== data.plan_id) state.snapshot.outcomes = {}; state.snapshot.plan = data; }
     else if (type === 'episode') {
+      if (data.run_from_seq != null) state.snapshot.status.run_from_seq = data.run_from_seq;  // a run's first step event
       state.snapshot.outcomes[data.step_id] = data;
       state.snapshot.events.push(data);
       state.snapshot.events = state.snapshot.events.slice(-200);
@@ -193,7 +194,7 @@ function connect() {
 }
 
 let noticeTimer = null;
-function padNotice({ text, ok }) {  // what a pad press did (e.g. a taught point), shown for a while in the header
+function padNotice({ text, ok }) {  // what a pad press did (e.g. a taught point), a toast for a while
   const node = $('pad-notice');
   node.textContent = text; node.title = text;
   node.classList.toggle('bad', !ok);
@@ -259,7 +260,8 @@ function renderRun() {
 }
 
 // The Run tab's recent steps: the last RECENT finished steps of the run shown, newest first: the step events of the
-// last plan after the run's start (plan.run_from_seq: a restart of the same mission has the same plan id). A
+// last plan after the run's start (status.run_from_seq: a restart of the same mission has the same plan id; empty
+// while a new run prepares its plan). A
 // neutral check for a success, ! red for a failure, amber ! for one canceled (Abort, Pause), ↻ amber for a retry (a
 // step that ended without success and started again in this run), the instruction with the command and its message,
 // and the time on the run's clock. Rebuilt only when its rows change.
@@ -267,7 +269,13 @@ const RECENT = 6;
 let recentKey = '';
 function renderRecent(snap) {
   const plan = snap.plan?.plan_id;
-  const from = snap.plan?.run_from_seq ?? 0;
+  const from = snap.status?.run_from_seq ?? 0;
+  const s = snap.status || {};
+  if (s.state === 'running' && s.step_index === -1 && s.step_status === 'planning') {  // a new run, no step yet
+    if (recentKey !== 'planning') $('recent').replaceChildren(el('li', { class: 'empty', text: 'Preparing the plan.' }));
+    recentKey = 'planning';
+    return;
+  }
   const run = snap.events.filter((e) => e.plan_id === plan && e.seq > from);
   const finished = run.filter((e) => e.event === 'step_finished').slice(-RECENT).reverse();
   const key = `${plan}|${from}|${finished.map((e) => e.seq).join(',')}|${run.at(-1)?.seq ?? ''}`;
@@ -671,7 +679,6 @@ function dropDirty(node, next) {
     return;
   }
   clearDrop();
-  if (state.dirty) { state.dirty = false; show($('editor-dirty'), false); }  // dropped: a third tap does not ask again
   next();
 }
 function clearDrop() { clearTimeout(dropping.timer); dropping.node = null; dropNote(''); }

@@ -64,7 +64,6 @@
       <span id="conn" class="conn" role="img" aria-label="Not connected" title="live connection"></span>
     </div>
   </div>
-  <span id="pad-notice" class="pad-notice" role="status" hidden></span>
   <div id="speed-panel" class="speed-panel" role="group" aria-label="Set the speed" hidden>
     <div class="speed-set">
       <button id="speed-down" class="icon" aria-label="Slower" title="Slower">−</button>
@@ -376,6 +375,9 @@
   </section>
 </main>
 </div>
+
+<!-- a pad press's answer: a toast over the page (outside the sticky top, so no sheet or bar hides it) -->
+<span id="pad-notice" class="pad-notice" role="status" hidden></span>
 
 <template id="step-template">
   <li class="edit-step">

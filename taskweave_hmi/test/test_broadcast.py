@@ -42,30 +42,47 @@ def test_step_events_are_numbered_and_read_since_a_number():
     assert bridge.snapshot(since=5)['events'] == []
 
 
-def test_a_run_marks_where_its_step_events_begin_and_resume_is_not_a_new_run():
+def make_run_bridge():
+    bridge = bridge_with()
+    bridge.events, bridge.event_seq, bridge.outcomes, bridge.recorder = deque(maxlen=50), 0, {}, None
+    bridge.status, bridge.plan, bridge.run_from_seq, bridge.run_armed = {'state': 'idle'}, None, 0, False
+    return bridge
+
+
+def run_helpers(bridge):
     from taskweave_hmi.server import STATES
     from taskweave_interfaces.msg import Plan, TaskStatus
 
-    bridge = bridge_with()
-    bridge.events, bridge.event_seq, bridge.outcomes, bridge.recorder = deque(maxlen=50), 0, {}, None
-    bridge.status, bridge.plan, bridge.run_from_seq, bridge.run_from_next = {'state': 'idle'}, None, 0, None
-    state = lambda name: TaskStatus(state=STATES.index(name))   # noqa: E731
+    state = lambda name: bridge._status(TaskStatus(state=STATES.index(name)))   # noqa: E731
     step = lambda: bridge._episode(type('Msg', (), {'data': json.dumps({'event': 'step_finished', 'step_id': 's1'})}))  # noqa: E731
-    plan = lambda: bridge._plan(Plan(plan_id='cycle-0001'))       # noqa: E731
-    bridge._status(state('running')), plan()
-    assert bridge.plan['run_from_seq'] == 0
-    step(), step()
-    bridge._status(state('paused')), bridge._status(state('running'))   # Resume: the same run
-    plan()                                                                # a replan: the same run
-    assert bridge.plan['run_from_seq'] == 0
-    bridge._status(state('failed'))
-    bridge._status(state('running')), bridge._status(state('failed'))   # refused while planning: no plan came
-    plan()
-    assert bridge.plan['run_from_seq'] == 0
-    bridge._status(state('running')), plan()                             # started again: a new run
-    assert bridge.plan['run_from_seq'] == 2
-    step(), plan()
-    assert bridge.plan['run_from_seq'] == 2
+    plan = lambda: bridge._plan(Plan(plan_id='cycle-0001'))   # noqa: E731
+    return state, step, plan
+
+
+def test_a_run_begins_at_its_first_step_event_and_resume_or_a_replan_is_not_a_new_run():
+    bridge = make_run_bridge()
+    state, step, plan = run_helpers(bridge)
+    state('running'), plan(), step(), step()
+    assert bridge.status['run_from_seq'] == 0 and bridge.events[-1]['run_from_seq'] == 0
+    state('paused'), state('running'), plan(), step()                  # Resume, a replan: the same run
+    assert bridge.status['run_from_seq'] == 0
+    state('failed')
+    state('running'), state('failed'), plan()                          # refused while planning: no step ran
+    assert bridge.status['run_from_seq'] == 0
+    state('running'), plan(), step()                                    # started again: a new run from event 4
+    assert bridge.status['run_from_seq'] == 3 and bridge.events[-1]['run_from_seq'] == 3
+
+
+def test_the_run_mark_does_not_depend_on_whether_plan_or_status_comes_first():
+    bridge = make_run_bridge()
+    state, step, plan = run_helpers(bridge)
+    state('running'), step(), state('succeeded')
+    plan(), state('running'), step()                                    # the plan before the status
+    assert bridge.status['run_from_seq'] == 1 and bridge.events[-1]['run_from_seq'] == 1
+    restarted = make_run_bridge()                                       # the HMI starts during a run
+    state, step, plan = run_helpers(restarted)
+    plan(), state('running'), step()
+    assert restarted.status['run_from_seq'] == 0 and restarted.events[-1]['run_from_seq'] == 0
 
 
 def test_a_manual_skill_waits_on_work_time_and_is_given_up_when_its_server_is_gone():
