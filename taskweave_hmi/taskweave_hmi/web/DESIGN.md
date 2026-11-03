@@ -142,9 +142,11 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   flow: it never covers the manual skill strip).
 - **Run workspace** (`.run-grid`, Run tab): up to 1179px one column, board, 3D view, plan, recent steps. From 1180px
   two columns, 7 : 5 with 20px gaps and the page up to 1600px wide: the board over the plan at the left, the 3D view
-  (16 : 11) over the recent steps at the right, sticky under the top (`--top-h`, the top's measured height).
-- **Recent steps** (`.recent`): the last six finished steps of the run, newest first, one row each: a mark (✓ in
-  `--done`, ↻ in `--warn` for a step tried again, ! in `--bad`; its meaning as hidden text), the instruction with the
+  (16 : 11) over the recent steps at the right, sticky under the top (`--top-h`, the top's measured height) and never
+  taller than the window (it scrolls on its own on a short screen).
+- **Recent steps** (`.recent`): the last six finished steps of this run (after `status.run_from_seq`: a restart of the
+  same mission is a new run), newest first, one row each: a mark (✓ in `--done`, ↻ in `--warn` for a step tried again,
+  ! in `--warn` when canceled, else in `--bad`; its meaning as hidden text), the instruction with the
   command and message in muted 13px under it, and the time on the run's clock in muted monospace.
 - **Status board** (`.board`, Run tab): the andon panel of the run, read from a few metres. A 10px rail in the state
   colour (striped amber when paused) on a 5% tint; the state word (Barlow Semi Condensed 36px, caps, in the state's

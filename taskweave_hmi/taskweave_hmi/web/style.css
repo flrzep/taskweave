@@ -277,10 +277,12 @@ main { max-width: var(--content); margin: 0 auto; padding: var(--sp-4) var(--sp-
 @media (min-width: 1180px) {
   body.on-run main { max-width: 1600px; padding: var(--sp-5) var(--sp-6) var(--sp-12); }
   .run-grid { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); grid-template-areas: "board side" "plan side";
+              grid-template-rows: auto 1fr;  /* a taller side column stretches the plan's row, not the board's */
               align-items: start; gap: var(--sp-5); }
   #board { grid-area: board; } .run-plan { grid-area: plan; }
   .run-side { grid-area: side; display: grid; gap: var(--sp-5); min-width: 0; position: sticky;
-              top: calc(var(--top-h, 76px) + var(--sp-5)); }  /* the 3D view stays in sight while the plan scrolls */
+              top: calc(var(--top-h, 76px) + var(--sp-5));  /* the 3D view stays in sight while the plan scrolls */
+              max-height: calc(100dvh - var(--top-h, 76px) - 2 * var(--sp-5)); overflow-y: auto; overscroll-behavior: contain; }
   #viewer3d-run { aspect-ratio: 16 / 11; }
 }
 /* recent steps: the last finished ones of this run, newest first: a mark (a neutral check, ! red, ↻ amber for a retry),

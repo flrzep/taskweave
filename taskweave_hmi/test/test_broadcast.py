@@ -42,6 +42,28 @@ def test_step_events_are_numbered_and_read_since_a_number():
     assert bridge.snapshot(since=5)['events'] == []
 
 
+def test_a_run_marks_where_its_step_events_begin_and_resume_is_not_a_new_run():
+    from taskweave_hmi.server import STATES
+    from taskweave_interfaces.msg import TaskStatus
+
+    bridge = bridge_with()
+    bridge.events, bridge.event_seq, bridge.outcomes, bridge.recorder = deque(maxlen=50), 0, {}, None
+    bridge.status = {'state': 'idle'}
+    state = lambda name: TaskStatus(state=STATES.index(name))   # noqa: E731
+    step = lambda: bridge._episode(type('Msg', (), {'data': json.dumps({'event': 'step_finished', 'step_id': 's1'})}))  # noqa: E731
+    bridge._status(state('running'))
+    assert bridge.status['run_from_seq'] == 0
+    step(), step()
+    bridge._status(state('paused')), bridge._status(state('running'))   # Resume: the same run
+    assert bridge.status['run_from_seq'] == 0
+    bridge._status(state('failed'))
+    bridge._status(state('running'))                                      # started again: a new run
+    assert bridge.status['run_from_seq'] == 2
+    step()
+    bridge._status(state('running'))
+    assert bridge.status['run_from_seq'] == 2
+
+
 def test_a_manual_skill_waits_on_work_time_and_is_given_up_when_its_server_is_gone():
     t = {'now': 0.0}
 

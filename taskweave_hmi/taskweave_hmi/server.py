@@ -161,6 +161,7 @@ from . import arm, held, missions, points, recording, robot, scene, targets, und
 WEB = Path(__file__).parent / 'web'
 STATES = ['idle', 'running', 'paused', 'succeeded', 'failed', 'aborted']
 CALL_TIMEOUT_S = 5.0
+ACTIVE = ('running', 'paused')  # a run is under way (also planning: running without a step)
 AFTER_JUMP_S = 2.0  # the teach node's default after_jump_s: it refuses a teach this long after a sim clock jump
 START_TIMEOUT_S = 30.0  # start_mission answers once the plan is checked: seconds on a large cell (0.3.1 took minutes)
 STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'held.js', 'icons.js', 'graph.js', 'record.js', 'viewer3d.js',
@@ -326,6 +327,7 @@ class Bridge(Node):
         self.outcomes: dict[str, dict] = {}   # step id -> latest step event for the current plan and cycle
         self.events: deque = deque(maxlen=200)
         self.event_seq = 0
+        self.run_from_seq = 0  # the last step event before the run shown began (_status)
         self.listeners: list[queue.Queue] = []
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(TaskStatus, names.STATUS, self._status, latched, callback_group=self.group)
@@ -413,8 +415,15 @@ class Bridge(Node):
                     listener.put_nowait(None)
 
     def _status(self, msg: TaskStatus) -> None:
+        """The task handler's status; ``run_from_seq`` added: the last step event before the run shown began (a run
+        begins when the state turns running from idle or an end, not on Resume), so the browser can tell this run's step
+        events from an earlier run of the same mission (plan ids start again at -0001 on each start)."""
         status = status_dict(msg)
         with self.lock:
+            before = (self.status or {}).get('state')
+            if status['state'] in ACTIVE and before not in ACTIVE:
+                self.run_from_seq = self.event_seq
+            status['run_from_seq'] = getattr(self, 'run_from_seq', 0)
             self.status = status
         self._broadcast('status', status)
 
