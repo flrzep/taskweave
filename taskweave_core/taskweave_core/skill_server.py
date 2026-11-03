@@ -270,8 +270,9 @@ class SkillServer(Node):
         try:
             context = json.loads(goal.context_json or '{}')
         except json.JSONDecodeError:
-            context = {}   # a look-ahead aid, never a reason to refuse the step
+            context = None   # a look-ahead aid, never a reason to refuse the step
         if not isinstance(context, dict):
+            self.get_logger().warning(f'{skill.name} [{goal.step_id}]: context_json ignored (not a JSON object)')
             context = {}
         timeout = goal.timeout_s if goal.timeout_s > 0 else _default_timeout(skill, args)
 

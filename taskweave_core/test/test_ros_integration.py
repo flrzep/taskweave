@@ -316,3 +316,22 @@ def test_goals_without_or_with_unusable_context_are_still_accepted(system):
     assert [context for _, context in SEEN] == [{}, {}, {}]
     assert send_move(client, context_json='{"ahead": []}').outcome == RunSkill.Result.SUCCEEDED
     assert SEEN[-1][1] == {'ahead': []}
+
+
+def test_the_context_goes_out_even_with_a_world_value_json_cannot_write(system):
+    import json
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    handler, _, _, _ = system
+    sent = []
+
+    class Client:
+        def send_goal_async(self, goal, feedback_callback=None):
+            sent.append(goal)
+            return SimpleNamespace(add_done_callback=lambda f: None)
+
+    context = {'ahead': [{'id': 'b', 'skill': 'wait', 'kind': None, 'args': {'p': Path('x')}, 'resolved': True}]}
+    step = SimpleNamespace(id='a', skill='wait', instruction='', args={}, timeout_s=5)
+    handler.dispatcher._send(1, step, Client(), context)
+    assert json.loads(sent[0].context_json)['ahead'][0]['args'] == {'p': str(Path('x'))}

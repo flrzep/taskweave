@@ -358,3 +358,16 @@ def test_context_kind_is_annotated_once_a_placeholder_is_filled():
     ex.annotate = lambda s: (s.args['k'], [])
     ex.start()
     assert d.contexts[0]['ahead'][0]['kind'] == 'hand'
+
+
+def test_a_failing_context_never_stops_the_step():
+    def boom(s):
+        raise TypeError('malformed step')
+
+    ex, d, _, _ = make([step('a'), step('b', args={'k': '{k}'})], world={'k': 1})
+    ex.annotate = boom
+    ex.start()
+    assert [s.id for _, s, _ in d.started] == ['a'] and d.contexts == [{}]
+    assert ex.status.state == State.RUNNING and any('no look-ahead' in line for line in ex.status.log)
+    finish(ex, d)
+    assert d.contexts[-1] == {'plan_id': 'p1', 'cycle': 1, 'step_index': 1, 'ahead': []}

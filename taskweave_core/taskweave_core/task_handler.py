@@ -125,7 +125,7 @@ class RosDispatcher:
     def _send(self, token: int, step: Step, client: ActionClient, context: dict | None) -> None:
         goal = RunSkill.Goal(step_id=step.id, skill=step.skill, instruction=step.instruction,
                              args_json=json.dumps(step.args), timeout_s=float(step.timeout_s),
-                             context_json=json.dumps(context) if context else '')
+                             context_json=json.dumps(context, default=str) if context else '')
         future = client.send_goal_async(
             goal, feedback_callback=lambda msg: self.node.executive.on_feedback(
                 token, msg.feedback.progress, msg.feedback.status))

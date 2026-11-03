@@ -15,6 +15,7 @@ Operator: pause cancels the running skill and later re-runs the same step; abort
 
 from __future__ import annotations
 
+import copy
 import threading
 import time
 from collections.abc import Callable
@@ -241,6 +242,11 @@ class Executive:
             return
         if self.annotate is not None and resolved.args != step.args:   # a placeholder hid the kind until now
             resolved.kind, resolved.resources = self.annotate(resolved)
+        try:   # a look-ahead aid: its failure never stops the step (the skill then runs without it)
+            context = self._context()
+        except Exception as error:  # noqa: BLE001
+            self._log(f'{step.id}: no look-ahead context ({type(error).__name__}: {error})')
+            context = {}
         self._token += 1
         self._running = True
         self.status.step, self.status.step_started = resolved, self.clock()
@@ -248,18 +254,19 @@ class Executive:
         self.status.step_status, self.status.step_progress = 'dispatched', -1.0
         self._episode('step_started')
         self.on_status(self.status)
-        self.dispatcher.dispatch(self._token, resolved, self.status.attempt, self._context())
+        self.dispatcher.dispatch(self._token, resolved, self.status.attempt, context)
 
     def _context(self) -> dict:
         """For the skill of the current step: {plan_id, cycle, step_index, ahead: [{id, skill, kind, args, resolved}]},
         the steps after it to the end of the cycle. ``args`` have their placeholders filled from the world now;
-        ``resolved`` is False (args as written) where one has no value yet."""
+        ``resolved`` is False (all args as written) where one has no value yet; a True one may still change when an
+        earlier step finishes."""
         world, ahead = self.world.snapshot(), []
         for step in self.plan.steps[self.status.step_index + 1:]:
             try:
                 args, done = placeholders.resolve(step.args, world), True
             except placeholders.PlaceholderError:
-                args, done = step.args, False
+                args, done = copy.deepcopy(step.args), False
             kind = step.kind
             if done and args != step.args and self.annotate is not None:
                 kind = self.annotate(replace(step, args=args))[0]
