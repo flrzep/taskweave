@@ -55,6 +55,7 @@
 @media (pointer: coarse), (max-width: 600px) { :root { --tap-s: 44px; } }
 
 * { box-sizing: border-box; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 [hidden] { display: none !important; }  /* component display rules must not override hidden */
 /* clip, not hidden: overflow hidden on both makes body a scroll container that never scrolls, and the sticky top bar
    and Save bar then scrolled away with the page */
@@ -269,6 +270,31 @@ body.on-run .mission.active .mission-row { grid-template-columns: auto minmax(0,
 @media (max-width: 600px) { .manual-text { white-space: normal; overflow-wrap: anywhere; } }  /* the target matters more than one line */
 
 main { max-width: var(--content); margin: 0 auto; padding: var(--sp-4) var(--sp-4) var(--sp-12); }
+/* the Run tab's workspace: one column (board, 3D view, plan, recent steps) up to 1179px; from 1180px two, 7 : 5, the
+   board over the plan at the left, the 3D view over the recent steps at the right, and the page as wide as 1600px */
+.run-side { display: contents; }
+#board { order: 1; } #viewer3d-run { order: 2; } .run-plan { order: 3; } .run-recent { order: 4; }
+@media (min-width: 1180px) {
+  body.on-run main { max-width: 1600px; padding: var(--sp-5) var(--sp-6) var(--sp-12); }
+  .run-grid { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); grid-template-areas: "board side" "plan side";
+              align-items: start; gap: var(--sp-5); }
+  #board { grid-area: board; } .run-plan { grid-area: plan; }
+  .run-side { grid-area: side; display: grid; gap: var(--sp-5); min-width: 0; position: sticky;
+              top: calc(var(--top-h, 76px) + var(--sp-5)); }  /* the 3D view stays in sight while the plan scrolls */
+  #viewer3d-run { aspect-ratio: 16 / 11; }
+}
+/* recent steps: the last finished ones of this run, newest first: a mark (a neutral check, ! red, ↻ amber for a retry),
+   the step's instruction and command, and when it ended (s since the run's clock started) */
+.recent { list-style: none; margin: 0; padding: 0; display: grid; }
+.recent li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: var(--sp-2) var(--sp-3); align-items: baseline;
+             padding: var(--sp-2) 0; border-top: 1px solid var(--border); font-size: var(--fs-s); }
+.recent li:first-child { border-top: 0; }
+.recent .mark { font-weight: 700; color: var(--done); text-align: center; }
+.recent .mark.bad { color: var(--bad); } .recent .mark.warn { color: var(--warn); }
+.recent .what { min-width: 0; overflow-wrap: anywhere; }
+.recent .what small { display: block; color: var(--text-muted); font-size: var(--fs-sm); }
+.recent time { font: var(--fs-sm) var(--mono); color: var(--text-muted); white-space: nowrap; }
+.recent .empty { display: block; color: var(--text-muted); border-top: 0; }
 .view { display: grid; gap: var(--sp-3); min-width: 0; }
 .view > *, .card > * { min-width: 0; }
 @media (min-width: 601px) { .view { gap: var(--sp-4); } }

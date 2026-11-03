@@ -98,7 +98,10 @@ mission's phases (its included missions): done in grey, the current one ringed. 
 keeps only the state, Pause and Abort.
 
 The plan shows as a **Graph** (the steps and where a failure leads: retry, replan, skip, abort) or a **List**, each step
-with its outcome once it ran. The 3D view under the board shows the robot where the stack believes it is, in the cell
+with its outcome once it ran. On a laptop the board and the plan are at the left and the 3D view and **Recent steps**
+at the right (it stays in sight while the plan scrolls); narrower, they follow each other. Recent steps lists the last
+six steps of the run that finished, newest first: ✓ done, ↻ failed and tried again, ! failed, with the command, its
+message and when it ended. The 3D view shows the robot where the stack believes it is, in the cell
 with its fixtures, and the taught targets and objects. **Robot** frames the robot, **Cell** the whole cell,
 **Follow** keeps the camera on the robot as it drives, **Labels** shows the names (greyed out while nothing is taught).
 A note `no robot pose` means the stack has no position of the robot: the 3D view and every drive are off until it

@@ -90,7 +90,9 @@
 
 <main>
   <!-- RUN -->
-  <section id="view-run" class="view">
+  <!-- a workspace on a laptop (1180px and wider): the board and the plan at the left, the 3D view and the recent steps
+       at the right; narrower, one column: board, 3D view, plan, recent steps -->
+  <section id="view-run" class="view run-grid">
     <!-- the status board: what the robot is doing, readable from a few metres; the bar above keeps the controls -->
     <section id="board" class="card board" aria-label="Mission status">
       <div class="board-head">
@@ -109,9 +111,15 @@
       <ol id="board-phases" class="board-phases" aria-label="Phases" hidden></ol>
     </section>
 
-    <div id="viewer3d-run" class="viewer3d" role="region" aria-label="3D view: the robot live in its cell"></div>
+    <div class="run-side">
+      <div id="viewer3d-run" class="viewer3d" role="region" aria-label="3D view: the robot live in its cell"></div>
+      <section class="card run-recent" aria-labelledby="recent-title">
+        <h2 id="recent-title" class="label">Recent steps</h2>
+        <ol id="recent" class="recent"></ol>
+      </section>
+    </div>
 
-    <div class="card">
+    <div class="card run-plan">
       <div class="row between"><div class="label">Plan</div>
         <div id="plan-view" class="segmented" role="group" aria-label="Plan view">
           <button data-view="graph" aria-pressed="true">Graph</button><button data-view="list" aria-pressed="false">List</button>

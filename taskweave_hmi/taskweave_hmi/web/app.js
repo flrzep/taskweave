@@ -129,6 +129,10 @@ function skillResult(node, result) {
 }
 function argsText(args) { return Object.entries(args || {}).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' '); }
 
+// the sticky top's height (status bar, manual skill strip, messages) as --top-h: what sticks under it starts there
+new ResizeObserver(([entry]) => document.documentElement.style.setProperty('--top-h', `${Math.ceil(entry.target.offsetHeight)}px`))
+  .observe(document.querySelector('.top'));
+
 // ---------- tabs ----------
 document.querySelectorAll('.tabs button').forEach((button) => button.addEventListener('click', () => {
   document.querySelectorAll('.tabs button').forEach((b) => {
@@ -243,11 +247,37 @@ function renderRun() {
 
   if (typeof renderGraph === 'function') renderGraph();  // graph.js
 
+  renderRecent(snap);
   const log = $('log');
   log.replaceChildren(...snap.events.slice().reverse().map((e) => el('li', {
     text: `t=${Number(e.time).toFixed(1)}s ${e.plan_id} c${e.cycle} ${e.step_id} ${e.skill} ${e.event.replace('step_', '')}`
       + `${e.outcome ? ' ' + e.outcome : ''}${e.attempt > 1 ? ' attempt ' + e.attempt : ''}${e.message ? ' · ' + e.message : ''}`,
   })));
+}
+
+// The Run tab's recent steps: the last RECENT finished steps of the run shown (the last plan's), newest first. A
+// neutral check for a success, ! red for a failure, ↻ amber for a retry (a step that ended without success and is
+// tried again), the instruction with the command and its message, and the time on the run's clock.
+const RECENT = 6;
+function renderRecent(snap) {
+  const plan = snap.plan?.plan_id;
+  const finished = snap.events.filter((e) => e.event === 'step_finished' && e.plan_id === plan).slice(-RECENT).reverse();
+  if (!finished.length) {
+    $('recent').replaceChildren(el('li', { class: 'empty', text: plan ? 'No step has finished yet.' : 'No run yet.' }));
+    return;
+  }
+  $('recent').replaceChildren(...finished.map((e) => {
+    const ok = e.outcome === 'SUCCEEDED';
+    const retried = !ok && snap.events.some((later) => later.seq > e.seq && later.step_id === e.step_id
+      && later.event === 'step_started' && later.plan_id === plan);
+    const [mark, kind, said] = ok ? ['✓', '', 'done'] : retried ? ['↻', 'warn', 'retried'] : ['!', 'bad', e.outcome.toLowerCase()];
+    const label = e.skill === 'move' && e.data?.kind ? moveLabel(e.data.kind) : e.skill;
+    return el('li', {},
+      el('span', { class: `mark ${kind}`, text: mark, 'aria-hidden': 'true' }), el('span', { class: 'sr-only', text: `${said}: ` }),
+      el('span', { class: 'what' }, e.instruction || e.step_id,
+        el('small', { text: [label, e.attempt > 1 ? `attempt ${e.attempt}` : '', e.message].filter(Boolean).join(' · ') })),
+      el('time', { text: `${Number(e.time).toFixed(1)} s` }));
+  }));
 }
 
 // ---------- mission bar ----------
