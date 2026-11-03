@@ -567,9 +567,9 @@ def main(argv=None) -> int:
                               help='base or hand of INSTANCE/NAME: store for this object instance only, not for its '
                                    'object type')
     teach_parser.add_argument('--tool', action='append', dest='tools',
-                              help='hand: store only this tool; joints: only this joint group; object: the hand '
-                                   'whose held object (repeatable; default: every tool, the groups the target has, '
-                                   'the only hold)')
+                              help='hand: store only this tool; joints: only this joint group (repeatable; default: '
+                                   'every tool, or the groups the target has); object: the hand that holds the '
+                                   'object (the first one given; default: the only hold)')
     state_parser = sub.add_parser('state', help='run-time object state').add_subparsers(dest='action', required=True)
     for action, text in (('show', 'what is taken, stack counts, placed objects'), ('clear', 'put every object back')):
         state_parser.add_parser(action, help=text).add_argument('cell_dir', nargs='?', default='.')

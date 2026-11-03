@@ -377,6 +377,29 @@ def test_object_of_an_existing_path_replaces_its_last_waypoint_and_keeps_the_res
     assert '# from carry: out and up' in (cell / 'robots' / ROBOT / 'targets.yaml').read_text()
 
 
+def test_object_of_a_turned_grip_is_the_tcp_times_the_inverse_grip(node, cell):
+    np = pytest.importorskip('numpy')
+    from taskweave_core.config.poses import quaternion_from_rpy
+
+    def matrix(rpy, xyz):
+        x, y, z, w = quaternion_from_rpy(rpy)
+        m = np.eye(4)
+        m[:3, :3] = [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                     [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                     [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
+        m[:3, 3] = xyz
+        return m
+
+    grip = matrix((0.2, -0.4, 0.7), (0.05, -0.1, 0.12))       # neither symmetric nor its own inverse
+    holding(node, frame_hold(hands=('left',), grips={'left': grip.tolist()}))
+    assert teach(node, 'carry_turned', 'object').success
+    entry = load(cell, f'robots/{ROBOT}/targets.yaml')['carry_turned']
+    tcp = matrix((0.0, math.pi, 0.0), (0.2, 0.2, 0.9))        # the left TCP in base_link
+    expected = tcp @ np.linalg.inv(grip)
+    stored = matrix(entry['rpy'], entry['xyz'])
+    assert np.allclose(stored, expected, atol=1e-4)
+
+
 def test_object_with_one_hand_uses_that_hands_grip(node, cell):
     holding(node, frame_hold(hands=('right',)))
     assert teach(node, 'carry', 'object').success
