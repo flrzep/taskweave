@@ -175,9 +175,12 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   (`.chip` inside it) in the state colour, a 5% tint on the card, the title as the headline.
 - **Missions** (`.missions-md`): up to 1179px the list or the open mission (← Missions back). From 1180px the list
   (300px, sticky under the top, its own scroll) beside the open mission, or a hint while none is open; the open one is
-  marked (`.open`, `--brand-soft`, `aria-current`). A search field filters by name and goal. With unsaved edits the
-  first tap on another mission adds "Unsaved changes in <name>: tap again to drop them" (amber, 3 s). The save bar
-  (`.sticky-actions`) starts with "● Unsaved changes" in amber; on a phone it sits above the bottom nav.
+  marked (`.open`, `--brand-soft`, `aria-current`). A search field filters by name and goal ("No mission matches the
+  search." when none does; cleared after a save); only the list scrolls. With unsaved edits the first tap on another
+  mission or on New mission says "Unsaved changes in <name>: tap again to drop them" in the list's status line
+  (`#mission-note`, amber, `role="status"`, 3 s); a second tap on the same one goes on. Focus goes to the back link
+  when the list gives way to the editor, to the list's title when the editor closes. The save bar (`.sticky-actions`)
+  starts with "● Unsaved changes" in amber; on a phone it sits above the bottom nav, the note on its own line.
 - **Lists and rows**: mission rows (`.list li`) with a brand left rule (red when invalid); plan steps (`.steps`) with a
   numbered dot: a neutral ✓ when done, red when it failed, ringed green while running; points, poses and recordings (`.point`)
   open into an editor, the pad's target gets a brand inset rule. Mission editor steps (`.edit-step`) have a drag

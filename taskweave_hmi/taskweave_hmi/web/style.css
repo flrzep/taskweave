@@ -447,7 +447,8 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
 .list li .bad { color: var(--bad); font-size: var(--fs-s); }
 .list li:has(.bad) { border-left-color: var(--bad); }
 .list li.open { background: var(--brand-soft); border-left-color: var(--brand-text); }
-.list li .warn-note { color: var(--warn); font-size: var(--fs-s); font-weight: 600; }
+#mission-note { margin: 0; color: var(--warn); font-size: var(--fs-s); font-weight: 600; }
+#mission-note:empty { display: none; }
 .log { gap: 0; }
 /* Missions: the list or the editor up to 1179px (.editing hides the list); from 1180px the list (300px, sticky) beside
    the open mission or a hint, the page up to 1600px wide, no back button */
@@ -456,9 +457,10 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
 @media (min-width: 1180px) {
   body[data-view="missions"] main { max-width: 1600px; padding: var(--sp-5) var(--sp-6) var(--sp-12); }
   .missions-md { grid-template-columns: 300px minmax(0, 1fr); align-items: start; gap: var(--sp-5); }
-  .missions-md.editing #mission-list-card { display: grid; }
-  #mission-list-card { position: sticky; top: calc(var(--top-h, 76px) + var(--sp-5)); max-height: calc(100dvh - var(--top-h, 76px) - 2 * var(--sp-5));
-                       overflow-y: auto; }
+  .missions-md #mission-list-card, .missions-md.editing #mission-list-card { display: flex; }
+  #mission-list-card { flex-direction: column; position: sticky; top: calc(var(--top-h, 76px) + var(--sp-5));
+                       max-height: calc(100dvh - var(--top-h, 76px) - 2 * var(--sp-5)); overflow: hidden; }
+  #mission-list { flex: 0 1 auto; overflow-y: auto; min-height: 0; }  /* only the list scrolls: the title and search stay */
   .editor-empty { display: grid; place-items: center; min-height: 240px; color: var(--text-muted); }
   .editor-empty p { margin: 0; }
   #btn-back { display: none; }
@@ -538,7 +540,10 @@ details.arg-group > .arg-head { justify-content: flex-end; margin-top: calc(-1 *
 details.arg-more > summary { color: var(--text-muted); font-weight: 500; }
 details.arg-more[open] { display: grid; gap: var(--sp-2); }
 .sticky-actions { position: sticky; bottom: 0; background: var(--surface-card); padding: var(--sp-3) 0; border-top: 1px solid var(--border); }
-@media (max-width: 600px) { .sticky-actions { bottom: calc(var(--nav) + env(safe-area-inset-bottom, 0px)); } }  /* above the bottom nav */
+@media (max-width: 600px) {  /* above the bottom nav; the unsaved note on its own line over the buttons */
+  .sticky-actions { bottom: calc(var(--nav) + env(safe-area-inset-bottom, 0px)); flex-wrap: wrap; }
+  .editor-dirty { flex: 1 1 100%; }
+}
 .editor-dirty { margin-right: auto; color: var(--warn); font-size: var(--fs-s); font-weight: 600; }
 .editor-dirty::before { content: "● "; }
 li.empty { list-style: none; padding: 6px 2px; }

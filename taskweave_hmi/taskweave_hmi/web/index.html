@@ -134,10 +134,12 @@
   <!-- from 1180px the list beside the open mission; narrower, the list or the editor -->
   <section id="view-missions" class="view missions-md" hidden>
     <div id="mission-list-card" class="card">
-      <div class="row between"><h2 class="label">Missions</h2><button id="btn-new" class="btn small">New mission</button></div>
+      <div class="row between"><h2 id="missions-title" class="label" tabindex="-1">Missions</h2><button id="btn-new" class="btn small">New mission</button></div>
       <div class="field"><label for="mission-search">Search</label>
         <input id="mission-search" type="search" autocomplete="off" spellcheck="false" placeholder="Name or goal"></div>
+      <p id="mission-note" class="warn-note" role="status"></p>
       <ul id="mission-list" class="list"></ul>
+      <p id="mission-none" class="muted small-text" hidden>No mission matches the search.</p>
     </div>
 
     <div id="editor-empty" class="card editor-empty">

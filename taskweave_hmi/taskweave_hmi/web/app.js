@@ -650,8 +650,9 @@ async function loadMissions() {
   markOpen();
   filterMissions();
 }
-// The open mission is marked in the list (beside the editor from 1180px). Another one with unsaved edits open: the first
-// tap asks ("tap again to drop them", 3 s), the second opens it.
+// The open mission is marked in the list (beside the editor from 1180px). With unsaved edits open, another mission or
+// New mission asks first: the first tap says so in the list's status line ("tap again to drop them", 3 s), a second tap
+// on the same one goes on (dropDirty).
 function markOpen() {
   $('mission-list').querySelectorAll('li').forEach((li) => {
     const open = !!state.editing && li.dataset.name === state.editing.name;
@@ -659,28 +660,42 @@ function markOpen() {
     if (open) li.setAttribute('aria-current', 'true'); else li.removeAttribute('aria-current');
   });
 }
-function pickMission(item, name) {
-  if (state.editing?.name === name) return;
-  if (state.dirty && !item._armed) {
-    const note = el('span', { class: 'warn-note', text: `Unsaved changes in ${state.editing.name || 'the new mission'}: tap again to drop them` });
-    item.append(note);
-    item._armed = setTimeout(() => { note.remove(); item._armed = null; }, 3000);
+const dropping = { node: null, timer: null };
+function dropNote(text) { $('mission-note').textContent = text; }
+function dropDirty(node, next) {
+  if (state.dirty && dropping.node !== node) {
+    clearTimeout(dropping.timer);
+    dropping.node = node;
+    dropNote(`Unsaved changes in ${state.editing.name || 'the new mission'}: tap again to drop them`);
+    dropping.timer = setTimeout(() => { dropping.node = null; dropNote(''); }, 3000);
     return;
   }
-  clearTimeout(item._armed); item._armed = null;
-  openEditor(name);
+  clearTimeout(dropping.timer); dropping.node = null; dropNote('');
+  next();
+}
+function pickMission(item, name) {
+  if (state.editing?.name === name) return;
+  dropDirty(item, () => openEditor(name));
 }
 function filterMissions() {
   const words = $('mission-search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  $('mission-list').querySelectorAll('li').forEach((li) => { li.hidden = !words.every((w) => li.dataset.find.includes(w)); });
+  let shown = 0;
+  $('mission-list').querySelectorAll('li').forEach((li) => { li.hidden = !words.every((w) => li.dataset.find.includes(w)); shown += !li.hidden; });
+  show($('mission-none'), !shown && words.length > 0);
 }
 $('mission-search').addEventListener('input', filterMissions);
 // the list or the editor (narrow) / both (wide): .editing on the view; nothing open: the empty side says what to do
 function showEditor(open) {
+  const had = $('view-missions').contains(document.activeElement);
   show($('editor'), open);
   show($('editor-empty'), !open);
   $('view-missions').classList.toggle('editing', open);
   markOpen();
+  // the keyboard focus stays on the page: on the back link when the list went away (narrow), on the list's title when
+  // the editor closed; not moved while the list stays (wide)
+  if (!had) return;
+  if (open && $('mission-list-card').offsetParent === null) $('btn-back').focus();
+  else if (!open) $('missions-title').focus();
 }
 
 // ---------- mission editor ----------
@@ -1717,6 +1732,7 @@ $('btn-save').addEventListener('click', async () => {
   if (!ok) { showProblems(data.problems || [data.error || 'not saved'], data.places); message($('save-msg'), ''); return; }
   showProblems([]);
   state.dirty = false; show($('editor-dirty'), false);
+  $('mission-search').value = '';  // the saved mission is in the list, whatever was searched
   state.editing = { ...state.editing, name, isNew: false };
   show($('btn-delete'), true);
   // the plan graph reads its band names again
@@ -1745,7 +1761,7 @@ $('btn-delete').addEventListener('click', async () => {
   showEditor(false);
   loadMissions();
 });
-$('btn-new').addEventListener('click', () => openEditor(null));
+$('btn-new').addEventListener('click', () => dropDirty($('btn-new'), () => openEditor(null)));
 $('btn-back').addEventListener('click', () => {
   if (state.dirty && !$('btn-back').classList.contains('confirm')) {
     $('btn-back').classList.add('confirm'); $('btn-back').textContent = 'Discard changes?';
