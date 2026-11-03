@@ -195,8 +195,11 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   handle, the step's tile (52px) with its state and number over the instruction (20px, 600), the step's progress
   while it runs, the side card's rows (command, target, locks, on failure, status; 96px labels), each note in an amber
   box (`.pg-sheet-note`), and a full-width Close (48px). A non-modal dialog (`role="dialog"`, labelled by the title):
-  focus goes to Close when it opens and back to the chip when it closes (Close, the scrim, Escape or the chip
-  again). Never taller than the room between the status bar and the nav; it scrolls inside.
+  focus goes to Close when it opens (idle too, where the tap also picks the start step: Close keeps it, a second tap
+  on the chip unpicks it), Tab stays on Close, and focus goes back to the chip when it closes (Close, the scrim,
+  Escape or the chip again). Escape does not close it while a manual skill runs: then it aborts the skill, as
+  everywhere. Rebuilt every second, it keeps its scroll place. As high as the room between the status bar and the nav,
+  at least 160px; it scrolls inside.
 - **Lists and rows**: mission rows (`.list li`) with a brand left rule (red when invalid); plan steps (`.steps`) with a
   numbered dot: a neutral ✓ when done, red when it failed, ringed green while running; points, poses and recordings (`.point`)
   open into an editor, the pad's target gets a brand inset rule. Mission editor steps (`.edit-step`) have a drag

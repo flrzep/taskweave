@@ -666,6 +666,7 @@ li.empty { list-style: none; padding: 6px 2px; }
 .graph-box { display: grid; gap: var(--sp-3); container: plan / inline-size;
   --g-fail: #e5566b; --g-warn: #d17a12; --g-ok: var(--ok); --g-bad: var(--bad); --g-card: var(--surface-card); }
 @media (prefers-color-scheme: dark) { .graph-box { --g-fail: #ff7385; --g-warn: var(--warn); } }
+@media (max-width: 600px) { .graph-box { container-type: normal; } }  /* no containment: the sheet is fixed to the screen */
 .kind-drive { --k: var(--kind-drive); } .kind-arm { --k: var(--kind-arm); } .kind-grip { --k: var(--kind-grip); }
 .kind-wait { --k: var(--kind-wait); } .kind-other { --k: var(--kind-other); }
 .pg { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: var(--sp-6); }
@@ -782,7 +783,7 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-rnum { position: absolute; bottom: 3px; left: 0; right: 0; font: 10px/1 var(--cond); text-align: center; }
 .pg-rail .pg-end { position: static; }
 .pg-sheet { position: fixed; left: 0; right: 0; bottom: calc(var(--nav) + env(safe-area-inset-bottom, 0px)); z-index: 4; display: grid; gap: var(--sp-4);
-  max-height: calc(100dvh - var(--top-h, 76px) - var(--nav) - var(--sp-6)); overflow-y: auto; overscroll-behavior: contain;
+  max-height: max(160px, calc(100dvh - var(--top-h, 76px) - var(--nav) - var(--sp-6))); overflow-y: auto; overscroll-behavior: contain;
   padding: 10px var(--sp-5) var(--sp-5); background: var(--surface-card);
   border-radius: 20px 20px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / 18%); border-top: 1px solid var(--border); }
 /* the scrim: over the page, under the status bar (Pause and Abort stay in reach) and the bottom nav */

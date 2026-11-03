@@ -220,20 +220,27 @@ const failureText = (rule) => `${ruleText(rule)}${rule.onFailure === 'replan' ? 
 
 // A click on a chip: idle, it picks the start step (app.js) and shows its card; running, it shows the step's card
 // (again, or the running chip: back to the running step). Escape does that too.
+// On a phone the sheet opens (idle too: Close keeps the start step picked, a second tap on the chip unpicks it) and the
+// focus goes into it.
 function choose(step, pickable) {
+  let opening;
   if (pickable) {
-    view.selected = state.startStep === step.id ? null : step.id;
+    opening = state.startStep !== step.id;
+    view.selected = opening ? step.id : null;
     pickStart(step);
-    return;
+  } else {
+    const running = state.snapshot?.status.step?.id === step.id && !PHONE.matches;
+    opening = view.selected !== step.id && !running;
+    view.selected = opening ? step.id : null;
+    renderGraph();
   }
-  const running = state.snapshot?.status.step?.id === step.id && !PHONE.matches;
-  const opening = view.selected !== step.id && !running;
-  view.selected = opening ? step.id : null;
-  renderGraph();
   if (opening && PHONE.matches) $('plan-graph').querySelector('[data-sheet-close]')?.focus();  // into the sheet
 }
+// Escape: on the Run tab it closes the card or sheet, but not while a manual skill runs: then Escape aborts that skill
+// (app.js) and nothing else
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || !view.selected || e.target.closest?.('textarea, select, input, [contenteditable]')) return;
+  if (e.key !== 'Escape' || !view.selected || $('view-run').hidden || state.snapshot?.manual
+    || e.target.closest?.('textarea, select, input, [contenteditable]')) return;
   if (PHONE.matches) { closeSheet(view.selected); return; }
   view.selected = null;
   renderGraph();
@@ -289,9 +296,11 @@ function planCard(i, ctx, phone) {
     close.addEventListener('click', () => closeSheet(step.id));
     const scrim = div('pg-scrim');
     scrim.addEventListener('click', () => closeSheet(step.id));
-    return [scrim, el('section', { class: `pg-sheet state-${status}`, role: 'dialog', 'aria-labelledby': 'pg-sheet-title' },
+    const sheet = el('section', { class: `pg-sheet state-${status}`, role: 'dialog', 'aria-labelledby': 'pg-sheet-title' },
       div('pg-handle'), div('pg-sheet-row', tile, div('pg-sheet-text', eyebrow, title)), progress, rows(false),
-      ...(step.notes || []).map((note) => el('p', { class: 'pg-sheet-note', text: note })), close)];
+      ...(step.notes || []).map((note) => el('p', { class: 'pg-sheet-note', text: note })), close);
+    sheet.addEventListener('keydown', (e) => { if (e.key === 'Tab') { e.preventDefault(); close.focus(); } });  // stays in
+    return [scrim, sheet];
   }
   return el('aside', { class: `pg-card state-${status}${live || start || view.selected === step.id ? ' marked' : ''}`,
     'aria-live': 'polite' },
@@ -519,13 +528,16 @@ function renderGraph() {
     pickable: snap.status.state !== 'running' && snap.status.state !== 'paused', focus: focusIndex(plan, states),
     toggle: (band) => () => { storeBand(missionName, band.key, !isOpen(band)); renderGraph(); },
     cycleNote: end && snap.status.plan_id === plan.plan_id && snap.status.cycle ? `cycle ${snap.status.cycle}` : '' };
+  const sheetScroll = box.querySelector('.pg-sheet')?.scrollTop ?? 0;  // the sheet is rebuilt every second: keep its place
   if (ctx.phone) {
     box.replaceChildren(rail(bands, ctx, end), legend(plan, ctx.events, false, false));
+    const sheet = box.querySelector('.pg-sheet');
+    if (sheet) sheet.scrollTop = sheetScroll;
   } else {
     const drawn = lanesGraph(bands, ctx, end);
     box.replaceChildren(drawn.node, legend(plan, ctx.events, drawn.replans > 0, drawn.pairs > 0));
   }
-  if (refocus) box.querySelector(refocus)?.focus();
+  if (refocus) (box.querySelector(refocus) || box.querySelector('[data-step]'))?.focus({ preventScroll: true });
 }
 PHONE.addEventListener('change', () => renderGraph());
 
