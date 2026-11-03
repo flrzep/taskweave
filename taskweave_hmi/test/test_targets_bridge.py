@@ -92,9 +92,9 @@ def test_the_live_plan_json_has_each_steps_kind_and_resources():
     from taskweave_interfaces.msg import PlanStep
 
     step = step_dict(PlanStep(step_id='s1', instruction='Drive', skill='move', args_json='{"to": "waiting"}',
-                              kind='navigate', resources=['base', 'torso']))
+                              kind='navigate', resources=['base', 'torso'], notes=['args.object: migrate']))
     assert step['kind'] == 'navigate' and step['resources'] == ['base', 'torso'] and step['args'] == {'to': 'waiting'}
-    assert step['notes'] == []                                     # PlanStep carries none
+    assert step['notes'] == ['args.object: migrate']
     assert step_dict(PlanStep(step_id='s2', skill='wait'))['kind'] == ''
 
 

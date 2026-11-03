@@ -28,7 +28,7 @@ HTTP API (JSON):
                                    {step, path, include, message} of what runs but is noted (a cell schema 4 form)
   GET  /api/missions/<name>/plan   the plan a start would run now (includes expanded, facts filled): step ids to
                                    start at; each step with kind (a move step's kind of motion, '') and resources,
-                                   as the live plan's steps, and notes (the live plan's are [])
+                                   as the live plan's steps, and notes
   GET  /api/speed                  the global speed override {percent, test_mode, test_percent, cap_percent, presets,
                                    min, max, available}; also in /api/state (speed) and as the live event speed
   POST /api/speed {percent, test_mode, test_percent}  set it through the task handler (each key optional; also while
@@ -166,7 +166,7 @@ def step_dict(step) -> dict:
     ``resources`` are filled when the task handler validated the plan (a message without them: '' and []);
     ``origin`` is origin_json parsed (``missions.step_origin``'s shape; None when empty), ``replan_from`` ('' = the step
     itself) and ``max_replans`` (an older message without the three fields: None, '', 0) feed the plan graph's phases
-    and replan lines; ``notes``: [] (PlanStep has none; a preview has them, ``missions.preview_plan``)."""
+    and replan lines; ``notes``: what validation noted on the step ([] from an older message)."""
     origin = getattr(step, 'origin_json', '') or ''
     return {'id': step.step_id, 'instruction': step.instruction, 'skill': step.skill,
             'args': json.loads(step.args_json or '{}'), 'timeout_s': step.timeout_s, 'retries': step.retries,
