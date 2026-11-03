@@ -712,6 +712,15 @@ class IkClient:
         best.skipped = GLOBAL_ONLY
         return best, found
 
+    def check_height(self, samples, height: float, current: dict, fixed: dict | None = None, elbow=None,
+                     allow_flip: bool = False, global_search: bool = False, should_stop=lambda: False) -> TorsoChoice:
+        """One height of solve_with_torso, the torso already there (``current`` has it at ``height``): every sample
+        solved, its state checked, ``samples.verify`` / ``ahead``; no torso cost. Raises TorsoError. As at the current
+        height of the search, the explicit collision check is skipped when ``avoid_collisions`` is on (IK checked the
+        state it was given, idle arm included). torso_plan's step check; ``global_search``: its one-time rescue."""
+        return self._torso_height(samples, height, dict(fixed or {}), current, self.torso['joint'], height, 0.0,
+                                  should_stop, elbow, allow_flip, global_search=global_search)
+
     def _torso_height(self, samples, height, fixed, current, joint, now, weight, should_stop, elbow,
                       allow_flip, global_search=False, hint=None, global_only=False) -> TorsoChoice:
         """One candidate of solve_with_torso, or TorsoError saying why it is out. ``global_search``: the IK may fall

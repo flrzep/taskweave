@@ -337,10 +337,11 @@ class MoveGripper(_PointMotion):
         at.verify = verify
         return at
 
-    def _state_at(self, hands, current: dict, height: float, poses: dict | None = None):
+    def _state_at(self, hands, current: dict, height: float, poses: dict | None = None, global_search: bool = True):
         """(joints, problem) once the torso is at ``height``: the arms keep their joints, except hands that hold an
         object: it goes with the torso and their arms are solved again there (joints._widen). ``poses``: the held
-        hands' TCPs at ``current`` (default: where they are now; torso_plan passes predicted ones)."""
+        hands' TCPs at ``current`` (default: where they are now; torso_plan passes predicted ones). ``global_search``
+        False: local IK only (repeatable; torso_plan's rides)."""
         from .ik import IkError
         from .points import target_of
 
@@ -355,7 +356,7 @@ class MoveGripper(_PointMotion):
         poses = self.hold.tcp_poses(held) if poses is None else poses
         try:
             arms = self.ik.solve({h: target_of(column @ poses[h]) for h in held}, {joint: height}, current=current,
-                                 allow_flip=False, nearby=True)
+                                 allow_flip=False, nearby=True, global_search=global_search)
         except IkError as error:
             return None, f'{" and ".join(held)} cannot follow the torso to {height:g}: {str(error).split(":")[0]}'
         return {**state, **arms}, None
