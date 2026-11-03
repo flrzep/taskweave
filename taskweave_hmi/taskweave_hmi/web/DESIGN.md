@@ -258,17 +258,19 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   (`--tap-s` square, light icons; `aria-pressed="true"` in brand fill).
 - **Plan graph** (`.pg`, graph.js): steps top to bottom in resource lanes (base, hands, torso, joints) that share the
   Plan card's width (at least 64px each; drawn again when the card resizes), rows of 32px, step numbers in Barlow Semi
-  Condensed in a 28px gutter. Each step is one 28px bar (Figma B) across the lanes it holds, from its first to its
-  last, 4px inside them, its icon (icons.js) at the left end. A step on lanes that are not next to each other (base
-  and right arm, the left arm between) spans the lane between too, as in Figma B: the bar reads as the step's
-  reach, the pop-up's Locks row says which lanes it holds. Bars take the skill colour (`--k` from `--kind-*`):
+  Condensed in a 28px gutter. A step on one lane is a 28px chip as wide as the lane (4px inside), its icon
+  (icons.js) at the left end. A step on several lanes is a tile (at most 64px wide, icon centred) in the middle of a
+  12px track (`.pg-track`, a pill from its first lane to its last, 4px inside, the step's colour at 10-35%): it
+  reads as one step holding those lanes, not as a bar of time (the earlier full-width bar looked like a Gantt
+  chart). The track spans a lane between that the step does not hold (base and right arm, the left arm between);
+  the pop-up's Locks row says which it holds. Chips take the skill colour (`--k` from `--kind-*`):
   filled pastel with no outline (22% done, 11% pending) and a neutral ✓ corner when done, running solid with a 2px
   ring and the breathing glow (amber ring paused), failed red with a ✕ dot, timeout / canceled / skipped amber.
   Phases are bands (`.pg-band`, `--surface-field`, 24px) with a chevron, done/total and the usual failure rule;
   closed, one row with the lanes as mini chips and the state word, remembered per mission. Only exceptions are
-  marked: rule badges on the bar's top edge, a dashed replan line in the left gutter, dashed boxes round parallel
-  candidates. A click on a step (the running one too; the status board shows that one anyway) opens its details in
-  a 320px pop-up beside its bar (`.pg-pop`, right of it if it fits, else left, else under the bar, the graph growing
+  marked: rule badges on the chip's top edge, a dashed replan line in the left gutter (no parallel-candidate boxes:
+  they were noise). A click on a step (the running one too; the status board shows that one anyway) opens its details in
+  a 320px pop-up beside the step, its track too (`.pg-pop`, right of it if it fits, else left, else under it, the graph growing
   to hold it; a non-modal dialog with Close; Escape, a click
   elsewhere or the step again close it, the focus goes to Close and back to the step). At 600px and below: a rail of
   44px chips per band and a bottom sheet (`.pg-sheet`) for a step the operator taps. It reads `--g-*` tokens mapped

@@ -1,12 +1,11 @@
 'use strict';
 // taskweave HMI, Run tab: the running plan as a graph of icon chips (G3). Steps run top to bottom, one row each; a
-// step's chip sits in the lane of the resource it holds (base, hands, torso, joints: step.resources), a bar with dots
-// runs across the other lanes it holds. Phases are bands: one per include of the top mission (origin.top +
+// step's chip sits in the lane of the resource it holds (base, hands, torso, joints: step.resources); a step on
+// several lanes is a tile centred on a thin track from its first lane to its last. Phases are bands: one per include of the top mission (origin.top +
 // origin.include[0]) and one per run of its own steps, nested includes as sub-bands; each band collapses to one
 // row, remembered per mission. Only exceptions are marked: the band header names the usual failure rule, a step
 // whose rule differs gets a badge (↻2, skip), a replan is the one line (dashed, through the left gutter to the step
-// it replans from: replan_from). Neighbouring steps on disjoint resources get a dashed box (parallel candidates,
-// display only). The running or selected step opens in the side card. At 600 px and below the lanes collapse into
+// it replans from: replan_from). A step opens its details in a pop-up beside it. At 600 px and below the lanes collapse into
 // a rail of 44 px chips per band and the card becomes a bottom sheet. Chips are tinted by what moves (--kind-*:
 // drive, arm, grip, wait, other) and show the step's icon (icons.js). Loop rules (stop_when, max_cycles) and band
 // names come from the mission file. Uses $, el, api, state, show, missionOf, shownPlan, pickStart, moveLabel,
@@ -24,7 +23,7 @@ const ICON_COLOURS = { navigate: 'drive', straight: 'drive', hand: 'arm', carry:
 // the laptop graph (px): number gutter, lane, row pitch, chip, band header, gaps; the replan lines' area left of it
 // (Figma has rows of 34 and bands 14 apart: 32 and 10 let frame_cycle's running phase fit under the sticky header at 768)
 const G = { gutter: 28, lane: 64, row: 32, chip: 28, inset: 4, head: 24, laneHead: 24, bandGap: 10, headGap: 6, subIndent: 12,
-  pairOut: 3, replanArea: 22, replanGap: 6, endGap: 6, endH: 18 };
+  track: 12, tile: 64, replanArea: 22, replanGap: 6, endGap: 6, endH: 18 };
 const POP_W = 320;     // the step pop-up's width (style.css .pg-pop), the gap to its chip, the least room it gets below
 const POP_GAP = 12;
 const POP_MIN_H = 260;
@@ -362,7 +361,7 @@ function focusIndex(plan, states) {
     .find((i) => i >= 0);
 }
 
-function legend(plan, events, anyReplan, anyPair) {
+function legend(plan, events, anyReplan) {
   const labels = { navigate: moveLabel('navigate'), straight: moveLabel('straight'), hand: moveLabel('hand'),
     carry: 'carrying', posture: moveLabel('posture'), joints: moveLabel('joints'), 'grip-close': 'grip close',
     'grip-open': 'grip open', wait: 'wait', other: 'other' };
@@ -370,7 +369,6 @@ function legend(plan, events, anyReplan, anyPair) {
   return div('legend',
     ...icons.map((id) => el('span', { class: `legend-item kind-${ICON_COLOURS[id] || 'other'}` }, iconElement(id),
       labels[id] || id)),
-    anyPair ? el('span', { class: 'legend-item' }, el('i', { class: 'swatch-pair' }), 'parallel candidates') : '',
     anyReplan ? el('span', { class: 'legend-item' }, el('i', { class: 'swatch-fail' }), 'replan') : '');
 }
 
@@ -410,8 +408,8 @@ function rail(bands, ctx, end) {
 // the lanes: core's resource names in their order, then any other resource a step holds
 const lanesOf = (plan) => [...new Set([...LANES, ...plan.steps.flatMap((s) => s.resources || [])])];
 
-// the laptop graph: rows in lanes, chips and band headers positioned in a box; lane dividers, the bars of steps on
-// several lanes and the pair boxes in an SVG underneath, the replan lines in one on top
+// the laptop graph: rows in lanes, chips, tracks and band headers positioned in a box; lane dividers in an SVG
+// underneath, the replan lines in one on top
 function lanesGraph(bands, ctx, end) {
   const { plan, states, r } = ctx;
   const lanes = lanesOf(plan);
@@ -428,11 +426,15 @@ function lanesGraph(bands, ctx, end) {
     const held = (step.resources || []).map(laneIndex).filter((l) => l >= 0);
     chipLane[i] = prev = held.length ? Math.min(...held) : prev;
   });
-  // Figma B: a step is one bar across the lanes it holds, from its first to its last (a step on one lane: one lane
-  // wide), inset in its lanes; the icon at its left end
+  // A step on one lane: a chip as wide as its lane (inset), the icon at its left end. A step on several: a thin
+  // track from its first lane to its last (inset) and a tile (at most G.tile wide, the icon centred) in the middle of
+  // it, so it reads as one step holding those lanes, not as a bar of time.
   const lastLane = plan.steps.map((step, i) => Math.max(chipLane[i], ...(step.resources || []).map(laneIndex)));
-  const chipX = (i) => laneX(chipLane[i]) + G.inset;
-  const chipW = (i) => laneX(lastLane[i] + 1) - laneX(chipLane[i]) - 2 * G.inset;
+  const wide = (i) => lastLane[i] > chipLane[i];
+  const spanX = (i) => laneX(chipLane[i]) + G.inset;
+  const spanR = (i) => laneX(lastLane[i] + 1) - G.inset;
+  const chipW = (i) => (wide(i) ? Math.min(lane - 2 * G.inset, G.tile) : lane - 2 * G.inset);
+  const chipX = (i) => (wide(i) ? (spanX(i) + spanR(i) - chipW(i)) / 2 : spanX(i));
   const items = [];  // {band, y, depth, extra, open} and {step, y, owner}
   const rowY = [];   // per step: its chip's centre (a step of a closed band: the band header's)
   const shown = new Set();
@@ -459,7 +461,6 @@ function lanesGraph(bands, ctx, end) {
   const graph = el('div', { class: 'pg-graph', style: `width: ${width}px; height: ${height}px`, role: 'group',
     'aria-label': `Plan ${plan.plan_id}: ${plan.steps.length} steps` }, under,
   ...lanes.map((name, l) => el('span', { class: 'pg-lane', text: name, style: `left: ${laneX(l)}px; width: ${lane}px` })));
-  const rows = [];
   items.forEach((it) => {
     if (it.band) {
       const indent = it.depth * G.subIndent;
@@ -471,29 +472,19 @@ function lanesGraph(bands, ctx, end) {
     const i = it.step;
     const step = plan.steps[i];
     const top = it.y + (G.row - G.chip) / 2;
-    rows.push({ i, top, owner: it.owner });
     graph.append(el('span', { class: `pg-num${isLive(states[i]) ? ' now' : ''}`, text: String(i + 1),
       style: `left: ${x0}px; top: ${it.y}px; width: ${G.gutter}px; height: ${G.row}px` }));
+    if (wide(i)) {
+      graph.append(el('span', { class: `pg-track kind-${colourOf(step)} state-${states[i]}`, 'aria-hidden': 'true',
+        style: `left: ${spanX(i)}px; top: ${top + (G.chip - G.track) / 2}px; width: ${spanR(i) - spanX(i)}px; height: ${G.track}px` }));
+    }
     const chip = chipButton(step, i, ctx);
+    if (wide(i)) chip.classList.add('tile');
     chip.style.left = `${chipX(i)}px`;
     chip.style.top = `${top}px`;
     chip.style.width = `${chipW(i)}px`;
     graph.append(chip);
   });
-  // parallel candidates: neighbouring shown steps of one band on disjoint resources, paired left to right
-  let pairs = 0;
-  for (let k = 0; k + 1 < rows.length; k += 1) {
-    const [a, b] = [rows[k], rows[k + 1]];
-    const ra = plan.steps[a.i].resources || [];
-    const rb = plan.steps[b.i].resources || [];
-    if (a.owner !== b.owner || b.i !== a.i + 1 || !ra.length || !rb.length || ra.some((x) => rb.includes(x))) continue;
-    const left = Math.min(chipX(a.i), chipX(b.i)) - G.pairOut;
-    const right = Math.max(chipX(a.i) + chipW(a.i), chipX(b.i) + chipW(b.i)) + G.pairOut;
-    under.append(svg('rect', { x: left, y: a.top - G.pairOut, width: right - left, height: b.top - a.top + G.chip + 2 * G.pairOut, rx: 7,
-      class: 'pg-pair' }));
-    pairs += 1;
-    k += 1;
-  }
   // replans: from the step's left edge into the left area, up or down, into the target from the left
   const over = svg('svg', { class: 'pg-lines over', width, height, 'aria-hidden': 'true' });
   const marker = svg('marker', { id: 'pg-arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 6, markerHeight: 6,
@@ -525,8 +516,8 @@ function lanesGraph(bands, ctx, end) {
   const picked = view.selected ? plan.steps.findIndex((s) => s.id === view.selected) : -1;
   if (picked >= 0) {
     const pop = planCard(picked, ctx, false);
-    const x = shown.has(picked) ? chipX(picked) : x0 + G.gutter;
-    const right = shown.has(picked) ? x + chipW(picked) : x;
+    const x = shown.has(picked) ? spanX(picked) : x0 + G.gutter;   // beside the whole step, its track too
+    const right = shown.has(picked) ? spanR(picked) : x;
     const top = rowY[picked] - G.row / 2;
     if (width - (right + POP_GAP) >= POP_W) pop.style.left = `${right + POP_GAP}px`;
     else if (x >= POP_W + POP_GAP) pop.style.left = `${x - POP_W - POP_GAP}px`;
@@ -537,7 +528,7 @@ function lanesGraph(bands, ctx, end) {
     pop.style.top ||= `${Math.max(0, Math.min(top, height - POP_MIN_H))}px`;
     graph.append(pop);
   }
-  return { node: div('pg', graph), pairs, replans: replans.length };
+  return { node: div('pg', graph), replans: replans.length };
 }
 
 function renderGraph() {
@@ -591,7 +582,7 @@ function renderGraph() {
     if (sheet) sheet.scrollTop = sheetScroll;
   } else {
     const drawn = lanesGraph(bands, ctx, end);
-    box.replaceChildren(drawn.node, legend(plan, ctx.events, drawn.replans > 0, drawn.pairs > 0));
+    box.replaceChildren(drawn.node, legend(plan, ctx.events, drawn.replans > 0));
     // the pop-up is placed over the graph: the graph grows to hold it (one under a low bar, a tall one)
     const pop = box.querySelector('.pg-pop');
     const graph = box.querySelector('.pg-graph');

@@ -700,7 +700,6 @@ li.empty { list-style: none; padding: 6px 2px; }
   font: 600 11px var(--sans); letter-spacing: .06em; text-transform: uppercase; }
 .pg-num { position: absolute; display: grid; place-items: center; font: 12px var(--cond); color: var(--text-muted); }
 .pg-num.now { font-weight: 700; color: var(--run); }
-.pg-pair { fill: none; stroke: var(--border-strong); stroke-width: 1.25; stroke-dasharray: 4 3; }
 .pg-replan { fill: none; stroke: var(--g-fail); stroke-width: 1.75; stroke-dasharray: 5 4; stroke-linejoin: round; }
 .pg-lines marker path { fill: var(--g-fail); }
 .pg-replan-label { font: 600 11.5px var(--sans); fill: var(--g-fail); }
@@ -711,8 +710,15 @@ li.empty { list-style: none; padding: 6px 2px; }
   border-radius: var(--r-s); border: 1.5px solid var(--k); background: color-mix(in srgb, var(--k) 8%, var(--g-card));
   color: var(--k); transition: background-color .3s, border-color .3s; }
 .pg-chip .icon { width: 16px; height: 16px; pointer-events: none; }
-/* the laptop graph (Figma B): a bar across the step's lanes, the icon at its left end */
+/* the laptop graph: a chip as wide as its lane, the icon at its left end; a step on several lanes a tile (icon
+   centred) on a thin track across them, in the step's colour (stronger when done or running) */
 .pg-graph .pg-chip { place-items: center start; padding-left: 8px; }
+.pg-graph .pg-chip.tile { place-items: center; padding-left: 0; }
+.pg-track { position: absolute; border-radius: 999px; pointer-events: none;
+  background: color-mix(in srgb, var(--k) 18%, var(--g-card)); }
+.pg-track.state-pending { background: color-mix(in srgb, var(--k) 10%, var(--g-card)); }
+.pg-track.state-running, .pg-track.state-paused { background: color-mix(in srgb, var(--k) 35%, var(--g-card)); }
+.pg-track.state-failed, .pg-track.state-rejected { background: color-mix(in srgb, var(--g-fail) 22%, var(--g-card)); }
 /* filled pastel bars, no outline (done stronger, pending lighter); running, paused, failed and warn keep theirs */
 .pg-graph .pg-chip:not(.state-running, .state-paused, .state-failed, .state-rejected, .state-warn) {
   border-color: transparent; background: color-mix(in srgb, var(--k) 22%, var(--g-card)); }
@@ -797,7 +803,6 @@ li.empty { list-style: none; padding: 6px 2px; }
 .legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px var(--sp-4); font-size: var(--fs-sm); color: var(--text-muted); }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .legend-item .icon { width: 16px; height: 16px; color: var(--k); }
-.legend-item i.swatch-pair { width: 16px; height: 12px; border: 1.25px dashed var(--border-strong); border-radius: 4px; }
 .legend-item i.swatch-fail { width: 16px; height: 0; border-top: 2px dashed var(--g-fail); }
 
 /* phone: the rail (lanes collapsed), 44 px chips with the number inside, and the step in a bottom sheet */
