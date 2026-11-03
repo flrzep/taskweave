@@ -196,6 +196,7 @@ function renderRun() {
   $('pad-mode').textContent = pad === 'drive' ? 'pad: drive' : `pad: ${pad} arm`;
   $('pad-mode').className = `chip pad ${pad === 'drive' ? '' : 'jog'}`;
   const active = renderMission(s);
+  updatePreviews();
   const { plan, live } = shownPlan();
   const outcomes = live ? snap.outcomes : {};
   const startIndex = plan && state.startStep ? plan.steps.findIndex((step) => step.id === state.startStep) : -1;
@@ -401,6 +402,7 @@ function manualText() {
 }
 function renderManual() {
   const m = state.snapshot?.manual || null;
+  updatePreviews();
   show($('manual'), !!m);
   if (!m) { clearInterval(manualUi.timer); manualUi.timer = null; manualUi.since = null; return; }
   if (manualUi.since !== m.since) {  // a new one: count from its elapsed time, Abort pressable again
@@ -576,7 +578,10 @@ function stepCard(step, index, steps, expanded) {
     showIf(argsBox, [...argsBox.children].map((node) => ({ key: node.dataset.arg, spec: props[node.dataset.arg], node, read: node._value })));
   };
   renderArgs(step.include ? step.with || {} : step.args || {});
+  const preview = movePreview(() => card._read());
+  argsBox.after(preview);
   q('skill').addEventListener('change', () => { renderArgs({}); markDirty(); });
+  ['input', 'change'].forEach((type) => card.addEventListener(type, () => { preview._clear(); preview._refresh(); }));
   card.addEventListener('input', markDirty);
   card.addEventListener('change', markDirty);
   ['input', 'change'].forEach((type) => card.addEventListener(type, () => stepSummary(card)));
@@ -629,8 +634,90 @@ function stepCard(step, index, steps, expanded) {
   };
   setExpanded(card, expanded);
   stepSummary(card);
+  preview._refresh();
   return card;
 }
+
+// ---------- a move step's preview ----------
+// Preview on a move step: its arguments as they are in the editor, run as a dry run on the robot (POST
+// /api/skills/move/dry_run: resolved and solved, nothing moves). The answer stays under the arguments until the step
+// is edited: the skill's message (the command and target) over the joint goal per group (deg, m), the base pose and
+// torso of a drive, what it carries and the goals on the way; a refusal or a failure as a red line, as the step's
+// problems. Not while a mission or a manual skill runs (they share the move skill on the robot), not with a
+// placeholder ({fact}, {param}: filled at run time): the button is off and says why.
+const PREVIEW_SKILL = 'move';
+const placeholdersIn = (value) => (typeof value === 'string' ? (isPlaceholder(value) ? [value] : [])
+  : Array.isArray(value) ? value.flatMap(placeholdersIn) : isPlain(value) ? Object.values(value).flatMap(placeholdersIn) : []);
+function previewBlocked(args) {
+  const snap = state.snapshot;
+  const mission = snap?.status?.state;
+  if (mission === 'running' || mission === 'paused') return `a mission is ${mission}`;
+  if (snap?.manual) return `${snap.manual.label} (${snap.manual.skill}) is running`;
+  const held = [...new Set(placeholdersIn(args))];
+  if (held.length) return `${held.join(', ')} ${held.length > 1 ? 'are' : 'is'} filled at run time`;
+  return Object.keys(args || {}).length ? '' : 'no arguments yet';
+}
+function movePreview(read) {
+  const button = el('button', { type: 'button', class: 'btn small', text: 'Preview',
+    title: 'Resolve and solve this move on the robot with the arguments as they are here; nothing moves' });
+  const why = el('span', { class: 'muted small-text' });
+  const out = el('div', { class: 'preview-out', hidden: '' });
+  const node = el('div', { class: 'step-preview' }, el('div', { class: 'row wrap' }, button, why), out);
+  let busy = false;
+  let step = { skill: '', args: {} };  // the step as last read: _refresh on its edits, _update on status events
+  node._update = () => {
+    const move = step.skill === PREVIEW_SKILL;
+    show(node, move);
+    const blocked = move ? previewBlocked(step.args) : '';
+    button.disabled = busy || !!blocked;
+    why.textContent = busy ? 'Solving… nothing moves.' : blocked ? `No preview: ${blocked}.` : '';
+  };
+  node._refresh = () => { step = read(); node._update(); };
+  node._clear = () => { out.replaceChildren(); show(out, false); };
+  button.addEventListener('click', async () => {
+    const sent = JSON.stringify(step.args);
+    busy = true;
+    node._clear();
+    node._update();
+    let answer;
+    try {
+      const { ok, data } = await api('POST', `/api/skills/${PREVIEW_SKILL}/dry_run`, { args: step.args });
+      answer = ok ? previewAnswer(data)
+        : [el('div', { class: 'msg bad', text: (data.problems || [data.error || 'no answer']).join('\n') })];
+    } catch (error) {  // no connection (the HMI restarting): say so, never stick on "Solving"
+      answer = [el('div', { class: 'msg bad', text: `no answer from the HMI: ${error.message || error}` })];
+    } finally {
+      busy = false;
+      node._update();
+    }
+    if (JSON.stringify(step.args) !== sent) return;  // edited while it solved: the answer is for other args
+    out.replaceChildren(...answer);
+    show(out, true);
+  });
+  return node;
+}
+// the preview's answer: the message, then label / value rows (a group's values with the joint names as the tooltip)
+function previewAnswer(answer) {
+  if (answer.outcome !== 'succeeded') return [el('div', { class: 'msg bad', text: `${answer.outcome}: ${answer.message}` })];
+  const d = answer.data || {};
+  const rows = [];
+  const num = (n, digits) => n.toFixed(digits).replace('-', '−');
+  const value = (j) => (j.unit === 'm' ? `${num(j.value, 3)} m` : `${num(j.value, 1)}°`);
+  const groups = (view) => view.forEach((g) => rows.push([g.group, g.joints.map(value).join('  '), g.joints.map((j) => `${j.name} ${value(j)}`).join('\n')]));
+  if (d.pose) rows.push(['base', `x ${num(d.pose.x, 2)} m · y ${num(d.pose.y, 2)} m · yaw ${num(d.pose.yaw * DEG, 1)}°`]);
+  if (Array.isArray(d.by)) rows.push(['base', `by ${signed(+d.by[0].toFixed(3))} m${d.by[1] ? ` · ${signed(+d.by[1].toFixed(3))} m sideways` : ''}`]);
+  if (answer.torso) groups(answer.torso);
+  else if (['navigate', 'straight'].includes(d.kind)) rows.push(['torso', d.torso === 'keep' ? 'kept' : d.torso == null ? 'drive height' : String(d.torso)]);
+  groups(answer.goal || []);
+  if (d.carrying) rows.push(['carrying', d.carrying]);
+  if (Array.isArray(d.legs) && d.legs.length > 1) rows.push(['on the way', d.legs.slice(0, -1).map((leg) => leg.label).join(' → ')]);
+  if (!rows.length) rows.push(['goal', 'nothing to move']);
+  return [el('div', { class: 'msg preview-answer' }, el('div', { text: answer.message }),
+    el('dl', { class: 'preview-goal' }, rows.flatMap(([label, text, tip]) => [el('dt', { text: label }), el('dd', tip ? { text, title: tip } : { text })])))];
+}
+// the previews follow the mission and the manual skill (a mission start turns them off); each from the step as last
+// read, so a status event reads no fields
+function updatePreviews() { document.querySelectorAll('#step-editor .step-preview').forEach((node) => node._update()); }
 
 // ---------- folded steps ----------
 // A step folds to its summary line (number, instruction, skill and a short reading of its arguments): a long mission
