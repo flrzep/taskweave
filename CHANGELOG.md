@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 — 2026-11-03
+## Unreleased
 
 - **step_finished episodes keep `carrying`, `kind` and `module`** (`EPISODE_DATA`); **`PlanStep.notes`** (`string[]`): the
   validation notes of the step (`Step.notes`). Rebuild `taskweave_interfaces`.
@@ -9,10 +9,12 @@
   from the world where possible, `resolved: false` where not); the skill server hands it to the skill as `ctx.context`
   (`{}` when none: HMI jog/teach goals and the operator joy send none). A retry sends the same, a replan the new plan's
   rest. Rebuild `taskweave_interfaces`.
+
+## 0.4.0 — 2026-11-03
+
 - **PlanStep carries the plan graph's data:** `origin_json` (`{"include": [names, outermost first], "step": index in the
   innermost mission's own steps, "top": index in the top mission's own steps}`, empty when the step is not from a
   mission), `replan_from` and `max_replans`.
-
 - **move from the operator's view: five commands, cell schema 5.** A move step's kind (`data.kind`, the plan's
   `Step.kind`, smoke keys `move.<kind>`) is one of `navigate`, `straight`, `hand`, `posture`, `joints` (labels "navigate
   to", "move straight", "move to target", "change posture", "move to joint positions": `targets.MOVE_LABELS`; result
