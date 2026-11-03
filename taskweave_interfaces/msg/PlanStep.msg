@@ -7,5 +7,5 @@ string args_json        # arguments as JSON; may contain placeholders such as "{
 float32 timeout_s       # 0 = mission default
 int32 retries           # -1 = mission default
 string on_failure       # "retry" | "replan" | "skip" | "abort"; empty = mission default
-string kind             # a move step: "base" | "straight" | "hand" | "object" | "posture" | "joints"; else empty
+string kind             # a move step: "navigate" | "straight" | "hand" | "posture" | "joints"; else empty
 string[] resources      # what the step uses ("base", "hands", "torso", "joints"), filled when the plan is validated
