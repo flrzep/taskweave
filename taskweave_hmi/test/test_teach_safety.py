@@ -139,7 +139,9 @@ def test_a_point_preview_takes_each_tcp_relative_to_the_object_from_tf(serve, co
     handled = config.handling_instance(config.object_instances()['bay_1_stack_1_front'], ROBOT, Pose2D(5.0, 1.0, 0.0))
     c, s = math.cos(handled.pose.yaw), math.sin(handled.pose.yaw)
 
-    def frame_pose(link):  # each flange (= TCP) where the saved point puts it, the left one 20 mm higher
+    def frame_pose(link, stamps=None):  # each flange (= TCP) where the saved point puts it, the left one 20 mm higher
+        if stamps is not None:
+            stamps.append(0.0)   # static: no age
         tool = link.split('_')[0]
         hand = point.tools[f'{tool}_tool']
         x, y, z = hand.xyz
@@ -238,3 +240,72 @@ def test_bodies_and_names_of_the_wrong_shape_are_refused(serve, config):  # noqa
     assert status == 422 and 'a name has no "/"' in data['problems'][0]
     assert request('POST', '/api/points/location/spawn/x/teach', {})[0] == 422
     assert bridge.sent_requests == []
+
+
+def test_a_base_preview_of_a_new_instance_override_has_nothing_to_overwrite(serve, config):  # noqa: F811
+    bridge = teach_bridge(config, None)
+    bridge.robot_pose = lambda: Pose2D(5.0, 1.0, 0.0)
+    request = serve(bridge)
+    status, data = request('POST', '/api/points/stance/instances/bay_1_stack_1_front/pick/preview', {})
+    assert status == 200 and data['exists'] is False and data['old'] is None and data['at'] == 'bay_1_stack_1_front'
+    status, data = request('POST', '/api/points/stance/instances/bay_1_stack_1_back/pick/preview', {})
+    assert status == 200 and data['exists'] is True and data['old'] == {'x': -1.528, 'y': 1.0, 'yaw': 0.0}
+
+
+def test_test_and_held_routes_refuse_a_body_that_is_no_object(serve, config):  # noqa: F811
+    request = serve(teach_bridge(config, None))
+    for path in ('/api/teach/arm/frame_type2/rails_top/test', '/api/teach/held/frame_type2/carry/test',
+                 '/api/teach/held/frame_type2/carry/capture'):
+        status, data = request('POST', path, [1])
+        assert status == 400 and 'JSON object' in data['error']
+
+
+def test_a_capture_without_joint_states_saves_nothing_and_a_late_timeout_offers_the_undo(  # noqa: F811
+        serve, config, monkeypatch):
+    from taskweave_hmi import arm
+
+    bridge = teach_bridge(config, node_writes_hand(config))
+
+    def no_joints():
+        raise TimeoutError('no current joint states')
+    bridge.joint_positions = no_joints
+    request = serve(bridge)
+    body = {'at': 'bay_1_stack_1_front'}
+    assert request('POST', '/api/teach/arm/frame_type2/rails_top/capture', body)[0] == 503
+    assert bridge.sent_requests == []                       # asked before the node saves
+    bridge.joint_positions = lambda: {}
+
+    def late(*_):
+        raise TimeoutError('the gripper table did not answer')
+    monkeypatch.setattr(arm, 'closed_grips', late)
+    status, data = request('POST', '/api/teach/arm/frame_type2/rails_top/capture', body)
+    assert status == 503 and data['undo']['files'] and 'did not answer' in data['problems'][0]
+    assert request('POST', '/api/teach/undo', {'id': data['undo']['id']})[0] == 200
+
+
+def test_a_point_preview_refuses_stale_tf_as_the_node_would(serve, config):  # noqa: F811
+    profile = config.root / 'robots' / ROBOT / 'profile.yaml'
+    profile.write_text(profile.read_text() + TOOL_FRAMES)
+    config.reload()
+    bridge = teach_bridge(config, None)
+    bridge.robot_pose = lambda: Pose2D(5.0, 1.0, 0.0)
+    bridge.now_s = lambda: 100.0
+
+    def frame_pose(link, stamps=None):
+        stamps.append(97.5)          # 2.5 s old
+        return (6.0, 1.0, 0.5), (0.0, 0.0, 0.0, 1.0)
+    bridge.frame_pose = frame_pose
+    status, data = serve(bridge)('POST', '/api/teach/arm/frame_type2/rails_top/preview', {'at': 'bay_1_stack_1_front'})
+    assert status == 503 and data['error'].startswith('TF is stale (2.5 s old, limit 1 s)')
+
+
+def node_writes_hand(config):
+    """The teach node's answer to a hand request: it saves a left tool pose as asked."""
+    from taskweave_interfaces.srv import TeachPoint
+
+    def answer(request):
+        paths = config.save_target(request.name, {'moves': 'hand', 'left_tool': {'xyz': [0.0, 0.1, 0.1],
+                                                                                 'rpy': [0.0, 0.0, 0.0]}},
+                                   ROBOT, instance_override=request.instance_override)
+        return TeachPoint.Response(success=True, message='ok', file=', '.join(str(p) for p in paths))
+    return answer

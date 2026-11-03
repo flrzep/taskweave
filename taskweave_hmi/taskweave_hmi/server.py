@@ -471,16 +471,31 @@ class Bridge(Node):
         except (ConfigError, KeyError):
             return 'world'
 
-    def frame_pose(self, frame: str) -> scene.Transform | None:
-        """Where ``frame`` is in the cell frame now (TF): position, quaternion x, y, z, w; None if TF lacks it."""
+    def frame_pose(self, frame: str, stamps: list | None = None) -> scene.Transform | None:
+        """Where ``frame`` is in the cell frame now (TF): position, quaternion x, y, z, w; None if TF lacks it. The
+        transform's stamp (s, 0 for a static one) is appended to ``stamps``."""
         from tf2_ros import TransformException
 
         try:
-            t = self.tf.lookup_transform(self.cell_frame, frame, Time()).transform
+            found = self.tf.lookup_transform(self.cell_frame, frame, Time())
         except TransformException:
             return None
+        if stamps is not None:
+            stamps.append(found.header.stamp.sec + found.header.stamp.nanosec * 1e-9)
+        t = found.transform
         return ((t.translation.x, t.translation.y, t.translation.z),
                 (t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w))
+
+    def tf_stale(self, stamps: list) -> str:
+        """Why TF read with these stamps is too old to compare with, as the teach node words it ('' when it is not):
+        older than MAX_POSE_AGE_S (the node's default max_tf_age_s), static transforms (stamp 0) left out."""
+        oldest = min((stamp for stamp in stamps if stamp), default=None)
+        if oldest is None:
+            return ''
+        age = self.now_s() - oldest
+        if abs(age) <= MAX_POSE_AGE_S:
+            return ''
+        return f'TF is stale ({age:.1f} s old, limit {MAX_POSE_AGE_S:g} s); is the robot publishing TF?'
 
     def base_transform(self) -> dict:
         """The robot base's pose in the cell from TF (the 3D view places the robot model with it)."""
@@ -738,6 +753,18 @@ class Bridge(Node):
         finally:
             self.skill_lock.release()
 
+    def start_mission(self, mission: str, start_step: str = ''):
+        """Ask the task handler to start ``mission`` (POST /api/start). Holds the manual-skill lock for the call:
+        no manual skill or move preview (dry_run_move) starts between the check and the mission's start, and none runs
+        while it is asked; Busy when one runs."""
+        if not self.skill_lock.acquire(blocking=False):  # no mission move beside a manual skill's or a preview's
+            raise Busy('a manual skill or a move preview is running; start the mission when it has finished')
+        try:
+            return self.call(self.start_client, StartMission.Request(mission=mission, start_step=start_step),
+                             START_TIMEOUT_S)
+        finally:
+            self.skill_lock.release()
+
     def manual_view(self) -> dict | None:
         """The running manual skill as the browser shows it (call under self.lock). elapsed_s lets the browser count
         on from its own clock, whatever the server's clock says."""
@@ -828,8 +855,9 @@ class Bridge(Node):
         notes = []
 
         def write():
+            joints = self.joint_positions()   # before the node saves: no joint states, nothing saved
             response = self.teach('hand', f'{at}/{name}', tools, override)
-            grip = arm.closed_grips(self.config, self.robot, tools, self.joint_positions())
+            grip = arm.closed_grips(self.config, self.robot, tools, joints)
             if grip and override:  # the grip is a setting of the type's point: it would change every placed one
                 notes.append(f'grip opening not saved: it is set on the {scope} point for every placed {scope}')
             elif grip:  # grippers closed on the part when taught: they close that far at this point
@@ -873,21 +901,23 @@ class Bridge(Node):
                      for key, pose in old.tools.items()}
         frames = self.config.robot(self.robot).data.get('tool_frames', {})
         handled = self.config.handling_instance(instance, self.robot, self.robot_pose())
-        hands = {}
+        hands, stamps = {}, []
         for tool in tools or list(frames):
             if tool not in frames:
                 raise arm.ArmError(f'no tool_frames.{tool} in the robot profile')
-            position, quaternion = self.tcp_in_cell(frames[tool])
+            position, quaternion = self.tcp_in_cell(frames[tool], stamps)
             pose = handled.relative_pose(position, quaternion)
             hands[tool] = {'xyz': list(pose.xyz), 'rpy': list(pose.rpy)}
+        if reason := self.tf_stale(stamps):   # the node would refuse it: no comparison with old numbers
+            raise TimeoutError(reason)
         return {'exists': True, 'at': at, **arm.capture_changes(old_hands, hands, {}, {}, linear)}
 
-    def tcp_in_cell(self, tool_frame: dict) -> scene.Transform:
+    def tcp_in_cell(self, tool_frame: dict, stamps: list | None = None) -> scene.Transform:
         """A tool's canonical TCP in the cell frame from TF (flange link + the profile's offset), as the teach node
-        takes it."""
+        takes it; the TF stamp is appended to ``stamps``."""
         from taskweave_core.config.poses import quaternion_from_rpy, quaternion_multiply, rotate
 
-        found = self.frame_pose(tool_frame['link'])
+        found = self.frame_pose(tool_frame['link'], stamps)
         if found is None:
             raise TimeoutError(f'no transform {self.cell_frame} -> {tool_frame["link"]}: is the robot publishing TF?')
         (x, y, z), flange = found
@@ -939,6 +969,9 @@ class Bridge(Node):
             old = points.stored_pose(self.config, self.robot, kind, address)
         except points.PointError:
             old = None
+        if _override and not targets.instance_entry(self.config, self.robot, self.point_type(kind, address), at,
+                                                    address[-1]):
+            old = None   # a new override: the pose shown would be the type's, which it does not change
         return {'exists': old is not None, 'at': at, 'old': old, 'new': points.pose_dict(pose)}
 
     def point_type(self, kind: str, address: list[str]) -> str | None:
@@ -958,8 +991,6 @@ class Bridge(Node):
     def undo(self, key: str) -> dict:
         """Undo the Teach save ``key`` (POST /api/teach/undo)."""
         self.check_idle()
-        if self.undos is None:
-            raise undo.UndoError('nothing to undo: no save was made since the HMI started')
         result = self.undos.undo(self.config, key)
         self.get_logger().info(f'HMI undid {result["label"]} ({", ".join(result["files"])})')
         self.points_changed()
@@ -1019,7 +1050,7 @@ class Bridge(Node):
     def test_position(self, scope: str, name: str, body: dict) -> dict:
         if scope == arm.ROBOT:
             return self.go_to_pose(name)
-        at = body.get('at') or self.nearest_placed(scope)
+        at = text_arg(body, 'at') or self.nearest_placed(scope)
         if self.serves_move():
             return self.run_skill(targets.MOVE, targets.move_args(f'{at}/{name}', hands=body.get('hands'),
                                                                   offset_m=body.get('offset_m')),
@@ -1317,10 +1348,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(result, HTTPStatus.OK if result['ok'] else HTTPStatus.UNPROCESSABLE_ENTITY)
             if method == 'POST' and route == ['start']:
                 body = self._body()
-                if bridge.skill_lock.locked():  # no mission move beside a manual skill's or a preview's (dry_run_move)
-                    raise Busy('a manual skill or a move preview is running; start the mission when it has finished')
-                response = bridge.call(bridge.start_client, StartMission.Request(
-                    mission=body['mission'], start_step=str(body.get('start_step') or '')), START_TIMEOUT_S)
+                response = bridge.start_mission(body['mission'], str(body.get('start_step') or ''))
                 status = HTTPStatus.OK if response.accepted else HTTPStatus.UNPROCESSABLE_ENTITY
                 return self._json({'accepted': response.accepted, 'message': response.message,
                                    'plan_id': response.plan_id}, status)
@@ -1416,7 +1444,12 @@ class Handler(BaseHTTPRequestHandler):
                     args = targets.dry_run_args(body.get('args') if isinstance(body, dict) else None)
                 except ValueError as error:  # no args object, or a placeholder in them
                     return self._json({'problems': [str(error)]}, HTTPStatus.UNPROCESSABLE_ENTITY)
-                return self._json(bridge.dry_run_move(args))
+                try:
+                    return self._json(bridge.dry_run_move(args))
+                except ValueError as error:  # the skill's answer could not be read (dry_run_answer): say so
+                    bridge.get_logger().info(f'HMI move preview: unreadable answer: {error}')
+                    return self._json({'problems': [f'the preview ran, but its answer could not be read: {error}']},
+                                      HTTPStatus.INTERNAL_SERVER_ERROR)
             if method == 'POST' and route == ['skill', 'abort']:
                 aborted = bridge.abort_skill()
                 if aborted is None:
@@ -1453,7 +1486,7 @@ class Handler(BaseHTTPRequestHandler):
                     bridge.points_changed()
                     return self._json(result)
                 if len(route) == 5 and method == 'POST' and route[4] == 'test':
-                    return self._json(bridge.test_position(scope, name, self._body()))
+                    return self._json(bridge.test_position(scope, name, self._object_body()))
                 if len(route) == 5 and method == 'POST' and route[4] == 'preview':
                     return self._json(bridge.capture_preview(scope, name, self._object_body()))
             if len(route) >= 4 and route[:2] == ['teach', 'held']:
@@ -1472,8 +1505,10 @@ class Handler(BaseHTTPRequestHandler):
                     bridge.points_changed()
                     return self._json({'file': file, 'undo': saved})
                 if len(route) == 5 and method == 'POST' and route[4] == 'test':
+                    self._object_body()   # nothing in it is used: a body of another shape is still refused
                     return self._json(bridge.test_held(obj, name))
                 if len(route) == 5 and method == 'POST' and route[4] == 'capture':
+                    self._object_body()
                     result = bridge.capture_held(name)
                     bridge.points_changed()
                     return self._json(result)
@@ -1494,7 +1529,11 @@ class Handler(BaseHTTPRequestHandler):
         except BadRequest as error:
             return self._json({'error': str(error)}, HTTPStatus.BAD_REQUEST)
         except (TimeoutError, KeyError, json.JSONDecodeError) as error:
-            return self._json({'error': str(error)}, HTTPStatus.SERVICE_UNAVAILABLE
+            answer = {'error': str(error)}
+            if getattr(error, 'undo', None):   # timed out after a part was saved (undo.Undo.run): offer its undo
+                answer.update(problems=[str(error)], undo=error.undo)
+                bridge.points_changed()
+            return self._json(answer, HTTPStatus.SERVICE_UNAVAILABLE
                               if isinstance(error, TimeoutError) else HTTPStatus.BAD_REQUEST)
 
     def _events(self) -> None:

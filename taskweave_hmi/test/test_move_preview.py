@@ -205,3 +205,22 @@ def test_no_mission_starts_while_a_preview_or_a_manual_skill_holds_the_lock(stor
     assert request('POST', '/api/start', {'mission': 'cycle'}) == (200, {'accepted': True, 'message': 'ok',
                                                                        'plan_id': 'p1'})
     assert started == ['cycle']
+
+
+def test_a_start_holds_the_manual_skill_lock_while_it_asks_the_task_handler(store, serve):  # noqa: F811
+    bridge = preview_bridge(store, AnsweringAction())
+    bridge.start_client, held = object(), []
+    bridge.call = lambda _client, request, _timeout=None: (held.append(bridge.skill_lock.locked()),
+                                                           SimpleNamespace(accepted=True, message='ok', plan_id='p'))[1]
+    assert serve(bridge)('POST', '/api/start', {'mission': 'cycle'})[0] == 200
+    assert held == [True] and not bridge.skill_lock.locked()
+
+
+def test_a_preview_whose_answer_cannot_be_read_says_so(store, serve, monkeypatch):  # noqa: F811
+    def unreadable(*_):
+        raise ValueError('joint_goal: not a mapping')
+    monkeypatch.setattr(targets, 'dry_run_answer', unreadable)
+    bridge = preview_bridge(store, AnsweringAction('succeeded', 'resolved', {}))
+    status, answer = serve(bridge)('POST', '/api/skills/move/dry_run', {'args': {'to': 'home'}})
+    assert status == 500 and 'its answer could not be read: joint_goal: not a mapping' in answer['problems'][0]
+    assert not bridge.skill_lock.locked()
