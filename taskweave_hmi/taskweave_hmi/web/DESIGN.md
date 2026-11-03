@@ -72,9 +72,9 @@ network may have no internet). `font-variant-numeric: tabular-nums` throughout, 
 | `--fs-md` | 18px | brand name, state badge (700, uppercase), record stats |
 | `--fs-lg` | 20px / 1.35 | current step instruction |
 | `--fs-xl` | 24px / 1.2 | `h2` |
-| `--fs-2xl` | 30px / 1.12 | speed value, recording headline (26px on a phone), the board's "/ N" |
+| `--fs-2xl` | 30px / 1.12 | speed value, recording headline (26px on a phone), the board's "/ N" (`--fs-xl` on a phone) |
 | `--fs-3xl` | 36px | the status board's state word (30px on a phone) |
-| `--fs-4xl` | 60px | the status board's step number (44px on a phone) |
+| `--fs-4xl` | 60px | the status board's step number (a 44px literal on a phone, its only use) |
 
 Weights: 400 body, 500 instruction, 600 titles and buttons, 700 badges and the brand name.
 
@@ -116,7 +116,8 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   wrap and share the width.
 - **Sticky top** (`.top`): header (brand, pad, connection), mission bar, speed strip, manual skill strip, tabs; on
   every tab.
-- **Mission bar** (`.mission`): below the header. A 4px rail in the state colour (striped amber when paused) and the
+- **Mission bar** (`.mission`): below the header. On the Run tab, while a mission is active, it keeps only the badge
+  and Pause / Abort, and its error hides (the status board shows both); idle it keeps the picker and Start everywhere. A 4px rail in the state colour (striped amber when paused) and the
   state as a solid badge (`#state`, uppercase Barlow Semi Condensed 14px; `planning` while the task handler prepares
   the plan). While a mission is active (`.mission.active`, a 5% state tint): the goal (18px, 600) with plan id and
   cycle right, under it "step n/N" and the step's instruction, one line with an ellipsis, then skill, status, seconds
@@ -130,7 +131,8 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   text colour: "done" for succeeded), the mission and cycle; the step number at 60px with "/ N", the instruction at
   24px (two lines, three on a phone), and under it the command, status, seconds and attempt. Planning, idle ("26 steps ·
   Ready to start", or the chosen start step), done, failed (the failed step, from the outcomes when the status has no
-  step) and aborted each have their own words. When it stopped, the error in a red-ruled panel with how to go on. Under
+  step) and aborted each have their own words. The last error (not after a success) in a red-ruled panel, with how to go on once it stopped. After a run the board
+  keeps showing that run (and names a different picked mission as next) while the plan below previews the pick. Under
   it the phases: the plan graph's bands as one bar each, as wide as their steps, done in green, the current one ringed
   in the state colour, name and done/total under it. On the Run tab the mission bar keeps only the badge and the
   controls (`body.on-run`), so the words are not shown twice, and its error hides (the board shows it).

@@ -89,10 +89,10 @@ means the task handler or skill servers are not running), and `taskweave status`
    mission after a fix, not as a shortcut through a mission whose first steps set things up.
 
 The **status board** at the top of the Run tab is the run in large type, readable from a few metres: the state
-(RUNNING, PAUSED, DONE, FAILED, ...), the step number out of the total, the step's instruction, and under it how long the
-step has run. When the mission stopped it shows the error and the step it stopped at. The strip at its foot shows the
-mission's phases (its included missions): done in green, the current one ringed. On the Run tab the mission bar then
-keeps only the state and the buttons.
+(RUNNING, PAUSED, DONE, FAILED, ...), the step number out of the total, the step's instruction, and under it, while a step runs, how long it has run. An error shows under it; when the mission
+stopped, with the step it stopped at and how to go on. The strip at its foot shows the
+mission's phases (its included missions): done in green, the current one ringed. While a mission runs, the mission bar on the Run tab
+keeps only the state, Pause and Abort.
 
 The plan shows as a **Graph** (the steps and where a failure leads: retry, replan, skip, abort) or a **List**, each step
 with its outcome once it ran. The 3D view under the board shows the robot where the stack believes it is, in the cell
