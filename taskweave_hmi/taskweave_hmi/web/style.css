@@ -253,14 +253,17 @@ body.on-run .mission.active .mission-row { grid-template-columns: auto minmax(0,
 .top:has(.speed.off) .speed-msg:not(.bad) { color: var(--text-muted); }
 /* a pad press's answer, for a while: a toast at the page's foot (above the phone's bottom nav). It lets taps through
    and is never in the bar, so the bar keeps its height and the manual skill's Abort stays clear */
-.pad-notice { position: fixed; z-index: 6; right: var(--sp-6); top: calc(var(--top-h, 76px) + var(--sp-3)); max-width: min(70ch, 50vw);
+.pad-notice { position: fixed; z-index: 6; left: calc(var(--rail) + var(--sp-6)); bottom: var(--sp-6); max-width: min(70ch, 40vw);
               padding: var(--sp-2) var(--sp-3); border-radius: var(--r-s); background: var(--surface-card); box-shadow: var(--shadow-2);
               border-left: 4px solid currentColor; pointer-events: none; font: 500 var(--fs-sm) var(--cond); color: var(--ok);
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 600px) {
-  .pad-notice { left: var(--sp-3); right: var(--sp-3); top: auto; max-width: none; bottom: calc(var(--nav) + env(safe-area-inset-bottom, 0px) + var(--sp-2)); }
-  /* a long error scrolls in its own box: the top keeps the mission's and the manual skill's Abort in sight */
-  .mission .error { max-height: 25dvh; overflow-y: auto; }
+  /* just under the sticky top: clear of the step sheet, the Save bar and the bottom nav */
+  .pad-notice { left: var(--sp-3); right: var(--sp-3); bottom: auto; top: calc(var(--top-h, 76px) + var(--sp-2)); max-width: none; }
+  /* long texts scroll in their own boxes (the error's ✕ stays): the top keeps both Aborts in sight */
+  #last-error-text { max-height: 20dvh; overflow-y: auto; }
+  .speed-msg { max-height: 4.5em; overflow-y: auto; }
+  .manual-text { max-height: 4.5em; overflow-y: auto; }
 }
 .pad-notice.bad { color: var(--bad); }
 @media (max-width: 600px) {

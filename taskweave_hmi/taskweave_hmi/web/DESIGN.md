@@ -139,9 +139,9 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   goal; the pad mode shows only while it jogs an arm (also on a phone). On a phone: badge, step n/N, the speed and the
   connection in one row, the instruction and progress under it, then Pause and Abort side by side, full width; idle:
   badge, speed, then picker and Start. A pad press's answer is a toast for a while (`.pad-notice`, fixed outside the
-  top, taps pass through: under the bar at the right on a laptop, above the bottom nav and any sheet on a phone), so
-  the bar keeps its height. On a phone a long error scrolls in its own box (at most 25% of the screen), so both
-  Aborts stay in sight.
+  top, taps pass through: bottom left of the page on a laptop, clear of the 3D view's tools; just under the top on a
+  phone, clear of the step sheet and the Save bar), so the bar keeps its height. On a phone the error text, the speed
+  message and the manual skill's text scroll in their own boxes (the error's ✕ stays), so both Aborts stay in sight.
 - **Run workspace** (`.run-grid`, Run tab): up to 1179px one column, board, 3D view, plan, recent steps. From 1180px
   two columns, 7 : 5 with 20px gaps and the page up to 1600px wide: the board over the plan at the left, the 3D view
   (16 : 11) over the recent steps at the right, sticky under the top (`--top-h`, the top's measured height) and never
