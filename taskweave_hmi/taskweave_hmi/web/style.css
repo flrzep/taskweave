@@ -515,7 +515,8 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
   .missions-md #mission-list-card, .missions-md.editing #mission-list-card { display: flex; }
   #mission-list-card { flex-direction: column; position: sticky; top: calc(var(--top-h, 76px) + var(--sp-5));
                        max-height: calc(100dvh - var(--top-h, 76px) - 2 * var(--sp-5)); overflow: hidden; }
-  #mission-list { flex: 0 1 auto; overflow-y: auto; min-height: 0; }  /* only the list scrolls: the title and search stay */
+  #mission-list { flex: 0 1 auto; overflow-y: auto; min-height: 0;  /* only the list scrolls: the title and search stay */
+                  grid-auto-rows: max-content; }  /* each entry as tall as its text: the rows shrank to 48px and overlapped */
   .editor-empty { display: grid; place-items: center; min-height: 240px; color: var(--text-muted); }
   .editor-empty p { margin: 0; }
   #btn-back { display: none; }

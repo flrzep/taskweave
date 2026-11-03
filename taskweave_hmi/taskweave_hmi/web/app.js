@@ -756,7 +756,7 @@ async function openEditor(name) {
   fillSelect($('d-fail'), ON_FAILURE, d.on_failure ?? '');
   $('d-replans').value = d.max_replans ?? '';
   const steps = data.steps || [];
-  renderSteps(steps, steps.map(() => steps.length <= FOLD_ABOVE));  // a long mission opens folded, to reorder it
+  renderSteps(steps, steps.map(() => false));  // a mission opens folded: its outline first, a step opened on a tap
 }
 function alertInline(data) { message($('save-msg'), data.error || (data.problems || []).join('\n'), true); }
 
@@ -953,9 +953,8 @@ function updatePreviews() { document.querySelectorAll('#step-editor .step-previe
 // ---------- folded steps ----------
 // A step folds to its summary line (number, instruction, skill and a short reading of its arguments): a long mission
 // is reordered by dragging folded steps. The summary is the toggle (click, Enter, Space); the open state stays through
-// reorders (editSteps), Check, Save and point refreshes. A mission of more than FOLD_ABOVE steps opens folded; new and
-// duplicated steps open, and so do the steps a Check or Save names.
-const FOLD_ABOVE = 6;
+// reorders (editSteps), Check, Save and point refreshes. A mission opens with every step folded; new and duplicated
+// steps open, and so do the steps a Check or Save names.
 function setExpanded(card, open) {
   card.classList.toggle('collapsed', !open);
   card.querySelector('[data-act="fold"]').setAttribute('aria-expanded', String(open));

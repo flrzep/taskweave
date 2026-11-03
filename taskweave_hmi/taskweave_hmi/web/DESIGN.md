@@ -222,7 +222,8 @@ buttons on a laptop, raised to 44px on touch screens and at 600px and below.
   handle left of the step number (an `.icon` with six dots in `--text-muted` on a hairline border, `touch-action:
   none`), then the fold toggle (`.step-toggle`: a ▶ marker turned down when open, the step number in brand text and,
   folded, the instruction over the skill and its arguments in a few words, monospace muted, each one line with an
-  ellipsis), then ↑ ↓ ⧉ ✕; on a phone the buttons go to a second row. Folded (`.collapsed`), only that head shows;
+  ellipsis), then ↑ ↓ ⧉ ✕; on a phone the buttons go to a second row. Folded (`.collapsed`), only that head shows; a
+  mission opens with every step folded;
   "Collapse all / Expand all" is a ghost button by the Steps title. While dragged the step folds and follows the
   pointer with a brand border and `--shadow-2`, and a 3px brand line in the gap marks where it lands. A step that Check or Save names in its problems
   gets a red border, a 4px red inset rule and a red step number (`.has-problem`) until it is edited.
