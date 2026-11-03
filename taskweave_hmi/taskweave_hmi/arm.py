@@ -104,6 +104,16 @@ def handled_at(instance) -> dict:
     return {'x': instance.pose.x, 'y': instance.pose.y, 'top_z': instance.top_z, 'yaw': instance.pose.yaw}
 
 
+NEAR_HAND_M = 0.4  # a hand this close to an object's origin is on it (a frame's rails sit 0.25 m out to the side)
+
+
+def near_hands(distances: Mapping) -> list[str]:
+    """The hands on the object, from hand_distances: those within NEAR_HAND_M of its origin, else the nearest one
+    (Teach's grasp: the hands a new grasp point is taught with)."""
+    order = sorted(distances, key=lambda tool: distances[tool])
+    return [tool for tool in order if distances[tool] <= NEAR_HAND_M] or order[:1]
+
+
 def hand_distances(base: Mapping, instance: Mapping, current: Mapping) -> dict:
     """How far each tool's TCP is now (``current``: /api/robot/tools, base frame) from the placed object's origin (its
     top item), m: which hand is on the object."""

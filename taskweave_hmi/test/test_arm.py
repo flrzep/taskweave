@@ -125,3 +125,18 @@ def test_reach_targets_report_a_broken_point_and_check_the_rest(cell, monkeypatc
     found, _ = arm.reach_targets(cell, 'bot_two_arm', 'bay_2_stack_2_front', None, base)
     assert found['rails_top_steep'] == {'error': "'bay_2_stack_2_front/rails_top_steep': left_tool needs xyz"}
     assert set(found['rails_top']) == {'left', 'right'}
+
+
+def test_near_hands_take_both_hands_of_a_frame_grasp(cell):
+    # both hands on bay_2_stack_2_front's rails (rails_top, 0.25 m out to each side of the origin, from x = 7)
+    from taskweave_core.config import Pose2D
+
+    base = {'xyz': [7.0, 1.0, 0.0], 'quat': [1.0, 0.0, 0.0, 0.0]}
+    found, where = arm.reach_targets(cell, 'bot_two_arm', 'bay_2_stack_2_front', Pose2D(7.0, 1.0, 0.0), base)
+    distances = arm.hand_distances(base, where, found['rails_top'])
+    assert all(0.25 < m < 0.3 for m in distances.values())
+    assert sorted(arm.near_hands(distances)) == ['left', 'right']
+    # one hand there, the other far: that one; none near: the nearest; no hands: none
+    assert arm.near_hands({'left': distances['left'], 'right': 0.9}) == ['left']
+    assert arm.near_hands({'left': 1.2, 'right': 0.9}) == ['right']
+    assert arm.near_hands({}) == []

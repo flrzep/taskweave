@@ -91,7 +91,9 @@ HTTP API (JSON):
   POST /api/robot/reach {joints, tools, search: [tool]}   per tool: ok, message, warnings, nearest reachable target
   POST /api/robot/reach {at, points[, search]}   from where the robot stands now, at placed object <at>: per point of
                                    its type (all, or those named) per tool the same entry ({error} for a point that
-                                   does not resolve), and per tool how far its TCP
+                                   does not resolve; a quick solve without the global search, so a point only that
+                                   finds is "not found by the quick check": a move preview decides), the hands on the
+                                   object (near: within 0.4 m of it, else the nearest), and per tool how far its TCP
                                    is from the object now {at, points: {point: {tool: entry}}, hands: {tool: m}}
                                    (Teach's live check; arm.point_targets)
   PUT  /api/robot/joints {joints: {name: value}}  send joint targets now (no mission running; within the limits)
@@ -672,16 +674,18 @@ class Bridge(Node):
         found, where = arm.reach_targets(self.config, self.robot, at, self.robot_pose(), base, body.get('points'))
         search = body.get('search', [])
         result = {name: {'error': tools['error']} if 'error' in tools
-                  else self.reach_tools({'joints': body.get('joints'), 'tools': tools, 'search': search})
+                  else self.reach_tools({'joints': body.get('joints'), 'tools': tools, 'search': search}, quick=True)
                   for name, tools in found.items()}
         try:
             hands = arm.hand_distances(base, where, self.tool_targets())
         except TimeoutError:
             hands = {}
-        return {'at': at, 'object': self.config.object_instances()[at].object, 'points': result, 'hands': hands}
+        return {'at': at, 'object': self.config.object_instances()[at].object, 'points': result, 'hands': hands,
+                'near': arm.near_hands(hands)}
 
-    def reach_tools(self, body: dict) -> dict:
-        """Per tool of ``tools``: can IK put it there (reach)."""
+    def reach_tools(self, body: dict, quick: bool = False) -> dict:
+        """Per tool of ``tools``: can IK put it there (reach). ``quick``: the local solves only, no global search
+        (Teach's live check, asked again every few seconds); a miss then says a move preview is the full check."""
         from taskweave_skills.ik import IkClient, IkError, target_warnings
 
         profile = self.config.robot(self.robot)
@@ -702,10 +706,10 @@ class Bridge(Node):
                 entry = {'ok': False, 'message': '', 'warnings': [], 'suggestion': None}
                 try:
                     entry['warnings'] = target_warnings(target)
-                    self.ik.solve({tool: target}, joints)
+                    self.ik.solve({tool: target}, joints, global_search=not quick)
                     entry['ok'] = True
                 except IkError as error:
-                    entry['message'] = str(error)
+                    entry['message'] = f'not found by the quick check (use Preview): {error}' if quick else str(error)
                     if tool in body.get('search', []):
                         entry['suggestion'] = self.ik.nearest_reachable(tool, target, joints)
                 except (KeyError, ValueError, TypeError) as error:

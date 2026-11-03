@@ -25,7 +25,6 @@ const JOBS = {
 const REACH_MS = 1500;    // the live check's period while the guided screen is open
 const MOVED_M = 0.005;    // the robot moved this far since Capture (a hand, the base, a linear joint): capture again
 const MOVED_DEG = 0.5;    // or turned this far (the base, a hand's approach or closing, a revolute joint)
-const NEAR_HAND_M = 0.3;  // a hand this close to the object is on it (grasp: the hands that are taught)
 const flow = { step: 'closed', job: null, at: null, name: '', hands: [], captured: null, saved: null, checked: null,
   timer: null, asking: false };
 
@@ -169,9 +168,7 @@ async function liveCheck() {
     const { ok, data } = answer;
     flow.checked = ok ? data : { error: data.error || (data.problems || []).join('; ') || 'no answer' };
     if (ok && job === 'grasp' && !flow.handsSet) {  // the hands on the object, else the nearest one (kept from Capture)
-      const near = Object.entries(data.hands || {}).sort((a, b) => a[1] - b[1]);
-      const on = near.filter(([, m]) => m <= NEAR_HAND_M).map(([tool]) => tool);
-      flow.hands = on.length ? on : near.slice(0, 1).map(([tool]) => tool);
+      flow.hands = data.near || [];  // the server's choice (arm.near_hands): within 0.4 m, else the nearest
     }
   }
   const was = flow.captured;
@@ -381,7 +378,8 @@ function objectStep() {
   const all = [...relative, ...rest];
   const many = all.length > 6 && !flow.allObjects;
   const list = el('div', { class: 'flow-objects' }, ...(many ? all.slice(0, 6) : all).map((r, i) => {
-    const item = button('', () => chooseObject(r.instance), 'flow-object', i ? {} : { 'data-first': '' });
+    const item = button('', () => chooseObject(r.instance), 'flow-object', { ...(i ? {} : { 'data-first': '' }),
+      'aria-label': `${r.instance}, ${r.object}${r.distance != null ? `, ${r.distance} m away` : ''}` });
     item.append(el('b', { text: r.instance }), el('span', { text: r.object }),
       el('span', { class: 'flow-m', text: r.distance != null ? `${r.distance} m` : '' }));
     return item;
