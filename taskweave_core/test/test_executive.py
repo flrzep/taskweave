@@ -361,8 +361,13 @@ def test_context_kind_is_annotated_once_a_placeholder_is_filled():
 
 
 def test_a_failing_context_never_stops_the_step():
-    def boom(s):
-        raise TypeError('malformed step')
+    calls = []
+
+    def boom(s):   # fails for the look-ahead; the step itself, when it runs, annotates fine
+        calls.append(s.id)
+        if len(calls) == 1:
+            raise TypeError('malformed step')
+        return None, []
 
     ex, d, _, _ = make([step('a'), step('b', args={'k': '{k}'})], world={'k': 1})
     ex.annotate = boom
@@ -371,3 +376,11 @@ def test_a_failing_context_never_stops_the_step():
     assert ex.status.state == State.RUNNING and any('no look-ahead' in line for line in ex.status.log)
     finish(ex, d)
     assert d.contexts[-1] == {'plan_id': 'p1', 'cycle': 1, 'step_index': 1, 'ahead': []}
+
+
+def test_step_finished_keeps_carrying_kind_and_module():
+    ex, d, _, episodes = make([step('a')])
+    ex.start()
+    finish(ex, d, data={'carrying': 'frame_1', 'kind': 'hand', 'module': 'carry', 'other': 1})
+    done = [e for e in episodes if e['event'] == 'step_finished'][0]
+    assert done['data'] == {'carrying': 'frame_1', 'kind': 'hand', 'module': 'carry'}

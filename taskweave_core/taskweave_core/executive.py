@@ -33,7 +33,7 @@ from .world_state import WorldState
 # step_status while the first plan is prepared: the state is running, there is a plan id and step count, but no step
 PLANNING_STATUS = 'planning'
 
-EPISODE_DATA = ('path', 'mode', 'choice', 'plan_s', 'plan_points', 'torso')
+EPISODE_DATA = ('path', 'mode', 'choice', 'plan_s', 'plan_points', 'torso', 'carrying', 'kind', 'module')
 
 
 class Outcome(Enum):

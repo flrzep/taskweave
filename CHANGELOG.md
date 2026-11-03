@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **step_finished episodes keep `carrying`, `kind` and `module`** (`EPISODE_DATA`); **`PlanStep.notes`** (`string[]`): the
+  validation notes of the step (`Step.notes`). Rebuild `taskweave_interfaces`.
 - **RunSkill `context_json`: the skill sees what follows its step.** The executive sends `{"plan_id", "cycle",
   "step_index", "ahead": [{"id", "skill", "kind", "args", "resolved"}]}` (the rest of the cycle, placeholders filled
   from the world where possible, `resolved: false` where not); the skill server hands it to the skill as `ctx.context`
