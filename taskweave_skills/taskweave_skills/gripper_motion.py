@@ -43,7 +43,7 @@ from taskweave_core.gripper import joint_for_opening, opening_for_joint, opening
 from taskweave_core.skill import SkillResult
 
 from .collision import HoldCollision, shapes_of
-from .joints import _FingerMotion, _JointSkill, _PointMotion
+from .joints import RIDE_EXACT, _FingerMotion, _JointSkill, _PointMotion
 from .parts import RESOLVED
 
 # skills/<skill>.yaml (spec 2.2) -> the joint skill parameter names
@@ -369,10 +369,12 @@ class MoveGripper(_PointMotion):
         return at
 
     def _state_at(self, hands, current: dict, height: float, poses: dict | None = None, global_search: bool = True):
-        """(joints, problem) once the torso is at ``height``: the arms keep their joints, except hands that hold an
-        object: it goes with the torso and their arms are solved again there (joints._widen). ``poses``: the held
-        hands' TCPs at ``current`` (default: where they are now; torso_plan passes predicted ones). ``global_search``
-        False: local IK only (repeatable; torso_plan's rides)."""
+        """(joints, problem) once the torso is at ``height``: the arms keep their joints. A held object goes with the
+        torso: when the URDF chains carry the held hands with the column (the hands' FK at ``height`` with the arms
+        unchanged is the column's motion of their FK now, within RIDE_EXACT), the unchanged arms are the answer (no
+        IK: the column carries the arms, as the torso move executes); else their arms are solved again there
+        (joints._widen). ``poses``: the held hands' TCPs at ``current`` (default: where they are now; torso_plan
+        passes predicted ones). ``global_search`` False: local IK only (repeatable; torso_plan's rides)."""
         from .ik import IkError
         from .points import target_of
 
@@ -383,6 +385,10 @@ class MoveGripper(_PointMotion):
             return state, None
         column = self.ik.joint_motion(joint, current, height)
         if column is None:
+            return state, None
+        now, then = self.ik.tcps_at(held, current), self.ik.tcps_at(held, state)
+        if len(now) == len(then) == len(held) and all(
+                np.allclose(then[h], column @ now[h], atol=RIDE_EXACT) for h in held):
             return state, None
         poses = self.hold.tcp_poses(held) if poses is None else poses
         try:

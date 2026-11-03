@@ -85,10 +85,50 @@ def test_a_change_step_refines_its_height_when_it_runs(store):
     rig.done(LIVE)
     rig.look(1)
     rig.done(LIVE)
+    import taskweave_skills.torso_window as tw
+    predicted, real = [], tw.predict
+
+    def spy(skill, hold, first, ahead, base_now):
+        predicted.append((first['id'], hold['object_in_base'][2, 3]))
+        return real(skill, hold, first, ahead, base_now)
+    tw.predict = spy
+    try:
+        _, look, _ = rig.look(2)
+    finally:
+        tw.predict = real
+    # 0.3 planned, 0.4 out: 0.35 passes, 0.375 does not; one finest step of margin from it: 0.325 (checked)
+    assert look['height'] == 0.325 and look['report']['refined'] == {'from': 0.3, 'to': 0.325}
+    assert rig.carry.kept[('p1', 1, 'box_1')].plan.changes == [{'at': 'c', 'from': LIVE, 'to': 0.325}]
+    assert predicted == [('c', rig.registry.hold['object_in_base'][2, 3])]    # re-predicted from the real hold
+
+
+def test_a_refine_cut_short_by_the_budget_keeps_the_planned_height(store):
+    rig = Rig(store, refine=2)
+    rig.look(0)
+    rig.done(LIVE)
+    rig.look(1)
+    rig.done(LIVE)
+    rig.carry.ik.torso['lookahead'] = {'budget_s': 1e-9}
     _, look, _ = rig.look(2)
-    # 0.3 planned, 0.4 out: 0.35 passes, 0.375 does not; F17 keeps 0.35 (its inner neighbour was not tried)
-    assert look['height'] == 0.35 and look['report']['refined'] == {'from': 0.3, 'to': 0.35}
-    assert rig.carry.kept[('p1', 1, 'box_1')].plan.changes == [{'at': 'c', 'from': LIVE, 'to': 0.35}]
+    assert look['height'] == 0.3 and 'refined' not in look['report']
+
+
+def test_a_retry_after_a_refusal_is_refused_again_and_a_later_proof_fails_the_step(store):
+    out = lambda sid, h: 'out of reach: left target 1.40 m from its shoulder' if sid == 'c' else None   # noqa: E731
+    rig = Rig(store, bound=out)
+    refused, _, _ = rig.look(0)
+    calls = len(rig.fake.steps)
+    again, look, _ = rig.look(0)                           # on_failure retry / replan: the same step again
+    assert again.outcome == Outcome.REJECTED and again.message == refused.message and len(rig.fake.steps) == calls
+    assert look['report']['source'] == 'kept' and look['report']['certain']
+    late = Rig(store, bound=out)
+    late.fake.out = lambda sid, h: None                    # the plan at a passes; the hook goes out of reach later
+    late.look(0)
+    late.done(LIVE)
+    late.fake.out = out
+    late.state['lift'] = 0.45                              # b moved the torso before it failed: re-planned there
+    failed, look, _ = late.look(1)
+    assert failed.outcome == Outcome.FAILED and look['report']['source'] == 'replanned'
 
 
 def test_a_retry_keeps_the_plan_while_the_state_is_the_planned_one(store):
@@ -214,3 +254,28 @@ def test_a_step_out_of_reach_after_a_posture_move_still_refuses_the_first_step(s
     refused, _, _ = rig.look(0, steps)
     assert refused is not None and refused.outcome == Outcome.REJECTED and refused.data['torso_plan']['certain']
     assert 'no heights work: c' in refused.message and rig.fake.steps == [('a', LIVE), ('p', LIVE)]
+
+
+def test_a_planned_ride_keeps_the_arms_and_an_unplanned_one_solves_them_as_before():
+    """Fix round 1 I3: the executed torso move of a planned height is the ride the plan checked (arms unchanged)."""
+    from taskweave_skills.object_motion import MoveObject
+
+    def lifted(h):
+        m = np.eye(4)
+        m[2, 3] = h
+        return m
+    solved = []
+    hold = {'object': 'box_1', 'hands': ['left'], 'tcp_in_object': {'left': np.eye(4)}, 'object_in_base': np.eye(4)}
+    skill = SimpleNamespace(
+        ik=SimpleNamespace(torso={'joint': 'lift'}, joint_motion=lambda j, state, h: lifted(h - state['lift']),
+                           tcps_at=lambda tools, state: {t: lifted(state['lift']) for t in tools},
+                           solve=lambda tools, fixed, *a, **kw: solved.append(tools) or {'left_j1': 0.9}),
+        hold=SimpleNamespace(reanchor=lambda: True, held_all=lambda: [hold], hand_holds={'left': 'box_1'}),
+        _hands_moved=lambda joints: set(), _start=lambda: {'lift': 0.5, 'left_j1': 0.1},
+        p=SimpleNamespace(position_tolerance=1e-3), _arm_joints=lambda goal: [], keep_arms=True)
+    ctx = SimpleNamespace(should_stop=False)
+    goal, failure = MoveObject._widen(skill, ctx, {'lift': 0.3}, 'ride')
+    assert failure is None and goal == {'lift': 0.3} and solved == []
+    skill.keep_arms = False
+    goal, _ = MoveObject._widen(skill, ctx, {'lift': 0.3}, 'ride')
+    assert goal == {'lift': 0.3, 'left_j1': 0.9} and len(solved) == 1

@@ -211,8 +211,9 @@ class TorsoPlan:
         after it that keep its ``height``; ``state`` the joints now (the torso at ``toward``, the height before the
         change). While the grid neighbour toward ``toward`` (or the last height tried that way) is out, the step to it
         is halved (``halvings`` times); a height passes when the ride from ``state`` and every step at it pass,
-        chained. Returns (height, {step id: joints after it}) of the passing height nearest ``toward`` (at the very
-        edge of the band: its tried inner neighbour, as F17), or None (nothing better than ``height``)."""
+        chained. Returns (height, {step id: joints after it}) of the passing height nearest ``toward`` that keeps one
+        finest step of margin from a failing height (its inner neighbour, checked if not tried yet), or None: nothing
+        better than ``height``, or ``should_stop`` cut it short (so a refine never depends on time)."""
         side = 1 if toward > height else -1
         beyond = [h for h in self.grid if (h - height) * side > self.tolerance and (toward - h) * side >= 0]
         if not steps or not beyond:
@@ -243,12 +244,17 @@ class TorsoPlan:
                 out.add(h)
             else:
                 best, done[h] = h, states
-        if best == round(float(height), 6):
+        if best == round(float(height), 6) or should_stop():   # nothing better, or cut short: the planned height
             return None
-        inner = round(best - side * span, 6)
-        if round(best + side * span, 6) in out and inner in done:
+        if round(best + side * span, 6) not in out:
+            return best, done[best]
+        inner = round(best - side * span, 6)      # a failing height one finest step beyond: keep that much margin
+        if inner not in done and (side * (inner - height) > self.tolerance) and not should_stop():
+            states = run(inner)
+            done |= {inner: states} if states is not None else {}
+        if inner in done and not should_stop():
             return inner, done[inner]
-        return best, done[best]
+        return None
 
     def hopeless(self, steps: list[WindowStep], start: float, checks: Checks, name: str = '') -> Plan | None:
         """The first of ``steps`` no arm can reach at any height it may take (``checks.bound`` at every height a plan
@@ -657,13 +663,16 @@ class SkillChecks:
     ik.torso and the URDF chains), ``skill._state_at``, ``skill._walk_lines``, ``skill._ahead_check``. A step's joints
     after it: the end of its lines (mode linear), else the IK solution of its main target. Local IK only, except with
     ``rescue`` (the global search, as solve_with_torso falls back to). ``ride_sample_m``: the ride's sample spacing
-    (default: ik.torso.line_sample_m, at most half the grid's usual step, so a collision between grid heights is
-    seen)."""
+    (default: ik.torso.lookahead.ride_sample_m, at most line_sample_m and half the grid's usual step). A ride sample is
+    cheap: while the column carries the held hands the arms keep their joints (``_state_at``, no IK), so it is one
+    collision check."""
 
     def __init__(self, skill, should_stop: Callable[[], bool] = lambda: False, ride_sample_m: float | None = None,
                  world: Callable | None = None, progress: Callable | None = None):
         """``world``: a step's ``base`` (the predicted base motion) -> IkClient.at_base's value (torso_window.World),
         None: every check where the base stands now; ``progress(step)``: called before each step check."""
+        from taskweave_core.config.schemas import ROBOT_PROFILE, default
+
         from .ik import LINE_SAMPLE_M
 
         self.skill, self.ik, self.should_stop = skill, skill.ik, should_stop
@@ -672,7 +681,10 @@ class SkillChecks:
         grid = sorted({round(float(v), 6) for v in self.ik.torso.get('candidates', ())})
         gaps = [round(b - a, 6) for a, b in zip(grid, grid[1:], strict=False)]
         half = max(gaps, key=lambda g: (gaps.count(g), -g)) / 2 if gaps else math.inf    # the grid's usual step
-        self.ride_sample = ride_sample_m or min(float(self.ik.torso.get('line_sample_m', LINE_SAMPLE_M)), half)
+        dense = (self.ik.torso.get('lookahead') or {}).get(
+            'ride_sample_m', default(ROBOT_PROFILE, 'ik', 'torso', 'lookahead', 'ride_sample_m'))
+        self.ride_sample = ride_sample_m or min(float(self.ik.torso.get('line_sample_m', LINE_SAMPLE_M)), half,
+                                                float(dense))
 
     def _hands(self, step: WindowStep) -> list[str]:
         return list(step.hands) or list(self.ik.groups)
@@ -724,7 +736,7 @@ class SkillChecks:
             return Check(True, state)
         if self.progress is not None:
             self.progress(step)
-        if step.lines and not rescue:            # a straight line gets to its goal by itself, as the move will
+        if step.lines:     # a straight line gets to its goal by itself, as the move will (a rescue walks the same)
             return self._walk(step, height, state)
         band = self.band(step) if rescue else None
         samples, end = Samples(targets), {}

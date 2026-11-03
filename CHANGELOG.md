@@ -8,7 +8,9 @@
   `torso_plan` plans, `move.carry` keeps the plan for the later steps and re-plans when the state is not the planned
   one: retry, jog, start mid-plan). Only a hold no height can serve is REJECTED before moving; a plan over its time
   budget or check cap falls back to the per-step choice. New optional profile keys `ik.torso.lookahead` (`enabled`,
-  `budget_s`, `max_checks`, `torso_m`, `object_m`, `branch_rad`): deploy before a profile sets them. `data.torso_plan`
+  `budget_s`, `max_checks`, `torso_m`, `object_m`, `branch_rad`, `ride_sample_m`, `refine`): deploy before a profile
+  sets them. A torso ride while holding keeps the arms' joints when the URDF chains show the column carries the held
+  hands (no IK per sample: a cold frame_cycle plan 3-6 s instead of 16.5 s); a planned ride executes that way. `data.torso_plan`
   in the result and in step_finished episodes (`EPISODE_DATA`); `planned: true` in `data.torso`. `ctx.step_id` on the
   skill context.
 - **Predicted base poses in collision checks:** `IkClient.at_base` puts MoveIt's virtual joint into the validity

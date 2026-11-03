@@ -57,6 +57,7 @@ OBJECT_MODE = 'linear'                    # the mode of move_object whose yaml h
 HOLD_RULES = ('auto', 'all')              # hands words of the held-object skills: the hold's hands, all hands
 LOOKAHEAD = {key: default(ROBOT_PROFILE, 'ik', 'torso', 'lookahead', key)        # ik.torso.lookahead defaults
              for key in ('enabled', 'budget_s', 'max_checks', 'torso_m', 'object_m', 'branch_rad')}
+# ik.torso.lookahead.refine has no fixed default: it falls back to ik.torso.refine (F17), then REFINE
 REFINE = default(ROBOT_PROFILE, 'ik', 'torso', 'refine')                          # ik.torso.refine default
 
 
@@ -222,6 +223,11 @@ class MoveObject(_HeldMotion):
         self._look = look = {'id': sid, 'key': key, 'call': args, 'tune': tune, 'replanned': False, 'height': None}
         kept = (getattr(self, 'kept', None) or {}).get(key)
         if kept is not None and kept.covers(sid, [str(a.get('id', '')) for a in context.get('ahead') or []]):
+            if kept.plan.certain:    # proven impossible (the reach bound): a retry gets the same refusal
+                look['report'] = {**kept.plan.report(), 'source': 'kept', 'from': kept.first}
+                refused = SkillResult.rejected(kept.plan.message)
+                refused.data['torso_plan'] = look['report']
+                return refused
             height = kept.plan.heights.get(sid)
             if height is None:       # the plan ends before this step (cut short, stopped, capped): as without it
                 look['report'] = {'source': 'per step', 'why': f'the plan made at {kept.first} does not reach {sid}'}
@@ -272,7 +278,7 @@ class MoveObject(_HeldMotion):
                             max_checks=int(tune['max_checks']))
         plan = planner.plan(window.steps, float(current[spec['joint']]), current, checks,
                             name=f'the hold of {hold["object"]}', should_stop=stop)
-        if not plan.certain and window.later and not stop():     # after a posture move: the reach bound only
+        if not plan.certain and window.later:     # after a posture move: the reach bound only (no IK, no time)
             plan = planner.hopeless(window.later, float(current[spec['joint']]), checks,
                                     name=f'the hold of {hold["object"]}') or plan
         self.kept = {look['key']: Kept(plan, window, current, look['id'], source, world)}
@@ -280,8 +286,8 @@ class MoveObject(_HeldMotion):
                   **({'end': window.end} if window.end else {}), **({'until': window.cut} if window.cut else {})}
         look.update(report=report, replanned=look['replanned'] or source == 'replanned',
                     height=plan.heights.get(look['id']) if plan.ok else None)
-        if plan.certain:
-            refused = SkillResult.rejected(plan.message)
+        if plan.certain:      # before anything moved: REJECTED; a later step of the hold, things moved: FAILED
+            refused = (SkillResult.failed if source == 'replanned' else SkillResult.rejected)(plan.message)
             refused.data['torso_plan'] = report
             return refused
         return None
@@ -308,27 +314,43 @@ class MoveObject(_HeldMotion):
             return None
 
     def _refined(self, ctx, kept, sid: str, current: dict, height: float) -> float:
-        """At a change step of the kept plan (not the step that planned: its time is the budget's), F17's refine
-        between the planned height and the height before (TorsoPlan.refine, ik.torso.refine halvings) over the steps
-        that keep it; the kept plan takes the refined height for them. The height to take."""
+        """At a change step of the kept plan (not the step that planned: its time was the budget's), F17's refine
+        between the planned height and the height before (TorsoPlan.refine, ik.torso.lookahead.refine halvings, one
+        finest step of margin from a failing height) over the steps that keep it, predicted again from the real hold
+        and base (the kept window was predicted where the plan was made), within the lookahead budget (cut short:
+        the planned height). The kept plan takes the refined height for them. The height to take."""
         from .torso_plan import TorsoPlan
+        from .torso_window import predict
 
-        halvings = int(self.ik.torso.get('refine', REFINE))
+        tune = self._look['tune']
+        halvings = int(tune.get('refine', self.ik.torso.get('refine', REFINE)))
         change = next((c for c in kept.plan.changes if c['at'] == sid), None)
-        if change is None or sid == kept.first or halvings <= 0:
+        if change is None or sid == kept.first or halvings <= 0 or not callable(self.ahead):
             return height
-        ids, steps = kept.window.ids, kept.window.steps
-        k = ids.index(sid)
+        hold = self._hold(self._look['call'])
+        if isinstance(hold, SkillResult):
+            return height
+        try:
+            base_now = self._base_in_cell()
+        except LookupError:
+            return height
+        window = predict(self, hold, {'id': sid, 'label': change['at'], 'call': self._look['call']}, self.ahead(),
+                         base_now)
         later = {c['at'] for c in kept.plan.changes} - {sid}
-        run = [steps[k]]
-        for step in steps[k + 1:]:          # the steps that keep the change's height: to the next change
-            if step.id in later:
+        run = []
+        for step in window.steps:           # the steps that keep the change's height: to the next change
+            if step.id in later or step.id not in kept.plan.heights:
                 break
             run.append(step)
+        began = time.monotonic()
+
+        def stop():
+            return ctx.should_stop or time.monotonic() - began > float(tune['budget_s'])
+        world = self._world(base_now) if any(step.base is not None for step in run) else None
         planner = TorsoPlan([*self.ik.torso['candidates'], height], tolerance=self.p.position_tolerance,
                             memory=self.__dict__.setdefault('torso_memory', {}))
-        found = planner.refine(run, height, current, self._torso_checks(ctx, kept.world),
-                               float(current[self.ik.torso['joint']]), halvings, lambda: ctx.should_stop)
+        found = planner.refine(run, height, current, self._torso_checks(ctx, world, stop=stop),
+                               float(current[self.ik.torso['joint']]), halvings, stop)
         if found is None:
             return height
         better, states = found
@@ -336,9 +358,22 @@ class MoveObject(_HeldMotion):
             kept.plan.heights[step.id] = better
         kept.plan.states.update(states)
         change['to'] = round(better, 4)
+        after = [c for c in kept.plan.changes if c['at'] in later and kept.window.ids.index(c['at']) >
+                 kept.window.ids.index(sid)]
+        if after:                            # the next change now starts from the refined height
+            min(after, key=lambda c: kept.window.ids.index(c['at']))['from'] = round(better, 4)
         self._look['report'] |= {'height': round(better, 4), 'refined': {'from': round(height, 4),
                                                                          'to': round(better, 4)}}
         return better
+
+    def _ride(self, ctx, chosen, label: str, planner: str, planned: bool):
+        """_set_torso; a planned height rides as its plan checked it: the arms keep their joints while the column
+        carries the held hands (``keep_arms``, joints._widen), not re-solved by IK."""
+        self.keep_arms = planned
+        try:
+            return self._set_torso(ctx, chosen, label, planner)
+        finally:
+            self.keep_arms = False
 
     def _planned_choice(self, ctx, search):
         """(choice, planned) of a held leg: at the planned height when there is one, checked here (``search(h)``);
@@ -548,7 +583,7 @@ class MoveObject(_HeldMotion):
             self.torso_reports.append({'leg': label, **chosen.report(), **({'planned': True} if planned else {})})
         if mode == 'linear':
             if chosen is not None:     # set the height first, the line keeps it; the object moved with the lift
-                result = self._set_torso(ctx, chosen, label, planner)
+                result = self._ride(ctx, chosen, label, planner, planned)
                 failed = self._follow_holds([hold], label)
                 if result is not None or failed is not None:
                     return result or failed
@@ -632,7 +667,7 @@ class MoveObject(_HeldMotion):
             if isinstance(chosen, SkillResult):
                 return chosen
             self.torso_reports.append({'leg': label, **chosen.report(), **({'planned': True} if planned else {})})
-            result = self._set_torso(ctx, chosen, label, planner)
+            result = self._ride(ctx, chosen, label, planner, planned)
             failed = self._follow_holds([hold], label)
             if result is not None or failed is not None:
                 return result or failed

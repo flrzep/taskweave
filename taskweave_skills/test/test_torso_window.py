@@ -144,3 +144,25 @@ def test_world_moves_the_virtual_joint_with_the_base():
     world = World('j', model_base @ np.linalg.inv(offset), model_base)
     assert close(world(moved)[1] @ offset, model_base @ moved, 1e-9)
     assert close(flat(base_matrix(Pose2D(1.0, 2.0, 0.5))), planar(1.0, 2.0, 0.5), 1e-9)
+
+
+def test_at_base_puts_the_base_into_validity_and_turns_off_ik_collisions_and_the_stay_shortcut():
+    """Fix round 1 M10: the request wiring the predicted-base collision check rests on."""
+    pytest.importorskip('moveit_msgs')
+    from moveit_msgs.msg import RobotState
+    from moveit_msgs.srv import GetPositionIK
+
+    from taskweave_skills.ik import IkClient
+    ik = IkClient.__new__(IkClient)
+    ik.Request, ik.avoid_collisions, ik.frame = GetPositionIK.Request, True, 'base_link'
+    ik.tools, ik.choose = {'left': {'link': 'left_link7'}}, None
+    pose = np.eye(4)
+    assert ik._request('left', 'left_arm', pose, 0.1).ik_request.avoid_collisions
+    there = planar(1.0, 2.0, 0.5)
+    key_here = ik._memo_key({'left': {}}, {}, {'lift': 0.3}, False, None)
+    with ik.at_base(('world_joint', there)):
+        assert not ik._request('left', 'left_arm', pose, 0.1).ik_request.avoid_collisions
+        state = ik._with_world(RobotState(is_diff=True)).multi_dof_joint_state
+        assert list(state.joint_names) == ['world_joint'] and state.transforms[0].translation.y == 2.0
+        assert ik._memo_key({'left': {}}, {}, {'lift': 0.3}, False, None) != key_here
+    assert ik.world is None and not ik._with_world(RobotState(is_diff=True)).multi_dof_joint_state.joint_names

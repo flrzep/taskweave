@@ -122,7 +122,9 @@ def predict(skill, hold: dict, first: dict, ahead: list, base_now: np.ndarray | 
                 break
             step, obj = found
         else:
-            window.end = f'{sid}: not a move of {hold["object"]}'
+            window.end = f'{sid}: ' + (f'a move of {item["carrying"]}, not of {hold["object"]}'
+                                       if item['part'] == 'carry' and item['carrying'] != hold['object'] else
+                                       f'a {item["part"]} move of {len(item["calls"])} calls')
             break
         (window.later if window.cut else window.steps).append(step)
         if item['part'] == 'posture' and not window.cut:
@@ -179,8 +181,9 @@ def _carry(skill, hold: dict, sid: str, label: str, call: dict, base_now, moved,
     goals = [{hand: pose @ grips[hand] for hand in hands} for pose in poses]
     tools = [{hand: target_of(goal) for hand, goal in leg.items()} for leg in goals]
     lines = goals if m.get('mode', OBJECT_MODE) == 'linear' else []
+    there = None if base_now is None else flat(base_now if moved is None else base_now @ moved)   # in the cell
     key = json.dumps(_rounded([tools, torso, fixed, ahead, m.get('elbow'), bool(lines),
-                               None if moved is None else moved[:3, :].tolist()]), sort_keys=True, default=str)
+                               None if there is None else there[:2, :].tolist()]), sort_keys=True, default=str)
     step = WindowStep(sid, label, torso=torso, why=why, certain=certain, key=key, hands=tuple(hands),
                       targets=[tools[-1], *tools[:-1]], lines=lines, ahead=ahead, elbow=m.get('elbow'), fixed=fixed,
                       base=moved)

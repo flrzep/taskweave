@@ -34,6 +34,8 @@ from taskweave_core.skill import Skill, SkillResult
 
 from .parts import RESOLVED, in_move
 
+RIDE_EXACT = 1e-6         # FK check that the column carries the held hands unchanged (numerical tolerance, m / rot)
+
 SWING_STRAIGHT_STEPS = 20  # samples of the eased straight move that follows an elbow swing (_swing_first)
 
 
@@ -502,6 +504,13 @@ class _PoseMotion(_JointSkill):
         column = self.ik.joint_motion(torso, start, goal[torso])
         if column is None:
             return goal, None
+        hands = list(self.hold.hand_holds)
+        if getattr(self, 'keep_arms', False):     # a planned ride (torso look-ahead): the arms keep their joints when
+            now, then = self.ik.tcps_at(hands, start), self.ik.tcps_at(hands, {**start, torso: goal[torso]})
+            if len(now) == len(then) == len(hands) and all(     # the column carries the held hands (chains)
+                    np.allclose(then[h], column @ now[h], atol=RIDE_EXACT) for h in hands):
+                self.drift_hands = tuple(hands) if len(hands) > 1 else ()
+                return goal, None
         tools = {hand: target_of(column @ hold['object_in_base'] @ grip) for hold in holds
                  for hand, grip in hold['tcp_in_object'].items()}
         try:
