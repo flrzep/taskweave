@@ -110,7 +110,7 @@ function carrying(step, event) {
 }
 // The torso line of a step (the side card, the phone's sheet): from the look-ahead's report (data.torso_plan of a
 // finished carry step: TorsoPlan.report() in taskweave_skills torso_plan.py) whose window holds the step, and the
-// height the step ran at (data.torso). Planned: "Torso 0.35 m · planned change at this step (from 0.494)" or
+// height the step ran at (data.torso, its last leg). Planned: "Torso 0.35 m · planned change at this step (from 0.494)" or
 // "Torso 0.494 m · kept (plan)"; cut, capped or stopped: "chosen per step"; infeasible and certain: its message, red.
 // A step that ran a planned change on a state that differed says "replanned". null: no report covers the step.
 const metres = (v) => `${+Number(v).toFixed(3)} m`;
@@ -119,7 +119,10 @@ function torsoLine(step, events) {
   const own = events?.[step.id]?.data;
   const plan = own?.torso_plan?.window?.includes(step.id) ? own.torso_plan : reports.at(-1);
   if (!plan) return null;
-  const height = own?.torso ?? plan.heights?.[step.id];
+  // data.torso: the step's per-leg torso reports [{leg, height, ...}] (object_motion, gripper_motion): the last leg's
+  // height; a plain number kept for safety; else the plan's height for the step
+  const ran = Array.isArray(own?.torso) ? own.torso.at(-1)?.height : own?.torso;
+  const height = ran ?? plan.heights?.[step.id];
   const at = height != null ? `Torso ${metres(height)}` : 'Torso';
   const replanned = own?.torso_plan?.source === 'replanned'
     ? ` · replanned${own.torso_plan.message ? `: ${own.torso_plan.message}` : ''}` : '';
