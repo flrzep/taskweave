@@ -1,60 +1,47 @@
-/* taskweave HMI, P3 look ("steel and signal", see DESIGN.md): the P3 brand blue for brand and action, cool steel
-   neutrals, state colours that carry meaning and nothing else. The run status reads like an andon board: the state
-   as a solid badge and a rail in its colour. Barlow (a signage face) with tabular figures; system fonts if it cannot
-   load (no internet on the cell network). Components use the tokens below, never raw values. */
+/* taskweave HMI: the P3 technical look (see DESIGN.md). A navy ground with a faint blueprint grid, electric blue
+   for action only, and state colours that mean one thing each, like a stack light: lime runs, amber waits or asks for
+   a look, coral stopped on a fault. Montserrat for words, JetBrains Mono for ids and values; system fonts if the cell
+   network has no internet. One theme, dark, so there is one theme to keep right. Components use the tokens below,
+   never raw values. */
 :root {
-  /* neutrals: page, card, inset field, hover; borders (hairline, and strong for fields and buttons at 3:1) */
-  --surface-page: #edf0f4; --surface-card: #ffffff; --surface-field: #f4f6f9; --surface-hover: #e6e9f0;
-  --border: #d5d9e2; --border-strong: #8d93a6;
-  --text: #0d1026; --text-muted: #545a70;
-  /* brand: fill for primary buttons, text for links, selected tabs and markers */
-  --brand: #0000ff; --brand-hover: #0000c4; --brand-edge: #0000ff; --brand-text: #0000ff; --brand-soft: #e8e8ff;
-  --on-brand: #ffffff; --logo: #0000ff;
-  /* states, one colour each, as text on surfaces and as solid fills with --on-fill on top (a stack light): --run green
-     while it runs (also planning, a manual skill), --warn amber paused or to look at, --bad red stopped on a fault;
-     --done neutral, finished as planned; --idle grey. --ok (the same green) for "healthy": the live link, a save.
-     Running is a vivid yellow-green: --run-fill for fills, rails, lights and bars (--on-run on it), --run the darker
-     shade for text and thin rings (4.5:1 and up) */
-  --run-fill: #7ccf00; --on-run: #142400;
-  --run: #3f7d00; --ok: #0a7a4a; --warn: #9a5200; --bad: #c0112d; --done: #2e3447; --idle: #5c6177; --on-fill: #ffffff;
+  color-scheme: dark;
+  /* ground: the page, the panels (cards, rail, strip), inset fields, hover; borders (hairline, and strong at 3:1) */
+  --surface-page: #03031c; --surface-card: #07072e; --surface-field: #0b0b3d; --surface-hover: #11114a;
+  --border: #1c1d5a; --border-strong: #5b5f9e;
+  --text: #e9ebf5; --text-muted: #9a9ec8;
+  --grid: rgb(120 130 255 / 5%);  /* the blueprint grid on the ground */
+  /* action: electric blue as a fill (white on it), a lighter blue as text, links, selected tabs and markers */
+  --brand: #3d3dff; --brand-hover: #5a5aff; --brand-edge: #6b6bff; --brand-text: #9b9bff; --brand-soft: #16164f;
+  --on-brand: #ffffff; --logo: #ffffff;
+  /* states, one colour each, as text on panels and as solid fills with --on-fill on top (a stack light): lime while
+     it runs (also planning, a manual skill; --run-fill with --on-run on it), amber paused or to look at, coral stopped
+     on a fault; --done neutral, finished as planned; --idle grey. --ok (lime) for "healthy": the live link, a save */
+  --run-fill: #dbff55; --on-run: #141a00;
+  --run: #dbff55; --ok: #dbff55; --warn: #ffc95c; --bad: #ff7f6a; --done: #c5c9e6; --idle: #9a9ec8; --on-fill: #03031c;
   /* skills in the plan graph: categorical, not states */
-  --kind-drive: #1f3dff; --kind-arm: #8a2be2; --kind-grip: #e0620d; --kind-wait: #8a8ea8; --kind-other: #0f9488;
-  /* the 3D view stays dark in both themes, like a viewport */
-  --viewer-bg: #161a2a; --viewer-line: #2a3048; --viewer-ink: #e9ebf5; --viewer-tools: rgb(10 12 22 / 78%);
+  --kind-drive: #7a8cff; --kind-arm: #b394ff; --kind-grip: #ff9a4d; --kind-wait: #8a8ea8; --kind-other: #2dd4bf;
+  /* the 3D view: the ground's navy, like a viewport */
+  --viewer-bg: #03031c; --viewer-line: #1c1d5a; --viewer-ink: #e9ebf5; --viewer-tools: rgb(7 7 46 / 82%);
 
-  --mono: ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
-  --sans: "Barlow", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --cond: "Barlow Semi Condensed", "Barlow", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
+  --sans: "Montserrat", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --cond: var(--sans);  /* one family: where a narrow face was used, Montserrat at the same weight */
   --fs-xs: 12px; --fs-sm: 13px; --fs-s: 14px; --fs-base: 16px; --fs-md: 18px; --fs-lg: 20px; --fs-xl: 24px; --fs-2xl: 30px;
   --fs-3xl: 36px; --fs-4xl: 60px;  /* the Run tab's run board, read from a few metres */
 
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-12: 48px;
-  --r-xs: 3px; --r-s: 6px; --r-m: 10px; --r-pill: 999px;
-  --shadow-1: 0 1px 2px rgb(13 16 38 / 6%), 0 1px 3px rgb(13 16 38 / 4%);
-  --shadow-2: 0 2px 10px rgb(13 16 38 / 10%);
-  --focus: color-mix(in srgb, var(--brand-text) 55%, transparent);
+  /* two radii: controls and panels; pills for chips and bars */
+  --r-xs: 2px; --r-s: 4px; --r-m: 8px; --r-pill: 999px;
+  --shadow-1: none; --shadow-2: 0 6px 28px rgb(0 0 12 / 55%);  /* borders carry the edges; a shadow only under what floats */
+  --focus: color-mix(in srgb, var(--brand-text) 60%, transparent);
   /* touch targets: --tap for main buttons, --tap-s for small and icon buttons (44 on touch screens) */
   --tap: 48px; --tap-s: 36px; --tap-min: 44px;
   --content: 760px;
   --rail: 92px;  /* the section rail; on a phone the bottom nav is --nav high */
   --nav: 60px;
-  /* a number field's ▲ ▼ (an image cannot take currentColor: the --text-muted value, per theme) */
-  --spin-arrows: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='16' viewBox='0 0 10 16'%3E%3Cpath d='M5 1 9.5 6.5h-9zM5 15 .5 9.5h9z' fill='%23545a70'/%3E%3C/svg%3E");
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --surface-page: #0b0d17; --surface-card: #141827; --surface-field: #0f121f; --surface-hover: #1d2236;
-    --border: #272c42; --border-strong: #5d6485;
-    --text: #e9ebf5; --text-muted: #a3a8bf;
-    --brand: #3d3dff; --brand-hover: #5252ff; --brand-edge: #6b6bff; --brand-text: #9494ff; --brand-soft: #1d1f4d;
-    --on-brand: #ffffff; --logo: #ffffff;
-    --run-fill: #93e02a; --on-run: #0f1a00;
-    --run: #a6e85a; --ok: #45c98f; --warn: #f2a64f; --bad: #ff7385; --done: #c9cddb; --idle: #8e93ab; --on-fill: #0b0d17;
-    --kind-drive: #7a8cff; --kind-arm: #b57bff; --kind-grip: #ff9a4d; --kind-wait: #8a8ea8; --kind-other: #2dd4bf;
-    --viewer-bg: #080a12; --viewer-line: #252a3e;
-    --shadow-1: none; --shadow-2: 0 2px 12px rgb(0 0 0 / 45%);
-    --spin-arrows: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='16' viewBox='0 0 10 16'%3E%3Cpath d='M5 1 9.5 6.5h-9zM5 15 .5 9.5h9z' fill='%23a3a8bf'/%3E%3C/svg%3E");
-  }
+  --strip: 52px;  /* the system strip */
+  /* a number field's ▲ ▼ (an image cannot take currentColor: the --text-muted value) */
+  --spin-arrows: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='16' viewBox='0 0 10 16'%3E%3Cpath d='M5 1 9.5 6.5h-9zM5 15 .5 9.5h9z' fill='%239a9ec8'/%3E%3C/svg%3E");
 }
 @media (pointer: coarse), (max-width: 600px) { :root { --tap-s: 44px; } }
 
@@ -64,7 +51,13 @@
 /* clip, not hidden: overflow hidden on both makes body a scroll container that never scrolls, and the sticky top bar
    and Save bar then scrolled away with the page */
 html, body { max-width: 100%; overflow-x: clip; }
-body { margin: 0; background: var(--surface-page); color: var(--text); font: var(--fs-base)/1.5 var(--sans);
+/* the ground: navy with a faint blueprint grid and a blue glow at the top right; the panels sit solid on it */
+html { background: radial-gradient(1100px 560px at 88% -8%, rgb(0 0 255 / 18%), transparent 60%),
+                   radial-gradient(900px 500px at -8% 108%, rgb(101 68 254 / 12%), transparent 60%),
+                   linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+                   var(--surface-page);
+       background-size: auto, auto, 32px 32px, 32px 32px, auto; background-attachment: fixed; }
+body { margin: 0; background: none; color: var(--text); font: var(--fs-base)/1.5 var(--sans);
        font-variant-numeric: tabular-nums; padding-bottom: env(safe-area-inset-bottom, 0); -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font-family: inherit; }
 :is(button, select, input, textarea, summary, a):focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -74,7 +67,8 @@ button, input, select, textarea { font-family: inherit; }
    of the page. At 600px and below the rail is the bottom nav (fixed) and the page takes the whole width */
 body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); align-items: start; }
 .shell { min-width: 0; }
-.top { position: sticky; top: 0; z-index: 3; background: var(--surface-card); box-shadow: var(--shadow-2); }
+.top { position: sticky; top: 0; z-index: 3; background: color-mix(in srgb, var(--surface-card) 88%, transparent);
+       backdrop-filter: blur(10px); }
 .rail { position: sticky; top: 0; height: 100vh; height: 100dvh; z-index: 4; display: flex; flex-direction: column;
         gap: var(--sp-1); padding: calc(var(--sp-4) + env(safe-area-inset-top, 0px)) 10px var(--sp-4);
         background: var(--surface-card); border-right: 1px solid var(--border); overflow-y: auto; scrollbar-width: none; }
@@ -88,8 +82,6 @@ body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); align-i
 .tabs button:hover { color: var(--text); background: var(--surface-hover); }
 .tabs button[aria-current="page"] { color: var(--brand-text); background: var(--brand-soft); }
 .rail-icon { width: 22px; height: 22px; flex: none; }
-.rail-robot { margin-top: auto; padding-top: var(--sp-3); text-align: center; font-size: var(--fs-xs); color: var(--text-muted);
-              overflow-wrap: anywhere; }
 .conn { width: 12px; height: 12px; border-radius: 50%; background: var(--bad); flex: none;
         box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); }
 .conn.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
@@ -97,7 +89,7 @@ body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); align-i
   body { display: block; padding-bottom: calc(var(--nav) + env(safe-area-inset-bottom, 0px)); }
   .rail { position: fixed; inset: auto 0 0 0; height: auto; flex-direction: row; padding: 0 0 env(safe-area-inset-bottom, 0px);
           border-right: 0; border-top: 1px solid var(--border); overflow: visible; }
-  .rail-brand, .rail-robot { display: none; }
+  .rail-brand { display: none; }
   .tabs { flex: 1; flex-direction: row; gap: 0; }
   .tabs button { flex: 1 1 0; min-width: 0; min-height: var(--nav); padding: 6px 2px; border-radius: 0; font-size: var(--fs-xs); }
   .tabs button[aria-current="page"] { background: none; box-shadow: inset 0 3px 0 var(--brand-text); }
@@ -105,64 +97,52 @@ body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); align-i
   .tabs button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
-/* status bar (the mission bar): the mission on every tab, at the top of the page. The andon look of the old status card made compact: a rail
-   and a solid badge in the state colour (paused: a striped rail), a light tint while a mission is active. Active:
-   badge, goal over "step n/N" and the instruction (one line each, ellipsis) over a thin progress bar of the step, and
-   Pause / Abort; idle: badge, picker, Start. On a phone: badge, step n/N, Pause, Abort in one row, the instruction
-   under it, no goal; idle: badge, picker, Start */
-.mission { --state: var(--idle); position: relative; display: grid; gap: var(--sp-2); min-height: 76px; align-content: center;
-           padding: calc(var(--sp-3) + env(safe-area-inset-top, 0px)) var(--sp-6) var(--sp-3) calc(var(--sp-6) + 4px);
-           border-bottom: 1px solid var(--border); transition: background .4s; }
-.mission::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--state); transition: background .4s; }
+/* the system strip (#mission): one thin bar on every tab. The link dot with the robot's name, the state badge, the
+   mission while one is active (goal, step n/N, the instruction on one line; the step's progress as a line along the
+   strip's bottom edge), the resources the step holds (base, hands, torso: lit while locked), Speed and the pad mode.
+   Mission control (the picker, Start, Pause, Abort) is on the Run tab's board, and on the Run tab the strip keeps no
+   mission words either (the board says them). Under the strip, small: Start's answer and the last error */
+.mission { --state: var(--idle); position: relative; display: grid; gap: var(--sp-2); min-height: var(--strip); align-content: center;
+           padding: calc(var(--sp-2) + env(safe-area-inset-top, 0px)) var(--sp-5) var(--sp-2);
+           border-bottom: 1px solid var(--border); }
 .mission:has(#state.running) { --state: var(--run-fill); }
 .mission:has(#state.paused) { --state: var(--warn); }
-.mission:has(#state.paused)::before { background: repeating-linear-gradient(-45deg, var(--warn) 0 6px,
-                                      color-mix(in srgb, var(--warn) 35%, var(--surface-card)) 6px 12px); }
 .mission:has(#state.succeeded) { --state: var(--done); }
 .mission:has(#state.failed), .mission:has(#state.aborted) { --state: var(--bad); }
-.mission.active { background: color-mix(in srgb, var(--state) 5%, var(--surface-card)); }
-.mission-row { display: grid; align-items: center; gap: var(--sp-1) var(--sp-3);
-               grid-template-columns: auto minmax(0, 520px) auto minmax(0, 1fr) auto auto;
-               grid-template-areas: "state pick start . speed sys"; }
-.mission.active .mission-row { grid-template-columns: auto auto minmax(0, 1fr) auto auto auto;
-                               grid-template-areas: "state goal goal speed ctrl sys" "state meta step speed ctrl sys"
-                                                    "state prog prog speed ctrl sys"; }
-.sys { grid-area: sys; display: flex; align-items: center; gap: var(--sp-3); padding-left: var(--sp-2); }
-.mission #state { grid-area: state; justify-content: center; min-width: 9.5ch; font: 700 var(--fs-s)/1 var(--cond); text-transform: uppercase;
-                 letter-spacing: .07em; padding: 7px 10px; border-radius: var(--r-s); background: var(--fill); color: var(--ink); }
+.mission-row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; min-height: var(--tap-s); }
+.strip-robot { display: flex; align-items: center; gap: var(--sp-2); flex: none; font: 600 var(--fs-s) var(--sans); white-space: nowrap; }
+.mission #state { flex: none; justify-content: center; min-width: 9ch; font: 700 var(--fs-sm)/1 var(--sans); text-transform: uppercase;
+                  letter-spacing: .08em; padding: 7px 10px; border-radius: var(--r-s); background: var(--fill); color: var(--ink); }
 .mission #state::before { display: none; }
-.mission-run, .mission-start { display: contents; }
-.mission-goal { grid-area: goal; display: flex; align-items: baseline; gap: var(--sp-3); min-width: 0; }
-.mission-goal b { font: 600 var(--fs-md)/1.25 var(--cond); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mission-goal .mono { margin-left: auto; flex: none; white-space: nowrap; }
-.mission-meta { grid-area: meta; font: 600 var(--fs-base) var(--cond); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mission-step { grid-area: step; display: flex; align-items: baseline; gap: var(--sp-3); min-width: 0; }
-#step-instruction { flex: 0 1 auto; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mission-run { display: flex; align-items: baseline; gap: var(--sp-3); flex: 1 1 auto; min-width: 0; }
+.mission-goal { display: contents; }
+.mission-goal b { flex: 0 1 auto; min-width: 0; font: 600 var(--fs-s) var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mission-goal .mono { flex: none; white-space: nowrap; }
+.mission-meta { flex: none; font: 600 var(--fs-sm) var(--mono); white-space: nowrap; }
+.mission-step { flex: 1 1 auto; display: flex; align-items: baseline; gap: var(--sp-3); min-width: 0; }
+#step-instruction { flex: 0 1 auto; min-width: 0; font-size: var(--fs-s); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #step-detail { flex: none; margin-left: auto; white-space: nowrap; }
-.mission .progress { grid-area: prog; height: 4px; margin-top: 2px; }
-#mission-select { grid-area: pick; min-height: var(--tap-s); padding-block: 4px; }
-#btn-start { grid-area: start; }
-.mission-controls { grid-area: ctrl; display: flex; gap: var(--sp-2); }
+/* the step's progress: a line along the strip's bottom edge, in the state colour */
+.mission .progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; border-radius: 0; background: none; }
+.mission .progress #progress-bar { background: var(--state); }
+.resources { display: flex; gap: var(--sp-1); margin-left: auto; flex: none; }
+.resources span { font: 600 var(--fs-xs)/1 var(--mono); letter-spacing: .04em; padding: 6px 8px; border-radius: var(--r-s);
+                  border: 1px solid var(--border); color: var(--text-muted); transition: background .2s, color .2s; }
+.resources span.on { color: var(--on-run); background: var(--run-fill); border-color: var(--run-fill); }
+.sys { display: flex; align-items: center; gap: var(--sp-3); flex: none; }
 .mission.active #start-msg { display: none; }  /* Start's answer is for idle; it can arrive after the run's status */
 .mission .msg, .mission .error { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); }
 .mission .error { display: flex; align-items: flex-start; gap: var(--sp-2); }
 #last-error-text { flex: 1; min-width: 0; align-self: center; }
 #last-error-close { width: 28px; height: 28px; border: 0; background: none; color: var(--text-muted); }
-@media (min-width: 601px) and (max-width: 1000px) {  /* a tablet: the controls in the first row, the step under them */
-  .mission.active .mission-row { grid-template-columns: auto minmax(0, 1fr) auto auto auto;
-                                 grid-template-areas: "state meta speed ctrl sys" "step step step step step" "prog prog prog prog prog"; }
-  .mission-goal { display: none; }
-}
+body.on-run .mission-run, body.on-run .mission .error { display: none; }  /* the board says it */
 @media (max-width: 1000px) { .sys .chip.pad:not(.jog) { display: none; } }  /* the pad mode only while it jogs an arm */
 @media (max-width: 600px) {
-  .mission { min-height: 0; padding: calc(var(--sp-2) + env(safe-area-inset-top, 0px)) var(--sp-3) var(--sp-2) calc(var(--sp-3) + 4px); }
-  .mission-row { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "state . speed sys" "pick pick pick start"; }
-  .mission.active .mission-row { grid-template-columns: auto minmax(0, 1fr) auto auto;
-                                 grid-template-areas: "state meta speed sys" "step step step step" "prog prog prog prog"
-                                                      "ctrl ctrl ctrl ctrl"; }
-  .mission-goal, #step-detail { display: none; }
+  .mission { padding: calc(var(--sp-2) + env(safe-area-inset-top, 0px)) var(--sp-3) var(--sp-2); }
+  .mission-row { flex-wrap: wrap; gap: var(--sp-2); }
+  .mission-run { order: 9; flex-basis: 100%; }  /* the step on its own row */
+  .mission-goal b, #step-detail, .resources { display: none; }
   .mission #state { min-width: 0; }
-  .mission-controls .btn { flex: 1; padding: 0 var(--sp-3); white-space: normal; line-height: 1.15; }
 }
 /* run board: a little robot walks the mission (Run tab). Its floor is the phases (the plan graph's bands, as wide as
    their steps, the done part filled); it stands where the run is (--p from app.js) and its pose is the state: walking
@@ -171,17 +151,23 @@ body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); align-i
    colour. Above it a bubble (its tail over the robot) says what it does and holds the next move as one button. On the
    Run tab the bar above keeps only the badge and the controls, so the words are not shown twice. */
 .board { --state: var(--idle); --bot-h: 150px; --bot-w: calc(var(--bot-h) * 2 / 3); --p: 0;
-         --bot: #dfe2e9; --bot-2: #c2c7d2; --bot-ink: #1e212b; --bot-eye: #e6fbff; gap: var(--sp-3); padding: var(--sp-4) var(--sp-6) var(--sp-4);
+         --bot: #6b7387; --bot-2: #545b6d; --bot-ink: #0d0f15; --bot-eye: #e6fbff; gap: var(--sp-3); padding: var(--sp-4) var(--sp-6) var(--sp-4);
          background: color-mix(in srgb, var(--state) 6%, var(--surface-card)); transition: background .4s; }
 .board.state-running, .board.state-planning { --state: var(--run-fill); }
 .board.state-paused { --state: var(--warn); }
 .board.state-succeeded { --state: var(--done); }
 .board.state-failed, .board.state-aborted { --state: var(--bad); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .board { --bot: #6b7387; --bot-2: #545b6d; --bot-ink: #0d0f15; } }
-:root[data-theme="dark"] .board { --bot: #6b7387; --bot-2: #545b6d; --bot-ink: #0d0f15; }
-.board-head { display: flex; align-items: baseline; gap: var(--sp-4); min-width: 0; }
-.board-goal { min-width: 0; font: 600 var(--fs-lg)/1.25 var(--cond); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.board-cycle { margin-left: auto; flex: none; font: 700 var(--fs-lg)/1 var(--cond); color: var(--text-muted); }
+/* the head: the goal and the cycle; idle, the mission picker in the goal's place; active, Pause and Abort at the right
+   (48px: gloves). The bubble's button is the one way on (Start, Resume, Retry: board-act); #btn-start is its wire */
+.board-head { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; flex-wrap: wrap; }
+.board-goal { flex: 1 1 0; min-width: 120px; font: 600 var(--fs-lg)/1.25 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-cycle { flex: none; font: 700 var(--fs-lg)/1 var(--sans); color: var(--text-muted); }
+.board-head #mission-start { display: flex; flex: 1 1 240px; min-width: 0; }
+.board-head:has(#mission-start:not([hidden])) #board-goal { display: none; }
+#btn-start { display: none; }
+#mission-select { flex: 1; min-width: 0; min-height: var(--tap); font-weight: 600; }
+.board-head .mission-controls { display: flex; gap: var(--sp-2); margin-left: auto; }
+.board-head .mission-controls .btn { min-height: var(--tap); padding: 0 var(--sp-5); white-space: nowrap; }
 
 /* the bubble: the step count big, what the robot does, the next move; its tail points down at the robot */
 /* one height whatever it says (the count, two lines of instruction and one of detail; with an error one line and two):
@@ -196,7 +182,7 @@ body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); align-i
   background: color-mix(in srgb, var(--state) 45%, var(--border)); clip-path: polygon(0 0, 100% 0, 50% 100%);
   transition: left 1.2s ease, background .4s; }
 .board-count { display: flex; align-items: baseline; gap: var(--sp-1); white-space: nowrap; }
-#board-step { font: 700 var(--fs-4xl)/.9 var(--cond); font-variant-numeric: tabular-nums; }
+#board-step { font: 700 var(--fs-4xl)/.9 var(--sans); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .board-of { font: 600 var(--fs-2xl)/1 var(--cond); color: var(--text-muted); }
 .board-instruction { font: 500 var(--fs-xl)/1.3 var(--sans); display: -webkit-box; -webkit-box-orient: vertical;
   -webkit-line-clamp: 2; overflow: hidden; }
@@ -300,13 +286,11 @@ body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); align-i
 .board-phases .name b { flex: none; margin-left: auto; font: 600 var(--fs-s) var(--cond); color: var(--text); }
 .board-phases li.now .name { color: var(--text); font-weight: 600; }
 .board-phases.single .name { display: none; }
-body.on-run .mission.active .mission-goal, body.on-run .mission.active .mission-step,
-body.on-run .mission.active .mission-meta, body.on-run .mission.active .progress, body.on-run .mission .error { display: none; }
-body.on-run .mission.active .mission-row { grid-template-columns: auto minmax(0, 1fr) auto auto auto;
-                                          grid-template-areas: "state . speed ctrl sys"; }
 @media (max-width: 600px) {
   .board { --bot-h: 96px; padding: var(--sp-3) var(--sp-4); }
   .board-goal { font-size: var(--fs-md); }
+  .board-head .mission-controls { margin-left: 0; flex: 1 1 100%; }
+  .board-head .mission-controls .btn { flex: 1; padding: 0 var(--sp-3); }
   .board-say { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; height: 200px;
                padding: var(--sp-3) var(--sp-4); gap: var(--sp-2) var(--sp-3); }
   .board-say:not(:has(.board-act:not([hidden]))) { grid-template-rows: minmax(0, 1fr); }
@@ -725,7 +709,7 @@ li.empty { list-style: none; padding: 6px 2px; }
 .teach-list { display: grid; gap: var(--sp-3); min-width: 0; }
 @media (min-width: 601px) { .teach-list { gap: var(--sp-4); } }
 .teach-hero { display: flex; align-items: center; justify-content: center; gap: var(--sp-3); min-height: 72px;
-  border: 0; border-radius: 16px; background: var(--brand); color: var(--on-brand); cursor: pointer;
+  border: 0; border-radius: var(--r-m); background: var(--brand); color: var(--on-brand); cursor: pointer;
   font: 700 26px/1 var(--sans); letter-spacing: .01em; box-shadow: var(--shadow-2); }
 .teach-hero svg { width: 30px; height: 30px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; }
 .teach-hero:hover { background: var(--brand-hover); }
@@ -744,7 +728,7 @@ li.empty { list-style: none; padding: 6px 2px; }
 .job-icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .flow-jobs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
 .flow-job { display: grid; justify-items: start; align-content: start; gap: 6px; min-height: 148px; padding: var(--sp-4);
-  text-align: left; border: 1.5px solid var(--border); border-radius: 16px; background: var(--surface-card);
+  text-align: left; border: 1.5px solid var(--border); border-radius: var(--r-m); background: var(--surface-card);
   color: var(--text); cursor: pointer; transition: border-color .15s, transform .15s; }
 .flow-job .job-icon { color: var(--brand-text); margin-bottom: var(--sp-2); }
 .flow-job b { font: 700 22px/1.1 var(--sans); }
@@ -881,8 +865,7 @@ li.empty { list-style: none; padding: 6px 2px; }
    the way travelled (solid), the step running (flowing lime) and the way ahead (dotted). The graph's own colours are
    the --g-* tokens. */
 .graph-box { display: grid; gap: var(--sp-3); container: plan / inline-size;
-  --g-fail: #e5566b; --g-warn: #d17a12; --g-ok: var(--ok); --g-bad: var(--bad); --g-card: var(--surface-card); }
-@media (prefers-color-scheme: dark) { .graph-box { --g-fail: #ff7385; --g-warn: var(--warn); } }
+  --g-fail: var(--bad); --g-warn: var(--warn); --g-ok: var(--ok); --g-bad: var(--bad); --g-card: var(--surface-card); }
 @media (max-width: 600px) { .graph-box { container-type: normal; } }  /* no containment: the sheet is fixed to the screen */
 .kind-drive { --k: var(--kind-drive); } .kind-arm { --k: var(--kind-arm); } .kind-grip { --k: var(--kind-grip); }
 .kind-wait { --k: var(--kind-wait); } .kind-other { --k: var(--kind-other); }
@@ -1016,7 +999,7 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-sheet { position: fixed; left: 0; right: 0; bottom: calc(var(--nav) + env(safe-area-inset-bottom, 0px)); z-index: 4; display: grid; gap: var(--sp-4);
   max-height: max(160px, calc(100dvh - var(--top-h, 76px) - var(--nav) - var(--sp-6))); overflow-y: auto; overscroll-behavior: contain;
   padding: 10px var(--sp-5) var(--sp-5); background: var(--surface-card);
-  border-radius: 20px 20px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / 18%); border-top: 1px solid var(--border); }
+  border-radius: 12px 12px 0 0; box-shadow: var(--shadow-2); border-top: 1px solid var(--border); }
 /* the scrim: over the page, under the status bar (Pause and Abort stay in reach) and the bottom nav */
 .pg-scrim { position: fixed; inset: 0; z-index: 2; background: rgb(10 12 20 / 45%); }
 .pg-handle { justify-self: center; width: 44px; height: 5px; border-radius: var(--r-pill); background: var(--border); }

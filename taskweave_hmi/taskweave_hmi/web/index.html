@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark">
 <title>taskweave HMI</title>
 <link rel="icon" href="p3.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body class="on-run">
-<!-- the rail: the sections, the P3 mark and the robot; on a phone it is the bottom nav (the mark and robot hidden) -->
+<!-- the rail: the sections and the P3 mark; on a phone it is the bottom nav (the mark hidden) -->
 <nav class="rail" aria-label="Sections">
   <div class="rail-brand">
     <!-- P3 logo (P3_Logo_2024.svg, Wikimedia Commons), inline so it takes the theme colour -->
@@ -21,22 +21,23 @@
   </div>
   <div class="tabs">
   <button data-view="run" aria-current="page"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l6-3.5z"/></svg><span>Run</span></button>
-  <button data-view="missions"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg><span>Missions</span></button>
+  <button data-view="missions"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="6" rx="1.5"/><rect x="14" y="3" width="7" height="6" rx="1.5"/><rect x="8.5" y="15" width="7" height="6" rx="1.5"/><path d="M6.5 9v3h11V9M12 12v3"/></svg><span>Program</span></button>
   <button data-view="robot"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01"/></svg><span>Robot</span></button>
   <button data-view="points"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg><span>Teach</span></button>
   <button data-view="record" hidden><svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" fill="currentColor"/></svg><span>Record</span></button>
   <button data-view="log"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9l3 3-3 3M12 15h5"/></svg><span>Log</span></button>
   </div>
-  <small id="robot" class="rail-robot">connecting…</small>
 </nav>
 
 <div class="shell">
 <div class="top">
-<!-- the status bar, on every tab: the mission (running, also planning and paused: its state, goal, step and the step's
-     progress, with Pause and Abort, two taps; idle: the mission picker and Start), the speed override and the link to
-     the robot. Start's answer and the last error under it -->
-<header id="mission" class="mission" role="group" aria-label="Mission">
+<!-- the system strip, on every tab: the link and the robot, the state badge, the mission while one is active (goal,
+     step n/N, the instruction; its progress as a line along the strip's bottom edge), the resources the step holds,
+     the speed override and the pad mode. Mission control (picker, Start, Pause, Abort) is on the Run tab's board.
+     Start's answer and the last error under it -->
+<header id="mission" class="mission" role="group" aria-label="Robot and mission">
   <div class="mission-row">
+    <span class="strip-robot"><span id="conn" class="conn" role="img" aria-label="Not connected" title="live connection"></span><span id="robot">connecting…</span></span>
     <span id="state" class="chip">idle</span>
     <div id="mission-run" class="mission-run" hidden>
       <div class="mission-goal"><b id="goal">No mission running</b><span id="cycle" class="muted mono"></span></div>
@@ -44,24 +45,19 @@
       <span class="mission-step"><span id="step-instruction"></span><span id="step-detail" class="muted mono"></span></span>
       <div id="current" class="progress" hidden><div id="progress-bar"></div></div>
     </div>
-    <div id="mission-start" class="mission-start">
-      <select id="mission-select" aria-label="Mission to start"></select>
-      <button id="btn-start" class="btn small primary">Start</button>
-    </div>
-    <!-- global speed override: the value in the bar, the controls in a panel under it (Speed opens it) -->
+    <!-- what the running step holds: lit while locked (app.js renderMission, from step.resources) -->
+    <span id="resources" class="resources" role="group" aria-label="What the step holds">
+      <span data-res="base">base</span><span data-res="hands">hands</span><span data-res="torso">torso</span>
+    </span>
+    <!-- global speed override: the value in the strip, the controls in a panel under it (Speed opens it) -->
     <div id="speed" class="speed off" role="group" aria-label="Speed override">
       <button id="speed-open" class="btn small speed-open" aria-expanded="false" aria-controls="speed-panel">
         <span class="sub">Speed</span><output id="speed-value" class="speed-value" aria-live="polite">–</output>
         <span class="speed-flag">test</span>
       </button>
     </div>
-    <div id="mission-controls" class="mission-controls" hidden>
-      <button id="btn-pause" class="btn small" disabled>Pause</button>
-      <button id="btn-abort" class="btn small danger" disabled>Abort</button>
-    </div>
     <div class="sys">
       <span id="pad-mode" class="chip pad" title="PS4 pad mode: PS = drive, d-pad left/right = jog that arm (hold L1)">pad: drive</span>
-      <span id="conn" class="conn" role="img" aria-label="Not connected" title="live connection"></span>
     </div>
   </div>
   <div id="speed-panel" class="speed-panel" role="group" aria-label="Set the speed" hidden>
@@ -95,9 +91,18 @@
     <!-- the run board: a robot walks the mission (its floor is the phases, it stands where the run is), says what it
          does in a bubble and offers the next move there (Start, Resume, Retry, Run again); app.js renderBoard -->
     <section id="board" class="card board state-idle" aria-label="Mission status">
+      <!-- the head: the goal and the cycle; idle, the mission picker instead of the goal; active, Pause and Abort -->
       <div class="board-head">
         <b id="board-goal" class="board-goal"></b>
         <span id="board-cycle" class="board-cycle"></span>
+        <div id="mission-start" class="mission-start">
+          <select id="mission-select" aria-label="Mission to run"></select>
+          <button id="btn-start" class="btn small primary" tabindex="-1" aria-hidden="true">Start</button>
+        </div>
+        <div id="mission-controls" class="mission-controls" hidden>
+          <button id="btn-pause" class="btn" disabled>Pause</button>
+          <button id="btn-abort" class="btn danger" disabled>Abort</button>
+        </div>
       </div>
       <span id="board-state" class="sr-only" aria-live="polite">idle</span>
       <div class="board-say">

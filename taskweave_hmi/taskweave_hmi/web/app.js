@@ -324,6 +324,8 @@ function renderMission(s) {
   $('goal').title = $('goal').textContent;
   $('cycle').textContent = s.plan_id ? `${s.plan_id} · cycle ${s.cycle}` : '';
   show($('current'), active && !!s.step);
+  const held = active && s.step ? s.step.resources || [] : [];  // the strip's resource chips light up while locked
+  document.querySelectorAll('#resources [data-res]').forEach((chip) => chip.classList.toggle('on', held.includes(chip.dataset.res)));
   if (planning) {
     $('step-meta').textContent = ''; $('step-detail').textContent = '';  // in the instruction's place: a phone shows it
     $('step-instruction').textContent = `planning ${s.step_count} step${s.step_count === 1 ? '' : 's'}…`;
