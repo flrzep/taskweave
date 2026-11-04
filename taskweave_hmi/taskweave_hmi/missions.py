@@ -270,6 +270,7 @@ def save(name: str, mission: Mapping, store: ConfigStore, catalog: Mapping[str, 
 def included_by(store: ConfigStore, name: str, what: str) -> list[str]:
     """The problem when other missions include ``name`` (they would not load once it is ``what``: renamed,
     deleted); none otherwise. A mission that does not load itself is skipped."""
+    store.reload()   # a mission written by hand since the last reload counts too
     users = sorted(other for other in store.mission_names() if other != name and _includes(store, other, name))
     if not users:
         return []
@@ -404,8 +405,9 @@ def unsupported(ops) -> list[str]:
             keys = ['a block']
         elif kind == 'insert' and isinstance(op.get('step'), Mapping):
             keys = [k for k in missing if k in op['step']]
-        elif kind == 'set' and op.get('key') in (missing if _parts(op.get('at'), f'op {n + 1}') else missing_top):
-            keys = [op['key']]
+        elif kind == 'set':
+            at_step = _parts(op.get('at'), f'op {n + 1} ({kind})')   # '' is the mission, else a step or block
+            keys = [op['key']] if op.get('key') in (missing if at_step else missing_top) else []
         if keys:
             bad.append(f'op {n + 1} ({kind}): {", ".join(keys)}')
     if not bad:
@@ -546,14 +548,19 @@ def edit(name: str, ops: list, store: ConfigStore, catalog: Mapping[str, dict], 
     try:
         saved = store.save(file, buffer.getvalue(), base=None if create or source != path else base,
                            message=f'HMI: edit mission {name}')
-        if source != path:
-            store.delete(relative, base=base, message=f'HMI: rename mission {rename_from} to {name}')
     except SaveConflict as error:
         raise MissionConflict([f'{relative} changed since it was opened (another editor, the pad or a hand edit): '
                                'open the mission again and redo your changes']) from error
     except SaveError as error:
         errors = [f'{p["path"]}{p["where"]}: {p["message"]}' for p in error.problems if p['severity'] == 'error']
         raise MissionError(errors or [str(error)]) from error
+    if source != path:   # the old file goes under its own lock: a failure here leaves both, and says so
+        try:
+            store.delete(relative, base=base, message=f'HMI: rename mission {rename_from} to {name}')
+        except (SaveConflict, SaveError) as error:
+            raise MissionError([f'mission {name!r} was saved, but {rename_from!r} could not be removed ({error}): '
+                                f'both exist now. Undo this save, or open {name!r} to go on and delete '
+                                f'{rename_from!r} yourself']) from error
     return {'mission': mission, 'file': file, 'hash': saved['hash']}
 
 

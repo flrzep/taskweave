@@ -301,6 +301,14 @@ def ros_parameter(name: str, value) -> Parameter:
     return Parameter(name=name, value=ParameterValue(type=ParameterType.PARAMETER_STRING, string_value=str(value)))
 
 
+def _with_undo(answer: dict, error: Exception) -> dict:
+    """The answer to a refused write, with the undo of what was written before it failed (undo.Undo.run puts
+    it on the exception: a rename whose old file could not be removed)."""
+    if getattr(error, 'undo', None):
+        answer['undo'] = error.undo
+    return answer
+
+
 class Busy(Exception):
     """The request would change config while a mission runs."""
 
@@ -1636,10 +1644,11 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'POST' and route == ['robot', 'move']:
                 return self._json(bridge.go_to_pose(self._body()['pose']))
             return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
-        except missions.MissionConflict as error:
-            return self._json({'problems': error.problems}, HTTPStatus.CONFLICT)
+        except missions.MissionConflict as error:   # conflict: the editor offers a reload from the file
+            return self._json(_with_undo({'problems': error.problems, 'conflict': 'stale'}, error), HTTPStatus.CONFLICT)
         except missions.MissionError as error:
-            return self._json({'problems': error.problems, 'places': error.places}, HTTPStatus.UNPROCESSABLE_ENTITY)
+            return self._json(_with_undo({'problems': error.problems, 'places': error.places}, error),
+                              HTTPStatus.UNPROCESSABLE_ENTITY)
         except (points.PointError, robot.RobotSettingsError, arm.ArmError, held.HeldError,
                 recording.RecordingError) as error:
             return self._refused(error, HTTPStatus.UNPROCESSABLE_ENTITY)

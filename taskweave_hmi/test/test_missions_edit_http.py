@@ -86,7 +86,7 @@ def test_edit_saves_with_an_undo_and_refuses_a_bad_step(served):
     assert status == 200 and opened['_etag']
     status, answer = request('POST', '/api/missions/patrol/edit',
                              {'ops': [{'op': 'set', 'at': '', 'key': 'goal', 'value': 'Again'}], 'base': 'stale'})
-    assert status == 409 and 'changed since' in answer['problems'][0]
+    assert status == 409 and 'changed since' in answer['problems'][0] and answer['conflict'] == 'stale'
     status, answer = request('POST', '/api/missions/patrol/edit',
                              {'ops': [{'op': 'set', 'at': '', 'key': 'goal', 'value': 'Again'}],
                               'base': opened['_etag']})
@@ -100,6 +100,20 @@ def test_edit_saves_with_an_undo_and_refuses_a_bad_step(served):
     status, answer = request('DELETE', '/api/missions/patrol')
     assert status == 409
     bridge.status['state'] = 'idle'
+    # a rename whose old file cannot go: 422 that says so, with the undo of the file that was written
+    from taskweave_core.config.save import SaveConflict
+
+    def refuse(*_args, **_kwargs):
+        raise SaveConflict('h', 'text')
+    bridge.config.delete = refuse
+    status, opened = request('GET', '/api/missions/patrol')
+    status, answer = request('POST', '/api/missions/night/edit?rename_from=patrol',
+                             {'ops': [], 'base': opened['_etag']})
+    assert status == 422 and 'both exist now' in answer['problems'][0]
+    assert answer['undo']['files'] == ['missions/night.yaml']
+    status, answer = request('POST', '/api/teach/undo', {'id': answer['undo']['id']})
+    assert status == 200 and not (bridge.config.root / 'missions' / 'night.yaml').exists()
+    del bridge.config.delete
     # the undos put the file back as it was before the first edit, newest first (an older save's file changed since)
     assert len(bridge.undos.saves) == 2
     for key in reversed(list(bridge.undos.saves)):

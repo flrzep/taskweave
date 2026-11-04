@@ -259,6 +259,18 @@ def test_rename_and_delete_are_refused_while_another_mission_includes_it(store):
     assert 'rounds' not in store.mission_names()
 
 
+def test_a_rename_whose_old_file_cannot_go_says_both_exist(store, monkeypatch):
+    from taskweave_core.config.save import SaveConflict
+
+    def refuse(*_args, **_kwargs):
+        raise SaveConflict('h', 'text')
+    monkeypatch.setattr(store, 'delete', refuse)
+    with pytest.raises(MissionError, match="'night' was saved, but 'patrol' could not be removed"):
+        edit('night', [{'op': 'set', 'at': '', 'key': 'goal', 'value': 'At night'}], store, CATALOG, 'demo_bot',
+             rename_from='patrol', base=opened(store))
+    assert {'night', 'patrol'} <= set(store.mission_names())
+
+
 def test_nulls_inside_a_value_stay_and_a_null_step_key_goes():
     d = doc(THREE)
     apply_ops(d, [{'op': 'set', 'at': 'steps/0', 'key': 'args', 'value': {'seconds': 2, 'joint': None}},

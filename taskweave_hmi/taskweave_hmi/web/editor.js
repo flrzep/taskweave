@@ -1081,7 +1081,7 @@ $('btn-save').addEventListener('click', async () => {
     showProblems(data.problems || [data.error || 'not saved'], data.places);
     message($('save-msg'), '');
     // the file changed since it was opened (not a 409 for a running mission): offer it as it is now, the edits dropped
-    if (status === 409 && old && (data.problems || []).some((p) => /changed since it was opened/.test(p))) {
+    if (status === 409 && old && data.conflict === 'stale') {
       const reload = el('button', { type: 'button', class: 'btn small ed-reload', text: 'Reload from file',
         title: `Open ${old} as it is saved now; the changes here are dropped` });
       reload.addEventListener('click', () => { state.dirty = false; openEditor(old); });

@@ -348,6 +348,7 @@ function renderMission(s) {
   $('btn-pause').textContent = s.state === 'paused' ? 'Resume' : 'Pause';
   $('btn-abort').disabled = !active;
   show($('strip-abort'), active);  // in reach on every tab while a mission runs or is paused
+  if (!active && abortArmed) { clearTimeout(abortArmed); abortArmed = null; showAbortArmed(false); }  // a tap armed for a mission that ended
   $('strip-abort').disabled = !active;
   $('btn-start').disabled = !canStart();
   return active;
