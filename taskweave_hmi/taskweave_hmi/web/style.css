@@ -859,9 +859,9 @@ li.empty { list-style: none; padding: 6px 2px; }
 .viewer3d-tools svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.75; }
 @media (max-width: 600px) { .viewer3d { aspect-ratio: 4 / 3; } }
 
-/* plan graph (graph.js): a state machine. Steps are 44 px icon nodes joined by curved arrows, phases soft outlines
-   with their header on the edge (closed: a stack node), a pop-up for a picked step (a bottom sheet at 600px and
-   below). Nodes take their skill colour (--k, from --kind-*) and show state by fill, ring and corner dot; arrows show
+/* mission graph (graph-core.js, graph-run.js): steps are 44 px icon nodes joined by wires in run order, snaking
+   across the box; frames (groups, includes, repeats, parallel lanes) are outlines with their head on the edge (closed:
+   a stack node); a pop-up for a picked step (a bottom sheet at 600px and below). Nodes take their skill colour (--k, from --kind-*) and show state by fill, ring and corner dot; arrows show
    the way travelled (solid), the step running (flowing lime) and the way ahead (dotted). The graph's own colours are
    the --g-* tokens. */
 .graph-box { display: grid; gap: var(--sp-3); container: plan / inline-size;
@@ -875,6 +875,14 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-outline { fill: color-mix(in srgb, var(--surface-field) 55%, transparent); stroke: var(--border); stroke-width: 1.25; }
 .pg-outline.running, .pg-outline.paused { stroke: var(--run-fill); stroke-width: 2; }
 .pg-outline.failed { stroke: color-mix(in srgb, var(--g-bad) 60%, transparent); }
+/* a repeat and a parallel block are structure, in the brand's blue; a lane (one branch) is a dashed outline inside */
+.pg-outline.repeat, .pg-outline.parallel { stroke: color-mix(in srgb, var(--brand-text) 45%, var(--border)); }
+.pg-outline.branch { fill: none; stroke-dasharray: 3 5; stroke-linecap: round; }
+.pg-dot-split, .pg-dot-join { fill: var(--text-muted); }
+.pg-dot-split.running, .pg-dot-join.running, .pg-dot-split.paused, .pg-dot-join.paused { fill: var(--run-fill); }
+.pg-band.branch { cursor: default; } .pg-band.branch:hover { background: var(--g-card); }
+.pg-band.repeat, .pg-band.parallel { border-color: color-mix(in srgb, var(--brand-text) 45%, var(--border)); }
+.pg-link { font-size: 11px; line-height: 1; color: var(--brand-text); }
 .pg-subband { fill: none; stroke: color-mix(in srgb, var(--brand-text) 8%, transparent); stroke-linecap: round;
   stroke-linejoin: round; }
 .pg-wire { fill: none; stroke: var(--text-muted); stroke-width: 1.75; }
@@ -907,9 +915,7 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-stack.running, .pg-stack.paused { border-color: var(--run-fill); border-width: 2px; }
 .pg-stack.failed { border-color: var(--g-bad); color: var(--g-bad); }
 .pg-stack:hover { border-width: 2px; }
-.pg-stack:focus-visible, .pg-tidy:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-.pg-chip.dragging, .pg-stack.dragging, .pg-band.dragging { cursor: grabbing; z-index: 2; }
-.pg-tidy { position: absolute; bottom: 4px; right: 0; width: 32px; padding: 0; font-size: 16px; }
+.pg-stack:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .pg-lines { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
 
 /* chips: pending faded, succeeded tinted with a green dot, running solid with a brand ring (breathing), failed red */

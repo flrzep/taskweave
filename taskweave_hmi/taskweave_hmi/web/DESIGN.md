@@ -282,29 +282,27 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
 - **3D view** (`.viewer3d`): a full-width viewport card, 16:10 on a laptop and 4:3 at 600px and below, dark in both
   themes, 10px radius; a `canvas` child fills it. `.viewer3d-tools` is an overlay toolbar top right for icon buttons
   (`--tap-s` square, light icons; `aria-pressed="true"` in brand fill).
-- **Plan graph** (`.pg`, graph.js): a state machine, laptop and phone alike (the resource lanes looked like a Gantt
-  chart and spent the width on empty lanes). Steps are 44px icon nodes (14px radius, skill colour `--k`: pastel when
-  done or pending, solid with the breathing ring when running, red when failed, amber timeout / canceled / skipped),
-  their number and target under them, joined by curved arrows in run order: solid (`--text-muted`) where the run has
-  been, flowing lime into the running step, dotted ahead. A phase of 4 to 16 steps is a ring (clockwise from its
-  upper left, open at the left, its done/total big and faint in the middle); a shorter or longer one a snake on a
-  gentle wave. Each node is nudged a few px off its spot (fixed per step), so it reads drawn, not gridded. An open
-  phase has a soft outline (28px radius; lime while it runs, red when it failed) with its header pill on the top
-  edge (name, done/total, usual failure rule); a nested include is a soft band through its steps with a small tag;
-  a closed phase is one stack node (cards, filled from below to its share done), and the arrows point at it.
-  Phases flow across the box in lines; an arrow to a phase further down runs out to the left of the outlines, down
-  and in from the left. A black dot points at the start step; a dashed brand loop runs up the left gutter back to
-  the first step when the mission repeats (its rule along it), else a final ring follows the last step. A replan is
-  a dashed red arrow to the step it replans from, labelled; other rule exceptions are badges on the node's top edge.
-  A ring's opening is wide enough that its first and last node stay apart; where the box is too narrow for a ring
-  (a phone, mostly from 8 steps) the phase is a snake. The operator can drag a node or a phase (by its header or
-  stack) with a mouse (a pen may pan instead: a finger must scroll the page from a node, also on a touch laptop), kept per mission (`tw-plan-layout`, offsets of steps or phases no longer in the plan
-  dropped) and kept inside the box with its outline; ↺ bottom right puts the drawn layout back. The layout is
-  optional, so it has no keyboard path; the nodes and headers are buttons in run order, each header before its
-  steps. The resources a step locks are in its pop-up and its tooltip, a phase's in its header's tooltip. A click on a step opens its details in a 320px pop-up
-  beside it (`.pg-pop`, right if it fits, else left, else under it; Close, Escape, a click elsewhere or the step
-  again close it); at 600px and below a bottom sheet (`.pg-sheet`). It reads `--g-*` tokens mapped onto the global
-  ones.
+- **Mission graph** (`.pg`, graph-core.js and graph-run.js): the plan as a node graph, laptop and phone alike. Steps
+  are 44px icon nodes (14px radius, skill colour `--k`: pastel when done or pending, solid with the breathing ring
+  while running, red when failed, amber timeout / canceled / skipped), their number and target under them, joined by
+  wires in run order: solid (`--text-muted`) where the run has been, flowing lime into the running step, dotted
+  ahead. The layout is automatic and the same on every draw (a structured program has one picture): a sequence
+  snakes across the box in rows, every other row running back, so a long mission stays in view; the editor lays
+  the same tree out as one column. Frames hold the groups: an include of the top mission or a nested one (a link
+  mark ⛓ in the head: shared with other missions), and with schema v2 a group, a repeat (its return wire up the
+  frame's left gutter, its rule and pass along it, in brand blue) and a parallel block (a split dot, one dashed lane
+  per branch side by side, a join dot). An open frame has a soft outline (20px radius; lime while it runs, red when
+  it failed) with its head pill on the top edge (chevron, name, done/total and its words: the usual failure rule, a
+  repeat's rule, a parallel's lanes and join); a closed frame is one stack node (cards, filled from below to its
+  share done), and the wires point at it. The frame with the running step is always open; the others as the
+  operator left them (`tw-plan-bands`), else the one with the failed or the start step. A dot points at the start
+  step; a dashed brand loop runs up the box's left gutter back to the first step when the mission repeats (its rule
+  along it), else a final ring follows the last step. A replan is a dashed red arrow to the step it replans from,
+  labelled; other rule exceptions are badges on the node's top edge. Nothing is dragged: the nodes and heads are
+  buttons in run order, each head before its steps. The resources a step locks are in its pop-up and its tooltip, a
+  frame's in its head's tooltip. A click on a step opens its details in a 320px pop-up beside it (`.pg-pop`, right
+  if it fits, else left, else under it; Close, Escape, a click elsewhere or the step again close it); at 600px and
+  below a bottom sheet (`.pg-sheet`). It reads `--g-*` tokens mapped onto the global ones.
 
 ## Icons and imagery
 
