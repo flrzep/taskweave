@@ -51,7 +51,7 @@ Contrast was measured with the WCAG formula against the panel (`--surface-card`)
 | `--warn` | `#ffc95c` | paused, jog mode, canceled, a save that asks first (12.8:1) |
 | `--bad` | `#ff7f6a` | failed, aborted, errors, near a joint limit, danger buttons (7.9:1) |
 | `--idle` | `#9a9ec8` | idle, pending |
-| `--on-fill` | `#03031c` | navy text on a solid state fill (7.9:1 and up on every fill) |
+| `--on-fill` | `#03031c` | navy text on a solid state fill (7.9:1 and up on every fill) and the glyph on a solid skill colour: the running or paused node, the card's tile (6.3 to 10.9:1) |
 | `--kind-*` | drive `#7a8cff`, arm `#b394ff`, grip `#ff9a4d`, wait `#8a8ea8`, other `#2dd4bf` | skill colours in the plan graph, categorical only (6:1 and up) |
 | `--viewer-bg`, `--viewer-line`, `--viewer-ink`, `--viewer-tools` | the ground's navy, a hairline, body text, the panel at 82% | the 3D view |
 | `--rail`, `--nav`, `--strip` | 92px, 60px, 52px | the section rail's width; the phone's bottom nav; the system strip |
@@ -82,7 +82,7 @@ Weights: 400 body, 500 instruction, 600 titles and buttons, 700 badges, big figu
 
 ## Spacing
 
-A 4px scale: `--sp-1` 4, `--sp-2` 8, `--sp-3` 12, `--sp-4` 16, `--sp-5` 20, `--sp-6` 24, `--sp-8` 32, `--sp-12` 48.
+A 4px scale: `--sp-1` 4, `--sp-2` 8, `--sp-3` 12, `--sp-4` 16, `--sp-5` 20, `--sp-6` 24, `--sp-12` 48.
 Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 601px. Content width `--content`
 760px, side gutter 16 (12 at 400px and below).
 
@@ -109,8 +109,7 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   second tap and shown again instead of saving when it differs.
   `.danger.solid`: red fill from the first press, for a stop that needs no second tap (the manual skill's Abort).
   `.small`: `--tap-s` high, 14px. `.ghost`: a text link in brand colour. Hover darkens or tints, active moves down
-  1px, disabled is 45% opacity. `.icon`: a square small button for ↑ ↓ ⧉ ✕; a step's ✕ asks first, as a solid red
-  "Remove?" (`.icon.confirm`, 3 s).
+  1px, disabled is 45% opacity. `.icon`: a square small button (the error's ✕, the speed's − and +).
 - **Inputs and selects**: field surface, strong border, 6px radius, 44px high; brand border on focus; red border and
   tint when invalid. Checkboxes 20px in the brand colour, inside a 44px-high label.
 - **Number fields** (`input.num`, made by `numberField` in app.js): text fields, so a decimal is always shown with a
@@ -131,17 +130,21 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   prepares the plan), and while a mission is active (`.mission.active`) the goal with plan id and cycle, "step
   n/N" in monospace and the step's instruction, one line each with an ellipsis, with skill, status, seconds and
   attempt in muted monospace; the step's progress is a 3px line along the strip's bottom edge in the state colour.
-  At the right the resources the step holds (`.resources`: base, hands, torso as monospace chips, lime while
-  locked, from `step.resources`), Speed and the pad mode (only while it jogs an arm up to 1000px). Mission control
-  is not in the strip: the picker, Start, Pause and Abort live on the Run board, and on the Run tab (`body.on-run`)
-  the strip shows no mission words and no error either, since the board says them. Under the strip, small: Start's
+  Beside the badge, only while a mission runs or is paused, **Abort** (`#strip-abort`, a small `.danger` with a stop
+  square): Abort is in reach on every tab while a mission is active. Two taps, one control with the board's Abort
+  (a first tap on either arms both: solid red, "Tap again", 3 s; a second tap on either aborts). At the right the
+  resources the step holds (`.resources`: base, hands, torso as monospace chips, lime while locked, from
+  `step.resources`), Speed and the pad mode (only while it jogs an arm up to 1000px). The rest of mission control
+  lives on the Run board (the picker, Start, Pause), and on the Run tab (`body.on-run`) the strip shows no mission
+  words and no error either, since the board says them. Under the strip, small: Start's
   answer (`.msg`, idle only) and the last error (`.error` with a ✕ that hides that error until another one or the
-  next start). On a phone: dot and name, badge, speed in one row, the step n/N and instruction on a second row; the
-  resources and the goal are not shown. A pad press's answer is a toast for a while (`.pad-notice`, fixed outside
+  next start). On a phone: dot and name, badge, speed in one row (while a mission is active the name gives
+  way to Abort, the stop square alone at 44 × 44 with its label, so the row stays one line), the step n/N and
+  instruction on a second row; the resources and the goal are not shown. A pad press's answer is a toast for a while (`.pad-notice`, fixed outside
   the top, taps pass through: bottom left of the page on a laptop, clear of the 3D view's tools; just under the top
   on a phone, clear of the step sheet and the Save bar), so the strip keeps its height. On a phone the error text,
-  the speed message and the manual skill's text scroll in their own boxes (the error's ✕ stays), so both Aborts stay
-  in sight.
+  the speed message and the manual skill's text scroll in their own boxes (the error's ✕ stays), so the strip's and
+  the manual skill's Abort stay in sight.
 - **Run workspace** (`.run-grid`, Run tab): up to 1179px one column, board, 3D view, plan, recent steps. From 1180px
   two columns, 7 : 5 with 20px gaps and the page up to 1600px wide: the board over the plan at the left, the 3D view
   (16 : 11) over the recent steps at the right, sticky under the top (`--top-h`, the top's measured height) and never
@@ -167,10 +170,10 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   the command, status, seconds and attempt, the error in red; and the next move as one button: Start / Start at step
   N, Resume, Retry step N (the step it stopped at), Run again (Start <mission> when another one is picked). No
   "press Start in the bar above" lines: the button is the instruction. The head above holds the mission's goal and the cycle (↻ 2); idle, the mission picker (`#mission-select`,
-  48px) takes the goal's place; active, Pause / Resume and Abort (`.danger`, two taps; 48px, full width on a
-  phone) sit at its right. `#btn-start` stays in the page, hidden: the bubble's button is its wire. Reduced motion keeps the poses without the motion. On the Run tab the strip shows no mission words (`body.on-run`), so they are not shown twice, and its error
+  48px) takes the goal's place; active, Pause / Resume and Abort (`.danger`, two taps, armed together with the
+  strip's; 48px, full width on a phone) sit at its right. `#btn-start` stays in the page, hidden: the bubble's button is its wire. Reduced motion keeps the poses without the motion. On the Run tab the strip shows no mission words (`body.on-run`), so they are not shown twice, and its error
   hides (the board shows it).
-- **Speed override** (`.speed`): in the status bar, a small button "Speed 60 %" (the value in Barlow Semi Condensed
+- **Speed override** (`.speed`): in the status bar, a small button "Speed 60 %" (the value in Montserrat 700
   20px; amber with "TEST" while test mode caps it; greyed out without the task handler; on a phone the value only).
   It opens a panel under the bar (`aria-expanded`, focus to its first control; a click elsewhere or Escape closes
   it, and Escape still aborts a manual skill as everywhere): − / + around a range slider in brand colour, the presets as a segmented control, and the test mode toggle,
@@ -198,26 +201,45 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   the canvas (`.ed-canvas`, scrolls, a faint panel tint over the grid, 480px high at least, never taller than the
   window) and the properties panel at its right (`.ed-panel`, 380px, sticky; under the canvas up to 1000px). The
   panel shows the mission (name, goal, loop, defaults, + Add step, Delete) while nothing is selected, else the
-  selected step's form (the step card without its handle, buttons and fold: "Step n" is its title; an include step
+  selected step's form (the step card: "Step n" is its title, not a control, so no key folds it; an include step
   gets a brand-soft banner "Linked: the steps of <mission> run here …" with Open to edit) or a block's form (schema
   v2: instruction, id, a repeat's rule and max passes, a parallel's join, "run only when"), with the actions under
   it: ↑ ↓, Duplicate, Group / Repeat / In parallel (only when the running core's schema has blocks), Unwrap, Remove.
+  A lane of a parallel block goes only with its block: Unwrap puts every lane's steps in the block's place (+ lane on
+  its head adds one).
   Nodes (`.pg-node`) are 196 × 56 tiles: the skill's icon on a 36px tile in its colour (`--k`), the instruction in
   two lines (muted italic "Describe this step" until it has one), the command and target in mono under it; a closed
   frame is a tile with a dashed brand border (an include: solid, ⛓), its kind and size, and a chevron that opens it.
   Ports sit on the edges: in on top, done at the bottom, and the failed port at the right, red, filled when the step
   has its own rule; a click on it opens the rule menu (`.ed-menu`: mission default, retry, replan, skip, abort), a
-  drag draws a red wire to the step a replan restarts from (the target gets a dashed red outline). The selected node
+  drag draws a red wire to the step a replan restarts from (the target gets a dashed red outline; only a step tile
+  takes it, not a closed block or an include, since replan_from names a step of the plan; a touch that turns into a
+  scroll only cleans up). The selected node
   has a 2px brand outline; a problem a Check or Save names is a red left bar and a red border on its node and on the
   field in the panel. "+" spots (`.ed-spot`, 24px dashed rings, a 44px target) sit on every wire and at the end of
   every open frame; one opens the palette (`.ed-palette`: a search over the skills, the other missions and the
-  blocks) at that place; while a node is dragged they turn solid brand and the nearest lights up as the drop. A
+  blocks; ↑ ↓ walk the options, the active one marked with
+  `aria-selected` and the hover tint, the focused one with the focus ring; Enter in the search takes the first) at
+  that place; while a node is dragged they turn solid brand and the nearest lights up as the drop. A
   frame head in the editor is a chevron button (closes it), the name (selects the block) and its words; a linked
   one adds Open. Keys on the canvas: Shift+A adds after the selection (Tab keeps walking the page), Delete removes, Ctrl+D duplicates,
   Ctrl+↑ / ↓ move, Ctrl+Z / Ctrl+Y undo and redo, Escape clears; shift-click extends a selection along one list,
   ctrl-click toggles, a drag on empty canvas draws a box. Every edit is an op on a path in the mission file
   (insert, remove, move, wrap, unwrap, set); Save sends the ops since the open to `/api/missions/<name>/edit`, which
   applies them on the file's own tree (comments kept) and validates the whole; nothing is written when it refuses.
+  When the file changed since it was opened (a 409), "Reload from file" beside the problem opens it as it is saved
+  now and drops the edits here.
+  A structural edit (insert, remove, move, wrap, unwrap, duplicate) keeps every `replan_from` on the step it named:
+  a place name `s<n>` (a top-level step without an id, numbered from 1) follows its step to its new number, or to a
+  new id when the step went into a block; a `replan_from` whose step was removed is cleared with its `on_failure:
+  replan` (the mission default applies). These are set ops in the same undo entry, sent at Save with the rest, and
+  the save message line says what changed in amber ("replan_from of 'carry' is s4 now (was s3).", "The replan
+  target of 'd' was removed: on failure it does the mission default (abort) now."), as does a note on the step's
+  form. The keyboard stays on the graph after Delete, a move, Undo and Redo: on the selection, else the node now
+  at the change (the next one, else the one before, else the frame that holds it). A graph wider than the canvas
+  (lanes side by side on a phone) scrolls the canvas, not the page, so the selected node (or, on opening, the first)
+  is in sight. The Run graph and the editor give their arrow heads their own ids (`pg-run-head-*`,
+  `pg-ed-head-*`).
 - **Teach in 3D** (`.teach-grid`, teach3d.js): the cell view (4 : 3, at most half the screen high) above the lists up
   to 1179px; from 1180px 7 : 5, the lists at the left and the view (16 : 13, sticky, never taller than the window) at
   the right. Markers: locations (an arrow), stances (a fainter arrow in a ring labelled "<object> · <variant>", from `/api/scene` stances, Teach only; a
@@ -250,7 +272,7 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
 - **Robot dashboard** (`.robot-grid`): up to 1179px one column, 3D view, base, grippers, joints, settings. From
   1180px 7 : 5 up to 1600px wide: the base over the joints at the left, the 3D view (16 : 11) over the grippers at the
   right (sticky under the top), the settings full width under both. The base as a readout (`.readout`: x, y, yaw in
-  Barlow Semi Condensed 24px over muted 13px names), the nearest placed object under it in muted monospace, or in
+  Montserrat 600 24px over muted 13px names), the nearest placed object under it in muted monospace, or in
   red why there is no pose.
 - **Torso line** (side card and step sheet, a `torso` row after the target): what the carry's torso look-ahead
   planned for the step (`data.torso_plan` of a finished carry step whose window holds it, and the step's own
@@ -258,7 +280,7 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   step (cut)" when the plan did not cover the hold, ", replanned: …" when the real state differed, and a certain
   infeasible plan's message in `--bad`. No row without a report.
 - **Step sheet** (phone, `.pg-sheet`): a tap on a step's chip (also the running one) opens a bottom sheet over a
-  scrim (`.pg-scrim`, 45% ink; under the status bar, so Pause and Abort stay in reach, and the bottom nav): a 44 × 5
+  scrim (`.pg-scrim`, 45% ink; under the status bar, so the strip's Abort stays in reach, and the bottom nav): a 44 × 5
   handle, the step's tile (52px) with its state and number over the instruction (20px, 600), the step's progress
   while it runs, the pop-up's rows (command, target, locks, on failure, status; 96px labels), each note in an amber
   box (`.pg-sheet-note`), and a full-width Close (48px). A non-modal dialog (`role="dialog"`, labelled by the title):
@@ -269,15 +291,10 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   at least 160px; it scrolls inside.
 - **Lists and rows**: mission rows (`.list li`) with a brand left rule (red when invalid); plan steps (`.steps`) with a
   numbered dot: a neutral ✓ when done, red when it failed, ringed green while running; points, poses and recordings (`.point`)
-  open into an editor, the pad's target gets a brand inset rule. Mission editor steps (`.edit-step`) have a drag
-  handle left of the step number (an `.icon` with six dots in `--text-muted` on a hairline border, `touch-action:
-  none`), then the fold toggle (`.step-toggle`: a ▶ marker turned down when open, the step number in brand text and,
-  folded, the instruction over the skill and its arguments in a few words, monospace muted, each one line with an
-  ellipsis), then ↑ ↓ ⧉ ✕; on a phone the buttons go to a second row. Folded (`.collapsed`), only that head shows; a
-  mission opens with every step folded;
-  "Collapse all / Expand all" is a ghost button by the Steps title. While dragged the step folds and follows the
-  pointer with a brand border and `--shadow-2`, and a 3px brand line in the gap marks where it lands. A step that Check or Save names in its problems
-  gets a red border, a 4px red inset rule and a red step number (`.has-problem`) until it is edited.
+  open into an editor, the pad's target gets a brand inset rule. The step form in the editor's
+  panel (`.edit-step.ed-card`, from the page's step template) is the step's fields without a frame: "Step n" as its
+  title, the instruction, the skill, the arguments, the rules; the graph moves, copies and removes steps. A field
+  Check or Save names gets a red rule and its problem under it until it is edited.
 - **Step arguments** (`.args`, made by `argField` in app.js from the skill's schema): each argument a `.field` with
   its label (unit in brackets: "offset (m)", "turn (°)", "speed (0–1)"; the schema's description as the tooltip) and,
   for structured ones, an "edit as text" ghost link at the right of the label row. Nested objects are indented on a
@@ -308,7 +325,7 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   themes, 10px radius; a `canvas` child fills it. `.viewer3d-tools` is an overlay toolbar top right for icon buttons
   (`--tap-s` square, light icons; `aria-pressed="true"` in brand fill).
 - **Mission graph** (`.pg`, graph-core.js and graph-run.js): the plan as a node graph, laptop and phone alike. Steps
-  are 44px icon nodes (14px radius, skill colour `--k`: pastel when done or pending, solid with the breathing ring
+  are 44px icon nodes (14px radius, skill colour `--k`: pastel when done or pending, solid with a navy glyph (`--on-fill`) and the breathing ring
   while running, red when failed, amber timeout / canceled / skipped), their number and target under them, joined by
   wires in run order: solid (`--text-muted`) where the run has been, flowing lime into the running step, dotted
   ahead. The layout is automatic and the same on every draw (a structured program has one picture): a sequence
@@ -316,7 +333,7 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   the same tree out as one column. Frames hold the groups: an include of the top mission or a nested one (a link
   mark ⛓ in the head: shared with other missions), and with schema v2 a group, a repeat (its return wire up the
   frame's left gutter, its rule and pass along it, in brand blue) and a parallel block (a split dot, one dashed lane
-  per branch side by side, a join dot). An open frame has a soft outline (20px radius; lime while it runs, red when
+  per branch side by side, a join dot; an empty frame keeps a muted dot, `.pg-dot-empty`). An open frame has a soft outline (20px radius; lime while it runs, red when
   it failed) with its head pill on the top edge (chevron, name, done/total and its words: the usual failure rule, a
   repeat's rule, a parallel's lanes and join); a closed frame is one stack node (cards, filled from below to its
   share done), and the wires point at it. The frame with the running step is always open; the others as the
@@ -327,11 +344,12 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   buttons in run order, each head before its steps. The resources a step locks are in its pop-up and its tooltip, a
   frame's in its head's tooltip. A click on a step opens its details in a 320px pop-up beside it (`.pg-pop`, right
   if it fits, else left, else under it; Close, Escape, a click elsewhere or the step again close it); at 600px and
-  below a bottom sheet (`.pg-sheet`). It reads `--g-*` tokens mapped onto the global ones.
+  below a bottom sheet (`.pg-sheet`). It reads `--g-*` tokens mapped onto the global ones. The Run graph is
+  rebuilt on every status update only while the Run tab is shown; the tab's button draws it again when it comes back.
 
 ## Icons and imagery
 
 The P3 logo inline at the top of the rail (takes `--logo`). The rail's sections, the plan graph's skills
 (`icons.js`) and the Teach jobs are inline SVG line icons with a 2px stroke in `currentColor`; the 3D view toolbar
-expects the same at 1.75px. The step editor's ↑ ↓ ⧉ ✕ and the marks ✓ ! ↻ are still Unicode. No photos; one illustration, the run
+expects the same at 1.75px. The editor panel's ↑ ↓ and the marks ✓ ! ↻ are still Unicode. No photos; one illustration, the run
 board's robot (inline SVG in index.html, flat greys and the state colour).

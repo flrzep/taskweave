@@ -151,7 +151,10 @@ document.querySelectorAll('.tabs button').forEach((button) => button.addEventLis
   teachFlowShown(pointsVisible);  // teachtask.js: the same for the guided screen, and its live check
   if (robotVisible) { loadRobot(); refreshPose(); }  // robot.js: live grippers and joints, settings
   if (button.dataset.view === 'record') loadRecordings();  // record.js
-  if (button.dataset.view === 'run') startRunViewer();
+  if (button.dataset.view === 'run') {
+    startRunViewer();
+    if (typeof renderGraph === 'function') renderGraph();  // graph-run.js: not drawn while the tab was hidden
+  }
 }));
 
 // ---------- Run tab: the robot live in its cell (viewer3d.js, cell mode), for following a task ----------
@@ -252,7 +255,7 @@ function renderRun() {
     list.append(item);
   });
 
-  if (typeof renderGraph === 'function') renderGraph();  // graph.js
+  if (typeof renderGraph === 'function') renderGraph();  // graph-run.js (not while the Run tab is hidden)
 
   renderRecent(snap);
   const log = $('log');
@@ -305,10 +308,10 @@ function renderRecent(snap) {
 
 // ---------- mission bar ----------
 // In the sticky top bar, on every tab. While a mission is active (running, planning, paused): the state badge, the
-// goal, "step n/N" with the step's instruction (one line, ellipsis), a thin progress bar of the step, Pause / Resume
-// and Abort (two taps). Idle (also after the end of one): the badge, the mission picker and Start. Under the bar,
-// Start's answer (while idle) and the last error: it follows the status as before (gone on success, on the next
-// failure a new one), and ✕ hides that error until another comes.
+// goal, "step n/N" with the step's instruction (one line, ellipsis), a thin progress bar of the step, and Abort (two
+// taps, shared with the board's). The picker, Start and Pause are on the Run tab's board. Under the bar, Start's
+// answer (while idle) and the last error: it follows the status as before (gone on success, on the next failure a
+// new one), and ✕ hides that error until another comes.
 const missionUi = { dismissed: null };
 function renderMission(s) {
   const active = s.state === 'running' || s.state === 'paused';
@@ -344,6 +347,8 @@ function renderMission(s) {
   $('btn-pause').disabled = !active;
   $('btn-pause').textContent = s.state === 'paused' ? 'Resume' : 'Pause';
   $('btn-abort').disabled = !active;
+  show($('strip-abort'), active);  // in reach on every tab while a mission runs or is paused
+  $('strip-abort').disabled = !active;
   $('btn-start').disabled = !canStart();
   return active;
 }
@@ -371,7 +376,7 @@ const board = { phases: null, error: null, act: null, kind: null };
 $('board-act').addEventListener('click', () => board.act?.());
 // a step that ended without success (the failed band, where a stopped run stopped)
 const NOT_DONE = ['FAILED', 'REJECTED', 'CANCELED', 'TIMEOUT'];
-// graph.js (bandsOf) loads after this file: draw the phases once more when every script is there
+// graph-run.js (bandsOf) loads after this file: draw the phases once more when every script is there
 window.addEventListener('load', () => { if (board.phases) renderPhases(...board.phases); });
 // plan / outcomes: what the Run tab shows (the picked mission's preview while idle); the board shows the run itself
 // while one is active or has ended, the preview only before any run
@@ -461,7 +466,7 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
   board.phases = [s, plan, outcomes, active];
   renderPhases(s, plan, outcomes, active);
 }
-// the robot's floor: the plan graph's bands (graph.js bandsOf, from each step's origin); one band (or none yet): one
+// the robot's floor: the plan graph's bands (graph-run.js bandsOf, from each step's origin); one band (or none yet): one
 // floor without a name
 function renderPhases(s, plan, outcomes, active) {
   const list = $('board-phases');
@@ -490,17 +495,28 @@ $('last-error-close').addEventListener('click', () => { missionUi.dismissed = $(
 $('btn-pause').addEventListener('click', async () => {
   await api('POST', state.snapshot?.status.state === 'paused' ? '/api/resume' : '/api/pause');
 });
+// Abort, two taps (no browser dialogs): the board's and the strip's are one control, so a first tap on either arms
+// both and a second tap on either aborts. The strip's says it with its word (an icon alone on a phone) and its label.
 let abortArmed = null;
-$('btn-abort').addEventListener('click', async () => {
-  const button = $('btn-abort');
-  if (!abortArmed) {  // two taps: no browser dialogs
-    button.classList.add('confirm'); button.textContent = 'Tap again to abort';
-    abortArmed = setTimeout(() => { button.classList.remove('confirm'); button.textContent = 'Abort'; abortArmed = null; }, 3000);
+function showAbortArmed(armed) {
+  $('btn-abort').classList.toggle('confirm', armed);
+  $('btn-abort').textContent = armed ? 'Tap again to abort' : 'Abort';
+  const strip = $('strip-abort');
+  strip.classList.toggle('confirm', armed);
+  strip.querySelector('.strip-abort-word').textContent = armed ? 'Tap again' : 'Abort';
+  strip.setAttribute('aria-label', armed ? 'Tap again to abort the mission' : 'Abort the mission');
+}
+async function abortPress() {
+  if (!abortArmed) {
+    showAbortArmed(true);
+    abortArmed = setTimeout(() => { showAbortArmed(false); abortArmed = null; }, 3000);
     return;
   }
-  clearTimeout(abortArmed); abortArmed = null; button.classList.remove('confirm'); button.textContent = 'Abort';
+  clearTimeout(abortArmed); abortArmed = null; showAbortArmed(false);
   await api('POST', '/api/abort');
-});
+}
+$('btn-abort').addEventListener('click', abortPress);
+$('strip-abort').addEventListener('click', abortPress);
 $('btn-start').addEventListener('click', async () => {
   const mission = $('mission-select').value;
   if (!mission) return;
@@ -803,7 +819,6 @@ function stepCard(step, index, steps, expanded) {
   card.querySelectorAll('input[type="number"]').forEach(numberField);
   const q = (key) => card.querySelector(`[data-k="${key}"]`);
   card.querySelector('.step-no').replaceChildren(el('span', { class: 'step-word', text: 'Step ' }), String(index + 1));
-  card.querySelector('[data-act="fold"]').addEventListener('click', () => setExpanded(card, !isExpanded(card)));
   q('instruction').value = step.instruction || '';
   const missions = state.missions.filter((m) => m.valid && m.name !== state.editing?.name).map((m) => INCLUDE + m.name);
   const chosen = step.include ? INCLUDE + step.include : step.skill;
@@ -951,12 +966,10 @@ function previewAnswer(answer) {
 function updatePreviews() { document.querySelectorAll('#ed-panel .step-preview').forEach((node) => node._update()); }
 
 // ---------- folded steps ----------
-// A step card folds to its summary line (number, instruction, skill and a short reading of its arguments); in the
-// Program tab's panel it is always open (editor.js), the fold is for other users of the card.
-function setExpanded(card, open) {
-  card.classList.toggle('collapsed', !open);
-  card.querySelector('[data-act="fold"]').setAttribute('aria-expanded', String(open));
-}
+// A step card can fold to its summary line (number, instruction, skill and a short reading of its arguments). Its
+// head is a title, not a control: in the Program tab's panel (editor.js) the card is always open, so nothing there
+// folds it from the keyboard or the mouse.
+function setExpanded(card, open) { card.classList.toggle('collapsed', !open); }
 const isExpanded = (card) => !card.classList.contains('collapsed');
 function stepSummary(card) {
   const step = card._read();

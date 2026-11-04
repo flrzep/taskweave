@@ -218,8 +218,9 @@ function graphRounded(points, radius) {
   const [lx, ly] = points[points.length - 1];
   return `${d} L${lx},${ly}`;
 }
-const graphMarker = (name) => {
-  const m = gsvg('marker', { id: `pg-head-${name}`, class: `pg-head ${name}`, viewBox: '0 0 10 10', refX: 8, refY: 5,
+// an arrow head; ids: the drawing's own prefix, so two graphs on one page do not point at each other's markers
+const graphMarker = (ids, name) => {
+  const m = gsvg('marker', { id: `${ids}-head-${name}`, class: `pg-head ${name}`, viewBox: '0 0 10 10', refX: 8, refY: 5,
     markerWidth: 9, markerHeight: 9, markerUnits: 'userSpaceOnUse', orient: 'auto-start-reverse' });
   m.append(gsvg('path', { d: 'M0,1 L9,5 L0,9 z' }));
   return m;
@@ -229,7 +230,8 @@ const graphMarker = (name) => {
 // renderHead(frame) -> the frame's head element, labelOf(item) -> the label text under a compact node (or ''),
 // stateOf(item) -> 'running' | 'paused' | 'pending' | a finished outcome (for the wires), frameWord(frame) -> its
 // state word (for the outline), replans: [[from step key, to step key]], start: the start step's key, loop: the
-// mission loop's words ('' when it does not repeat), repeatText(frame) -> a repeat frame's words.
+// mission loop's words ('' when it does not repeat), repeatText(frame) -> a repeat frame's words, ids: the prefix of
+// the drawing's element ids (its arrow heads; one per graph on the page).
 // Returns {node, items, height, replans: how many replan arrows were drawn, flow: the wires in run order as
 // {a, b, mid} (the items joined and the wire's middle; a null a: from the start, a null b: to the end), so the
 // editor can put its "+" on them}.
@@ -244,8 +246,10 @@ function drawGraph(layout, ctx) {
   [back, wires, notes].forEach((s) => { s.setAttribute('width', width); s.setAttribute('height', height); });
   graph.style.cssText = `width: ${width}px; height: ${height}px`;
   graph.append(back, wires);
+  const ids = ctx.ids || 'pg';
+  const arrow = (name) => `url(#${ids}-head-${name})`;
   const defs = gsvg('defs');
-  ['done', 'now', 'todo', 'fail', 'loop'].forEach((name) => defs.append(graphMarker(name)));
+  ['done', 'now', 'todo', 'fail', 'loop'].forEach((name) => defs.append(graphMarker(ids, name)));
   wires.append(defs);
 
   // the frames: an outline with its head on the top edge (a branch: a fainter lane with its name)
@@ -260,10 +264,11 @@ function drawGraph(layout, ctx) {
       graph.append(head);
     }
   });
-  // the items: the caller's node elements, the label under them, the split and join dots
-  items.forEach((it) => {
+  // the items: the caller's node elements, the label under them, the dots (a parallel's split and join, the one in an
+  // empty frame), each classed by its own key's end: pg-dot-split, pg-dot-join, pg-dot-empty
+  items.forEach((it, key) => {
     if (it.kind === 'dot') {
-      wires.append(gsvg('circle', { class: `pg-dot-${it.node.key.endsWith(':split') ? 'split' : 'join'} ${ctx.stateOf(it)}`,
+      wires.append(gsvg('circle', { class: `pg-dot-${key.slice(key.lastIndexOf(':') + 1)} ${ctx.stateOf(it)}`,
         cx: it.cx, cy: it.cy, r: M.dot / 2 - 1 }));
       return;
     }
@@ -311,7 +316,7 @@ function drawGraph(layout, ctx) {
     const c = cls(b);
     const w = graphWire(a, b, bend);
     flow.push({ a, b, mid: w.mid });
-    wires.append(flowing(gsvg('path', { class: `pg-wire ${c}`, d: w.d, 'marker-end': `url(#pg-head-${c})` })));
+    wires.append(flowing(gsvg('path', { class: `pg-wire ${c}`, d: w.d, 'marker-end': arrow(c) })));
   };
   const wireSequence = (node, frame) => {
     const list = node.children || [];
@@ -330,7 +335,7 @@ function drawGraph(layout, ctx) {
         : [[from.cx - from.nw / 2 - 3, from.cy], [gx, from.cy]];
       const done = node.leaves ? node.leaves.every((i) => { const st = ctx.stateOf(items.get(owner.get(ctx.keyOf(i)))); return st !== 'pending' && !live(st); })
         : false;
-      wires.append(flowing(gsvg('path', { class: `pg-wire loop${done ? ' now' : ''}`, 'marker-end': 'url(#pg-head-loop)',
+      wires.append(flowing(gsvg('path', { class: `pg-wire loop${done ? ' now' : ''}`, 'marker-end': arrow('loop'),
         d: graphRounded([...way, [gx, to.cy], [to.cx - to.nw / 2 - 5, to.cy]], 16) })));
       const text = node.kind === 'root' ? ctx.loop : (ctx.repeatText ? ctx.repeatText(node) : '');
       const from_y = way[way.length - 1][1];
@@ -363,7 +368,7 @@ function drawGraph(layout, ctx) {
     drawnReplans += 1;
     // bowed sideways, clear of the nodes: wide ones (the editor's column) need the bow outside their edge
     const w = graphWire(a, b, Math.max(M.column ? a.nw / 2 + 56 : 0, Math.min(70, 26 + Math.hypot(b.cx - a.cx, b.cy - a.cy) * 0.25)));
-    wires.append(gsvg('path', { class: 'pg-wire fail', d: w.d, 'marker-end': 'url(#pg-head-fail)' }));
+    wires.append(gsvg('path', { class: 'pg-wire fail', d: w.d, 'marker-end': arrow('fail') }));
     notes.append(gsvg('text', { class: 'pg-wire-label fail', x: w.mid.x, y: w.mid.y + 4, 'text-anchor': 'middle' }, 'replan'));
   });
   // the start: a dot beside the start step, where nothing is; the end: a final ring after the last step (unless the
@@ -376,7 +381,7 @@ function drawGraph(layout, ctx) {
     const w = graphWire(dot, first, 0);
     flow.unshift({ a: null, b: first, mid: w.mid });
     wires.append(gsvg('circle', { class: 'pg-init', cx: dot.cx, cy: dot.cy, r: 6 }),
-      gsvg('path', { class: 'pg-wire done', d: w.d, 'marker-end': 'url(#pg-head-done)' }));
+      gsvg('path', { class: 'pg-wire done', d: w.d, 'marker-end': arrow('done') }));
   }
   const last = exit(layout.root);
   if (last && ctx.loop) flow.push({ a: last, b: null, mid: { x: last.cx, y: last.cy + last.nh / 2 + 22 } });  // the end, under the last node
@@ -386,7 +391,7 @@ function drawGraph(layout, ctx) {
     const ring = { cx: last.cx + ex, cy: last.cy + ey, nw: 18, nh: 18 };
     const w = graphWire(last, ring, 0);
     flow.push({ a: last, b: null, mid: w.mid });
-    wires.append(gsvg('path', { class: 'pg-wire todo', d: w.d, 'marker-end': 'url(#pg-head-todo)' }),
+    wires.append(gsvg('path', { class: 'pg-wire todo', d: w.d, 'marker-end': arrow('todo') }),
       gsvg('circle', { class: 'pg-final', cx: ring.cx, cy: ring.cy, r: 9 }), gsvg('circle', { class: 'pg-final-dot', cx: ring.cx, cy: ring.cy, r: 5 }));
   }
   graph.append(notes);

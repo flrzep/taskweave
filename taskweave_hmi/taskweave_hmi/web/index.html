@@ -33,12 +33,15 @@
 <div class="top">
 <!-- the system strip, on every tab: the link and the robot, the state badge, the mission while one is active (goal,
      step n/N, the instruction; its progress as a line along the strip's bottom edge), the resources the step holds,
-     the speed override and the pad mode. Mission control (picker, Start, Pause, Abort) is on the Run tab's board.
+     the speed override and the pad mode. Mission control (picker, Start, Pause, Abort) is on the Run tab's board;
+     while a mission is active the strip has its own Abort (two taps, as the board's), so it is in reach on every tab.
      Start's answer and the last error under it -->
 <header id="mission" class="mission" role="group" aria-label="Robot and mission">
   <div class="mission-row">
     <span class="strip-robot"><span id="conn" class="conn" role="img" aria-label="Not connected" title="live connection"></span><span id="robot">connecting…</span></span>
     <span id="state" class="chip">idle</span>
+    <button id="strip-abort" class="btn small danger strip-abort" type="button" aria-label="Abort the mission" title="Abort the mission (two taps)" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span class="strip-abort-word">Abort</span></button>
     <div id="mission-run" class="mission-run" hidden>
       <div class="mission-goal"><b id="goal">No mission running</b><span id="cycle" class="muted mono"></span></div>
       <span id="step-meta" class="mission-meta"></span>
@@ -193,7 +196,7 @@
       <div id="problems" class="error" hidden></div>
       <div id="save-msg" class="msg" hidden></div>
       <div class="ed-work">
-        <div id="ed-canvas" class="ed-canvas" tabindex="0" role="application"
+        <div id="ed-canvas" class="ed-canvas" tabindex="0" role="group"
              aria-label="Mission graph. Click a step to edit it, Shift+A to add one after it, Delete to remove it, Ctrl+Z to undo."></div>
         <aside id="ed-panel" class="ed-panel card" aria-label="Properties">
           <div id="ed-mission" class="ed-pane">
@@ -439,22 +442,11 @@
 
 <template id="step-template">
   <li class="edit-step">
+    <!-- the form's title, "Step n" (the editor's panel: the graph moves, copies and removes steps) -->
     <div class="step-head">
-      <!-- drag to reorder (mouse or touch); from the keyboard Alt + ↑ / ↓ on it, or the arrow buttons -->
-      <button class="icon handle" data-act="drag" aria-label="Move step: drag, or Alt + arrow keys"
-              title="Drag to move (Alt + ↑ / ↓)"><svg viewBox="0 0 10 16" width="10" height="16" aria-hidden="true">
-        <circle cx="2.5" cy="3" r="1.5"/><circle cx="7.5" cy="3" r="1.5"/><circle cx="2.5" cy="8" r="1.5"/>
-        <circle cx="7.5" cy="8" r="1.5"/><circle cx="2.5" cy="13" r="1.5"/><circle cx="7.5" cy="13" r="1.5"/></svg></button>
-      <!-- the step folded to one line, or open: click it (or Enter / Space) -->
-      <button class="step-toggle" data-act="fold" aria-expanded="true">
+      <div class="step-toggle" data-act="fold">
         <span class="step-no"></span>
         <span class="step-sum"><span class="sum-instruction"></span><span class="sum-args"></span></span>
-      </button>
-      <div class="row gap-s step-buttons">
-        <button class="icon" data-act="up" aria-label="Move up">↑</button>
-        <button class="icon" data-act="down" aria-label="Move down">↓</button>
-        <button class="icon" data-act="copy" aria-label="Duplicate step" title="Duplicate step (below this one)">⧉</button>
-        <button class="icon" data-act="remove" aria-label="Remove step">✕</button>
       </div>
     </div>
     <div class="step-body">

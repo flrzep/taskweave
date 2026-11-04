@@ -27,9 +27,9 @@
   --sans: "Montserrat", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --cond: var(--sans);  /* one family: where a narrow face was used, Montserrat at the same weight */
   --fs-xs: 12px; --fs-sm: 13px; --fs-s: 14px; --fs-base: 16px; --fs-md: 18px; --fs-lg: 20px; --fs-xl: 24px; --fs-2xl: 30px;
-  --fs-3xl: 36px; --fs-4xl: 60px;  /* the Run tab's run board, read from a few metres */
+  --fs-4xl: 60px;  /* the Run tab's run board, read from a few metres */
 
-  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-12: 48px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-12: 48px;
   /* two radii: controls and panels; pills for chips and bars */
   --r-xs: 2px; --r-s: 4px; --r-m: 8px; --r-pill: 999px;
   --shadow-1: none; --shadow-2: 0 6px 28px rgb(0 0 12 / 55%);  /* borders carry the edges; a shadow only under what floats */
@@ -131,6 +131,10 @@ body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); align-i
                   border: 1px solid var(--border); color: var(--text-muted); transition: background .2s, color .2s; }
 .resources span.on { color: var(--on-run); background: var(--run-fill); border-color: var(--run-fill); }
 .sys { display: flex; align-items: center; gap: var(--sp-3); flex: none; }
+/* the strip's Abort: only while a mission is active, so it is in reach on every tab; two taps, shared with the
+   board's (solid red with "Tap again" once armed). On a phone the stop icon alone, a 44px square */
+.strip-abort { flex: none; gap: var(--sp-1); }
+.strip-abort svg { width: 14px; height: 14px; flex: none; fill: currentColor; }
 .mission.active #start-msg { display: none; }  /* Start's answer is for idle; it can arrive after the run's status */
 .mission .msg, .mission .error { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); }
 .mission .error { display: flex; align-items: flex-start; gap: var(--sp-2); }
@@ -144,6 +148,9 @@ body.on-run .mission-run, body.on-run .mission .error { display: none; }  /* the
   .mission-run { order: 9; flex-basis: 100%; }  /* the step on its own row */
   .mission-goal b, #step-detail, .resources { display: none; }
   .mission #state { min-width: 0; }
+  .strip-abort { width: var(--tap-s); padding: 0; }
+  .strip-abort-word { display: none; }
+  .mission.active #robot { display: none; }  /* the link dot stays: Abort takes the name's room, the row keeps one line */
 }
 /* run board: a little robot walks the mission (Run tab). Its floor is the phases (the plan graph's bands, as wide as
    their steps, the done part filled); it stands where the run is (--p from app.js) and its pose is the state: walking
@@ -296,7 +303,7 @@ body.on-run .mission-run, body.on-run .mission .error { display: none; }  /* the
                padding: var(--sp-3) var(--sp-4); gap: var(--sp-2) var(--sp-3); }
   .board-say:not(:has(.board-act:not([hidden]))) { grid-template-rows: minmax(0, 1fr); }
   .board-act { grid-column: 1 / -1; }
-  #board-step { font-size: 44px; }  /* between --fs-3xl and --fs-4xl: the only use */
+  #board-step { font-size: 44px; }  /* between --fs-2xl and --fs-4xl: the only use */
   .board-of { font-size: var(--fs-xl); }
   .board-instruction { font-size: var(--fs-lg); -webkit-line-clamp: 3; }
   .board-phases .name b { display: none; }
@@ -539,7 +546,7 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
 }
 
 /* plan list, mission list, log */
-.steps, .list, .log, .edit-steps, .points, .placed, .arm-groups, .waypoints { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.steps, .list, .log, .points, .placed, .arm-groups, .waypoints { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
 .steps { gap: 0; }
 .steps li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: var(--sp-3); padding: var(--sp-3) var(--sp-1); border-top: 1px solid var(--border); }
 .steps li:first-child { border-top: 0; }
@@ -603,32 +610,16 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
 .log li { font: var(--fs-sm)/1.45 var(--mono); border-bottom: 1px solid var(--border); padding: 6px 0; overflow-wrap: anywhere; }
 .edit-step { border: 1px solid var(--border); border-radius: var(--r-s); padding: var(--sp-3); display: grid; gap: var(--sp-2); background: var(--surface-card); }
 .edit-step .step-no { font: 600 var(--fs-base) var(--cond); color: var(--brand-text); white-space: nowrap; }
-/* the head: handle, the toggle (number, and folded: the instruction and the skill with its arguments, one line each,
-   cut with an ellipsis), the buttons. On a phone the buttons go to a second row under the toggle */
-.edit-step .step-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--sp-1) var(--sp-2); }
-.step-toggle { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; min-height: var(--tap-s); padding: 2px var(--sp-1);
-               border: 0; border-radius: var(--r-s); background: none; color: var(--text); font: var(--fs-base) var(--sans);
-               text-align: left; cursor: pointer; }
-.step-toggle:hover { background: var(--surface-hover); }
-.step-toggle::before { content: "▶"; flex: none; width: 12px; text-align: center; color: var(--text-muted); font-size: 10px;
-                       line-height: 1; transition: transform .15s; }  /* as a details marker */
-.step-toggle[aria-expanded="true"]::before { transform: rotate(90deg); }
+/* the head: the form's title, "Step n" (a title, not a control); the summary line is for a folded card, which the
+   editor's panel never shows */
+.edit-step .step-head { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; }
+.step-toggle { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; color: var(--text); font: var(--fs-base) var(--sans); }
 .step-sum { display: none; min-width: 0; line-height: 1.3; }
 .step-sum > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .step-sum .sum-args { font: var(--fs-sm) var(--mono); color: var(--text-muted); }
-.edit-step.collapsed { padding-block: var(--sp-2); }
 .edit-step.collapsed .step-body { display: none; }
 .edit-step.collapsed .step-sum { display: grid; }
-.edit-step.collapsed .step-no, .edit-step.dragging .step-no { min-width: 4.2em; }  /* the instructions line up */
 .step-body { display: grid; gap: var(--sp-2); min-width: 0; }
-@media (max-width: 600px) {
-  .edit-step .step-head { grid-template-columns: auto minmax(0, 1fr); }
-  .edit-step .step-buttons { grid-column: 2; justify-self: end; }
-  .edit-step.collapsed .step-word { display: none; }  /* folded: the number alone, the instruction gets the width */
-  .edit-step.collapsed .step-no { min-width: 1.6em; }
-}
-/* reorder by drag: the handle takes the pointer (no page scroll on touch), the step follows it lifted, a brand line in
-   the gap marks where it lands */
 .edit-step { position: relative; }
 .edit-step.has-problem { border-color: var(--bad); box-shadow: inset 4px 0 0 var(--bad); }  /* named by Check or Save */
 .edit-step.has-problem .step-no { color: var(--bad); }
@@ -643,19 +634,6 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
                 font-family: var(--mono); font-size: var(--fs-sm); }
 .preview-goal dt { color: var(--text-muted); }
 .preview-goal dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.edit-step .icon.confirm { width: auto; padding: 0 var(--sp-2); background: var(--bad); border-color: var(--bad); color: var(--on-fill);
-                           font: 600 var(--fs-s) var(--sans); }  /* Remove? (the second tap removes) */  /* the buttons go below the number on a narrow phone */
-.edit-step .handle { cursor: grab; touch-action: none; color: var(--text-muted); border-color: var(--border); background: none; }
-.edit-step .handle svg { fill: currentColor; }
-.edit-steps.dragging { user-select: none; -webkit-user-select: none; }
-.edit-steps.dragging .handle { cursor: grabbing; }
-.edit-step.dragging { z-index: 2; border-color: var(--brand-text); box-shadow: var(--shadow-2); }
-.edit-step.dragging .step-body { display: none; }  /* folded while carried */
-.edit-step.dragging .step-sum { display: grid; }
-.edit-step.drop-before::before, .edit-step.drop-after::after { content: ""; position: absolute; z-index: 3; left: -1px; right: -1px;
-                                                               height: 3px; border-radius: var(--r-pill); background: var(--brand-text); }
-.edit-step.drop-before::before { top: calc(-1 * var(--sp-1) - 3px); }
-.edit-step.drop-after::after { bottom: calc(-1 * var(--sp-1) - 3px); }
 .args { display: grid; gap: var(--sp-3); }
 /* argument fields from the skill schema (app.js argField): nested objects indented on a hairline rule, their fields in
    a grid (vectors, variants, hands and lists full width), a variant chooser, hands as checkboxes and rule words */
@@ -861,7 +839,7 @@ li.empty { list-style: none; padding: 6px 2px; }
    the way travelled (solid), the step running (flowing lime) and the way ahead (dotted). The graph's own colours are
    the --g-* tokens. */
 .graph-box { display: grid; gap: var(--sp-3); container: plan / inline-size;
-  --g-fail: var(--bad); --g-warn: var(--warn); --g-ok: var(--ok); --g-bad: var(--bad); --g-card: var(--surface-card); }
+  --g-fail: var(--bad); --g-warn: var(--warn); --g-bad: var(--bad); --g-card: var(--surface-card); }
 @media (max-width: 600px) { .graph-box { container-type: normal; } }  /* no containment: the sheet is fixed to the screen */
 .kind-drive { --k: var(--kind-drive); } .kind-arm { --k: var(--kind-arm); } .kind-grip { --k: var(--kind-grip); }
 .kind-wait { --k: var(--kind-wait); } .kind-other { --k: var(--kind-other); }
@@ -875,17 +853,15 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-outline.repeat, .pg-outline.parallel { stroke: color-mix(in srgb, var(--brand-text) 45%, var(--border)); }
 .pg-outline.branch { fill: none; stroke-dasharray: 3 5; stroke-linecap: round; }
 .pg-dot-split, .pg-dot-join { fill: var(--text-muted); }
-.pg-dot-join[class*=":empty"] { fill: var(--border-strong); }
+.pg-dot-empty { fill: var(--border-strong); }  /* the dot in an empty frame */
 .pg-dot-split.running, .pg-dot-join.running, .pg-dot-split.paused, .pg-dot-join.paused { fill: var(--run-fill); }
 .pg-band.branch { cursor: default; } .pg-band.branch:hover { background: var(--g-card); }
 .pg-band.repeat, .pg-band.parallel { border-color: color-mix(in srgb, var(--brand-text) 45%, var(--border)); }
 .pg-link { font-size: 11px; line-height: 1; color: var(--brand-text); }
-.pg-subband { fill: none; stroke: color-mix(in srgb, var(--brand-text) 8%, transparent); stroke-linecap: round;
-  stroke-linejoin: round; }
 .pg-wire { fill: none; stroke: var(--text-muted); stroke-width: 1.75; }
 .pg-wire.todo { stroke: var(--border-strong); stroke-dasharray: 1 5; stroke-linecap: round; stroke-width: 2; }
 .pg-wire.now { stroke: var(--run-fill); stroke-width: 2.5; stroke-dasharray: 7 5;
-  animation: wire-flow .7s linear infinite; }  /* period = WIRE_FLOW_MS in graph.js */
+  animation: wire-flow .7s linear infinite; }  /* the phase: graph-core.js flowing() */
 .pg-wire.fail { stroke: var(--g-fail); stroke-dasharray: 5 4; }
 .pg-wire.loop { stroke: var(--brand-text); stroke-dasharray: 6 5; stroke-width: 1.5; }
 .pg-head path { fill: var(--text-muted); } .pg-head.todo path { fill: var(--border-strong); }
@@ -893,7 +869,6 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-wire-label { font: 600 11.5px var(--sans); paint-order: stroke; stroke: var(--g-card); stroke-width: 4px;
   stroke-linejoin: round; }
 .pg-wire-label.fail { fill: var(--g-fail); } .pg-wire-label.loop { fill: var(--brand-text); }
-.pg-ring-count { font: 600 34px var(--cond); fill: var(--text-muted); opacity: .45; }
 .pg-init { fill: var(--text); }
 .pg-final { fill: none; stroke: var(--text); stroke-width: 1.5; } .pg-final-dot { fill: var(--text); }
 @keyframes wire-flow { to { stroke-dashoffset: -12; } }
@@ -930,8 +905,8 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-chip:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .pg-chip.state-pending { background: var(--g-card); border-color: color-mix(in srgb, var(--k) 40%, transparent);
   color: color-mix(in srgb, var(--k) 50%, transparent); }
-.pg-chip.state-running, .pg-chip.state-paused { background: var(--k); border-color: var(--k); color: var(--on-brand);
-  --ring: var(--run); animation: node-breathe 2.8s ease-in-out infinite;  /* period = BREATHE_MS in graph.js */
+.pg-chip.state-running, .pg-chip.state-paused { background: var(--k); border-color: var(--k); color: var(--on-fill);
+  --ring: var(--run); animation: node-breathe 2.8s ease-in-out infinite;  /* period = BREATHE_MS in graph-run.js */
   box-shadow: 0 0 0 2px var(--g-card), 0 0 0 4px var(--ring),
     0 0 calc(10px * var(--breath)) calc(4px * var(--breath)) color-mix(in srgb, var(--k) 45%, transparent); }
 .pg-chip.state-paused { --ring: var(--g-warn); animation: none; }
@@ -958,8 +933,6 @@ li.empty { list-style: none; padding: 6px 2px; }
   padding: 0 var(--sp-3) 0 8px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--g-card);
   color: var(--text); cursor: pointer; font: 600 var(--fs-s)/1 var(--sans); text-align: left; }
 .pg-band:hover { background: var(--surface-hover); }
-.pg-band.pg-sub { z-index: 1; height: 22px; font-size: var(--fs-xs); }  /* over a neighbouring node in a ring */
-.pg-band.pg-sub .pg-band-meta { display: none; }
 .pg-band:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .pg-chev { flex: none; width: 12px; height: 12px; display: grid; place-items: center; color: var(--text-muted);
   transition: transform .15s; }
@@ -975,7 +948,7 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-card.marked { border: 2px solid var(--run); padding: calc(var(--sp-4) - 1px); }
 .pg-card-head, .pg-sheet-row { display: flex; gap: var(--sp-3); align-items: center; min-width: 0; }
 .pg-tile { flex: none; width: 44px; height: 44px; border-radius: var(--r-s); display: grid; place-items: center;
-  background: var(--k); color: var(--on-brand); }
+  background: var(--k); color: var(--on-fill); }
 .pg-tile .icon { width: 24px; height: 24px; }
 .pg-card-titles, .pg-sheet-text { display: grid; gap: 2px; min-width: 0; }
 .pg-eyebrow { font: 700 var(--fs-xs) var(--sans); letter-spacing: .04em; text-transform: uppercase; color: var(--brand-text); }
@@ -1070,13 +1043,9 @@ li.empty { list-style: none; padding: 6px 2px; }
 .ed-linked .pg-link { font-size: 16px; }
 .ed-linked .btn { margin-left: auto; white-space: nowrap; }
 .ed-block { display: grid; gap: var(--sp-3); }
-.ed-undo-save { margin-left: var(--sp-2); min-height: var(--tap-s); }
-/* the step form in the panel: no handle, no buttons, no folding; "Step n" is its title */
+.ed-undo-save, .ed-reload { margin-left: var(--sp-2); min-height: var(--tap-s); }
+/* the step form in the panel: "Step n" is its title; the graph moves, copies and removes steps */
 .ed-card { border: 0; padding: 0; background: none; }
-.ed-card .handle, .ed-card .step-buttons, .ed-card .step-sum { display: none; }
-.ed-card .step-head { grid-template-columns: minmax(0, 1fr); }
-.ed-card .step-toggle { pointer-events: none; padding: 0; min-height: 0; }
-.ed-card .step-toggle::before { display: none; }
 /* nodes */
 .pg-node { position: absolute; width: 196px; height: 56px; padding: 0 14px 0 8px; display: flex; align-items: center; gap: 10px;
   text-align: left; cursor: grab; border-radius: var(--r-m); border: 1.5px solid color-mix(in srgb, var(--k) 45%, var(--border));
@@ -1139,7 +1108,8 @@ li.empty { list-style: none; padding: 6px 2px; }
 .ed-palette-list { list-style: none; margin: 0; padding: 0; overflow: auto; display: grid; gap: 2px; align-content: start; }
 .ed-palette-list li[role="option"] { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--tap-min); padding: 4px var(--sp-2);
   border-radius: var(--r-s); cursor: pointer; }
-.ed-palette-list li[role="option"]:hover, .ed-palette-list li[role="option"]:focus-visible { background: var(--surface-hover); outline: none; }
+.ed-palette-list li[role="option"]:hover, .ed-palette-list li[role="option"][aria-selected="true"] { background: var(--surface-hover); }
+.ed-palette-list li[role="option"]:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }  /* inset: the list clips */
 .ed-pal-icon { flex: none; width: 22px; height: 22px; color: var(--brand-text); }
 .ed-pal-glyph { flex: none; width: 22px; text-align: center; font-size: 17px; color: var(--brand-text); }
 .ed-pal-text { min-width: 0; display: grid; }
@@ -1152,5 +1122,6 @@ li.empty { list-style: none; padding: 6px 2px; }
 .ed-menu-title { padding: 2px var(--sp-2) var(--sp-1); font: 600 var(--fs-xs) var(--sans); color: var(--text-muted); }
 .ed-menu button { min-height: var(--tap-s); padding: 0 var(--sp-2); border: 0; border-radius: var(--r-s); background: none; color: var(--text);
   font: var(--fs-s) var(--sans); text-align: left; cursor: pointer; }
-.ed-menu button:hover, .ed-menu button:focus-visible { background: var(--surface-hover); outline: none; }
+.ed-menu button:hover { background: var(--surface-hover); }
+.ed-menu button:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
 .ed-menu button.on { color: var(--brand-text); font-weight: 600; }

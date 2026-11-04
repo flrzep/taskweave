@@ -3,7 +3,7 @@
 // tints them by kind and state). The SVG files are web/icons/<id>.svg; ICON_SVG below holds the same markup inline (the
 // server lists its static files one by one, so no fetch per icon). After changing a file run
 // `python3 taskweave_hmi/test/test_icons.py --regenerate`; test_icons.py fails while the two differ.
-// Uses nothing from the other files; graph.js and the editors call skillIcon(step) and iconSvg(id).
+// Uses nothing from the other files; graph-run.js and the editor call skillIcon(step) and iconSvg(id).
 
 // a move step's kind -> its icon; the ids before cell schema 5 too (base, object, elbow)
 const KIND_ICONS = { navigate: 'navigate', straight: 'straight', hand: 'hand', carry: 'carry', posture: 'posture',

@@ -305,7 +305,7 @@ function planCard(i, ctx, phone) {
     ...row('locks', (step.resources || []).join(', ') || '–'), ...row('on failure', failureText(r[i])),
     ...row('status', statusText, live ? 'mono' : ''), ...(notes ? (step.notes || []).flatMap((note) => row('note', note)) : []));
   if (phone) {
-    // the bottom sheet (a dialog, not modal: the strip and the board's Pause and Abort stay in reach above the scrim):
+    // the bottom sheet (a dialog, not modal: the strip and its Abort stay in reach above the scrim):
     // the same rows as the side card, the notes as amber boxes, Close; a tap on the scrim, Escape or the chip close it
     const title = el('div', { class: 'pg-sheet-title', id: 'pg-sheet-title', text: `${i + 1} · ${step.instruction}` });
     const close = el('button', { type: 'button', class: 'btn pg-sheet-close', 'data-sheet-close': '', text: 'Close' });
@@ -360,7 +360,8 @@ function loopText(plan, mission, snap) {
 function renderGraph() {
   const box = $('plan-graph');
   const snap = state.snapshot;
-  if (!box || box.hidden || !snap) return;
+  // not while the Run tab is hidden: the tab's button draws it again when the tab comes back (app.js)
+  if (!box || box.hidden || $('view-run').hidden || !snap) return;
   const { plan, live } = shownPlan();  // app.js: the live plan, or a preview to pick a start step in
   if (!plan || !plan.steps.length) {
     box.replaceChildren(el('p', { class: 'muted', text: plan?.message || 'No plan yet' }));
@@ -398,7 +399,7 @@ function renderGraph() {
   const pickable = snap.status.state !== 'running' && snap.status.state !== 'paused';
   const ctx = { plan, states, r, events, snap, usual, pickable, metrics: PHONE.matches ? GRAPH_METRICS.phone : GRAPH_METRICS.compact,
     width: box.clientWidth || 300, isOpen, keyOf: (i) => plan.steps[i].id, loop: loopText(plan, mission, snap),
-    label: `Plan ${plan.plan_id}: ${plan.steps.length} steps`,
+    label: `Plan ${plan.plan_id}: ${plan.steps.length} steps`, ids: 'pg-run',
     start: state.startStep && plan.steps.some((s) => s.id === state.startStep) ? state.startStep : plan.steps[0].id,
     replans: plan.steps.map((s, i) => (jumps(r[i], i) ? [s.id, plan.steps[r[i].replanTo].id] : null)).filter(Boolean),
     stateOf: (it) => (it.node.kind === 'step' ? states[it.node.index] : info.get(it.node)?.word === 'done' ? 'succeeded'

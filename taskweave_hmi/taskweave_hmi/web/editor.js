@@ -6,12 +6,12 @@
 // frames hold includes (linked, read-only here) and, with schema v2, groups, repeats and parallel lanes. The
 // interaction is a node editor's (Nuke, Blender): click selects, shift-click extends, a box selects several; the
 // properties panel at the right edits the selected step with the step form (app.js stepCard) or the mission; "+" on
-// a wire (or Tab, Shift+A) opens the palette of skills, missions and blocks; a node is dragged onto a wire to move
-// it; the failed port (the red dot at the right) is dragged to the step a replan restarts from, or clicked for its
-// rule; Delete removes, Ctrl+Z and Ctrl+Y undo and redo. Uses $, el, api, state, show, message, markDirty,
-// stepCard, markField, unmarkField, setExpanded, moveSummary, argsSummary, INCLUDE, ON_FAILURE, fillSelect,
-// loadMissions, showEditor from app.js; iconElement, skillIcon from icons.js; div, colourOf, iconOf, forgetMission
-// from graph-run.js; GRAPH_METRICS, fillLeaves, layoutGraph, drawGraph from graph-core.js.
+// a wire (or Shift+A) opens the palette of skills, missions and blocks; a node is dragged onto a wire to move it; the
+// failed port (the red dot at the right) is dragged to the step a replan restarts from, or clicked for its rule;
+// Delete removes, Ctrl+Z and Ctrl+Y undo and redo. A structural edit keeps every replan_from on the step it named.
+// Uses $, el, api, state, show, message, markDirty, stepCard, markField, moveSummary, argsSummary, dropDirty,
+// clearDrop, openEditor, loadMissions, showEditor from app.js; iconElement, skillIcon from icons.js; div, colourOf,
+// iconOf, forgetMission from graph-run.js; GRAPH_METRICS, fillLeaves, layoutGraph, drawGraph, gsvg from graph-core.js.
 
 const BLOCK_KINDS = ['group', 'repeat', 'parallel'];
 const BLOCK_WORDS = { group: 'Group', repeat: 'Repeat', parallel: 'In parallel' };
@@ -83,29 +83,122 @@ function applyOp(m, op) {
   }
 }
 // Apply ops: one undo entry (tag: a following commit with the same tag joins it, so typing in a field is one undo).
+// A structural edit (insert, remove, move, wrap, unwrap) also keeps every replan_from on the step it named (set ops in
+// the same entry, sent at Save with the rest), says what it changed, and keeps the keyboard on the graph: the node at
+// the selection, else the one nearest the change.
 function commit(ops, { tag = null, select } = {}) {
   if (!ops.length) return;
+  const structural = ops.some((op) => op.op !== 'set');
   const last = ed.undo[ed.undo.length - 1];
   if (!(tag && last && last.tag === tag)) ed.undo.push({ mission: clone(ed.mission), ops: ed.ops.length, selected: [...ed.selected], tag });
   ed.redo = [];
+  const refs = structural ? replanRefs(ops) : null;
   ops.forEach((op) => applyOp(ed.mission, op));
-  ed.ops.push(...ops);
+  const fixed = refs ? replanFixes(refs) : { ops: [], notes: [] };
+  fixed.ops.forEach((op) => applyOp(ed.mission, op));
+  ed.ops.push(...ops, ...fixed.ops);
   ops.forEach((op) => { if (op.at !== undefined) ed.marks.delete(op.at); });
-  if (ops.some((op) => op.op !== 'set')) { ed.marks.clear(); ed.closed.clear(); ed.opened.clear(); }  // paths shifted
+  if (structural) {  // paths shifted
+    ed.marks.clear(); ed.notes.clear(); ed.closed.clear(); ed.opened.clear();
+    fixed.notes.forEach(({ path, text }) => ed.notes.set(path, [...(ed.notes.get(path) || []), text]));
+    if (fixed.notes.length) message($('save-msg'), fixed.notes.map((n) => n.text).join(' '), 'warn');
+    else if ($('save-msg').classList.contains('warn')) message($('save-msg'), '');  // the last such note is old now
+    const active = document.activeElement;
+    ed.focusNear = changedAt(ops.every((op) => op.op === 'remove') ? ops[ops.length - 1] : ops[0]);  // removes: back to front
+    ed.refocus = $('ed-canvas').contains(active) || !!active?.closest?.('.ed-actions, .ed-palette, .ed-menu');
+  }
   if (select !== undefined) ed.selected = select;
   markDirty();
   renderEditor();
-  if (select !== undefined || ops.some((op) => op.op !== 'set')) renderPanel();
+  if (select !== undefined || structural) renderPanel();
   tools();
+}
+// where an op changed the mission: the path the nearest node is looked for from
+const changedAt = (op) => op.at ?? (op.op === 'move' ? op.to : op.from) ?? '';
+
+// ---------- replan_from follows its step ----------
+// Every own step of a mission (blocks too, not the steps of an include) with its path, in document order.
+function ownSteps(m) {
+  const out = [];
+  const walk = (steps, list) => (steps || []).forEach((step, i) => {
+    const path = joinPath(list, i);
+    out.push({ step, path });
+    if (step?.parallel) step.parallel.forEach((lane, j) => walk(lane.steps, `${path}/parallel/${j}/steps`));
+    else if (step && !step.include) walk(step.steps, `${path}/steps`);
+  });
+  walk(m.steps, 'steps');
+  return out;
+}
+// The step a replan_from names in a mission: the step with that id, else for s<n> the n-th of the mission's own top
+// level steps when it has no id (core's fallback for a step without one; numbered from 1), else null.
+function replanTarget(m, ref, all = ownSteps(m)) {
+  const byId = all.find((n) => n.step?.id === ref);
+  if (byId) return byId.step;
+  const place = /^s(\d+)$/.exec(ref || '');
+  const top = place && m.steps?.[place[1] - 1];
+  return top && !top.id ? top : null;
+}
+// Before a structural edit: every step with a replan_from and the step it names now. A step the edit inserts (a
+// duplicate) names a step of the mission as it is before the insert, so its place is read now too.
+function replanRefs(ops) {
+  const all = ownSteps(ed.mission);
+  const refs = all.filter((n) => n.step?.replan_from)
+    .map((n) => ({ step: n.step, ref: n.step.replan_from, target: replanTarget(ed.mission, n.step.replan_from, all) }));
+  const insert = ops.length === 1 && ops[0].op === 'insert' ? ops[0] : null;
+  if (insert) {
+    refs.inserted = { at: insert.at, refs: ownSteps({ steps: [insert.step] })
+      .map((n) => (n.step?.replan_from ? { ref: n.step.replan_from, target: replanTarget(ed.mission, n.step.replan_from, all) } : null)) };
+  }
+  return refs;
+}
+// After it: set ops that keep each replan_from on its step (a place number that moved becomes the new one, or an id
+// when the step left the top level), and clear one whose step was removed (with on_failure: replan, back to the
+// mission's default). notes: [{path, text}] for the editor to say what changed.
+function replanFixes(refs) {
+  const all = ownSteps(ed.mission);
+  const pathOf = new Map(all.map((n) => [n.step, n.path]));
+  const ops = [];
+  const notes = [];
+  const ids = new Map();  // a target given an id here -> the id
+  const list = [...refs];
+  if (refs.inserted) {  // the inserted copy: its steps in the same order as the op's
+    const copy = ownSteps({ steps: [nodeAt(ed.mission, refs.inserted.at)] });
+    refs.inserted.refs.forEach((r, k) => { if (r && copy[k]) list.push({ step: copy[k].step, ...r }); });
+  }
+  list.forEach(({ step, ref, target }) => {
+    const at = pathOf.get(step);
+    if (at === undefined || step.replan_from !== ref || !target) return;  // removed, set in this edit, or named nothing
+    const name = `'${step.id || step.instruction || at}'`;
+    if (!pathOf.has(target)) {
+      ops.push({ op: 'set', at, key: 'replan_from', value: null });
+      if (step.on_failure === 'replan') ops.push({ op: 'set', at, key: 'on_failure', value: null });
+      const fallback = step.on_failure === 'replan' ? `does the mission default (${ed.mission.defaults?.on_failure || 'abort'})`
+        : 'replans from itself';  // its rule is the mission's replan
+      notes.push({ path: at, text: `The replan target of ${name} was removed: on failure it ${fallback} now.` });
+      return;
+    }
+    if (replanTarget(ed.mission, ref, all) === target) return;  // still names it
+    const top = (ed.mission.steps || []).indexOf(target);
+    let value = top >= 0 && !target.id ? `s${top + 1}` : target.id || ids.get(target);
+    if (!value) {
+      value = freshId(target, [...ids.values()]);
+      ids.set(target, value);
+      ops.push({ op: 'set', at: pathOf.get(target), key: 'id', value });
+    }
+    ops.push({ op: 'set', at, key: 'replan_from', value });
+    notes.push({ path: at, text: `replan_from of ${name} is ${value} now (was ${ref}).` });
+  });
+  return { ops, notes };
 }
 function undoEdit() {
   const entry = ed.undo.pop();
   if (!entry) return;
-  ed.redo.push({ mission: clone(ed.mission), ops: ed.ops.length, selected: [...ed.selected], after: ed.ops.slice(entry.ops) });
+  const undone = ed.ops.slice(entry.ops);
+  ed.redo.push({ mission: clone(ed.mission), ops: ed.ops.length, selected: [...ed.selected], after: undone });
   ed.mission = entry.mission;
   ed.ops = ed.ops.slice(0, entry.ops);
   ed.selected = entry.selected.filter((path) => nodeAt(ed.mission, path));
-  afterHistory();
+  afterHistory(undone[0]);
 }
 function redoEdit() {
   const entry = ed.redo.pop();
@@ -114,9 +207,12 @@ function redoEdit() {
   entry.after.forEach((op) => applyOp(ed.mission, op));
   ed.ops.push(...entry.after);
   ed.selected = entry.selected.filter((path) => nodeAt(ed.mission, path));
-  afterHistory();
+  afterHistory(entry.after[0]);
 }
-function afterHistory() {
+// after an undo or redo: the keyboard stays on the graph, at the selection, else at the node nearest the change
+function afterHistory(op) {
+  ed.focusNear = op ? changedAt(op) : null;
+  ed.notes.clear();
   ed.marks.clear();
   markDirty();
   fillMissionFields();
@@ -188,10 +284,9 @@ function allSteps(root = buildTree().root) {
 const stepIds = () => allSteps().map((n) => n.step?.id).filter(Boolean);
 // a step by its id; s<n> names the n-th of the mission's own steps when that one has no id (core's fallback)
 function stepById(id) {
-  const found = allSteps().find((n) => n.step?.id === id);
-  const m = !found && /^s(\d+)$/.exec(id || '');
-  if (m && ed.mission.steps?.[m[1] - 1] && !ed.mission.steps[m[1] - 1].id) return { path: joinPath('steps', m[1] - 1), step: ed.mission.steps[m[1] - 1] };
-  return found;
+  const all = ownSteps(ed.mission);
+  const step = replanTarget(ed.mission, id, all);
+  return step ? all.find((n) => n.step === step) : undefined;
 }
 
 // the words of the mission's own loop wire and of a repeat frame
@@ -361,7 +456,11 @@ function selectedRun() {
 function renderEditor() {
   const canvas = $('ed-canvas');
   if (!ed.mission || $('editor').hidden) return;
-  const focused = canvas.contains(document.activeElement);
+  const focused = canvas.contains(document.activeElement) || ed.refocus;
+  const near = ed.focusNear;
+  const had = canvas.contains(document.activeElement) ? document.activeElement.closest('[data-path]')?.dataset.path : null;  // a redraw keeps it
+  ed.refocus = false;
+  ed.focusNear = null;
   const { root, leaves } = buildTree();
   ed.leaves = leaves;
   closePalette();
@@ -370,20 +469,52 @@ function renderEditor() {
     const add = el('button', { type: 'button', class: 'btn primary ed-first', text: '+ Add the first step' });
     add.addEventListener('click', () => openPalette({ list: 'steps', index: 0 }, canvas.clientWidth / 2 - 150, 80));
     canvas.replaceChildren(div('ed-empty', el('p', { class: 'muted', text: 'This mission has no steps yet.' }), add));
+    if (focused) add.focus({ preventScroll: true });
     return;
   }
   const replans = allSteps(root).filter((n) => n.step.on_failure === 'replan' && n.step.replan_from)
     .map((n) => [n.path, stepById(n.step.replan_from)?.path]).filter(([, to]) => to);
   const ctx = { metrics: GRAPH_METRICS.editor, width: Math.max(320, canvas.clientWidth - 2), isOpen: isOpenFrame,
     keyOf: (i) => leaves[i], stateOf: () => 'succeeded', frameWord: () => '', renderItem: nodeEl, renderHead: headEl,
-    labelOf: () => '', replans, start: null, loop: loopWords(), repeatText: repeatWords, label: 'Mission graph editor' };
+    labelOf: () => '', replans, start: null, loop: loopWords(), repeatText: repeatWords, label: 'Mission graph editor', ids: 'pg-ed' };
   const layout = layoutGraph(root, ctx);
   const drawn = drawGraph(layout, ctx);
   addSpots(drawn, layout, root);
   canvas.replaceChildren(drawn.node);
   ed.layout = layout;
   ed.drawn = drawn;
-  if (focused) (canvas.querySelector('.pg-node.selected') || canvas.querySelector('.pg-node'))?.focus({ preventScroll: true });
+  // the node to keep in sight (and on the keyboard): the selection, else the one nearest the last change, else the
+  // one that had the focus, else the first; a graph wider than the canvas (lanes on a phone) scrolls it in, the start of a mission to its first node
+  const target = canvas.querySelector('.pg-node.selected, .pg-band.selected .pg-band-name') || nearestNode(near)
+    || nearestNode(had) || canvas.querySelector('.pg-node');
+  if (target && (focused || ed.selected.length || ed.reveal)) keepInView(canvas, target.closest('.pg-node, .pg-band'));
+  ed.reveal = false;
+  if (focused) target?.focus({ preventScroll: true });
+}
+// the element of the node at a path, else of the one before it in its list, else of the frame that holds it
+function nearestNode(path) {
+  const canvas = $('ed-canvas');
+  let p = path;
+  while (p) {
+    const found = canvas.querySelector(`.pg-node[data-path="${CSS.escape(p)}"]`)
+      || canvas.querySelector(`.pg-band[data-path="${CSS.escape(p)}"] .pg-band-name`);
+    if (found) return found;
+    const { list, index } = slotOf(p);
+    p = index > 0 ? joinPath(list, index - 1) : pathParts(list).slice(0, -1).join('/');  // a lane, then its block
+  }
+  return null;
+}
+// scroll the canvas (not the page) so a node is in sight: only the way it is out, with a margin
+function keepInView(canvas, node) {
+  if (!node) return;
+  const c = canvas.getBoundingClientRect();
+  const n = node.getBoundingClientRect();
+  const margin = 24;
+  if (n.left < c.left + margin || n.right > c.right - margin) {
+    canvas.scrollLeft += n.left + n.width / 2 - (c.left + canvas.clientWidth / 2);  // centred across
+  }
+  if (n.top < c.top + margin) canvas.scrollTop += n.top - c.top - margin;
+  else if (n.bottom > c.top + canvas.clientHeight - margin) canvas.scrollTop += n.bottom - (c.top + canvas.clientHeight) + margin;
 }
 // Where a step can go: on every wire (before the item the wire leads to, at the level the wire runs), at the end of
 // every open frame, in an empty frame and lane. A spot: {list, index, x, y}.
@@ -459,7 +590,7 @@ function openPalette(spot, x, y) {
   const canvas = $('ed-canvas');
   const box = div('ed-palette');
   const search = el('input', { type: 'search', placeholder: 'Skill, mission or block', 'aria-label': 'What to add', autocomplete: 'off', spellcheck: 'false' });
-  const list = el('ul', { class: 'ed-palette-list', role: 'listbox' });
+  const list = el('ul', { class: 'ed-palette-list', role: 'listbox', 'aria-label': 'Skills, missions and blocks' });
   const entries = paletteEntries();
   const fill = () => {
     const words = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -472,7 +603,12 @@ function openPalette(spot, x, y) {
       return item;
     }));
     if (!list.children.length) list.append(el('li', { class: 'muted', text: 'nothing matches' }));
+    choose(list.querySelector('li[role="option"]'));
   };
+  // the active option (aria-selected): the focused one, or while the search has the focus the first, which Enter takes
+  const choose = (item) => list.querySelectorAll('li[role="option"]').forEach((li) => li.setAttribute('aria-selected', String(li === item)));
+  list.addEventListener('focusin', (e) => choose(e.target.closest('li[role="option"]')));
+  search.addEventListener('focus', () => choose(list.querySelector('li[role="option"]')));
   search.addEventListener('input', fill);
   box.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { e.stopPropagation(); closePalette(); return; }
@@ -536,17 +672,21 @@ function failPortDown(e, node) {
     const g = graph.getBoundingClientRect();
     const o = origin();
     line.firstChild.setAttribute('d', `M${o.x},${o.y} L${m.clientX - g.left},${m.clientY - g.top}`);
-    const under = document.elementFromPoint(m.clientX, m.clientY)?.closest('.pg-node[data-path]');
-    const next = under && under.dataset.path !== node.path && !under.classList.contains('linked') ? under : null;
+    // a replan restarts from a step of the plan: a step tile, not a closed block or an include
+    const under = document.elementFromPoint(m.clientX, m.clientY)?.closest('.pg-node[data-path]:not(.frame, .linked)');
+    const next = under && under.dataset.path !== node.path ? under : null;
     if (target !== next) { target?.classList.remove('ed-target'); next?.classList.add('ed-target'); target = next; }
   };
-  const up = () => {
+  const done = () => {
     port.removeEventListener('pointermove', move);
     port.removeEventListener('pointerup', up);
-    port.removeEventListener('pointercancel', up);
+    port.removeEventListener('pointercancel', done);  // a touch that became a scroll: only clean up
     canvas.classList.remove('wiring');
     line?.remove();
     target?.classList.remove('ed-target');
+  };
+  const up = () => {
+    done();
     if (!line) { openRuleMenu(node, port); return; }
     if (!target) return;
     const toPath = target.dataset.path;
@@ -560,11 +700,11 @@ function failPortDown(e, node) {
   port.setPointerCapture(e.pointerId);
   port.addEventListener('pointermove', move);
   port.addEventListener('pointerup', up);
-  port.addEventListener('pointercancel', up);
+  port.addEventListener('pointercancel', done);
 }
 // an id for a step that has none: from its instruction's first words, unique in the mission
-function freshId(step) {
-  const taken = new Set(stepIds());
+function freshId(step, more = []) {
+  const taken = new Set([...stepIds(), ...more]);
   const base = (step.instruction || 'step').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').split('_').slice(0, 3).join('_') || 'step';
   const first = /^[a-z_]/.test(base) ? base : `s_${base}`;
   let id = first;
@@ -887,6 +1027,8 @@ function editorOpen(name, mission, isNew, base = null) {
   ed.marks = new Map();
   ed.notes = new Map();
   ed.savedUndo = null;
+  ed.reveal = true;  // a graph wider than the canvas starts at its first node, not at its left margin
+  $('ed-canvas').scrollTo(0, 0);
   if (isNew) {
     ['goal', 'robot', 'params', 'facts', 'loop', 'max_cycles', 'stop_when', 'defaults'].forEach((key) => { if (mission[key] !== undefined) ed.ops.push({ op: 'set', at: '', key, value: clone(mission[key]) }); });
     (mission.steps || []).forEach((step, i) => ed.ops.push({ op: 'insert', at: joinPath('steps', i), step: clone(step) }));
@@ -933,9 +1075,20 @@ $('btn-save').addEventListener('click', async () => {
   if (!name) { showProblems(['Give the mission a name.']); return; }
   const old = ed.isNew ? null : ed.name;
   const rename = old && old !== name ? `?rename_from=${encodeURIComponent(old)}` : '';
-  const { ok, data } = await api('POST', `/api/missions/${encodeURIComponent(name)}/edit${rename}`,
+  const { ok, status, data } = await api('POST', `/api/missions/${encodeURIComponent(name)}/edit${rename}`,
     { ops: ed.ops, base: ed.base, create: ed.isNew });
-  if (!ok) { showProblems(data.problems || [data.error || 'not saved'], data.places); message($('save-msg'), ''); return; }
+  if (!ok) {
+    showProblems(data.problems || [data.error || 'not saved'], data.places);
+    message($('save-msg'), '');
+    // the file changed since it was opened (not a 409 for a running mission): offer it as it is now, the edits dropped
+    if (status === 409 && old && (data.problems || []).some((p) => /changed since it was opened/.test(p))) {
+      const reload = el('button', { type: 'button', class: 'btn small ed-reload', text: 'Reload from file',
+        title: `Open ${old} as it is saved now; the changes here are dropped` });
+      reload.addEventListener('click', () => { state.dirty = false; openEditor(old); });
+      $('problems').append(' ', reload);
+    }
+    return;
+  }
   showProblems([]);
   ed.mission = data.mission;
   ed.ops = [];
@@ -993,5 +1146,5 @@ document.addEventListener('keydown', (e) => {
 let editorWidth = 0;
 new ResizeObserver(([entry]) => {
   const width = Math.round(entry.contentRect.width);
-  if (width && width !== editorWidth) { editorWidth = width; if (!ed.palette) renderEditor(); }
+  if (width && width !== editorWidth) { editorWidth = width; ed.reveal = true; if (!ed.palette) renderEditor(); }
 }).observe($('ed-canvas'));
