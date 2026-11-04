@@ -111,9 +111,9 @@ def test_edit_saves_with_an_undo_and_refuses_a_bad_step(served):
                              {'ops': [], 'base': opened['_etag']})
     assert status == 422 and 'both exist now' in answer['problems'][0]
     assert answer['undo']['files'] == ['missions/night.yaml']
+    del bridge.config.delete   # the undo deletes the new file through the store
     status, answer = request('POST', '/api/teach/undo', {'id': answer['undo']['id']})
     assert status == 200 and not (bridge.config.root / 'missions' / 'night.yaml').exists()
-    del bridge.config.delete
     # the undos put the file back as it was before the first edit, newest first (an older save's file changed since)
     assert len(bridge.undos.saves) == 2
     for key in reversed(list(bridge.undos.saves)):
