@@ -67,12 +67,17 @@ def test_edit_saves_with_an_undo_and_refuses_a_bad_step(served):
     before = path.read_text()
     status, answer = request('POST', '/api/missions/patrol/edit',
                              {'ops': [{'op': 'insert', 'at': 'steps/3', 'step': WAIT}]})
+    assert status == 422 and 'base is missing' in answer['problems'][0]   # the ops need the version they name
+    status, opened = request('GET', '/api/missions/patrol')
+    status, answer = request('POST', '/api/missions/patrol/edit',
+                             {'ops': [{'op': 'insert', 'at': 'steps/3', 'step': WAIT}], 'base': opened['_etag']})
     assert status == 200 and answer['file'] == 'missions/patrol.yaml'
     assert [s['instruction'] for s in answer['mission']['steps']][-1] == 'Wait a little'
     assert answer['undo'] and answer['undo']['files'] == ['missions/patrol.yaml']
     assert len(bridge.config.mission('patrol')['steps']) == 4
     status, answer = request('POST', '/api/missions/patrol/edit',
-                             {'ops': [{'op': 'set', 'at': 'steps/0', 'key': 'args', 'value': {'to': 'nowhere'}}]})
+                             {'ops': [{'op': 'set', 'at': 'steps/0', 'key': 'args', 'value': {'to': 'nowhere'}}],
+                              'base': answer['hash']})
     assert status == 422 and any('nowhere' in p for p in answer['problems']) and answer['places'][0]['step'] == 0
     status, answer = request('POST', '/api/missions/patrol/edit', {'ops': 'not a list'})
     assert status == 400
@@ -88,6 +93,13 @@ def test_edit_saves_with_an_undo_and_refuses_a_bad_step(served):
     assert status == 200 and answer['hash'] and answer['mission']['goal'] == 'Again'
     status, answer = request('POST', '/api/missions/patrol/edit', {'ops': [], 'create': True})
     assert status == 422 and 'already exists' in answer['problems'][0]
+    # no mission write while a mission runs: the planner rereads the file
+    bridge.status['state'] = 'running'
+    status, answer = request('POST', '/api/missions/patrol/edit', {'ops': [], 'base': answer.get('hash')})
+    assert status == 409 and 'running' in answer['problems'][0]
+    status, answer = request('DELETE', '/api/missions/patrol')
+    assert status == 409
+    bridge.status['state'] = 'idle'
     # the undos put the file back as it was before the first edit, newest first (an older save's file changed since)
     assert len(bridge.undos.saves) == 2
     for key in reversed(list(bridge.undos.saves)):
@@ -100,4 +112,6 @@ def test_schema_route_serves_the_step_schema(served):
     request, _bridge = served
     status, schema = request('GET', '/api/schema/mission')
     assert status == 200 and 'steps' in schema['properties']
+    assert schema['x-taskweave-features'] == (['mission_blocks'] if 'group' in schema['properties']['steps']['items']
+                                              ['properties'] else [])
     assert 'skill' in schema['properties']['steps']['items']['properties']

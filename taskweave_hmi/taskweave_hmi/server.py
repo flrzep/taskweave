@@ -21,14 +21,17 @@ HTTP API (JSON):
   GET  /api/missions/<name>        mission as JSON; GET /api/template for a new one
   PUT  /api/missions/<name>        validate and save; 422 with {problems} if invalid, nothing written;
                                    ?rename_from=<old> saves mission <old> as <name> (old file removed)
-  DELETE /api/missions/<name>      remove the mission file (a running mission keeps its plan)
+  DELETE /api/missions/<name>      remove the mission file; 409 while a mission runs or other missions include it
   POST /api/missions/<name>/edit   the graph editor's save: {ops: [...], base, create} applied on the file's own
                                    tree (comments kept; missions.apply_ops: insert, remove, move, wrap, unwrap,
-                                   set), validated and written: {mission, file, hash, undo}; 422 with {problems,
-                                   places}, nothing written. base: the ETag GET /api/missions/<name> gave (the
-                                   file's hash): 409 when the file changed since. create: a new mission from the
-                                   ops (refused when the name is taken). ?rename_from=<old> as PUT. The undo is a
-                                   Teach-style one: POST /api/teach/undo {id} puts the file back
+                                   set), validated and written through the store's save: {mission, file, hash,
+                                   undo}; 422 with {problems, places}, nothing written. base: the ETag GET
+                                   /api/missions/<name> gave (the file's hash), required unless create: 409 when
+                                   the file changed since. create: a new mission from the ops (refused when the
+                                   name is taken). ?rename_from=<old> as PUT. Block ops (schema v2) are refused
+                                   on a core without it (GET /api/schema/mission: x-taskweave-features). Like
+                                   PUT and DELETE, 409 while a mission runs. The undo is a Teach-style one: POST
+                                   /api/teach/undo {id} puts the file back
   GET  /api/schema/mission         the mission file's JSON schema (what a step may hold: the editor offers blocks
                                    only when the schema has them)
   POST /api/missions/<name>/validate  {problems, places, notes}; places (also in a 422 of PUT): per problem of a step
@@ -1411,6 +1414,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(bridge.config.mission(name),
                                       etag=bridge.config.file_hash(f'missions/{name}.yaml'))
                 if method == 'PUT':
+                    bridge.check_idle('save missions')
                     old = parse_qs(urlsplit(self.path).query).get('rename_from', [None])[0]
                     path = missions.save(name, self._body(), bridge.config, bridge.schemas(), bridge.robot,
                                          rename_from=old)
@@ -1418,6 +1422,7 @@ class Handler(BaseHTTPRequestHandler):
                     bridge.get_logger().info(f'HMI saved mission {name}{renamed} -> {path}')
                     return self._json({'saved': name})
                 if method == 'DELETE':
+                    bridge.check_idle('delete missions')
                     path = missions.delete(name, bridge.config)
                     bridge.get_logger().info(f'HMI deleted mission {name} ({path})')
                     return self._json({'deleted': name})
@@ -1429,6 +1434,7 @@ class Handler(BaseHTTPRequestHandler):
                     catalog = {}
                 return self._json(preview_plan(bridge.config, missions.check_name(route[1]), bridge.robot, catalog))
             if method == 'POST' and len(route) == 3 and route[0] == 'missions' and route[2] == 'edit':
+                bridge.check_idle('edit missions')   # the planner rereads the file per cycle and on a replan
                 name = missions.check_name(route[1])
                 old = parse_qs(urlsplit(self.path).query).get('rename_from', [None])[0]
                 body = self._object_body()
@@ -1439,14 +1445,15 @@ class Handler(BaseHTTPRequestHandler):
                 if base is not None and not isinstance(base, str):
                     raise BadRequest('base must be the hash the mission was read with')
                 files = [f'missions/{name}.yaml'] + ([f'missions/{missions.check_name(old)}.yaml'] if old else [])
+                catalog = bridge.schemas()   # a service call: before the undo lock, not under it
                 result, saved = bridge.undos.run(bridge.config, files, lambda: missions.edit(
-                    name, ops, bridge.config, bridge.schemas(), bridge.robot, rename_from=old, base=base,
+                    name, ops, bridge.config, catalog, bridge.robot, rename_from=old, base=base,
                     create=bool(body.get('create'))), f'edit of mission {name}')
                 renamed = f' (renamed from {old})' if old and old != name else ''
                 bridge.get_logger().info(f'HMI edited mission {name}{renamed}: {len(ops)} ops -> {result["file"]}')
                 return self._json({**result, 'undo': saved})
-            if method == 'GET' and route == ['schema', 'mission']:
-                return self._json(schemas.MISSION)
+            if method == 'GET' and route == ['schema', 'mission']:   # the features: what the editor may write
+                return self._json({**schemas.MISSION, 'x-taskweave-features': missions.features()})
             if method == 'POST' and len(route) == 3 and route[0] == 'missions' and route[2] == 'validate':
                 body = self._body()
                 problems, places = missions.check(body, bridge.config, bridge.schemas(), bridge.robot)

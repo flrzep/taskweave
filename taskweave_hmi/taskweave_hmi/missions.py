@@ -3,8 +3,9 @@
 Saving validates first (schema, then the plan against the skill catalog and the config) and writes nothing on
 failure. Existing files are updated in place with ruamel.yaml, so top-level comments and key order survive;
 the steps list is rewritten as a whole. A rename is a save under the new name that carries the old file's comments
-over and then removes the old file; no other config refers to a mission by name. A running mission keeps its plan
-when its file is renamed or deleted.
+over and then removes the old file; missions include each other by name, so a rename or delete of a mission other
+missions include is refused (``included_by``). The routes refuse every mission write while a mission runs: the
+planner rereads the file for each cycle of a looping mission and on a replan.
 
 A refused check names the places of its problems too (``places``: the step of the mission's own steps and the path in
 it, from ``validate_plan_structured``), so the editor marks the step and the field. ``preview_plan`` is the plan a
@@ -13,7 +14,10 @@ phases and replan lines, its ``origin`` (``step_origin``), ``replan_from`` and `
 has them.
 ``edit`` is the graph editor's save: operator-style ops (insert, remove, move, wrap, unwrap, set; paths like
 ``steps/0/steps/1/parallel/0/steps/2``) applied on the file's ruamel tree in place, so comments inside the steps
-survive too, then validated and written as a whole; the ops of a mission that does not exist yet make the file.
+survive too, then validated and written as a whole through ``ConfigStore.save`` (the pack lock the other writers
+take, an atomic write, a commit when the pack is a git work tree); the ops of a new mission make the file. The ops
+of schema v2 (blocks: group, repeat, parallel, when) are refused on a core whose schema lacks them
+(``blocks_supported``): the file would not load there.
 Both carry the notes of the steps too (what validation notes without stopping it, e.g. the move form of cell schema
 4): ``notes`` for a check, ``notes`` on each step of a preview.
 """
@@ -42,6 +46,7 @@ STEP_ORDER = ('id', 'instruction', 'skill', 'args', 'include', 'with', 'group', 
 BLOCK_KEYS = ('group', 'repeat', 'parallel')
 LIST_KEYS = ('steps', 'parallel')   # the lists an op's path runs through; set edits the other keys
 FLOW_KEYS = ('args', 'with', 'defaults', 'repeat')   # mappings written on one line
+INDEX = re.compile(r'^(0|[1-9][0-9]*)$')   # a list index in an op path, as written: no sign, no leading zero
 
 
 class MissionError(ValueError):
@@ -55,6 +60,16 @@ class MissionError(ValueError):
 
 class MissionConflict(MissionError):
     """The file changed since the editor opened it: the ops would land on other steps (``edit``'s ``base``)."""
+
+
+def blocks_supported() -> bool:
+    """Whether this core's mission schema knows blocks (group, repeat, parallel, when): schema v2."""
+    return all(key in schemas.STEP['properties'] for key in BLOCK_KEYS)
+
+
+def features() -> list[str]:
+    """What this core's mission schema supports, for the editor: ``mission_blocks`` with schema v2."""
+    return ['mission_blocks'] if blocks_supported() else []
 
 
 def check_name(name: str) -> str:
@@ -205,6 +220,7 @@ def save(name: str, mission: Mapping, store: ConfigStore, catalog: Mapping[str, 
             problems.append(f'mission {rename_from!r} does not exist')
         if path.exists():
             problems.append(f'a mission named {name!r} already exists')
+        problems += included_by(store, rename_from, 'renamed')
     found, places = check(mission, store, catalog, robot)
     if problems or found:
         raise MissionError(problems + found, [{**place, 'problem': place['problem'] + len(problems)}
@@ -251,9 +267,40 @@ def save(name: str, mission: Mapping, store: ConfigStore, catalog: Mapping[str, 
 
 
 
+def included_by(store: ConfigStore, name: str, what: str) -> list[str]:
+    """The problem when other missions include ``name`` (they would not load once it is ``what``: renamed,
+    deleted); none otherwise. A mission that does not load itself is skipped."""
+    users = sorted(other for other in store.mission_names() if other != name and _includes(store, other, name))
+    if not users:
+        return []
+    return [f'mission {name!r} is included by {", ".join(users)}: it cannot be {what} while they refer to it']
+
+
+def _includes(store: ConfigStore, mission: str, name: str) -> bool:
+    try:
+        steps = store.mission(mission).get('steps') or []
+    except ConfigError:
+        return False
+
+    def walk(items) -> bool:
+        for step in items:
+            if not isinstance(step, Mapping):
+                continue
+            if step.get('include') == name or walk(step.get('steps') or []) or walk(_block_steps(step)):
+                return True
+        return False
+    return walk(steps)
+
+
 # ---- edits from the graph editor ----
-def _parts(path: str) -> list[str]:
-    return [p for p in str(path or '').split('/') if p != '']
+def _parts(path, what: str) -> list[str]:
+    """The components of an op path (``steps/0/steps/1``, '' for the mission); an empty component (a leading or a
+    doubled '/') is refused: a path names one place, one way (the move guard compares paths)."""
+    text = str(path or '')
+    parts = text.split('/') if text else []
+    if '' in parts:
+        raise MissionError([f'{what}: {text!r} is not a path in the mission (an empty part)'])
+    return parts
 
 
 def _walk(doc, parts: list[str], what: str):
@@ -261,7 +308,12 @@ def _walk(doc, parts: list[str], what: str):
     node = doc
     for p in parts:
         try:
-            node = node[int(p)] if isinstance(node, list) else node[p]
+            if isinstance(node, list):
+                if not INDEX.match(p):   # no negatives, signs or leading zeros: one spelling per place
+                    raise ValueError(p)
+                node = node[int(p)]
+            else:
+                node = node[p]
         except (KeyError, IndexError, ValueError, TypeError):
             raise MissionError([f'{what}: no {"/".join(parts)} in the mission']) from None
     return node
@@ -272,13 +324,12 @@ def _slot(doc, path: str, what: str, make: bool = False) -> tuple:
     mapping is created (an insert into an empty mission or block) and the index may be the list's length."""
     from ruamel.yaml.comments import CommentedSeq
 
-    parts = _parts(path)
+    parts = _parts(path, what)
     if len(parts) < 2 or parts[-2] not in LIST_KEYS:
         raise MissionError([f'{what}: {path!r} is not a place in a list of steps'])
-    try:
-        index = int(parts[-1])
-    except ValueError:
-        raise MissionError([f'{what}: {path!r} does not end in an index']) from None
+    if not INDEX.match(parts[-1]):
+        raise MissionError([f'{what}: {path!r} does not end in an index (0, 1, 2 ...)'])
+    index = int(parts[-1])
     parent = _walk(doc, parts[:-2], what)
     if not isinstance(parent, Mapping):
         raise MissionError([f'{what}: no list at {"/".join(parts[:-1])}'])
@@ -295,14 +346,17 @@ def _slot(doc, path: str, what: str, make: bool = False) -> tuple:
 
 
 def _yaml(value, key: str | None = None):
-    """A JSON value as ruamel nodes: steps with their keys in file order, flow style for the one-line mappings."""
+    """A JSON value as ruamel nodes: steps with their keys in file order and without their null keys (a null
+    from a form field is an absent key), flow style for the one-line mappings. Nulls inside a value stay: a
+    null in a joint-group value means that joint is left alone."""
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
     if isinstance(value, Mapping):
         keys = list(value)
-        if key in (None, 'steps', 'parallel') and ('instruction' in value or 'steps' in value or 'skill' in value):
+        step = key in (None, 'steps', 'parallel') and ('instruction' in value or 'steps' in value or 'skill' in value)
+        if step:
             keys = [k for k in STEP_ORDER if k in value] + [k for k in value if k not in STEP_ORDER]
-        out = CommentedMap((k, _yaml(value[k], k)) for k in keys if value[k] is not None)
+        out = CommentedMap((k, _yaml(value[k], k)) for k in keys if value[k] is not None or not step)
         if key in FLOW_KEYS:
             out.fa.set_flow_style()
         return out
@@ -322,9 +376,41 @@ def plain(node):
 
 def _block_steps(block) -> list:
     """The steps a block holds, in order (a parallel: its lanes' steps one after the other)."""
-    if 'parallel' in block:
+    if isinstance(block.get('parallel'), list):
         return [step for lane in block['parallel'] if isinstance(lane, Mapping) for step in lane.get('steps') or []]
     return list(block.get('steps') or [])
+
+
+def _holds(node, target) -> bool:
+    """Whether ``target`` (a list of the tree) is ``node`` or inside it."""
+    if node is target:
+        return True
+    inner = node.values() if isinstance(node, Mapping) else node if isinstance(node, list) else ()
+    return any(_holds(v, target) for v in inner)
+
+
+def unsupported(ops) -> list[str]:
+    """The problem when ``ops`` write what this core's schema lacks (``blocks_supported``): wrap and unwrap, an
+    inserted step or a set key of schema v2; the file would not load on this core. None with schema v2."""
+    missing = [k for k in STEP_ORDER if k not in schemas.STEP['properties']]
+    missing_top = [k for k in TOP_LEVEL_ORDER if k not in schemas.MISSION['properties']]
+    if not missing and not missing_top:
+        return []
+    bad = []
+    for n, op in enumerate(ops or []):
+        kind = op.get('op') if isinstance(op, Mapping) else None
+        keys = []
+        if kind in ('wrap', 'unwrap'):
+            keys = ['a block']
+        elif kind == 'insert' and isinstance(op.get('step'), Mapping):
+            keys = [k for k in missing if k in op['step']]
+        elif kind == 'set' and op.get('key') in (missing if _parts(op.get('at'), f'op {n + 1}') else missing_top):
+            keys = [op['key']]
+        if keys:
+            bad.append(f'op {n + 1} ({kind}): {", ".join(keys)}')
+    if not bad:
+        return []
+    return [f'this core has no mission blocks (group, repeat, parallel, when): {"; ".join(bad)}']
 
 
 def apply_ops(doc, ops: list) -> None:
@@ -350,12 +436,12 @@ def apply_ops(doc, ops: list) -> None:
             seq, i = _slot(doc, op.get('at'), what)
             del seq[i]
         elif kind == 'move':
-            src, to = str(op.get('from') or ''), str(op.get('to') or '')
-            if to.startswith(src.rstrip('/') + '/'):
+            seq_from, i = _slot(doc, op.get('from'), what)
+            seq_to, j = _slot(doc, op.get('to'), what, make=True)
+            item = seq_from[i]
+            if seq_to is not seq_from and _holds(item, seq_to):   # by identity: the paths may spell it any way
                 raise MissionError([f'{what}: cannot move a block into itself'])
-            seq_from, i = _slot(doc, src, what)
-            seq_to, j = _slot(doc, to, what, make=True)
-            item = seq_from.pop(i)
+            seq_from.pop(i)
             if seq_to is seq_from and j > i:
                 j -= 1
             seq_to.insert(j, item)
@@ -391,7 +477,7 @@ def apply_ops(doc, ops: list) -> None:
             key = op.get('key')
             if not isinstance(key, str) or not key or key in LIST_KEYS:
                 raise MissionError([f'{what}: key must name a field (not {key!r})'])
-            node = _walk(doc, _parts(op.get('at')), what)
+            node = _walk(doc, _parts(op.get('at'), what), what)
             if not isinstance(node, Mapping):
                 raise MissionError([f'{what}: {op.get("at")!r} is not a step, block or the mission'])
             if op.get('value') is None:
@@ -408,11 +494,16 @@ def edit(name: str, ops: list, store: ConfigStore, catalog: Mapping[str, dict], 
     mission as saved, 'file': its path in the config, 'hash': the file's hash now (the next edit's base)}``.
     MissionError with every problem, nothing written then. ``create``: the mission is new, made from the ops on an
     empty document (refused when a file of that name exists; without it a missing file is refused: the ops name
-    places in a file). ``base``: the file's hash when the editor opened it (``ConfigStore.file_hash``); a file that
-    changed since is a MissionConflict, nothing written. ``rename_from``: the ops apply to that mission's file,
-    saved as ``name``."""
+    places in a file). ``base``: the file's hash when the editor opened it (``ConfigStore.file_hash``, the ETag of
+    its GET), required unless ``create``: the ops name places in that version; a file that changed since is a
+    MissionConflict, nothing written. The write is ``ConfigStore.save`` (the pack lock, an atomic write, a commit
+    in a git work tree). ``rename_from``: the ops apply to that mission's file, saved as ``name`` and the old file
+    deleted; refused while other missions include the old name. Ops of schema v2 are refused on a core without it
+    (``unsupported``)."""
     from ruamel.yaml import YAML
     from ruamel.yaml.comments import CommentedMap
+
+    from taskweave_core.config.save import SaveConflict, SaveError
 
     path = mission_path(store, name)
     source = mission_path(store, rename_from) if rename_from and rename_from != name else path
@@ -423,10 +514,16 @@ def edit(name: str, ops: list, store: ConfigStore, catalog: Mapping[str, dict], 
         problems.append(f'a mission named {name!r} already exists')
     if not create and source == path and not path.is_file():
         problems.append(f'mission {name!r} does not exist (deleted since it was opened?)')
+    if source != path and source.is_file():
+        problems += included_by(store, rename_from, 'renamed')
+    if base is None and not create:
+        problems.append('base is missing: the hash the mission was read with (the ETag of its GET), '
+                        'the ops name places in that version of the file')
+    problems += unsupported(ops)
     if problems:
         raise MissionError(problems)
     relative = source.relative_to(store.root).as_posix()
-    if base is not None and store.file_hash(relative) != base:
+    if not create and store.file_hash(relative) != base:
         raise MissionConflict([f'{relative} changed since it was opened (another editor, the pad or a hand edit): '
                                'open the mission again and redo your changes'])
     handler = YAML()
@@ -443,21 +540,30 @@ def edit(name: str, ops: list, store: ConfigStore, catalog: Mapping[str, dict], 
     found, places = check(mission, store, catalog, robot)
     if found:
         raise MissionError(found, places)
-    path.parent.mkdir(parents=True, exist_ok=True)
     buffer = io.StringIO()
     handler.dump(document, buffer)
-    path.write_text(buffer.getvalue(), encoding='utf-8')
-    if source != path:
-        source.unlink()
-    store.reload()
     file = path.relative_to(store.root).as_posix()
-    return {'mission': mission, 'file': file, 'hash': store.file_hash(file)}
+    try:
+        saved = store.save(file, buffer.getvalue(), base=None if create or source != path else base,
+                           message=f'HMI: edit mission {name}')
+        if source != path:
+            store.delete(relative, base=base, message=f'HMI: rename mission {rename_from} to {name}')
+    except SaveConflict as error:
+        raise MissionConflict([f'{relative} changed since it was opened (another editor, the pad or a hand edit): '
+                               'open the mission again and redo your changes']) from error
+    except SaveError as error:
+        errors = [f'{p["path"]}{p["where"]}: {p["message"]}' for p in error.problems if p['severity'] == 'error']
+        raise MissionError(errors or [str(error)]) from error
+    return {'mission': mission, 'file': file, 'hash': saved['hash']}
 
 
 def delete(name: str, store: ConfigStore) -> Path:
     path = mission_path(store, name)
     if not path.is_file():
         raise MissionError([f'mission {name!r} does not exist'])
+    problems = included_by(store, name, 'deleted')
+    if problems:
+        raise MissionError(problems)
     path.unlink()
     store.reload()
     return path

@@ -1,8 +1,10 @@
 # Mission graph: schema v2, execution semantics and the planner API
 
-Status: design, agreed with the user on 4 Nov 2026. The HMI session builds the graph editor and the Run dashboard
-against this; the core session implements the core part (sections 2 to 5). Nothing here changes an existing key,
-so no schema bump or migration is needed (AGENTS.md rule 4).
+Status: design, agreed with the user on 4 Nov 2026; revised the same day with the core session's feedback (its
+twelve points are folded in below, marked *core:*). The HMI session builds the graph editor and the Run dashboard
+against this; the core session implements the core part (sections 2 to 5) in the order of section 8. Nothing here
+changes an existing key, so no schema bump or migration is needed (AGENTS.md rule 4); a core without schema v2
+says so (section 5, features) and the editor keeps to v1 on it.
 
 ## 1. Why
 
@@ -75,7 +77,7 @@ steps:
 | `group` | block | `true` | an inline group of `steps`; only structure and a collapse unit in the graph |
 | `repeat` | block | object | `{while: <fact name>}`, `{until: <world-state key>}` or `{times: N>=1}`; exactly one |
 | `max_cycles` | repeat | int >= 1 | bound for `while`/`until` (required with them; ignored with `times`) |
-| `parallel` | block | list of branches | each branch: `{id, instruction, steps: [...]}`; 2 or more |
+| `parallel` | block | list of branches | each branch: `{id, instruction, steps: [...]}`; 2 or more. *core 8:* a branch is not a step: no `skill`, `args`, `include` or `when`; it takes `timeout_s` (bounds the branch) and `on_failure` (`retry` restarts the branch, `skip` skips the rest of it, `abort` and `replan` end the block and apply its rule); branch ids are unique like step ids |
 | `join` | parallel | `all` \| `first` | default `all`: the block ends when every branch ended; `first`: when one branch succeeded, the others are stopped |
 | `steps` | group, repeat | list of steps | at least 1 |
 | `when` | any step or block | world-state key (NAME) | guard: run only when the key is truthy, else outcome `skipped` |
@@ -92,6 +94,14 @@ Constraints checked by the schema (`schemas.py`) and `check.py`:
 - Parallel branches must lock **disjoint resources** (`step_info.py` computes a step's resources; a branch's set is
   the union of its steps'). A skill whose resources are unknown makes the branch unschedulable: a structured problem.
 - Nesting depth of blocks and includes together at most 5, as for includes today.
+- *core 9:* `join: first` is refused when any branch can hold an object (a step whose skill holds, per
+  `step_info`): a branch stopped mid-move while holding is not safe.
+- *core 4:* `when` and `until` read a **world-state key** of the form `<store>.<path>`. v1 has two stores:
+  `world.<key>` is the latest `world_state` the skills reported (merged by key: `world.left_gripper`,
+  `world.holding`), `object.<instance>.<field>` is the run-time object state (objects.yaml: `taken`, `gone`).
+  Truthy is JSON truthiness (not `false`, `0`, `''`, `null`, empty). The known keys come from the skill catalogue
+  (what the skills' `world_state` declares) and the object instances of the cell; an unknown key is a validation
+  problem, never a run-time skip.
 
 ### 2.2 Catalogue and docs
 
@@ -110,6 +120,12 @@ Constraints checked by the schema (`schemas.py`) and `check.py`:
   `node = step_dict | {id, instruction, kind: group|repeat|parallel|include, origin, rule keys..., steps|branches}`.
   `Plan.msg` gains a `tree_json` string (the flat `steps` stays for older readers until the HMI is switched).
 - Facts and params are filled at the same points as today (`_fill`); nothing new flows between nodes.
+- *core 3:* the body of a `repeat` cannot be filled up front: a fact like `{next_stack}` changes per pass. The plan
+  carries the body **unfilled** (placeholders as written) plus `passes`; at each pass start the executive sends a
+  `plan_update` with the filled body (same `plan_id`, the pass counter). The HMI shows the filled values for the
+  running pass only and the placeholders for the rest.
+- *core 10:* `origin.path` and the status' `path` are for display and for mapping an edit back to the file; they
+  change when the file is edited. Episodes keep carrying the step id, which is what anything durable refers to.
 
 ## 4. Execution semantics (executive)
 
@@ -124,14 +140,24 @@ The executive walks the tree; the flat list becomes a stack of frames.
   per branch). `join: all` waits for all; `join: first` stops the others (cancel their running action) when one
   succeeds. A failed branch stops its siblings, then the block's `on_failure` applies. Speed, pause and abort apply
   to every running branch; pause waits for all of them to settle.
+  *core 1:* this needs a concurrency model in the skill server first: today it accepts every goal on a reentrant
+  group with 8 threads, so two `move` goals would run at once on the one Move object (shared per-goal state, the
+  IK client, MoveIt, the torso). That is its own task (P8-x: which skill pairs may run at once, by resource kind
+  from `step_info`, action servers that accept concurrent goals only for disjoint resources or one server per
+  resource, the executor threading). Until it exists, **parallel is schema-only**: validated by `check.py`, shown
+  in the editor, and refused at start with a clear message ("parallel blocks need the skill server's concurrency
+  model, not in this build").
+- *core 2:* the torso look-ahead and the held-object plan (P6-10b) search over a static sequence of steps. With
+  blocks they work on the **linearisation of one pass of the innermost repeat**; a `when` step inside a hold is
+  planned as if it runs; a parallel block inside a hold is refused by `check.py` in v1.
 - **when**: evaluated at the node's start; falsy records outcome `skipped` (an episode `step_finished` with
   `outcome: SKIPPED`) and moves on.
 - **replan**: `replan_from` restarts at that node; counting against `max_replans` as today.
 - **Status** (`TaskStatus`, `/api/state.status`): gains `active: [{path, step_id, skill, attempt, status, progress,
   elapsed_s}]` (several entries during a parallel block), `passes: {<repeat id>: n}`, and keeps `step` as the first
   active entry for older readers. Episodes gain `path`.
-- **Resources**: the dispatcher already runs one skill at a time; concurrent branches need the `RosDispatcher` to hold
-  several goals (keyed by path). The skill server already serves each skill on its own action server.
+- **Resources**: the dispatcher runs one skill at a time; concurrent branches need the `RosDispatcher` to hold
+  several goals (keyed by path) and the skill server's concurrency model above (core 1).
 
 Tests: `test_executive.py` with `FakeDispatcher` for every rule above (a fixture mission per construct); a
 `test_include.py` case for a tree that keeps origin paths; `test_validation_paths.py` for the new structured
@@ -144,7 +170,7 @@ fix, up to N rounds, then the operator reviews.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/schema/mission` | the v2 JSON schema (from `catalogue.py`) |
+| `GET /api/schema/mission` | the JSON schema of the mission file, `schemas.MISSION` (*core 11:* one source, `schemas.py`), plus `x-taskweave-features`: `["mission_blocks"]` on a core with schema v2, `[]` without (*core 7:* the version gate; the HMI server derives it from the schema's step keys until core sets it, the editor hides the block tools without it and the edit route refuses block ops) |
 | `GET /api/robot/card` | `DescribeRobot`: `card` text, `embodiment`, `skills: [SkillInfo]` (description, args schema, needs, achieves, implementation), and the target groups of `/api/points` |
 | `POST /api/missions/validate` `{mission}` | `{problems: [{path, message, origin}], notes}` for an unsaved body (the per-name form exists) |
 | `POST /api/plan/propose` `{goal, mission?, select?: path, failed?: {plan_id, path, error}}` | `{mission, patch: [json-patch ops on the tree], rationale, rounds, problems: []}` |
@@ -157,17 +183,35 @@ fix, up to N rounds, then the operator reviews.
   The model and key come from the cell config (`cell/planner.yaml`: `{model, api_key_env, rounds}`), absent =
   endpoint answers 503 "no planner configured".
 - Every node's `instruction` is natural language already and doubles as the planner's per-node rationale.
+- *core 12:* the planner's output is only ever a **proposal**: it is never saved without the operator's Save in
+  the editor and never started. The model name comes from the cell config, the key only from the environment
+  variable `api_key_env` names: no key in any file. The planner comes after sections 2 to 4 work end to end.
 
 ## 6. Mission edits from the graph (HMI server)
 
-`POST /api/missions/<name>/edit {ops: [...]}` applies operator-style edits on the ruamel tree in place (comments and
-key order kept), validates, saves, and answers `{mission, problems, undo}`. Ops: `insert {at: path, step}`,
-`remove {at}`, `move {from, to}`, `wrap {from, to, as: group|repeat|parallel, ...}`, `unwrap {at}`,
-`set {at, key, value}`. An op whose `at` lies inside an include is applied to the include's file (the reply names
-the file). Undo as `undo.py`. `missions.py` `save` must write `params` and `facts` (today `TOP_LEVEL_ORDER` lacks
-them).
+`POST /api/missions/<name>/edit {ops: [...], base, create}` applies operator-style edits on the ruamel tree in
+place (comments and key order kept), validates, saves through `ConfigStore.save` (*core 6:* the pack lock the
+teach node and the other writers take, an atomic write, a commit on the host) and answers `{mission, file, hash,
+undo}`; `base` is the file's hash the editor read (the ETag of its GET) and is required unless `create`: a file
+that changed since is a 409. Ops: `insert {at: path, step}`, `remove {at}`, `move {from, to}`, `wrap {from, to,
+as: group|repeat|parallel, block}`, `unwrap {at}`, `set {at, key, value}`; paths have one spelling (`steps/0`,
+no signs or leading zeros). *core 5:* **includes are read-only in the editor** in v1: an op never lands in an
+include's file; the editor opens the included mission in place to look and offers Open to edit it as its own
+mission. (Editing in place with a "used by N missions" confirmation is a later step.) No mission write while a
+mission runs (the planner rereads the file per cycle). Undo as `undo.py`. `missions.py` `save` writes `params` and
+`facts` (done).
 
 ## 7. Out of scope here
 
 Conditions beyond the `when` guard (if/else branches), data ports between nodes, a free node canvas, run-time
-acceptance of a patched plan mid-run (the API allows it; the executive hook comes after the editor).
+acceptance of a patched plan mid-run (the API allows it; the executive hook comes after the editor), running
+parallel blocks (schema-only until the skill server's concurrency model, section 4), edits inside an include file.
+
+## 8. Order (core)
+
+a) 2.1 schema and `check.py` for group, repeat (times) and when; tree expansion with origin (section 3); the
+executive for group, repeat (times) and when (section 4 without parallel); status `active` and `passes`;
+`x-taskweave-features` set by core. b) repeat while/until with per-pass filling (core 3) and the world-state keys
+(core 4). c) the torso planner on the linearisation (core 2). d) parallel, its own design pass with the skill
+server (core 1). e) the planner API (section 5). The HMI follows each step: block tools appear with (a), the pass
+view with (b), lanes run with (d), the planner UI with (e).
