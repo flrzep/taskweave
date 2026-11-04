@@ -176,40 +176,52 @@
       <p>Pick a mission to edit it, or make a new one.</p>
     </div>
 
-    <div id="editor" class="card" hidden>
-      <div class="row between">
+    <!-- the graph editor (editor.js): the head with the tools, the canvas and the properties panel beside it (under it
+         up to 1000px). The panel shows the mission while nothing is selected, else the selected step's form (the step
+         template at the end of the page) -->
+    <div id="editor" class="ed" hidden>
+      <div class="ed-head">
         <button id="btn-back" class="btn small ghost">← Missions</button>
-      </div>
-      <div class="field"><label for="m-name">Name</label><input id="m-name" autocomplete="off" spellcheck="false"></div>
-      <div class="field"><label for="m-goal">Goal</label><textarea id="m-goal" rows="2"></textarea></div>
-      <div class="grid2">
-        <div class="field"><label for="m-loop">Loop</label><select id="m-loop"><option>once</option><option>forever</option></select></div>
-        <div class="field"><label for="m-max">Max cycles</label><input id="m-max" type="number" min="1" placeholder="none"></div>
-        <div class="field span2"><label for="m-stop">Stop when (world-state flag)</label><input id="m-stop" placeholder="none" spellcheck="false"></div>
-      </div>
-      <details class="defaults">
-        <summary>Defaults for every step</summary>
-        <div class="grid2">
-          <div class="field"><label for="d-timeout">Timeout (s)</label><input id="d-timeout" type="number" min="0" step="any"></div>
-          <div class="field"><label for="d-retries">Retries</label><input id="d-retries" type="number" min="0"></div>
-          <div class="field"><label for="d-fail">On failure</label><select id="d-fail"></select></div>
-          <div class="field"><label for="d-replans">Max replans</label><input id="d-replans" type="number" min="0"></div>
+        <div class="ed-title"><b id="ed-name-text">mission</b><span id="editor-dirty" class="editor-dirty" hidden>Unsaved changes</span></div>
+        <div class="row gap-s ed-tools">
+          <button id="ed-undo" class="btn small" title="Undo (Ctrl+Z)" disabled>Undo</button>
+          <button id="ed-redo" class="btn small" title="Redo (Ctrl+Y)" disabled>Redo</button>
+          <button id="btn-validate" class="btn small">Check</button>
+          <button id="btn-save" class="btn small primary">Save</button>
         </div>
-      </details>
-      <div class="row between"><div class="label">Steps</div>
-        <button id="btn-fold-steps" class="btn small ghost" hidden>Collapse all</button></div>
-      <ol id="step-editor" class="edit-steps"></ol>
-      <button id="btn-add-step" class="btn small">+ Add step</button>
+      </div>
       <div id="problems" class="error" hidden></div>
       <div id="save-msg" class="msg" hidden></div>
-      <div class="row gap sticky-actions">
-        <span id="editor-dirty" class="editor-dirty" hidden>Unsaved changes</span>
-        <button id="btn-delete" class="btn danger">Delete</button>
-        <button id="btn-validate" class="btn">Check</button>
-        <button id="btn-save" class="btn primary">Save</button>
+      <div class="ed-work">
+        <div id="ed-canvas" class="ed-canvas" tabindex="0" role="application"
+             aria-label="Mission graph. Click a step to edit it, Tab or Shift+A to add one after it, Delete to remove it, Ctrl+Z to undo."></div>
+        <aside id="ed-panel" class="ed-panel card" aria-label="Properties">
+          <div id="ed-mission" class="ed-pane">
+            <div class="row between"><h3 class="label">Mission</h3><button id="ed-add" class="btn small">+ Add step</button></div>
+            <div class="field"><label for="m-name">Name</label><input id="m-name" autocomplete="off" spellcheck="false"></div>
+            <div class="field"><label for="m-goal">Goal</label><textarea id="m-goal" rows="2"></textarea></div>
+            <div class="grid2">
+              <div class="field"><label for="m-loop">Loop</label><select id="m-loop"><option>once</option><option>forever</option></select></div>
+              <div class="field"><label for="m-max">Max cycles</label><input id="m-max" type="number" min="1" placeholder="none"></div>
+              <div class="field span2"><label for="m-stop">Stop when (world-state flag)</label><input id="m-stop" placeholder="none" spellcheck="false"></div>
+            </div>
+            <details class="defaults">
+              <summary>Defaults for every step</summary>
+              <div class="grid2">
+                <div class="field"><label for="d-timeout">Timeout (s)</label><input id="d-timeout" type="number" min="0" step="any"></div>
+                <div class="field"><label for="d-retries">Retries</label><input id="d-retries" type="number" min="0"></div>
+                <div class="field"><label for="d-fail">On failure</label><select id="d-fail"></select></div>
+                <div class="field"><label for="d-replans">Max replans</label><input id="d-replans" type="number" min="0"></div>
+              </div>
+            </details>
+            <p class="muted small-text">Click a step in the graph to edit it; drag it onto a wire to move it; drag its red port
+              to the step a replan restarts from. Saved missions are used at their next start; a running mission keeps its
+              plan. Change the name and save to rename.</p>
+            <button id="btn-delete" class="btn danger">Delete</button>
+          </div>
+          <div id="ed-sel" class="ed-pane" hidden></div>
+        </aside>
       </div>
-      <p class="muted small-text">Saved missions are used at their next start. A running mission keeps its plan, also
-        when it is renamed or deleted. Change the name and save to rename.</p>
     </div>
   </section>
 
@@ -476,6 +488,7 @@
 <script src="icons.js"></script>
 <script src="graph-core.js"></script>
 <script src="graph-run.js"></script>
+<script src="editor.js"></script>
 <script src="teach3d.js"></script>
 <script src="teachtask.js"></script>
 <script src="record.js"></script>

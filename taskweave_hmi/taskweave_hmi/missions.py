@@ -11,6 +11,9 @@ it, from ``validate_plan_structured``), so the editor marks the step and the fie
 start would run now, with each step's kind of motion and resources (``plan_step_info``) and, for the plan graph's
 phases and replan lines, its ``origin`` (``step_origin``), ``replan_from`` and ``max_replans``, as the live plan
 has them.
+``edit`` is the graph editor's save: operator-style ops (insert, remove, move, wrap, unwrap, set; paths like
+``steps/0/steps/1/parallel/0/steps/2``) applied on the file's ruamel tree in place, so comments inside the steps
+survive too, then validated and written as a whole; the ops of a mission that does not exist yet make the file.
 Both carry the notes of the steps too (what validation notes without stopping it, e.g. the move form of cell schema
 4): ``notes`` for a check, ``notes`` on each step of a preview.
 """
@@ -31,10 +34,14 @@ from taskweave_core.step_info import MOVE_SKILL, move_notes
 from taskweave_core.validation import plan_step_info, validate_plan, validate_plan_structured
 
 NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_\-]*$')
-TOP_LEVEL_ORDER = ('goal', 'robot', 'loop', 'max_cycles', 'stop_when', 'defaults', 'steps')
-# a step's keys in the file; an include step has include and with instead of skill and args
-STEP_ORDER = ('id', 'instruction', 'skill', 'args', 'include', 'with', 'timeout_s', 'retries', 'on_failure',
-              'replan_from', 'max_replans')
+TOP_LEVEL_ORDER = ('goal', 'robot', 'params', 'facts', 'loop', 'max_cycles', 'stop_when', 'defaults', 'steps')
+# a step's keys in the file; an include step has include and with instead of skill and args; a block (schema v2) has
+# group, repeat or parallel and its steps or lanes
+STEP_ORDER = ('id', 'instruction', 'skill', 'args', 'include', 'with', 'group', 'repeat', 'parallel', 'when', 'join',
+              'max_cycles', 'timeout_s', 'retries', 'on_failure', 'replan_from', 'max_replans', 'steps')
+BLOCK_KEYS = ('group', 'repeat', 'parallel')
+LIST_KEYS = ('steps', 'parallel')   # the lists an op's path runs through; set edits the other keys
+FLOW_KEYS = ('args', 'with', 'defaults', 'repeat')   # mappings written on one line
 
 
 class MissionError(ValueError):
@@ -237,6 +244,197 @@ def save(name: str, mission: Mapping, store: ConfigStore, catalog: Mapping[str, 
         source.unlink()
     store.reload()
     return path
+
+
+
+# ---- edits from the graph editor ----
+def _parts(path: str) -> list[str]:
+    return [p for p in str(path or '').split('/') if p != '']
+
+
+def _walk(doc, parts: list[str], what: str):
+    """The node at ``parts`` of the tree, or MissionError naming ``what``."""
+    node = doc
+    for p in parts:
+        try:
+            node = node[int(p)] if isinstance(node, list) else node[p]
+        except (KeyError, IndexError, ValueError, TypeError):
+            raise MissionError([f'{what}: no {"/".join(parts)} in the mission']) from None
+    return node
+
+
+def _slot(doc, path: str, what: str, make: bool = False) -> tuple:
+    """``(list, index)`` for a path into a list (``steps/2``); ``make``: an absent ``steps`` or ``parallel`` of a
+    mapping is created (an insert into an empty mission or block) and the index may be the list's length."""
+    from ruamel.yaml.comments import CommentedSeq
+
+    parts = _parts(path)
+    if len(parts) < 2 or parts[-2] not in LIST_KEYS:
+        raise MissionError([f'{what}: {path!r} is not a place in a list of steps'])
+    try:
+        index = int(parts[-1])
+    except ValueError:
+        raise MissionError([f'{what}: {path!r} does not end in an index']) from None
+    parent = _walk(doc, parts[:-2], what)
+    if not isinstance(parent, Mapping):
+        raise MissionError([f'{what}: no list at {"/".join(parts[:-1])}'])
+    if parts[-2] not in parent:
+        if not make:
+            raise MissionError([f'{what}: no list at {"/".join(parts[:-1])}'])
+        parent[parts[-2]] = CommentedSeq()
+    seq = parent[parts[-2]]
+    if not isinstance(seq, list):
+        raise MissionError([f'{what}: {"/".join(parts[:-1])} is not a list'])
+    if index < 0 or index > len(seq) - (0 if make else 1):
+        raise MissionError([f'{what}: index {index} is outside {"/".join(parts[:-1])} ({len(seq)} entries)'])
+    return seq, index
+
+
+def _yaml(value, key: str | None = None):
+    """A JSON value as ruamel nodes: steps with their keys in file order, flow style for the one-line mappings."""
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+    if isinstance(value, Mapping):
+        keys = list(value)
+        if key in (None, 'steps', 'parallel') and ('instruction' in value or 'steps' in value or 'skill' in value):
+            keys = [k for k in STEP_ORDER if k in value] + [k for k in value if k not in STEP_ORDER]
+        out = CommentedMap((k, _yaml(value[k], k)) for k in keys if value[k] is not None)
+        if key in FLOW_KEYS:
+            out.fa.set_flow_style()
+        return out
+    if isinstance(value, list):
+        return CommentedSeq(_yaml(v, key) for v in value)
+    return value
+
+
+def plain(node):
+    """A ruamel tree as plain dicts and lists."""
+    if isinstance(node, Mapping):
+        return {k: plain(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [plain(v) for v in node]
+    return node
+
+
+def _block_steps(block) -> list:
+    """The steps a block holds, in order (a parallel: its lanes' steps one after the other)."""
+    if 'parallel' in block:
+        return [step for lane in block['parallel'] if isinstance(lane, Mapping) for step in lane.get('steps') or []]
+    return list(block.get('steps') or [])
+
+
+def apply_ops(doc, ops: list) -> None:
+    """Apply the editor's ops on a ruamel tree in place (the file's comments stay). An op that cannot be applied
+    raises MissionError naming it; the ops before it have been applied then (``edit`` discards the tree).
+    ``insert {at, step}``: the step (a dict) at the path, ``at`` an index up to the list's length; ``remove {at}``;
+    ``move {from, to}``: ``to`` names the slot as it is before the move; ``wrap {from, to, as, block}``: the steps
+    from ``from`` to ``to`` (the same list) become the steps of a new block (as: group | repeat | parallel, the block's
+    own keys in ``block``); ``unwrap {at}``: a block is replaced by its steps; ``set {at, key, value}``: one key of a
+    step, block or the mission ('' at), None removes it."""
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+    for n, op in enumerate(ops):
+        kind = op.get('op') if isinstance(op, Mapping) else None
+        what = f'op {n + 1} ({kind})'
+        if kind == 'insert':
+            step = op.get('step')
+            if not isinstance(step, Mapping):
+                raise MissionError([f'{what}: the step must be an object'])
+            seq, i = _slot(doc, op.get('at'), what, make=True)
+            seq.insert(i, _yaml(step))
+        elif kind == 'remove':
+            seq, i = _slot(doc, op.get('at'), what)
+            del seq[i]
+        elif kind == 'move':
+            src, to = str(op.get('from') or ''), str(op.get('to') or '')
+            if to.startswith(src.rstrip('/') + '/'):
+                raise MissionError([f'{what}: cannot move a block into itself'])
+            seq_from, i = _slot(doc, src, what)
+            seq_to, j = _slot(doc, to, what, make=True)
+            item = seq_from.pop(i)
+            if seq_to is seq_from and j > i:
+                j -= 1
+            seq_to.insert(j, item)
+        elif kind == 'wrap':
+            block = op.get('block')
+            as_ = op.get('as')
+            if as_ not in BLOCK_KEYS or not isinstance(block, Mapping):
+                raise MissionError([f'{what}: as must be group, repeat or parallel, with the block as an object'])
+            seq, i = _slot(doc, op.get('from'), what)
+            seq_to, j = _slot(doc, op.get('to'), what)
+            if seq_to is not seq or j < i:
+                raise MissionError([f'{what}: from and to must be in the same list, from first'])
+            block = {k: v for k, v in block.items() if k not in LIST_KEYS}
+            if as_ == 'group':
+                block['group'] = True
+            elif as_ == 'repeat':
+                block['repeat'] = block.get('repeat') if isinstance(block.get('repeat'), Mapping) else {}
+            node = _yaml(block)
+            inner = CommentedSeq(seq[i:j + 1])
+            if as_ == 'parallel':
+                node['parallel'] = CommentedSeq([CommentedMap(steps=inner)])
+            else:
+                node['steps'] = inner
+            del seq[i:j + 1]
+            seq.insert(i, node)
+        elif kind == 'unwrap':
+            seq, i = _slot(doc, op.get('at'), what)
+            block = seq[i]
+            if not isinstance(block, Mapping) or not any(k in block for k in BLOCK_KEYS):
+                raise MissionError([f'{what}: {op.get("at")} is not a block'])
+            seq[i:i + 1] = _block_steps(block)
+        elif kind == 'set':
+            key = op.get('key')
+            if not isinstance(key, str) or not key or key in LIST_KEYS:
+                raise MissionError([f'{what}: key must name a field (not {key!r})'])
+            node = _walk(doc, _parts(op.get('at')), what)
+            if not isinstance(node, Mapping):
+                raise MissionError([f'{what}: {op.get("at")!r} is not a step, block or the mission'])
+            if op.get('value') is None:
+                node.pop(key, None)
+            else:
+                node[key] = _yaml(op['value'], key)
+        else:
+            raise MissionError([f'{what}: unknown op'])
+
+
+def edit(name: str, ops: list, store: ConfigStore, catalog: Mapping[str, dict], robot: str,
+         rename_from: str | None = None) -> dict:
+    """Apply ``ops`` (``apply_ops``) on missions/<name>.yaml (an empty document when there is no such file), validate
+    the result and write it: ``{'mission': the mission as saved, 'file': its path in the config}``. MissionError with
+    every problem, nothing written then. ``rename_from``: the ops apply to that mission's file, saved as ``name``."""
+    from ruamel.yaml import YAML
+    from ruamel.yaml.comments import CommentedMap
+
+    path = mission_path(store, name)
+    source = mission_path(store, rename_from) if rename_from and rename_from != name else path
+    problems = []
+    if source != path:
+        if not source.is_file():
+            problems.append(f'mission {rename_from!r} does not exist')
+        if path.exists():
+            problems.append(f'a mission named {name!r} already exists')
+    if problems:
+        raise MissionError(problems)
+    handler = YAML()
+    handler.preserve_quotes = True
+    handler.width = 120
+    document = handler.load(source.read_text(encoding='utf-8')) if source.is_file() else None
+    if not isinstance(document, CommentedMap):
+        document = CommentedMap()
+    apply_ops(document, list(ops or []))
+    mission = plain(document)
+    found, places = check(mission, store, catalog, robot)
+    if found:
+        raise MissionError(found, places)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    buffer = io.StringIO()
+    handler.dump(document, buffer)
+    path.write_text(buffer.getvalue(), encoding='utf-8')
+    if source != path:
+        source.unlink()
+    store.reload()
+    return {'mission': mission, 'file': path.relative_to(store.root).as_posix()}
 
 
 def delete(name: str, store: ConfigStore) -> Path:

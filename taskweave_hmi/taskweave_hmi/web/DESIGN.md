@@ -191,8 +191,33 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   search." when none does; cleared after a save); only the list scrolls. With unsaved edits the first tap on another
   mission or on New mission says "Unsaved changes in <name>: tap again to drop them" in the list's status line
   (`#mission-note`, amber, `role="status"`, 3 s); a second tap on the same one goes on. Focus goes to the back link
-  when the list gives way to the editor, to the list's title when the editor closes. The save bar (`.sticky-actions`)
-  starts with "● Unsaved changes" in amber; on a phone it sits above the bottom nav, the note on its own line.
+  when the list gives way to the editor, to the list's title when the editor closes.
+- **Program tab: the editor** (`.ed`, editor.js on graph-core.js): the open mission as its graph, one column top to
+  bottom. The head row: ← Missions (narrow screens), the name with "● Unsaved changes" in amber beside it, Undo, Redo,
+  Check, Save; under it the problems (red) and the save message (lime, with "Undo this save"). The work area:
+  the canvas (`.ed-canvas`, scrolls, a faint panel tint over the grid, 480px high at least, never taller than the
+  window) and the properties panel at its right (`.ed-panel`, 380px, sticky; under the canvas up to 1000px). The
+  panel shows the mission (name, goal, loop, defaults, + Add step, Delete) while nothing is selected, else the
+  selected step's form (the step card without its handle, buttons and fold: "Step n" is its title; an include step
+  gets a brand-soft banner "Linked: the steps of <mission> run here …" with Open to edit) or a block's form (schema
+  v2: instruction, id, a repeat's rule and max passes, a parallel's join, "run only when"), with the actions under
+  it: ↑ ↓, Duplicate, Group / Repeat / In parallel (only when the running core's schema has blocks), Unwrap, Remove.
+  Nodes (`.pg-node`) are 196 × 56 tiles: the skill's icon on a 36px tile in its colour (`--k`), the instruction in
+  two lines (muted italic "Describe this step" until it has one), the command and target in mono under it; a closed
+  frame is a tile with a dashed brand border (an include: solid, ⛓), its kind and size, and a chevron that opens it.
+  Ports sit on the edges: in on top, done at the bottom, and the failed port at the right, red, filled when the step
+  has its own rule; a click on it opens the rule menu (`.ed-menu`: mission default, retry, replan, skip, abort), a
+  drag draws a red wire to the step a replan restarts from (the target gets a dashed red outline). The selected node
+  has a 2px brand outline; a problem a Check or Save names is a red left bar and a red border on its node and on the
+  field in the panel. "+" spots (`.ed-spot`, 24px dashed rings, a 44px target) sit on every wire and at the end of
+  every open frame; one opens the palette (`.ed-palette`: a search over the skills, the other missions and the
+  blocks) at that place; while a node is dragged they turn solid brand and the nearest lights up as the drop. A
+  frame head in the editor is a chevron button (closes it), the name (selects the block) and its words; a linked
+  one adds Open. Keys on the canvas: Tab or Shift+A add after the selection, Delete removes, Ctrl+D duplicates,
+  Ctrl+↑ / ↓ move, Ctrl+Z / Ctrl+Y undo and redo, Escape clears; shift-click extends a selection along one list,
+  ctrl-click toggles, a drag on empty canvas draws a box. Every edit is an op on a path in the mission file
+  (insert, remove, move, wrap, unwrap, set); Save sends the ops since the open to `/api/missions/<name>/edit`, which
+  applies them on the file's own tree (comments kept) and validates the whole; nothing is written when it refuses.
 - **Teach in 3D** (`.teach-grid`, teach3d.js): the cell view (4 : 3, at most half the screen high) above the lists up
   to 1179px; from 1180px 7 : 5, the lists at the left and the view (16 : 13, sticky, never taller than the window) at
   the right. Markers: locations (an arrow), stances (a fainter arrow in a ring labelled "<object> · <variant>", from `/api/scene` stances, Teach only; a

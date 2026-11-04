@@ -22,6 +22,13 @@ HTTP API (JSON):
   PUT  /api/missions/<name>        validate and save; 422 with {problems} if invalid, nothing written;
                                    ?rename_from=<old> saves mission <old> as <name> (old file removed)
   DELETE /api/missions/<name>      remove the mission file (a running mission keeps its plan)
+  POST /api/missions/<name>/edit   the graph editor's save: {ops: [...]} applied on the file's own tree (comments
+                                   kept; missions.apply_ops: insert, remove, move, wrap, unwrap, set), validated and
+                                   written: {mission, file, undo}; 422 with {problems, places}, nothing written; a
+                                   mission that does not exist is made from the ops; ?rename_from=<old> as PUT.
+                                   The undo is a Teach-style one: POST /api/teach/undo {id} puts the file back
+  GET  /api/schema/mission         the mission file's JSON schema (what a step may hold: the editor offers blocks
+                                   only when the schema has them)
   POST /api/missions/<name>/validate  {problems, places, notes}; places (also in a 422 of PUT): per problem of a step
                                    {problem, step, path, include}: the step of the mission's own steps and the path in
                                    it (['args', 'to'], ['skill']), so the editor marks the step and the field; notes:
@@ -155,7 +162,7 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
 from taskweave_core import names, tf_util
-from taskweave_core.config import ConfigError, ConfigStore, Pose2D, TargetError
+from taskweave_core.config import ConfigError, ConfigStore, Pose2D, TargetError, schemas
 from taskweave_core.speed import MAX_PERCENT, MIN_PERCENT, PRESETS, SpeedOverride
 from taskweave_core.teach import MAX_POSE_AGE_S, yaw_from_quaternion
 from taskweave_interfaces.action import RunSkill
@@ -1416,6 +1423,21 @@ class Handler(BaseHTTPRequestHandler):
                 except TimeoutError:
                     catalog = {}
                 return self._json(preview_plan(bridge.config, missions.check_name(route[1]), bridge.robot, catalog))
+            if method == 'POST' and len(route) == 3 and route[0] == 'missions' and route[2] == 'edit':
+                name = missions.check_name(route[1])
+                old = parse_qs(urlsplit(self.path).query).get('rename_from', [None])[0]
+                ops = self._object_body().get('ops')
+                if not isinstance(ops, list):
+                    raise BadRequest('the body must hold ops, a list')
+                files = [f'missions/{name}.yaml'] + ([f'missions/{missions.check_name(old)}.yaml'] if old else [])
+                result, saved = bridge.undos.run(bridge.config, files, lambda: missions.edit(
+                    name, ops, bridge.config, bridge.schemas(), bridge.robot, rename_from=old),
+                    f'edit of mission {name}')
+                renamed = f' (renamed from {old})' if old and old != name else ''
+                bridge.get_logger().info(f'HMI edited mission {name}{renamed}: {len(ops)} ops -> {result["file"]}')
+                return self._json({**result, 'undo': saved})
+            if method == 'GET' and route == ['schema', 'mission']:
+                return self._json(schemas.MISSION)
             if method == 'POST' and len(route) == 3 and route[0] == 'missions' and route[2] == 'validate':
                 body = self._body()
                 problems, places = missions.check(body, bridge.config, bridge.schemas(), bridge.robot)

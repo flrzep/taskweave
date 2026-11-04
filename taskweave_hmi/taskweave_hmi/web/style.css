@@ -114,7 +114,8 @@ body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); align-i
 .mission #state { flex: none; justify-content: center; min-width: 9ch; font: 700 var(--fs-sm)/1 var(--sans); text-transform: uppercase;
                   letter-spacing: .08em; padding: 7px 10px; border-radius: var(--r-s); background: var(--fill); color: var(--ink); }
 .mission #state::before { display: none; }
-.mission-run { display: flex; align-items: baseline; gap: var(--sp-3); flex: 1 1 auto; min-width: 0; }
+.mission-run { display: flex; align-items: baseline; gap: var(--sp-3); flex: 1 1 auto; min-width: 0; overflow: hidden; }  /* its words give way, never the chips */
+@media (max-width: 1000px) { #step-detail { display: none; } }  /* skill, status and seconds: the board has them */
 .mission-goal { display: contents; }
 .mission-goal b { flex: 0 1 auto; min-width: 0; font: 600 var(--fs-s) var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mission-goal .mono { flex: none; white-space: nowrap; }
@@ -583,12 +584,12 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
                 padding: 6px; margin: -6px; }
   #viewer3d-teach { aspect-ratio: 16 / 13; max-height: none; }
 }
-/* Missions: the list or the editor up to 1179px (.editing hides the list); from 1180px the list (300px, sticky) beside
-   the open mission or a hint, the page up to 1600px wide, no back button */
+/* Program: the list or the editor up to 1179px (.editing hides the list); from 1180px the list (300px, sticky) beside
+   the open mission or a hint, the page as wide as the window, no back button */
 .editor-empty { display: none; }
 .missions-md.editing #mission-list-card { display: none; }
 @media (min-width: 1180px) {
-  body[data-view="missions"] main { max-width: 1600px; padding: var(--sp-5) var(--sp-6) var(--sp-12); }
+  body[data-view="missions"] main { max-width: none; padding: var(--sp-5) var(--sp-6) var(--sp-12); }
   .missions-md { grid-template-columns: 300px minmax(0, 1fr); align-items: start; gap: var(--sp-5); }
   .missions-md #mission-list-card, .missions-md.editing #mission-list-card { display: flex; }
   #mission-list-card { flex-direction: column; position: sticky; top: calc(var(--top-h, 76px) + var(--sp-5));
@@ -673,12 +674,7 @@ details.arg-group[open] { display: grid; gap: var(--sp-2); }
 details.arg-group > .arg-head { justify-content: flex-end; margin-top: calc(-1 * var(--tap-min)); justify-self: end; }
 details.arg-more > summary { color: var(--text-muted); font-weight: 500; }
 details.arg-more[open] { display: grid; gap: var(--sp-2); }
-.sticky-actions { position: sticky; bottom: 0; background: var(--surface-card); padding: var(--sp-3) 0; border-top: 1px solid var(--border); }
-@media (max-width: 600px) {  /* above the bottom nav; the unsaved note on its own line over the buttons */
-  .sticky-actions { bottom: calc(var(--nav) + env(safe-area-inset-bottom, 0px)); flex-wrap: wrap; }
-  .editor-dirty { flex: 1 1 100%; }
-}
-.editor-dirty { margin-right: auto; color: var(--warn); font-size: var(--fs-s); font-weight: 600; }
+.editor-dirty { color: var(--warn); font-size: var(--fs-s); font-weight: 600; white-space: nowrap; }
 .editor-dirty::before { content: "● "; }
 li.empty { list-style: none; padding: 6px 2px; }
 
@@ -1040,3 +1036,120 @@ li.empty { list-style: none; padding: 6px 2px; }
   .bot, .bot g, .board-say::after { transition: none; }
   .board .bot *, .board .bot-all { animation: none !important; }  /* the poses stay, without the motion */
 }
+
+/* ---- Program tab: the mission graph editor (editor.js). The head with the tools, the canvas (scrolls) and the
+   properties panel at its right (380px; under it up to 1000px). Nodes are 196 x 56 tiles: the skill's icon in its
+   colour, the instruction, the command in mono, ports on the edges (the red one at the right is the failed port).
+   "+" spots sit on the wires; while a node is dragged they are its drop targets. ---- */
+.ed { display: grid; gap: var(--sp-3); min-width: 0; }
+.ed-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.ed-title { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: var(--sp-3); }
+.ed-title b { font: 600 var(--fs-lg)/1.25 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-work { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: var(--sp-4); align-items: start; }
+.ed-canvas { position: relative; overflow: auto; min-height: 480px; max-height: calc(100dvh - var(--top-h, 76px) - 150px);
+  border: 1px solid var(--border); border-radius: var(--r-m); background: color-mix(in srgb, var(--surface-card) 35%, transparent); }
+.ed-canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
+.ed-canvas.dragging { cursor: grabbing; }
+.ed-canvas.wiring { cursor: crosshair; }
+.ed-empty { display: grid; place-items: center; gap: var(--sp-4); padding: var(--sp-12) var(--sp-4); text-align: center; }
+.ed-empty p { margin: 0; }
+.ed-panel { position: sticky; top: calc(var(--top-h, 76px) + var(--sp-4)); max-height: calc(100dvh - var(--top-h, 76px) - 2 * var(--sp-4));
+  overflow: auto; display: grid; gap: var(--sp-3); align-content: start; }
+@media (max-width: 1000px) {
+  .ed-work { grid-template-columns: minmax(0, 1fr); }
+  .ed-panel { position: static; max-height: none; }
+  .ed-canvas { min-height: 360px; max-height: 70dvh; }
+}
+.ed-pane { display: grid; gap: var(--sp-3); }
+.ed-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding-top: var(--sp-3); border-top: 1px solid var(--border); }
+.ed-actions .danger { margin-left: auto; }
+.icon-btn { min-width: var(--tap-s); padding: 0; }
+.ed-linked { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-s);
+  background: var(--brand-soft); font-size: var(--fs-s); }
+.ed-linked .pg-link { font-size: 16px; }
+.ed-linked .btn { margin-left: auto; white-space: nowrap; }
+.ed-block { display: grid; gap: var(--sp-3); }
+.ed-undo-save { margin-left: var(--sp-2); min-height: var(--tap-s); }
+/* the step form in the panel: no handle, no buttons, no folding; "Step n" is its title */
+.ed-card { border: 0; padding: 0; background: none; }
+.ed-card .handle, .ed-card .step-buttons, .ed-card .step-sum { display: none; }
+.ed-card .step-head { grid-template-columns: minmax(0, 1fr); }
+.ed-card .step-toggle { pointer-events: none; padding: 0; min-height: 0; }
+.ed-card .step-toggle::before { display: none; }
+/* nodes */
+.pg-node { position: absolute; width: 196px; height: 56px; padding: 0 14px 0 8px; display: flex; align-items: center; gap: 10px;
+  text-align: left; cursor: grab; border-radius: var(--r-m); border: 1.5px solid color-mix(in srgb, var(--k) 45%, var(--border));
+  background: color-mix(in srgb, var(--k) 9%, var(--surface-card)); color: var(--text); font: var(--fs-s) var(--sans); touch-action: none; }
+.pg-node.frame { --k: var(--brand-text); border-style: dashed; }
+.pg-node.frame.include { border-style: solid; }
+.pg-node:hover { border-color: var(--k); }
+.pg-node:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.pg-node.selected { outline: 2px solid var(--brand-text); outline-offset: 3px; border-color: var(--brand-text); }
+.pg-node.linked { opacity: .55; cursor: default; }
+.pg-node.has-problem { border-color: var(--bad); box-shadow: inset 4px 0 0 var(--bad); }
+.pg-node.ed-target { outline: 2px dashed var(--bad); outline-offset: 3px; }
+.pg-node-ico { flex: none; width: 36px; height: 36px; border-radius: var(--r-s); display: grid; place-items: center;
+  background: color-mix(in srgb, var(--k) 22%, var(--surface-card)); color: var(--k); }
+.pg-node-ico .icon { width: 20px; height: 20px; }
+.pg-glyph { font-size: 18px; line-height: 1; }
+.pg-node-text { min-width: 0; display: grid; gap: 2px; }
+.pg-node-title { font-weight: 600; font-size: 13px; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.pg-node-title.empty { color: var(--text-muted); font-weight: 500; font-style: italic; }
+.pg-node-sub { font: 11px var(--mono); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* a closed frame's chevron: opens it (a double-click or Enter does too) */
+.pg-node-chev { position: absolute; right: 18px; top: 50%; width: 22px; height: 22px; margin-top: -11px; display: grid; place-items: center;
+  border-radius: var(--r-s); color: var(--text-muted); cursor: pointer; }
+.pg-node-chev::before { content: ""; width: 7px; height: 7px; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(45deg); }
+.pg-node-chev:hover { background: var(--surface-hover); color: var(--brand-text); }
+.pg-node.frame { padding-right: 40px; }
+.pg-port { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: var(--surface-card); border: 1.5px solid var(--border-strong); }
+.pg-port.in { top: -6px; left: 50%; transform: translateX(-50%); }
+.pg-port.done { bottom: -6px; left: 50%; transform: translateX(-50%); }
+.pg-port.fail { right: -7px; top: 50%; transform: translateY(-50%); width: 12px; height: 12px; border-color: var(--bad); cursor: crosshair; }
+.pg-port.fail.set { background: var(--bad); }
+.pg-port.fail::after { content: ""; position: absolute; inset: -10px; }  /* a bigger target */
+.pg-node:hover .pg-port.fail, .pg-node.selected .pg-port.fail { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 30%, transparent); }
+/* frame heads in the editor: a chevron button, the name (selects the block), its words, Open on a linked mission */
+.ed-canvas .pg-band { cursor: default; }
+.ed-canvas .pg-band:hover { background: var(--surface-card); }
+.pg-band.selected { outline: 2px solid var(--brand-text); outline-offset: 2px; }
+.pg-band.linked { opacity: .7; }
+.pg-band-btn { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; min-width: 0; }
+.pg-chev-btn { display: grid; place-items: center; width: 20px; height: 20px; flex: none; }
+.pg-band-name.pg-band-btn { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.pg-band-name.pg-band-btn:hover { color: var(--brand-text); }
+.pg-band-open { flex: none; color: var(--brand-text); font-weight: 600; font-size: var(--fs-xs); padding: 0 4px; }
+/* the "+" spots */
+.ed-spot { position: absolute; z-index: 2; width: 24px; height: 24px; margin: -12px 0 0 -12px; padding: 0; border-radius: 50%; display: grid;
+  place-items: center; border: 1.5px dashed var(--border-strong); background: var(--surface-page); color: var(--text-muted);
+  font: 700 16px/1 var(--sans); cursor: pointer; opacity: .85; transition: transform .12s, opacity .12s; }
+.ed-spot::after { content: ""; position: absolute; inset: -10px; }  /* a 44px target */
+.ed-spot:hover, .ed-spot:focus-visible { opacity: 1; border-style: solid; border-color: var(--brand-text); color: var(--brand-text); outline: none; }
+.ed-canvas.dragging .ed-spot { opacity: 1; border-style: solid; border-color: var(--brand-text); }
+.ed-spot.near { background: var(--brand); border-color: var(--brand-edge); color: var(--on-brand); transform: scale(1.35); }
+.ed-ghost { position: fixed; z-index: 9; pointer-events: none; opacity: .85; box-shadow: var(--shadow-2); }
+.ed-box { position: absolute; z-index: 2; border: 1px dashed var(--brand-text); background: color-mix(in srgb, var(--brand-text) 10%, transparent); pointer-events: none; }
+.ed-overlay { z-index: 3; }
+/* the palette: a search over skills, missions and blocks */
+.ed-palette { position: absolute; z-index: 6; width: 300px; max-height: 360px; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: var(--sp-2);
+  padding: var(--sp-2); background: var(--surface-card); border: 1px solid var(--border-strong); border-radius: var(--r-m); box-shadow: var(--shadow-2); }
+.ed-palette input { min-height: var(--tap-min); }
+.ed-palette-list { list-style: none; margin: 0; padding: 0; overflow: auto; display: grid; gap: 2px; align-content: start; }
+.ed-palette-list li[role="option"] { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--tap-min); padding: 4px var(--sp-2);
+  border-radius: var(--r-s); cursor: pointer; }
+.ed-palette-list li[role="option"]:hover, .ed-palette-list li[role="option"]:focus-visible { background: var(--surface-hover); outline: none; }
+.ed-pal-icon { flex: none; width: 22px; height: 22px; color: var(--brand-text); }
+.ed-pal-glyph { flex: none; width: 22px; text-align: center; font-size: 17px; color: var(--brand-text); }
+.ed-pal-text { min-width: 0; display: grid; }
+.ed-pal-text b { font-size: var(--fs-s); }
+.ed-pal-text span { font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-palette li.muted { padding: var(--sp-2); }
+/* the failure rule menu at the red port */
+.ed-menu { position: absolute; z-index: 6; width: 230px; display: grid; gap: 2px; padding: var(--sp-2); background: var(--surface-card);
+  border: 1px solid var(--border-strong); border-radius: var(--r-m); box-shadow: var(--shadow-2); }
+.ed-menu-title { padding: 2px var(--sp-2) var(--sp-1); font: 600 var(--fs-xs) var(--sans); color: var(--text-muted); }
+.ed-menu button { min-height: var(--tap-s); padding: 0 var(--sp-2); border: 0; border-radius: var(--r-s); background: none; color: var(--text);
+  font: var(--fs-s) var(--sans); text-align: left; cursor: pointer; }
+.ed-menu button:hover, .ed-menu button:focus-visible { background: var(--surface-hover); outline: none; }
+.ed-menu button.on { color: var(--brand-text); font-weight: 600; }

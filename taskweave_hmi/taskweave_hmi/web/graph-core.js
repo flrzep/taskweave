@@ -104,7 +104,8 @@ function framesOf(root) {
 // ---------- the layout ----------
 // ctx: {metrics, width, isOpen(frame) -> bool}. Places every node: items (key -> {node, kind: step | stack | dot,
 // x, y, w, h: its slot; cx, cy: the node's centre; nw, nh: the node's size}), frames (open: {node, x, y, w, h}), and
-// owner (a step's key -> the key of the item that shows it: itself, or the stack of its closed frame).
+// owner (a step's key -> the key of the item that shows it: itself, or the stack of its closed frame; a frame's own
+// key -> its stack, or the item of its first step while open).
 function layoutGraph(root, ctx) {
   const M = ctx.metrics;
   const items = new Map();
@@ -118,7 +119,8 @@ function layoutGraph(root, ctx) {
     return { w: M.slotW, h: M.slotH, place(x, y) {
       const cy = M.label ? y + nh / 2 : y + M.slotH / 2;
       items.set(node.key, { node, kind, x, y, w: M.slotW, h: M.slotH, cx: x + M.slotW / 2, cy, nw, nh });
-      if (kind === 'stack') node.leaves.forEach((i) => owner.set(ctx.keyOf(i), node.key)); else owner.set(node.key, node.key);
+      owner.set(node.key, node.key);
+      if (kind === 'stack') node.leaves.forEach((i) => owner.set(ctx.keyOf(i), node.key));
     } };
   };
   const dotItem = (key, node, x, y) => items.set(key, { node, kind: 'dot', x: x - M.dot / 2, y: y - M.dot / 2, w: M.dot, h: M.dot,
@@ -143,6 +145,7 @@ function layoutGraph(root, ctx) {
         let lx = x + padX + (w - 2 * padX - (lanes.reduce((t, l) => t + l.w, 0) + (n - 1) * M.gapX)) / 2;
         lanes.forEach((l) => { l.place(lx, y + head + M.dot + M.gapY); lx += l.w + M.gapX; });
         dotItem(`${node.key}:join`, node, x + w / 2, y + h - foot - M.dot / 2);
+        owner.set(node.key, `${node.key}:split`);
       } };
     }
     const gutter = node.kind === 'repeat' || (node.kind === 'root' && root.loop) ? M.gutter : 0;
@@ -169,6 +172,7 @@ function layoutGraph(root, ctx) {
         list.forEach((s) => { s.place(cx, cy + (r.h - s.h) / 2); cx += s.w + M.gapX; });
         cy += r.h + M.gapY;
       });
+      if (node.kind !== 'root' && node.leaves.length) owner.set(node.key, owner.get(ctx.keyOf(node.leaves[0])));
     } };
   }
   const sized = measure(root, Math.max(M.slotW + M.gutter, ctx.width - M.left - M.right));
@@ -224,7 +228,9 @@ const graphMarker = (name) => {
 // stateOf(item) -> 'running' | 'paused' | 'pending' | a finished outcome (for the wires), frameWord(frame) -> its
 // state word (for the outline), replans: [[from step key, to step key]], start: the start step's key, loop: the
 // mission loop's words ('' when it does not repeat), repeatText(frame) -> a repeat frame's words.
-// Returns {node, items, height, replans: how many replan arrows were drawn}.
+// Returns {node, items, height, replans: how many replan arrows were drawn, flow: the wires in run order as
+// {a, b, mid} (the items joined and the wire's middle; a null a: from the start, a null b: to the end), so the
+// editor can put its "+" on them}.
 function drawGraph(layout, ctx) {
   const { items, frames, owner, metrics: M } = layout;
   const width = layout.width;
@@ -292,6 +298,7 @@ function drawGraph(layout, ctx) {
     return null;
   };
   const seen = new Set();
+  const flow = [];
   const flowing = (path) => {  // the graph is rebuilt every second: a flowing wire runs at the phase of a page-wide clock
     if (path.classList.contains('now')) path.style.animationDelay = `-${(performance.now() % 700) / 1000}s`;
     return path;
@@ -300,7 +307,9 @@ function drawGraph(layout, ctx) {
     if (!a || !b || a === b || seen.has(`${a.node.key}>${b.node.key}`)) return;
     seen.add(`${a.node.key}>${b.node.key}`);
     const c = cls(b);
-    wires.append(flowing(gsvg('path', { class: `pg-wire ${c}`, d: graphWire(a, b, bend).d, 'marker-end': `url(#pg-head-${c})` })));
+    const w = graphWire(a, b, bend);
+    flow.push({ a, b, mid: w.mid });
+    wires.append(flowing(gsvg('path', { class: `pg-wire ${c}`, d: w.d, 'marker-end': `url(#pg-head-${c})` })));
   };
   const wireSequence = (node, frame) => {
     const list = node.children || [];
@@ -350,7 +359,8 @@ function drawGraph(layout, ctx) {
     const b = items.get(owner.get(toKey));
     if (!a || !b || a === b) return;
     drawnReplans += 1;
-    const w = graphWire(a, b, Math.min(70, 26 + Math.hypot(b.cx - a.cx, b.cy - a.cy) * 0.25));
+    // bowed sideways, clear of the nodes: wide ones (the editor's column) need the bow outside their edge
+    const w = graphWire(a, b, Math.max(M.column ? a.nw / 2 + 56 : 0, Math.min(70, 26 + Math.hypot(b.cx - a.cx, b.cy - a.cy) * 0.25)));
     wires.append(gsvg('path', { class: 'pg-wire fail', d: w.d, 'marker-end': 'url(#pg-head-fail)' }));
     notes.append(gsvg('text', { class: 'pg-wire-label fail', x: w.mid.x, y: w.mid.y + 4, 'text-anchor': 'middle' }, 'replan'));
   });
@@ -361,17 +371,22 @@ function drawGraph(layout, ctx) {
     const free = ([dx, dy]) => [...items.values()].every((n) => n === first || Math.hypot(n.cx - first.cx - dx, n.cy - first.cy - dy) > 40);
     const [sx, sy] = (M.column ? [[0, -56], [-70, -20], [70, -20]] : [[-58, -28], [-58, 26], [0, -64], [58, -30], [0, 64]]).find(free) || [-58, -28];
     const dot = { cx: first.cx + sx, cy: first.cy + sy, nw: 12, nh: 12 };
+    const w = graphWire(dot, first, 0);
+    flow.unshift({ a: null, b: first, mid: w.mid });
     wires.append(gsvg('circle', { class: 'pg-init', cx: dot.cx, cy: dot.cy, r: 6 }),
-      gsvg('path', { class: 'pg-wire done', d: graphWire(dot, first, 0).d, 'marker-end': 'url(#pg-head-done)' }));
+      gsvg('path', { class: 'pg-wire done', d: w.d, 'marker-end': 'url(#pg-head-done)' }));
   }
   const last = exit(layout.root);
+  if (last && ctx.loop) flow.push({ a: last, b: null, mid: { x: last.cx, y: last.cy + last.nh / 2 + 22 } });  // the end, under the last node
   if (last && !ctx.loop) {
     const free = ([dx, dy]) => [...items.values()].every((n) => n === last || Math.hypot(n.cx - last.cx - dx, n.cy - last.cy - dy) > 40);
     const [ex, ey] = (M.column ? [[0, 56], [66, 0], [-66, 0]] : [[62, 0], [0, 66], [-62, 0], [0, -66]]).find(free) || [0, 66];
     const ring = { cx: last.cx + ex, cy: last.cy + ey, nw: 18, nh: 18 };
-    wires.append(gsvg('path', { class: 'pg-wire todo', d: graphWire(last, ring, 0).d, 'marker-end': 'url(#pg-head-todo)' }),
+    const w = graphWire(last, ring, 0);
+    flow.push({ a: last, b: null, mid: w.mid });
+    wires.append(gsvg('path', { class: 'pg-wire todo', d: w.d, 'marker-end': 'url(#pg-head-todo)' }),
       gsvg('circle', { class: 'pg-final', cx: ring.cx, cy: ring.cy, r: 9 }), gsvg('circle', { class: 'pg-final-dot', cx: ring.cx, cy: ring.cy, r: 5 }));
   }
   graph.append(notes);
-  return { node: graph, items, height, replans: drawnReplans };
+  return { node: graph, items, height, replans: drawnReplans, flow };
 }

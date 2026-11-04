@@ -115,7 +115,7 @@ function stepNumber(input, direction) {  // direction: steps, signed
   input.value = String(next);
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
-document.querySelectorAll('input[type="number"]').forEach(numberField);  // the page's own (the step editor's: stepCard)
+document.querySelectorAll('input[type="number"]').forEach(numberField);  // the page's own (the step form's: stepCard)
 function show(node, visible) { node.hidden = !visible; }
 function message(node, text, bad = false) {  // bad: true (red), 'warn' (amber) or false
   const warn = bad === 'warn';
@@ -761,7 +761,7 @@ async function refreshCatalog() {
   const { ok, data } = await api('GET', '/api/points');
   if (!ok || !state.editing) return;
   state.points = data;
-  $('step-editor').querySelectorAll('select[data-points]').forEach((select) => select._fill?.());
+  $('ed-panel').querySelectorAll('select[data-points]').forEach((select) => select._fill?.());
 }
 function fillSelect(select, values, selected) {
   select.replaceChildren(...values.map((v) => el('option', { value: v, text: v === '' ? 'default' : v })));
@@ -794,26 +794,16 @@ async function openEditor(name) {
   $('d-retries').value = d.retries ?? '';
   fillSelect($('d-fail'), ON_FAILURE, d.on_failure ?? '');
   $('d-replans').value = d.max_replans ?? '';
-  const steps = data.steps || [];
-  renderSteps(steps, steps.map(() => false));  // a mission opens folded: its outline first, a step opened on a tap
+  editorOpen(name, data, isNew);  // editor.js: the graph and the panel
 }
 function alertInline(data) { message($('save-msg'), data.error || (data.problems || []).join('\n'), true); }
-
-// expanded: per step, open (true) or folded to its summary line (false)
-function renderSteps(steps, expanded) {
-  const list = $('step-editor');
-  list.replaceChildren();
-  steps.forEach((step, index) => list.append(stepCard(step, index, steps, expanded[index])));
-  foldButton();
-}
-function readSteps() { return [...$('step-editor').children].map((card) => card._read()); }
 
 function stepCard(step, index, steps, expanded) {
   const card = $('step-template').content.firstElementChild.cloneNode(true);
   card.querySelectorAll('input[type="number"]').forEach(numberField);
   const q = (key) => card.querySelector(`[data-k="${key}"]`);
   card.querySelector('.step-no').replaceChildren(el('span', { class: 'step-word', text: 'Step ' }), String(index + 1));
-  card.querySelector('[data-act="fold"]').addEventListener('click', () => { setExpanded(card, !isExpanded(card)); foldButton(); });
+  card.querySelector('[data-act="fold"]').addEventListener('click', () => setExpanded(card, !isExpanded(card)));
   q('instruction').value = step.instruction || '';
   const missions = state.missions.filter((m) => m.valid && m.name !== state.editing?.name).map((m) => INCLUDE + m.name);
   const chosen = step.include ? INCLUDE + step.include : step.skill;
@@ -856,35 +846,6 @@ function stepCard(step, index, steps, expanded) {
   card.addEventListener('change', markDirty);
   ['input', 'change'].forEach((type) => card.addEventListener(type, () => stepSummary(card)));
   ['input', 'change'].forEach((type) => card.addEventListener(type, () => card.classList.remove('has-problem')));
-  card.querySelector('[data-act="up"]').disabled = index === 0;
-  card.querySelector('[data-act="down"]').disabled = index === steps.length - 1;
-  card.querySelector('[data-act="up"]').addEventListener('click', () => move(index, -1, 'up'));
-  card.querySelector('[data-act="down"]').addEventListener('click', () => move(index, 1, 'down'));
-  const remove = card.querySelector('[data-act="remove"]');
-  let removeArmed = null;
-  remove.addEventListener('click', () => {
-    if (!removeArmed) {  // two taps, as Delete elsewhere: there is no undo
-      remove.classList.add('confirm'); remove.textContent = 'Remove?'; remove.title = 'Tap again to remove this step';
-      removeArmed = setTimeout(() => { remove.classList.remove('confirm'); remove.textContent = '✕'; remove.title = ''; removeArmed = null; }, 3000);
-      return;
-    }
-    clearTimeout(removeArmed);
-    editSteps((items) => items.splice(index, 1));
-  });
-  card.querySelector('[data-act="copy"]').addEventListener('click', () => {  // below it, without its id (ids are unique)
-    focusStep(editSteps((items) => {
-      const copy = structuredClone(items[index].step);
-      delete copy.id;
-      items.splice(index + 1, 0, { step: copy, open: items[index].open, expanded: true, was: null });
-    })[index + 1]);
-  });
-  const handle = card.querySelector('[data-act="drag"]');
-  handle.addEventListener('pointerdown', (e) => dragStep(card, e));
-  handle.addEventListener('keydown', (e) => {
-    if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
-    e.preventDefault();
-    move(index, e.key === 'ArrowUp' ? -1 : 1, 'drag');
-  });
   card._read = () => {
     const including = q('skill').value.startsWith(INCLUDE);
     const out = including ? { instruction: q('instruction').value.trim(), include: q('skill').value.slice(INCLUDE.length), with: {} }
@@ -987,30 +948,16 @@ function previewAnswer(answer) {
 }
 // the previews follow the mission and the manual skill (a mission start turns them off); each from the step as last
 // read, so a status event reads no fields
-function updatePreviews() { document.querySelectorAll('#step-editor .step-preview').forEach((node) => node._update()); }
+function updatePreviews() { document.querySelectorAll('#ed-panel .step-preview').forEach((node) => node._update()); }
 
 // ---------- folded steps ----------
-// A step folds to its summary line (number, instruction, skill and a short reading of its arguments): a long mission
-// is reordered by dragging folded steps. The summary is the toggle (click, Enter, Space); the open state stays through
-// reorders (editSteps), Check, Save and point refreshes. A mission opens with every step folded; new and duplicated
-// steps open, and so do the steps a Check or Save names.
+// A step card folds to its summary line (number, instruction, skill and a short reading of its arguments); in the
+// Program tab's panel it is always open (editor.js), the fold is for other users of the card.
 function setExpanded(card, open) {
   card.classList.toggle('collapsed', !open);
   card.querySelector('[data-act="fold"]').setAttribute('aria-expanded', String(open));
 }
 const isExpanded = (card) => !card.classList.contains('collapsed');
-// "Collapse all" while any step is open, else "Expand all"; none for a single step
-function foldButton() {
-  const cards = [...$('step-editor').children];
-  show($('btn-fold-steps'), cards.length > 1);
-  $('btn-fold-steps').textContent = cards.some(isExpanded) ? 'Collapse all' : 'Expand all';
-}
-$('btn-fold-steps').addEventListener('click', () => {
-  const cards = [...$('step-editor').children];
-  const open = !cards.some(isExpanded);
-  cards.forEach((card) => setExpanded(card, open));
-  foldButton();
-});
 function stepSummary(card) {
   const step = card._read();
   const instruction = card.querySelector('.sum-instruction');
@@ -1590,140 +1537,6 @@ function listEditor(key, spec, value) {
 // so a moved step's id changes: replan_from follows the step it named; one that named a removed step falls back to the
 // step itself (and says so).
 // Returns the new step cards.
-function editSteps(change) {
-  const items = [...$('step-editor').children].map((card, i) => {
-    const step = card._read();
-    return { step, open: card.querySelector('.rules').open, expanded: isExpanded(card), was: step.id || `s${i + 1}` };
-  });
-  const before = new Set(items.map((item) => item.was));
-  change(items);
-  const now = new Map();
-  items.forEach((item, i) => { if (item.was) now.set(item.was, item.step.id || `s${i + 1}`); });
-  const lost = [];
-  items.forEach((item, i) => {
-    const target = item.step.replan_from;
-    if (!target || !before.has(target)) return;  // not a step of this list (already wrong): Check reports it
-    if (now.has(target)) item.step.replan_from = now.get(target);
-    else { delete item.step.replan_from; lost.push(i + 1); }
-  });
-  renderSteps(items.map((item) => item.step), items.map((item) => item.expanded));
-  const cards = [...$('step-editor').children];
-  cards.forEach((card, i) => { card.querySelector('.rules').open = items[i].open; });
-  message($('save-msg'), lost.length ? `Step ${lost.join(', ')} replanned from the removed step: now from itself.` : '', 'warn');
-  markDirty();
-  return cards;
-}
-
-// A new or duplicated step: its top just below the sticky top bar, its instruction focused to type.
-function focusStep(card) {
-  window.scrollBy(0, card.getBoundingClientRect().top - document.querySelector('.top').offsetHeight - 8);
-  card.querySelector('[data-k="instruction"]').focus({ preventScroll: true });
-}
-
-// One place up or down (the arrow buttons, Alt + arrow on the handle); the focus stays on the control used.
-function move(index, delta, control) {
-  const target = index + delta;
-  if (target < 0 || target >= $('step-editor').children.length) return;
-  const card = editSteps((items) => items.splice(target, 0, ...items.splice(index, 1)))[target];
-  const button = card.querySelector(`[data-act="${control}"]`);
-  (button.disabled ? card.querySelector('[data-act="drag"]') : button).focus();
-}
-
-// Drag a step by its handle (mouse, pen or touch: pointer events; the handle has touch-action none, so a touch drags
-// instead of scrolling). The step follows the pointer (folded to its summary line while carried), a line marks where it
-// lands, and near the top bar or the bottom of the window the page scrolls. Escape or a lost pointer puts it back.
-const DRAG_EDGE = 72;  // px from the top bar or the window's bottom where the page scrolls while dragging
-function dragStep(card, e) {
-  const list = $('step-editor');
-  const cards = [...list.children];
-  if (e.button !== 0 || cards.length < 2) return;
-  e.preventDefault();
-  const handle = e.currentTarget;
-  handle.setPointerCapture(e.pointerId);
-  const from = cards.indexOf(card);
-  const start = { y: e.clientY, scroll: window.scrollY };
-  let y = e.clientY, to = from, frame = 0, done = false;
-  list.classList.add('dragging'); card.classList.add('dragging');
-  const mark = () => {
-    card.style.transform = `translateY(${y - start.y + window.scrollY - start.scroll}px)`;
-    let slot = cards.length;  // it lands before cards[slot]: the first other step whose middle is below the pointer
-    for (let i = 0; i < cards.length; i += 1) {
-      const box = cards[i].getBoundingClientRect();
-      if (i !== from && y < box.top + box.height / 2) { slot = i; break; }
-    }
-    to = slot > from ? slot - 1 : slot;
-    cards.forEach((c) => c.classList.remove('drop-before', 'drop-after'));
-    if (to !== from) cards[Math.min(slot, cards.length - 1)].classList.add(slot < cards.length ? 'drop-before' : 'drop-after');
-  };
-  const scroll = () => {
-    const top = document.querySelector('.top').getBoundingClientRect().bottom + DRAG_EDGE;
-    const rail = document.querySelector('.rail').getBoundingClientRect();
-    const floor = rail.top > window.innerHeight / 2 ? rail.top : window.innerHeight;  // the phone's bottom nav, else the window
-    const bottom = Math.min(floor, $('editor').querySelector('.sticky-actions').getBoundingClientRect().top) - DRAG_EDGE;
-    const speed = y < top ? -Math.min(top - y, DRAG_EDGE) : y > bottom ? Math.min(y - bottom, DRAG_EDGE) : 0;
-    if (speed) { window.scrollBy(0, speed / 4); mark(); }
-    frame = requestAnimationFrame(scroll);
-  };
-  const onMove = (ev) => { y = ev.clientY; mark(); };
-  const onKey = (ev) => { if (ev.key === 'Escape') end(false); };  // not stopped: Escape still aborts a manual skill
-  function end(drop) {
-    if (done) return;
-    done = true;
-    cancelAnimationFrame(frame);
-    handle.removeEventListener('pointermove', onMove);
-    document.removeEventListener('keydown', onKey);
-    list.classList.remove('dragging'); card.classList.remove('dragging'); card.style.transform = '';
-    cards.forEach((c) => c.classList.remove('drop-before', 'drop-after'));
-    if (drop && to !== from) {
-      editSteps((items) => items.splice(to, 0, ...items.splice(from, 1)))[to].querySelector('[data-act="drag"]').focus({ preventScroll: true });
-    }
-  }
-  handle.addEventListener('pointermove', onMove);
-  handle.addEventListener('pointerup', () => end(true), { once: true });
-  handle.addEventListener('pointercancel', () => end(false), { once: true });
-  handle.addEventListener('lostpointercapture', () => end(false), { once: true });
-  document.addEventListener('keydown', onKey);
-  frame = requestAnimationFrame(scroll);
-}
-
-function readMission() {
-  const mission = { goal: $('m-goal').value.trim(), loop: $('m-loop').value, steps: readSteps() };
-  if (state.editing.mission.robot) mission.robot = state.editing.mission.robot;  // keep a robot-specific mission
-  for (const key of ['params', 'facts']) {  // not edited here (block parameters, cycle facts): kept as they are
-    if (state.editing.mission[key]) mission[key] = state.editing.mission[key];
-  }
-  if ($('m-max').value) mission.max_cycles = Number($('m-max').value);
-  if ($('m-stop').value.trim()) mission.stop_when = $('m-stop').value.trim();
-  const defaults = {};
-  if ($('d-timeout').value !== '') defaults.timeout_s = Number($('d-timeout').value);
-  if ($('d-retries').value !== '') defaults.retries = Number($('d-retries').value);
-  if ($('d-fail').value) defaults.on_failure = $('d-fail').value;
-  if ($('d-replans').value !== '') defaults.max_replans = Number($('d-replans').value);
-  if (Object.keys(defaults).length) mission.defaults = defaults;
-  return mission;
-}
-
-// The problems of a Check or a refused Save, above the buttons; the steps they name are marked red until they are
-// edited: by the server's places ({problem, step, path}: the step of the mission's own steps and the path in it, e.g.
-// ['args', 'motion', 'mode'] or ['skill']), else by the text ("step 's3' (...)", a step of an included mission as
-// "<include step id>_..."). A place in a step's arguments or settings also marks that field, with the problem under it.
-function showProblems(problems, places = []) {
-  show($('problems'), problems.length > 0);
-  $('problems').textContent = problems.join('\n');
-  const named = problems.flatMap((p) => [...p.matchAll(/step '([^']+)'/g)].map((m) => m[1]));
-  const marks = {};
-  places.forEach((place) => { (marks[place.step] = marks[place.step] || []).push({ path: place.path || [], text: place.message || problems[place.problem] }); });
-  [...$('step-editor').children].forEach((card, i) => {
-    const step = card._read();
-    const id = step.id || `s${i + 1}`;
-    const bad = i in marks || named.some((n) => n === id || (!!step.include && n.startsWith(`${id}_`)));
-    card.classList.toggle('has-problem', bad);
-    card.querySelectorAll('.field.has-problem').forEach(unmarkField);
-    (marks[i] || []).forEach(({ path, text }) => markField(card, path, text));
-    if (bad) setExpanded(card, true);  // opens to show what is wrong
-  });
-  foldButton();
-}
 // the field of a step a problem's path names: an argument (args.<key>, also nested: args.motion.mode marks motion),
 // the skill, or a setting under the rules (on_failure, replan_from, ...)
 function markField(card, path, text) {
@@ -1743,53 +1556,11 @@ function markField(card, path, text) {
   const clear = () => unmarkField(field);
   ['input', 'change'].forEach((type) => field.addEventListener(type, clear, { once: true }));
 }
-// The notes of a Check ({step, path, include, message}: what runs but is noted, e.g. a form of cell schema 4): a
-// warning line on the step, above its arguments, until the next Check
-function showNotes(notes) {
-  [...$('step-editor').children].forEach((card, i) => {
-    card.querySelectorAll('.step-note').forEach((node) => node.remove());
-    notes.filter((n) => n.step === i).forEach((n) => card.querySelector('.args')?.before(el('div', { class: 'msg step-note',
-      text: `${n.include ? `${n.include}: ` : ''}${n.message}` })));
-  });
-}
 function unmarkField(field) {
   field.classList.remove('has-problem');
   field.querySelectorAll(':scope > .problem-note').forEach((note) => note.remove());
 }
 
-$('btn-add-step').addEventListener('click', () => {
-  const cards = editSteps((items) => items.push({ step: { instruction: '', skill: state.skills[0]?.name || 'wait', args: {} },
-    open: false, expanded: true, was: null }));
-  focusStep(cards[cards.length - 1]);
-});
-$('btn-validate').addEventListener('click', async () => {
-  const name = $('m-name').value.trim() || 'new';
-  const { ok, data } = await api('POST', `/api/missions/${encodeURIComponent(name)}/validate`, readMission());
-  if (!ok) { alertInline(data); return; }
-  showProblems(data.problems, data.places);
-  showNotes(data.notes || []);
-  const noted = (data.notes || []).length;
-  message($('save-msg'), data.problems.length ? '' : `Mission is valid${noted ? ` (${noted} note${noted > 1 ? 's' : ''} on its steps)` : ''}.`);
-});
-$('btn-save').addEventListener('click', async () => {
-  const name = $('m-name').value.trim();
-  if (!name) { showProblems(['Give the mission a name.']); return; }
-  const old = state.editing.isNew ? null : state.editing.name;
-  const rename = old && old !== name ? `?rename_from=${encodeURIComponent(old)}` : '';
-  const { ok, data } = await api('PUT', `/api/missions/${encodeURIComponent(name)}${rename}`, readMission());
-  if (!ok) { showProblems(data.problems || [data.error || 'not saved'], data.places); message($('save-msg'), ''); return; }
-  showProblems([]);
-  state.dirty = false; show($('editor-dirty'), false);
-  $('mission-search').value = '';  // the saved mission is in the list, whatever was searched
-  clearDrop();
-  state.editing = { ...state.editing, name, isNew: false };
-  show($('btn-delete'), true);
-  // the plan graph reads its band names again
-  if (typeof forgetMission === 'function') [name, old].filter(Boolean).forEach(forgetMission);
-  message($('save-msg'), rename ? `Renamed ${old} to ${name} and saved. It is used at the next start.`
-    : `Saved ${name}. It is used at the next start.`);
-  loadMissions();
-});
 let deleteArmed = null;
 function disarmDelete() {
   clearTimeout(deleteArmed); deleteArmed = null;
