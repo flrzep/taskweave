@@ -36,6 +36,7 @@ def served(tmp_path):
     bridge.robot = 'demo_bot'
     bridge.schemas = lambda: CATALOG
     bridge.undos = undo.Undo()
+    bridge.lock, bridge.status = threading.Lock(), {'state': 'idle'}  # the undo's idle check
     bridge.points_changed = lambda: None
     logger = FakeLogger()
     bridge.get_logger = lambda: logger
@@ -87,9 +88,12 @@ def test_edit_saves_with_an_undo_and_refuses_a_bad_step(served):
     assert status == 200 and answer['hash'] and answer['mission']['goal'] == 'Again'
     status, answer = request('POST', '/api/missions/patrol/edit', {'ops': [], 'create': True})
     assert status == 422 and 'already exists' in answer['problems'][0]
-    # the undo puts the file back as it was before the first edit
-    status, answer = request('POST', '/api/teach/undo', {'id': bridge.undos.saves and next(iter(bridge.undos.saves))})
-    assert status == 200 and path.read_text() == before
+    # the undos put the file back as it was before the first edit, newest first (an older save's file changed since)
+    assert len(bridge.undos.saves) == 2
+    for key in reversed(list(bridge.undos.saves)):
+        status, answer = request('POST', '/api/teach/undo', {'id': key})
+        assert status == 200, answer
+    assert path.read_text() == before
 
 
 def test_schema_route_serves_the_step_schema(served):
