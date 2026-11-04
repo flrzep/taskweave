@@ -104,14 +104,12 @@ def handled_at(instance) -> dict:
     return {'x': instance.pose.x, 'y': instance.pose.y, 'top_z': instance.top_z, 'yaw': instance.pose.yaw}
 
 
-NEAR_HAND_M = 0.4  # a hand this close to an object's origin is on it (a frame's rails sit 0.25 m out to the side)
-
-
-def near_hands(distances: Mapping) -> list[str]:
-    """The hands on the object, from hand_distances: those within NEAR_HAND_M of its origin, else the nearest one
-    (Teach's grasp: the hands a new grasp point is taught with)."""
+def near_hands(distances: Mapping, near_m: float = 0.4) -> list[str]:
+    """The hands on the object, from hand_distances: those within ``near_m`` of its origin, else the nearest one
+    (Teach's grasp: the hands a new grasp point is taught with). The default leaves room for a two-hand grasp whose
+    hands sit about 0.25 m to each side of the origin."""
     order = sorted(distances, key=lambda tool: distances[tool])
-    return [tool for tool in order if distances[tool] <= NEAR_HAND_M] or order[:1]
+    return [tool for tool in order if distances[tool] <= near_m] or order[:1]
 
 
 def hand_distances(base: Mapping, instance: Mapping, current: Mapping) -> dict:
