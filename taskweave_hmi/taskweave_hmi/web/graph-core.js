@@ -159,11 +159,13 @@ function layoutGraph(root, ctx) {
       row.w += (row.items.length > 1 ? M.gapX : 0) + s.w;
       row.h = Math.max(row.h, s.h);
     });
-    const body = rows.reduce((t, r) => t + r.h, 0) + Math.max(0, rows.length - 1) * M.gapY;
+    const empty = node.kind !== 'root' && !sized.length;  // an empty block keeps a dot, so the wires and the editor's "+" reach it
+    const body = empty ? M.dot + 2 * M.gapY : rows.reduce((t, r) => t + r.h, 0) + Math.max(0, rows.length - 1) * M.gapY;
     const w = Math.max(M.slotW, ...rows.map((r) => r.w)) + 2 * padX + gutter;
     const h = head + body + foot;
     return { w, h, place(x, y) {
       if (node.kind !== 'root') frames.push({ node, x, y, w, h });
+      if (empty) { dotItem(`${node.key}:empty`, node, x + w / 2, y + head + M.gapY + M.dot / 2); owner.set(node.key, `${node.key}:empty`); }
       let cy = y + head;
       rows.forEach((r, ri) => {
         const list = !M.column && ri % 2 ? [...r.items].reverse() : r.items;  // a snake: every other row runs back
@@ -288,14 +290,14 @@ function drawGraph(layout, ctx) {
     if (node.kind === 'step' || (isFrame(node) && !ctx.isOpen(node))) return items.get(owner.get(node.kind === 'step' ? node.key : ctx.keyOf(node.leaves[0])) || node.key);
     if (node.kind === 'parallel') return items.get(`${node.key}:split`);
     for (const c of node.children || []) { const e = entry(c); if (e) return e; }
-    return null;
+    return items.get(`${node.key}:empty`) || null;
   };
   const exit = (node) => {
     if (node.kind === 'step' || (isFrame(node) && !ctx.isOpen(node))) return entry(node);
     if (node.kind === 'parallel') return items.get(`${node.key}:join`);
     const list = node.children || [];
     for (let k = list.length - 1; k >= 0; k -= 1) { const x = exit(list[k]); if (x) return x; }
-    return null;
+    return items.get(`${node.key}:empty`) || null;
   };
   const seen = new Set();
   const flow = [];

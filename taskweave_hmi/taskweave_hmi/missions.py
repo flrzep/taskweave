@@ -53,6 +53,10 @@ class MissionError(ValueError):
         super().__init__('; '.join(problems))
 
 
+class MissionConflict(MissionError):
+    """The file changed since the editor opened it: the ops would land on other steps (``edit``'s ``base``)."""
+
+
 def check_name(name: str) -> str:
     if not NAME.match(name or ''):
         raise MissionError([f'invalid mission name {name!r}: letters, digits, "_" and "-", starting with a letter'])
@@ -399,27 +403,39 @@ def apply_ops(doc, ops: list) -> None:
 
 
 def edit(name: str, ops: list, store: ConfigStore, catalog: Mapping[str, dict], robot: str,
-         rename_from: str | None = None) -> dict:
-    """Apply ``ops`` (``apply_ops``) on missions/<name>.yaml (an empty document when there is no such file), validate
-    the result and write it: ``{'mission': the mission as saved, 'file': its path in the config}``. MissionError with
-    every problem, nothing written then. ``rename_from``: the ops apply to that mission's file, saved as ``name``."""
+         rename_from: str | None = None, base: str | None = None, create: bool = False) -> dict:
+    """Apply ``ops`` (``apply_ops``) on missions/<name>.yaml, validate the result and write it: ``{'mission': the
+    mission as saved, 'file': its path in the config, 'hash': the file's hash now (the next edit's base)}``.
+    MissionError with every problem, nothing written then. ``create``: the mission is new, made from the ops on an
+    empty document (refused when a file of that name exists; without it a missing file is refused: the ops name
+    places in a file). ``base``: the file's hash when the editor opened it (``ConfigStore.file_hash``); a file that
+    changed since is a MissionConflict, nothing written. ``rename_from``: the ops apply to that mission's file,
+    saved as ``name``."""
     from ruamel.yaml import YAML
     from ruamel.yaml.comments import CommentedMap
 
     path = mission_path(store, name)
     source = mission_path(store, rename_from) if rename_from and rename_from != name else path
     problems = []
-    if source != path:
-        if not source.is_file():
-            problems.append(f'mission {rename_from!r} does not exist')
-        if path.exists():
-            problems.append(f'a mission named {name!r} already exists')
+    if source != path and not source.is_file():
+        problems.append(f'mission {rename_from!r} does not exist')
+    if (source != path or create) and path.exists():
+        problems.append(f'a mission named {name!r} already exists')
+    if not create and source == path and not path.is_file():
+        problems.append(f'mission {name!r} does not exist (deleted since it was opened?)')
     if problems:
         raise MissionError(problems)
+    relative = source.relative_to(store.root).as_posix()
+    if base is not None and store.file_hash(relative) != base:
+        raise MissionConflict([f'{relative} changed since it was opened (another editor, the pad or a hand edit): '
+                               'open the mission again and redo your changes'])
     handler = YAML()
     handler.preserve_quotes = True
     handler.width = 120
-    document = handler.load(source.read_text(encoding='utf-8')) if source.is_file() else None
+    try:
+        document = handler.load(source.read_text(encoding='utf-8')) if source.is_file() else None
+    except Exception as error:  # noqa: BLE001 - ruamel's errors have no common base worth naming
+        raise MissionError([f'{relative} is not valid YAML: {str(error).splitlines()[0]}']) from error
     if not isinstance(document, CommentedMap):
         document = CommentedMap()
     apply_ops(document, list(ops or []))
@@ -434,7 +450,8 @@ def edit(name: str, ops: list, store: ConfigStore, catalog: Mapping[str, dict], 
     if source != path:
         source.unlink()
     store.reload()
-    return {'mission': mission, 'file': path.relative_to(store.root).as_posix()}
+    file = path.relative_to(store.root).as_posix()
+    return {'mission': mission, 'file': file, 'hash': store.file_hash(file)}
 
 
 def delete(name: str, store: ConfigStore) -> Path:

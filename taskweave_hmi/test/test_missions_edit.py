@@ -142,7 +142,7 @@ def test_edit_makes_a_new_mission_from_ops(store):
     result = edit('fresh', [{'op': 'set', 'at': '', 'key': 'goal', 'value': 'A new one'},
                             {'op': 'set', 'at': '', 'key': 'params', 'value': {'where': {'point': 'target'}}},
                             {'op': 'insert', 'at': 'steps/0', 'step': go}],
-                  store, CATALOG, 'demo_bot')
+                  store, CATALOG, 'demo_bot', create=True)
     assert result['mission']['goal'] == 'A new one' and 'fresh' in store.mission_names()
     # params are written too (they were dropped from new files before)
     assert ConfigStore(store.root).mission('fresh')['params'] == {'where': {'point': 'target'}}
@@ -159,3 +159,34 @@ def test_save_writes_params_and_facts(store):
                'steps': [{'instruction': 'Go {where}', 'skill': 'move', 'args': {'to': '{where}'}}]}
     save('block', mission, store, CATALOG, 'demo_bot')
     assert ConfigStore(store.root).mission('block')['params'] == mission['params']
+
+
+def test_edit_refuses_a_new_mission_under_a_taken_name_and_a_missing_one(store):
+    before = (store.root / 'missions' / 'patrol.yaml').read_text()
+    with pytest.raises(MissionError, match="'patrol' already exists"):
+        edit('patrol', [{'op': 'set', 'at': '', 'key': 'goal', 'value': 'Taken'}], store, CATALOG, 'demo_bot',
+             create=True)
+    assert (store.root / 'missions' / 'patrol.yaml').read_text() == before
+    with pytest.raises(MissionError, match="'ghost' does not exist"):
+        edit('ghost', [{'op': 'set', 'at': '', 'key': 'goal', 'value': 'Gone'}], store, CATALOG, 'demo_bot')
+    assert not (store.root / 'missions' / 'ghost.yaml').exists()
+
+
+def test_edit_refuses_a_file_that_changed_since_the_open(store):
+    from taskweave_hmi.missions import MissionConflict
+
+    opened = store.file_hash('missions/patrol.yaml')
+    goal = lambda text: [{'op': 'set', 'at': '', 'key': 'goal', 'value': text}]  # noqa: E731
+    result = edit('patrol', goal('One'), store, CATALOG, 'demo_bot', base=opened)
+    assert result['hash'] == store.file_hash('missions/patrol.yaml') != opened
+    with pytest.raises(MissionConflict, match='changed since'):
+        edit('patrol', goal('Two'), store, CATALOG, 'demo_bot', base=opened)
+    assert store.mission('patrol')['goal'] == 'One'
+    edit('patrol', goal('Two'), store, CATALOG, 'demo_bot', base=result['hash'])
+    assert store.mission('patrol')['goal'] == 'Two'
+
+
+def test_edit_refuses_a_file_that_is_not_yaml(store):
+    (store.root / 'missions' / 'patrol.yaml').write_text('goal: [unclosed\nsteps: ')
+    with pytest.raises(MissionError, match='not valid YAML'):
+        edit('patrol', [{'op': 'set', 'at': '', 'key': 'goal', 'value': 'x'}], store, CATALOG, 'demo_bot')

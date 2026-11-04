@@ -22,11 +22,13 @@ HTTP API (JSON):
   PUT  /api/missions/<name>        validate and save; 422 with {problems} if invalid, nothing written;
                                    ?rename_from=<old> saves mission <old> as <name> (old file removed)
   DELETE /api/missions/<name>      remove the mission file (a running mission keeps its plan)
-  POST /api/missions/<name>/edit   the graph editor's save: {ops: [...]} applied on the file's own tree (comments
-                                   kept; missions.apply_ops: insert, remove, move, wrap, unwrap, set), validated and
-                                   written: {mission, file, undo}; 422 with {problems, places}, nothing written; a
-                                   mission that does not exist is made from the ops; ?rename_from=<old> as PUT.
-                                   The undo is a Teach-style one: POST /api/teach/undo {id} puts the file back
+  POST /api/missions/<name>/edit   the graph editor's save: {ops: [...], base, create} applied on the file's own
+                                   tree (comments kept; missions.apply_ops: insert, remove, move, wrap, unwrap,
+                                   set), validated and written: {mission, file, hash, undo}; 422 with {problems,
+                                   places}, nothing written. base: the ETag GET /api/missions/<name> gave (the
+                                   file's hash): 409 when the file changed since. create: a new mission from the
+                                   ops (refused when the name is taken). ?rename_from=<old> as PUT. The undo is a
+                                   Teach-style one: POST /api/teach/undo {id} puts the file back
   GET  /api/schema/mission         the mission file's JSON schema (what a step may hold: the editor offers blocks
                                    only when the schema has them)
   POST /api/missions/<name>/validate  {problems, places, notes}; places (also in a 422 of PUT): per problem of a step
@@ -1263,16 +1265,18 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     # ---- helpers ----------------------------------------------------------------------
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
+    def _send(self, status: int, body: bytes, content_type: str, etag: str | None = None) -> None:
         self.send_response(status)
         self.send_header('Content-Type', content_type)
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store')
+        if etag:
+            self.send_header('ETag', etag)
         self.end_headers()
         self.wfile.write(body)
 
-    def _json(self, data, status: int = HTTPStatus.OK) -> None:
-        self._send(status, json.dumps(data).encode(), 'application/json')
+    def _json(self, data, status: int = HTTPStatus.OK, etag: str | None = None) -> None:
+        self._send(status, json.dumps(data).encode(), 'application/json', etag)
 
     def _body(self) -> dict:
         length = int(self.headers.get('Content-Length') or 0)
@@ -1402,9 +1406,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(missions.template(bridge.robot))
             if len(route) == 2 and route[0] == 'missions':
                 name = missions.check_name(route[1])
-                if method == 'GET':
+                if method == 'GET':  # the ETag is the file's hash: the graph editor's base for its edit
                     bridge.config.reload()
-                    return self._json(bridge.config.mission(name))
+                    return self._json(bridge.config.mission(name),
+                                      etag=bridge.config.file_hash(f'missions/{name}.yaml'))
                 if method == 'PUT':
                     old = parse_qs(urlsplit(self.path).query).get('rename_from', [None])[0]
                     path = missions.save(name, self._body(), bridge.config, bridge.schemas(), bridge.robot,
@@ -1426,13 +1431,17 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'POST' and len(route) == 3 and route[0] == 'missions' and route[2] == 'edit':
                 name = missions.check_name(route[1])
                 old = parse_qs(urlsplit(self.path).query).get('rename_from', [None])[0]
-                ops = self._object_body().get('ops')
+                body = self._object_body()
+                ops = body.get('ops')
                 if not isinstance(ops, list):
                     raise BadRequest('the body must hold ops, a list')
+                base = body.get('base')
+                if base is not None and not isinstance(base, str):
+                    raise BadRequest('base must be the hash the mission was read with')
                 files = [f'missions/{name}.yaml'] + ([f'missions/{missions.check_name(old)}.yaml'] if old else [])
                 result, saved = bridge.undos.run(bridge.config, files, lambda: missions.edit(
-                    name, ops, bridge.config, bridge.schemas(), bridge.robot, rename_from=old),
-                    f'edit of mission {name}')
+                    name, ops, bridge.config, bridge.schemas(), bridge.robot, rename_from=old, base=base,
+                    create=bool(body.get('create'))), f'edit of mission {name}')
                 renamed = f' (renamed from {old})' if old and old != name else ''
                 bridge.get_logger().info(f'HMI edited mission {name}{renamed}: {len(ops)} ops -> {result["file"]}')
                 return self._json({**result, 'undo': saved})
@@ -1620,6 +1629,8 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'POST' and route == ['robot', 'move']:
                 return self._json(bridge.go_to_pose(self._body()['pose']))
             return self._json({'error': 'not found'}, HTTPStatus.NOT_FOUND)
+        except missions.MissionConflict as error:
+            return self._json({'problems': error.problems}, HTTPStatus.CONFLICT)
         except missions.MissionError as error:
             return self._json({'problems': error.problems, 'places': error.places}, HTTPStatus.UNPROCESSABLE_ENTITY)
         except (points.PointError, robot.RobotSettingsError, arm.ArmError, held.HeldError,

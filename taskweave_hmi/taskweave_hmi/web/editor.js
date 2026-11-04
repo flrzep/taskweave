@@ -22,8 +22,11 @@ const DRAG_PX = 6;      // a press that moves less is a click
 const SPOT_REACH = 56;  // px: a dragged node snaps to the nearest "+" within this
 const ed = { mission: null, name: null, isNew: false, ops: [], undo: [], redo: [], selected: [], closed: new Set(),
   opened: new Set(), includes: {}, blocks: false, leaves: [], layout: null, drawn: null, card: null, cardPath: null,
-  marks: new Map(), notes: new Map(), savedUndo: null, palette: null, menu: null };
+  marks: new Map(), notes: new Map(), savedUndo: null, palette: null, menu: null, base: null };
 const clone = (v) => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
+// a value as the server keeps it: no null keys, at any depth (the file has no place for them)
+const strip = (v) => (Array.isArray(v) ? v.map(strip) : v && typeof v === 'object'
+  ? Object.fromEntries(Object.entries(v).filter(([, x]) => x !== null && x !== undefined).map(([k, x]) => [k, strip(x)])) : v);
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const blockKind = (step) => BLOCK_KINDS.find((k) => k in (step || {})) || '';
 const pathParts = (path) => String(path || '').split('/').filter(Boolean);
@@ -47,7 +50,7 @@ function listAt(mission, list, make = false) {
 function applyOp(m, op) {
   if (op.op === 'insert') {
     const { list, index } = slotOf(op.at);
-    listAt(m, list, true).splice(index, 0, clone(op.step));
+    listAt(m, list, true).splice(index, 0, strip(clone(op.step)));
   } else if (op.op === 'remove') {
     const { list, index } = slotOf(op.at);
     listAt(m, list).splice(index, 1);
@@ -63,9 +66,9 @@ function applyOp(m, op) {
     const to = slotOf(op.to);
     const list = listAt(m, from.list);
     const inner = list.splice(from.index, to.index - from.index + 1);
-    const block = { ...clone(op.block) };
+    const block = strip({ ...clone(op.block) });
     if (op.as === 'group') block.group = true;
-    if (op.as === 'repeat') block.repeat = block.repeat && typeof block.repeat === 'object' ? block.repeat : {};
+    if (op.as === 'repeat') block.repeat = block.repeat && typeof block.repeat === 'object' && !Array.isArray(block.repeat) ? block.repeat : {};
     if (op.as === 'parallel') block.parallel = [{ steps: inner }]; else block.steps = inner;
     list.splice(from.index, 0, block);
   } else if (op.op === 'unwrap') {
@@ -76,7 +79,7 @@ function applyOp(m, op) {
     arr.splice(index, 1, ...steps);
   } else if (op.op === 'set') {
     const node = op.at ? nodeAt(m, op.at) : m;
-    if (op.value === null || op.value === undefined) delete node[op.key]; else node[op.key] = clone(op.value);
+    if (op.value === null || op.value === undefined) delete node[op.key]; else node[op.key] = strip(clone(op.value));
   }
 }
 // Apply ops: one undo entry (tag: a following commit with the same tag joins it, so typing in a field is one undo).
@@ -87,7 +90,8 @@ function commit(ops, { tag = null, select } = {}) {
   ed.redo = [];
   ops.forEach((op) => applyOp(ed.mission, op));
   ed.ops.push(...ops);
-  ops.forEach((op) => { if (op.at !== undefined) ed.marks.delete(op.at); if (op.from) ed.marks.clear(); });
+  ops.forEach((op) => { if (op.at !== undefined) ed.marks.delete(op.at); });
+  if (ops.some((op) => op.op !== 'set')) { ed.marks.clear(); ed.closed.clear(); ed.opened.clear(); }  // paths shifted
   if (select !== undefined) ed.selected = select;
   markDirty();
   renderEditor();
@@ -115,9 +119,23 @@ function redoEdit() {
 function afterHistory() {
   ed.marks.clear();
   markDirty();
+  fillMissionFields();
   renderEditor();
   renderPanel();
   tools();
+}
+// the mission's fields in the panel from the working copy (after undo, redo and a save); no events, no ops
+function fillMissionFields() {
+  const m = ed.mission;
+  $('m-goal').value = m.goal || '';
+  $('m-loop').value = m.loop || 'once';
+  $('m-max').value = m.max_cycles ?? '';
+  $('m-stop').value = m.stop_when ?? '';
+  const d = m.defaults || {};
+  $('d-timeout').value = d.timeout_s ?? '';
+  $('d-retries').value = d.retries ?? '';
+  $('d-fail').value = d.on_failure ?? '';
+  $('d-replans').value = d.max_replans ?? '';
 }
 function tools() {
   $('ed-undo').disabled = !ed.undo.length;
@@ -168,7 +186,13 @@ function allSteps(root = buildTree().root) {
   return out;
 }
 const stepIds = () => allSteps().map((n) => n.step?.id).filter(Boolean);
-const stepById = (id) => allSteps().find((n) => n.step?.id === id);
+// a step by its id; s<n> names the n-th of the mission's own steps when that one has no id (core's fallback)
+function stepById(id) {
+  const found = allSteps().find((n) => n.step?.id === id);
+  const m = !found && /^s(\d+)$/.exec(id || '');
+  if (m && ed.mission.steps?.[m[1] - 1] && !ed.mission.steps[m[1] - 1].id) return { path: joinPath('steps', m[1] - 1), step: ed.mission.steps[m[1] - 1] };
+  return found;
+}
 
 // the words of the mission's own loop wire and of a repeat frame
 function loopWords() {
@@ -246,7 +270,7 @@ function headEl(frame) {
   }
   if (frame.kind === 'include') head.append(el('span', { class: 'pg-link', title: 'linked: shared with other missions', text: '⛓' }));
   const name = el('button', { type: 'button', class: 'pg-band-btn pg-band-name', text: frame.name, title: frame.name });
-  name.addEventListener('click', (e) => { e.stopPropagation(); if (!frame.linked) select(frame.path, e); });
+  name.addEventListener('click', (e) => { e.stopPropagation(); if (!frame.linked) select(lane ? pathParts(frame.path).slice(0, -2).join('/') : frame.path, e); });
   const meta = frame.kind === 'include' ? `linked · ${frame.include}` : frame.kind === 'repeat' ? repeatWords(frame)
     : frame.kind === 'parallel' ? `${frame.branches.length} lanes · join ${frame.block.join || 'all'}` : lane ? '' : `${frame.leaves.length} steps`;
   head.append(name, el('span', { class: 'pg-band-meta', text: meta }));
@@ -286,6 +310,7 @@ function openIncluded(name) {
 function select(path, e = {}) {
   const node = nodeAt(ed.mission, path);
   if (!node) return;
+  if (slotOf(path).list.endsWith('/parallel')) { select(pathParts(path).slice(0, -2).join('/'), e); return; }  // a lane: its block
   const list = slotOf(path).list;
   if (e.shiftKey && ed.selected.length && slotOf(ed.selected[0]).list === list) {
     const a = slotOf(ed.selected[0]).index;
@@ -368,11 +393,10 @@ function spotsOf(drawn, layout, root) {
   const add = (list, index, x, y) => { const k = `${list}/${index}`; if (seen.has(k)) return; seen.add(k); spots.push({ list, index, x, y }); };
   const stepPath = (it) => (it.node.kind === 'branch' ? null : it.node.path);
   drawn.flow.forEach(({ a, b, mid }) => {
-    const A = a ? stepPath(a) : '';
+    const A = a ? (a.node.linked ? ownerInclude(stepPath(a)) : stepPath(a)) : '';  // out of an opened include: the include
     const B = b ? stepPath(b) : null;
     if (A === null) return;
     if (B === null) { add('steps', (ed.mission.steps || []).length, mid.x, mid.y); return; }
-    if (a && a.node.linked) return;
     if (b.node.linked) {  // into an opened include: before the include itself
       const owner = ownerInclude(B);
       if (owner && !inside(A, owner)) { const s = slotOf(owner); add(s.list, s.index, mid.x, mid.y); }
@@ -466,7 +490,7 @@ function openPalette(spot, x, y) {
   box.style.left = `${Math.max(4, Math.min(x, (ed.layout?.width || canvas.clientWidth) - 304))}px`;
   box.style.top = `${Math.max(4, y)}px`;
   graph.append(box);
-  if (ed.layout) graph.style.height = `${Math.max(graph.offsetHeight, y + 380)}px`;
+  if (graph !== canvas) graph.style.height = `${Math.max(graph.offsetHeight, y + 380)}px`;
   ed.palette = box;
   search.focus();
 }
@@ -542,8 +566,9 @@ function failPortDown(e, node) {
 function freshId(step) {
   const taken = new Set(stepIds());
   const base = (step.instruction || 'step').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').split('_').slice(0, 3).join('_') || 'step';
-  let id = /^[a-z_]/.test(base) ? base : `s_${base}`;
-  for (let n = 2; taken.has(id); n += 1) id = `${base}_${n}`;
+  const first = /^[a-z_]/.test(base) ? base : `s_${base}`;
+  let id = first;
+  for (let n = 2; taken.has(id); n += 1) id = `${first}_${n}`;
   return id;
 }
 function openRuleMenu(node, port) {
@@ -621,8 +646,9 @@ function nodeDown(e, node) {
     const from = slotOf(node.path);
     const to = joinPath(near.list, near.index);
     if (near.list === from.list && (near.index === from.index || near.index === from.index + 1)) return;  // where it is
-    const landed = near.list === from.list && near.index > from.index ? joinPath(near.list, near.index - 1) : to;
-    commit([{ op: 'move', from: node.path, to }], { select: [landed] });
+    // the landed path is only sure within one list (a move out of a block shifts what follows it)
+    const landed = near.list !== from.list ? [] : [joinPath(near.list, near.index > from.index ? near.index - 1 : near.index)];
+    commit([{ op: 'move', from: node.path, to }], { select: landed });
   };
   source.setPointerCapture(e.pointerId);
   source.addEventListener('pointermove', move);
@@ -652,7 +678,8 @@ function canvasDown(e) {
   const up = (m) => {
     canvas.removeEventListener('pointermove', move);
     canvas.removeEventListener('pointerup', up);
-    if (!box) { clearSelection(); return; }
+    canvas.removeEventListener('pointercancel', up);
+    if (!box) { if (m.type !== 'pointercancel') clearSelection(); return; }
     const r = box.getBoundingClientRect();
     box.remove();
     const hit = [];
@@ -671,13 +698,16 @@ function canvasDown(e) {
     renderPanel();
     m.preventDefault();
   };
+  canvas.setPointerCapture(e.pointerId);
   canvas.addEventListener('pointermove', move);
   canvas.addEventListener('pointerup', up);
+  canvas.addEventListener('pointercancel', up);
 }
 
 // ---------- the properties panel ----------
 function renderPanel() {
   const sel = $('ed-sel');
+  const had = sel.contains(document.activeElement) && document.activeElement.tagName === 'BUTTON' ? document.activeElement.textContent : null;
   const missionPane = $('ed-mission');
   ed.card = null;
   ed.cardPath = null;
@@ -724,6 +754,7 @@ function renderPanel() {
   if (ed.blocks && (!kind || kind === 'include')) actions.append(...BLOCK_KINDS.map((k) => act(BLOCK_WORDS[k], () => wrapSelection(k), `Put this step in a ${k}`)));
   actions.append(act('Remove', removeSelection, 'Remove this step (Delete)', 'btn small danger'));
   sel.append(actions);
+  if (had) [...actions.querySelectorAll('button')].find((b) => b.textContent === had)?.focus();
 }
 // the step form's fields changed: set ops for what differs (one undo entry per step while it stays selected)
 function cardChanged(path) {
@@ -733,6 +764,18 @@ function cardChanged(path) {
   if (!cur) return;
   const ops = CARD_KEYS.filter((key) => !same(cur[key], next[key])).map((key) => ({ op: 'set', at: path, key, value: next[key] ?? null }));
   if (!ops.length) return;
+  const byPlace = /^s(\d+)$/.exec(next.replan_from || '');  // the form offers s<n> for a sibling without an id
+  if (byPlace && next.replan_from !== cur.replan_from) {
+    const { list } = slotOf(path);
+    const targetPath = joinPath(list, byPlace[1] - 1);
+    const target = nodeAt(ed.mission, targetPath);
+    if (target && !target.id && targetPath !== path) {
+      const id = freshId(target);
+      ops.unshift({ op: 'set', at: targetPath, key: 'id', value: id });
+      ops.find((op) => op.key === 'replan_from').value = id;
+      ed.card.querySelector('[data-k="replan_from"]').replaceChildren(el('option', { value: id, text: id }));
+    }
+  }
   const keep = ed.card;
   commit(ops, { tag: `card:${path}` });
   ed.card = keep;  // the panel was not rebuilt
@@ -797,7 +840,8 @@ function duplicateSelected() {
   const run = selectedRun();
   if (!run || run.first !== run.last) return;
   const copy = clone(nodeAt(ed.mission, joinPath(run.list, run.first)));
-  delete copy.id;
+  const dropIds = (step) => { delete step.id; (step.steps || []).forEach(dropIds); (step.parallel || []).forEach((lane) => (lane.steps || []).forEach(dropIds)); };
+  dropIds(copy);
   const at = joinPath(run.list, run.first + 1);
   commit([{ op: 'insert', at, step: copy }], { select: [at] });
 }
@@ -828,8 +872,9 @@ $('m-name').addEventListener('input', () => { $('ed-name-text').textContent = $(
 // ---------- open, check, save ----------
 // app.js openEditor filled the mission's fields; here the graph: a saved mission as its file, a new one as the
 // template, recorded as the ops that make its file
-function editorOpen(name, mission, isNew) {
+function editorOpen(name, mission, isNew, base = null) {
   ed.mission = clone(mission);
+  ed.base = isNew ? null : base;
   ed.name = name;
   ed.isNew = isNew;
   ed.ops = [];
@@ -888,7 +933,8 @@ $('btn-save').addEventListener('click', async () => {
   if (!name) { showProblems(['Give the mission a name.']); return; }
   const old = ed.isNew ? null : ed.name;
   const rename = old && old !== name ? `?rename_from=${encodeURIComponent(old)}` : '';
-  const { ok, data } = await api('POST', `/api/missions/${encodeURIComponent(name)}/edit${rename}`, { ops: ed.ops });
+  const { ok, data } = await api('POST', `/api/missions/${encodeURIComponent(name)}/edit${rename}`,
+    { ops: ed.ops, base: ed.base, create: ed.isNew });
   if (!ok) { showProblems(data.problems || [data.error || 'not saved'], data.places); message($('save-msg'), ''); return; }
   showProblems([]);
   ed.mission = data.mission;
@@ -897,7 +943,9 @@ $('btn-save').addEventListener('click', async () => {
   ed.redo = [];
   ed.isNew = false;
   ed.name = name;
+  ed.base = data.hash || null;
   ed.savedUndo = data.undo;
+  fillMissionFields();
   state.editing = { ...state.editing, name, isNew: false, mission: data.mission };
   state.dirty = false;
   show($('editor-dirty'), false);
@@ -937,7 +985,6 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { if (ed.palette || ed.menu) { closePalette(); closeMenu(); } else clearSelection(); return; }
   if (!onCanvas) return;
   if (e.key === 'Delete' || e.key === 'Backspace') { if (ed.selected.length) { e.preventDefault(); removeSelection(); } return; }
-  if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && ed.selected.length) { e.preventDefault(); paletteAtSelection(); return; }
   if (e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); paletteAtSelection(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelected(); return; }
   if ((e.ctrlKey || e.metaKey) && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); moveSelected(e.key === 'ArrowUp' ? -1 : 1); }
@@ -946,5 +993,5 @@ document.addEventListener('keydown', (e) => {
 let editorWidth = 0;
 new ResizeObserver(([entry]) => {
   const width = Math.round(entry.contentRect.width);
-  if (width && width !== editorWidth) { editorWidth = width; renderEditor(); }
+  if (width && width !== editorWidth) { editorWidth = width; if (!ed.palette) renderEditor(); }
 }).observe($('ed-canvas'));

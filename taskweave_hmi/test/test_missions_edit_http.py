@@ -48,7 +48,10 @@ def served(tmp_path):
         data = None if body is None else json.dumps(body).encode()
         try:
             with urlopen(Request(base + path, data=data, method=method), timeout=10) as response:
-                return response.status, json.loads(response.read())
+                answer = json.loads(response.read())
+                if response.headers.get('ETag'):
+                    answer['_etag'] = response.headers['ETag']
+                return response.status, answer
         except HTTPError as error:
             return error.code, json.loads(error.read())
     yield request, bridge
@@ -72,6 +75,18 @@ def test_edit_saves_with_an_undo_and_refuses_a_bad_step(served):
     assert status == 422 and any('nowhere' in p for p in answer['problems']) and answer['places'][0]['step'] == 0
     status, answer = request('POST', '/api/missions/patrol/edit', {'ops': 'not a list'})
     assert status == 400
+    # the ETag of a GET is the base of the next edit: stale after the edit above, fresh from the answer's hash
+    status, opened = request('GET', '/api/missions/patrol')
+    assert status == 200 and opened['_etag']
+    status, answer = request('POST', '/api/missions/patrol/edit',
+                             {'ops': [{'op': 'set', 'at': '', 'key': 'goal', 'value': 'Again'}], 'base': 'stale'})
+    assert status == 409 and 'changed since' in answer['problems'][0]
+    status, answer = request('POST', '/api/missions/patrol/edit',
+                             {'ops': [{'op': 'set', 'at': '', 'key': 'goal', 'value': 'Again'}],
+                              'base': opened['_etag']})
+    assert status == 200 and answer['hash'] and answer['mission']['goal'] == 'Again'
+    status, answer = request('POST', '/api/missions/patrol/edit', {'ops': [], 'create': True})
+    assert status == 422 and 'already exists' in answer['problems'][0]
     # the undo puts the file back as it was before the first edit
     status, answer = request('POST', '/api/teach/undo', {'id': bridge.undos.saves and next(iter(bridge.undos.saves))})
     assert status == 200 and path.read_text() == before

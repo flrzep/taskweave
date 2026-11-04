@@ -213,7 +213,7 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   every open frame; one opens the palette (`.ed-palette`: a search over the skills, the other missions and the
   blocks) at that place; while a node is dragged they turn solid brand and the nearest lights up as the drop. A
   frame head in the editor is a chevron button (closes it), the name (selects the block) and its words; a linked
-  one adds Open. Keys on the canvas: Tab or Shift+A add after the selection, Delete removes, Ctrl+D duplicates,
+  one adds Open. Keys on the canvas: Shift+A adds after the selection (Tab keeps walking the page), Delete removes, Ctrl+D duplicates,
   Ctrl+↑ / ↓ move, Ctrl+Z / Ctrl+Y undo and redo, Escape clears; shift-click extends a selection along one list,
   ctrl-click toggles, a drag on empty canvas draws a box. Every edit is an op on a path in the mission file
   (insert, remove, move, wrap, unwrap, set); Save sends the ops since the open to `/api/missions/<name>/edit`, which

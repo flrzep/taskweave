@@ -26,7 +26,7 @@ async function api(method, path, body) {
   });
   let data = {};
   try { data = await response.json(); } catch (_) { /* empty */ }
-  return { ok: response.ok, status: response.status, data };
+  return { ok: response.ok, status: response.status, data, etag: response.headers.get('ETag') || null };
 }
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -775,7 +775,7 @@ window.addEventListener('beforeunload', (e) => { if (state.editing && state.dirt
 async function openEditor(name) {
   await loadCatalog();
   const isNew = name === null;
-  const { ok, data } = await api('GET', isNew ? '/api/template' : `/api/missions/${encodeURIComponent(name)}`);
+  const { ok, data, etag } = await api('GET', isNew ? '/api/template' : `/api/missions/${encodeURIComponent(name)}`);
   if (!ok) { alertInline(data); return; }
   state.editing = { name, isNew, mission: data };
   state.dirty = false;
@@ -794,7 +794,7 @@ async function openEditor(name) {
   $('d-retries').value = d.retries ?? '';
   fillSelect($('d-fail'), ON_FAILURE, d.on_failure ?? '');
   $('d-replans').value = d.max_replans ?? '';
-  editorOpen(name, data, isNew);  // editor.js: the graph and the panel
+  editorOpen(name, data, isNew, etag);  // editor.js: the graph and the panel; the ETag is the file's hash, the save's base
 }
 function alertInline(data) { message($('save-msg'), data.error || (data.problems || []).join('\n'), true); }
 
@@ -1532,11 +1532,6 @@ function listEditor(key, spec, value) {
   return { node: el('div', { class: 'arg-list-box' }, rows, el('div', {}, more)), read };
 }
 
-// Change the step list and draw it again: change gets [{step, open, expanded}] (the steps as edited now, rules folded
-// out or not, the step open or folded) to reorder, remove or insert. A step without an id of its own is s<position>,
-// so a moved step's id changes: replan_from follows the step it named; one that named a removed step falls back to the
-// step itself (and says so).
-// Returns the new step cards.
 // the field of a step a problem's path names: an argument (args.<key>, also nested: args.motion.mode marks motion),
 // the skill, or a setting under the rules (on_failure, replan_from, ...)
 function markField(card, path, text) {
