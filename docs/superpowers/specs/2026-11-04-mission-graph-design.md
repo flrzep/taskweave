@@ -99,9 +99,11 @@ Constraints checked by the schema (`schemas.py`) and `check.py`:
 - *core 4:* `when` and `until` read a **world-state key** of the form `<store>.<path>`. v1 has two stores:
   `world.<key>` is the latest `world_state` the skills reported (merged by key: `world.left_gripper`,
   `world.holding`), `object.<instance>.<field>` is the run-time object state (objects.yaml: `taken`, `gone`).
-  Truthy is JSON truthiness (not `false`, `0`, `''`, `null`, empty). The known keys come from the skill catalogue
-  (what the skills' `world_state` declares) and the object instances of the cell; an unknown key is a validation
-  problem, never a run-time skip.
+  Truthy is JSON truthiness (not `false`, `0`, `''`, `null`, empty). The known `world.*` keys are what the skill
+  catalogue declares (`SkillInfo.needs` and `achieves`; the executive merges each skill's `world_state` result
+  into its `WorldState`) plus the robot's gripper keys (`<hand>_gripper` from `grip`); the known `object.*` keys
+  are the cell's object instances. An unknown key is a validation problem, never a run-time skip; a key a skill
+  reports only at run time without declaring it is a warning in v1, not an error.
 
 ### 2.2 Catalogue and docs
 
