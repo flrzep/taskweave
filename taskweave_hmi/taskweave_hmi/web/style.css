@@ -885,6 +885,9 @@ li.empty { list-style: none; padding: 6px 2px; }
 .pg-canvas { position: relative; width: 100%; height: 100%; overflow: clip; touch-action: none; cursor: grab;
   background: color-mix(in srgb, var(--surface-card) 35%, transparent); }
 .pg-canvas.dragging { cursor: grabbing; }
+/* the node being dragged (a box: its title bar; on touch from the hold on): raised over the rest */
+.pg-layer .moving { z-index: 4; box-shadow: var(--shadow-2); cursor: grabbing; }
+.pg-layer .pg-band.moving { outline: 2px solid var(--brand-text); outline-offset: 2px; }
 .pg-layer { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 .pg-layer.animate { transition: transform .3s ease; }
 @media (prefers-reduced-motion: reduce) { .pg-layer.animate { transition: none; } }

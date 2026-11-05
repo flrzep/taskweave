@@ -5,8 +5,9 @@
 // the running one is filled with its colour, a lime ring and its main argument as the one field. Blocks (an include of
 // the top mission, a nested include, and with schema v2 groups, repeats and parallel lanes) are boxes with a title bar,
 // open unless closed to one stack node (remembered per mission); the box with the running step is always open. No ports, no
-// rule nodes, no words on wires but the loop's: a replan is a thin coral wire under the nodes. A step opens its details
-// (the instruction, the rule) in a pop-up beside it (a bottom sheet at 600 px and below). Uses $,
+// rule nodes, no words on wires but the loop's: a replan is a thin coral wire under the nodes. A node dragged (a box
+// with everything in it) stays where it was put, per mission in this browser; Reset layout puts them back. A step
+// opens its details (the instruction, the rule) in a pop-up beside it (a bottom sheet at 600 px and below). Uses $,
 // el, api, state, show, missionOf, shownPlan, focusIndex, pickStart, moveLabel, moveParts, carriesByArgs from app.js,
 // skillIcon, iconElement, moveKindOfArgs from icons.js and flowName, flowHead, flowField, stepFields, blockFields from graph-core.js.
 
@@ -21,6 +22,7 @@ const BREATHE_MS = 2800;  // period of node-breathe for the running step (style.
 const PHONE = window.matchMedia('(max-width: 600px)');
 const WARN_STATES = ['timeout', 'canceled', 'skipped'];  // amber chips; failed and rejected are red
 const BANDS_KEY = 'tw-plan-bands';  // localStorage: {mission: {frame key: open}}
+const PLACES_KEY = 'tw-plan-places';  // localStorage: {mission: {node key: [dx, dy]}}: how far each dragged node was moved
 const missionCache = {};  // mission name -> its file (frame names, defaults, loop), until a new plan or a save
 const missionPlan = {};   // mission name -> the plan_id its cached file was read for
 const view = { selected: null };  // the step (id) whose card shows instead of the running one
@@ -140,6 +142,65 @@ function storeBand(mission, key, open) {
     all[mission] = { ...(all[mission] || {}), [key]: open };
     localStorage.setItem(BANDS_KEY, JSON.stringify(all));
   } catch (_) { /* private mode: the choice lasts until the page reloads */ }
+}
+function storedPlaces(mission) {
+  try { return (JSON.parse(localStorage.getItem(PLACES_KEY) || '{}') || {})[mission] || {}; } catch (_) { return {}; }
+}
+function storePlaces(mission, places) {
+  try {
+    const all = JSON.parse(localStorage.getItem(PLACES_KEY) || '{}') || {};
+    if (Object.keys(places).length) all[mission] = places; else delete all[mission];
+    localStorage.setItem(PLACES_KEY, JSON.stringify(all));
+  } catch (_) { /* private mode: the places last until the page reloads */ }
+}
+
+// Moves a layout's nodes and boxes by the operator's offsets (places: node key -> [dx, dy], in layout units). A box
+// moves with everything in it (an offset on a frame reaches every node under it); a box grows around a child moved
+// out of it; the drawing's size grows with the moved things, the replan wires and the loop wire staying under them.
+// Returns how far the whole drawing was moved in to keep its top left margin, [x, y].
+function movePlaces(layout, tree, places) {
+  const keys = Object.keys(places);
+  if (!keys.length) return [0, 0];
+  const M = layout.metrics;
+  const above = new Map();  // a node's key -> the keys of the frames it is in, outermost first
+  const walk = (n, chain) => { above.set(n.key, chain); childrenOf(n).forEach((c) => walk(c, [...chain, n.key])); };
+  walk(tree, []);
+  const moveOf = (node) => [...(above.get(node.key) || []), node.key].reduce((t, k) => {
+    const d = places[k];
+    return d ? [t[0] + d[0], t[1] + d[1]] : t;
+  }, [0, 0]);
+  const shift = (rec, [dx, dy]) => {
+    rec.x += dx; rec.y += dy;
+    if ('line' in rec) rec.line += dy;
+    if ('cx' in rec) { rec.cx += dx; rec.cy += dy; rec.inX += dx; rec.outX += dx; }
+  };
+  const extent = (list) => list.reduce((b, r) => [Math.min(b[0], r.x), Math.min(b[1], r.y), Math.max(b[2], r.x + r.w), Math.max(b[3], r.y + r.h)],
+    [Infinity, Infinity, -Infinity, -Infinity]);
+  const all = [...layout.items.values(), ...layout.frames];
+  const bottomBefore = extent(all)[3];
+  all.forEach((rec) => shift(rec, moveOf(rec.node)));
+  // a box around what it holds: innermost first, so a grown inner box grows the outer one
+  [...layout.frames].reverse().forEach((f) => {
+    const inside = all.filter((r) => r !== f && above.get(r.node.key)?.includes(f.node.key));
+    if (!inside.length) return;
+    const [x0, y0, x1, y1] = extent(inside);
+    const nx = Math.min(f.x, x0 - M.pad);
+    const ny = Math.min(f.y, y0 - f.head - M.pad);
+    f.w = Math.max(f.x + f.w, x1 + M.pad) - nx;
+    f.h = Math.max(f.y + f.h, y1 + M.pad) - ny;
+    f.x = nx; f.y = ny;
+  });
+  // nothing past the drawing's top left margin (a box grown around a child moved up to it): everything moved in
+  const [left, top, right, bottom] = extent(all);
+  const inX = Math.max(0, M.left - left);
+  const inY = Math.max(0, M.top - top);
+  if (inX || inY) all.forEach((rec) => shift(rec, [inX, inY]));
+  const grown = Math.max(0, bottom + inY - bottomBefore);
+  layout.lanes.forEach((l) => { l.y += grown; });
+  if (layout.loopY !== null) layout.loopY += grown;
+  layout.width = Math.max(layout.width, right + inX + M.right);
+  layout.height += grown;
+  return [inX, inY];
 }
 
 // A frame's head data: done/total, its state word, the usual failure rule (the most common one), what it uses.
@@ -342,7 +403,11 @@ const ZOOM_MAX = 1.5;
 const FIRST_FIT_MIN = 0.6;  // a new plan opens fitted down to this; smaller, at scale 1 on the followed node
 const PAN_PX = 4;  // a pointer that moves less is a click on what is under it
 const canvas = { x: 0, y: 0, scale: 1, follow: true, layer: null, wrap: null, layout: null, planId: null, focus: null,
-  refocusing: false };  // refocusing: a rebuild puts the keyboard focus back (not a Tab: the camera stays)
+  refocusing: false,  // a rebuild puts the keyboard focus back (not a Tab: the camera stays)
+  places: null,       // {mission, map}: the dragged nodes' offsets of the mission drawn (map: key -> [dx, dy])
+  base: null,         // node key -> [x, y] where the layout draws it before the offsets (the drag's floor)
+  inset: [0, 0],      // how far movePlaces moved the drawing in: a change moves the camera the same, so nothing jumps
+  moving: null };     // the key of the node being dragged (drawn raised)
 const clampZoom = (s) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, s));
 
 // the whole tree in view: smaller than the viewport, centred on each axis; larger, from its top left
@@ -402,27 +467,55 @@ function placePop() {
   pop.style.maxHeight = `${canvas.wrap.clientHeight - top - 8}px`;  // scrolls inside, never past the viewport's bottom
 }
 
-// The gestures on the viewport. One pointer: a move past PAN_PX pans (and captures the pointer; under it the pointer is
-// a click on its node, or on the ground: that closes the pop-up); two: a pinch zooms around their midpoint and pans with
-// it. After a pan or a pinch the click that follows is swallowed once. The wheel zooms around the pointer (a notch
-// about 15%; a trackpad's pinch, which comes with Ctrl, in finer steps); only a drag pans. Not on the pop-up or the
-// sheet: they keep their own pointer and wheel.
+// The gestures on the viewport. One pointer on the ground: a move past PAN_PX pans (and captures the pointer; under
+// it the pointer is a click on the ground: that closes the pop-up). One pointer on a node (a step, a closed block,
+// a box's title bar): a move past PAN_PX drags the node (a box with everything in it) and the camera stays; a mouse
+// or a pen at once, a finger after a HOLD_MS hold (a finger that moves before the hold pans the canvas, so a dense
+// tree is still panned from a node); under it the pointer is a click on the node. Two: a pinch zooms around their
+// midpoint and pans with it. After a pan, a drag or a pinch the click that follows is swallowed once. The wheel zooms
+// around the pointer (a notch about 15%; a trackpad's pinch, which comes with Ctrl, in finer steps); only a drag
+// pans. Not on the pop-up or the sheet: they keep their own pointer and wheel.
+const HOLD_MS = 350;
 const pointers = new Map();  // pointerId -> its last { x, y } in the viewport
-const gesture = { sx: 0, sy: 0, drag: false, swallow: false };
+// drag: false, 'pan' or 'node'; node: {key, from: the node's offset at the press, lifted: it drags on a move}
+const gesture = { sx: 0, sy: 0, drag: false, swallow: false, node: null, hold: null };
 const canvasPoint = (e) => { const r = canvas.wrap.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
 const offCanvas = (e) => e.target.closest?.('.pg-pop, .pg-sheet, .pg-scrim');
+// the node under a press and its key: a step's id, a block's frame key (its title bar or its closed stack)
+const nodeKeyAt = (e) => {
+  const node = e.target.closest?.('.pg-chip, .pg-stack, .pg-band');
+  return node?.dataset.step || node?.dataset.band || null;
+};
 function canvasMoved() {
   canvasFollow(false);
   canvasApply(false);
+}
+function liftNode() {
+  gesture.hold = null;
+  if (!gesture.node) return;
+  gesture.node.lifted = true;
+  canvas.moving = gesture.node.key;  // drawn raised (renderGraph) from the hold on; a mouse shows it with the move
+  if (gesture.node.touch) renderGraph();
 }
 function canvasPointerDown(e) {
   gesture.swallow = false;  // first: a touch pan ends without a click, and the next tap (the pop-up's too) is real
   if (offCanvas(e) || (e.pointerType === 'mouse' && e.button !== 0)) return;
   const p = canvasPoint(e);
+  if (e.pointerType === 'mouse') pointers.clear();  // one mouse: an entry left behind is stale (its release was missed)
   pointers.set(e.pointerId, p);
-  if (pointers.size === 1) Object.assign(gesture, { sx: p.x, sy: p.y, drag: false });
-  else {  // a second finger: a pinch, both pointers held by the viewport
-    gesture.drag = true;
+  if (pointers.size === 1) {
+    Object.assign(gesture, { sx: p.x, sy: p.y, drag: false, node: null });
+    clearTimeout(gesture.hold);
+    const key = canvas.places && nodeKeyAt(e);
+    if (key) {
+      gesture.node = { key, from: canvas.places.map[key] || [0, 0], lifted: false, touch: e.pointerType === 'touch' };
+      if (e.pointerType === 'touch') gesture.hold = setTimeout(liftNode, HOLD_MS);
+      else liftNode();
+    }
+  } else {  // a second finger: a pinch, both pointers held by the viewport
+    clearTimeout(gesture.hold);
+    gesture.node = null;
+    gesture.drag = 'pan';
     pointers.forEach((_, id) => canvas.wrap.setPointerCapture(id));
   }
 }
@@ -441,9 +534,15 @@ function canvasPointerMove(e) {
   } else {
     if (!gesture.drag) {
       if (Math.hypot(p.x - gesture.sx, p.y - gesture.sy) < PAN_PX) return;
-      gesture.drag = true;
+      clearTimeout(gesture.hold);  // a finger that moves before the hold pans
+      gesture.drag = gesture.node?.lifted ? 'node' : 'pan';
       canvas.wrap.setPointerCapture(e.pointerId);
       canvas.wrap.classList.add('dragging');
+    }
+    if (gesture.drag === 'node') {
+      pointers.set(e.pointerId, p);
+      dragNode(p);
+      return;
     }
     canvas.x += p.x - last.x;
     canvas.y += p.y - last.y;
@@ -451,9 +550,35 @@ function canvasPointerMove(e) {
   pointers.set(e.pointerId, p);
   canvasMoved();
 }
+// the dragged node follows the pointer (its offset: where it was at the press plus the move in layout units), not
+// past the drawing's top left margin; drawn again at most once a frame
+let dragFrame = 0;
+function dragNode(p) {
+  const { key, from } = gesture.node;
+  const M = canvas.layout.metrics;
+  const base = canvas.base.get(key) || [M.left, M.top];
+  const dx = from[0] + (p.x - gesture.sx) / canvas.scale;
+  const dy = from[1] + (p.y - gesture.sy) / canvas.scale;
+  canvas.places.map[key] = [Math.max(dx, M.left - base[0]), Math.max(dy, M.top - base[1])];
+  if (!dragFrame) dragFrame = requestAnimationFrame(() => { dragFrame = 0; renderGraph(); });
+}
 function canvasPointerUp(e) {
+  clearTimeout(gesture.hold);
   if (!pointers.delete(e.pointerId) || pointers.size) return;
   canvas.wrap.classList.remove('dragging');
+  const moved = gesture.drag === 'node';
+  if (canvas.moving) {
+    canvas.moving = null;
+    if (moved) {
+      const map = canvas.places.map;
+      if (map[gesture.node.key]?.every((d) => Math.abs(d) < 1)) delete map[gesture.node.key];  // back where it was drawn
+      storePlaces(canvas.places.mission, map);
+      renderGraph();  // set down, the offset as stored
+    } else {  // a press that did not drag: the node is let go without a rebuild, so its click still lands on it
+      canvas.layer?.querySelector('.moving')?.classList.remove('moving');
+    }
+  }
+  gesture.node = null;
   if (gesture.drag) gesture.swallow = true;
   else if (e.type === 'pointerup' && view.selected && !PHONE.matches
     && !e.target.closest?.('.pg-chip, .pg-band, .pg-stack')) {  // a tap on the ground
@@ -487,8 +612,9 @@ function canvasView() {
   const wrap = div('pg-canvas');
   wrap.addEventListener('pointerdown', canvasPointerDown);
   wrap.addEventListener('pointermove', canvasPointerMove);
-  wrap.addEventListener('pointerup', canvasPointerUp);
-  wrap.addEventListener('pointercancel', canvasPointerUp);
+  // the release on the window: a press that ends off the canvas (before a drag captured it) is let go too
+  window.addEventListener('pointerup', canvasPointerUp);
+  window.addEventListener('pointercancel', canvasPointerUp);
   wrap.addEventListener('wheel', canvasWheel, { passive: false });
   wrap.addEventListener('focusin', canvasFocusIn);
   wrap.addEventListener('click', (e) => {  // the click a pan or a pinch ends with: not a click on a node
@@ -504,6 +630,14 @@ $('canvas-fit').addEventListener('click', () => {
   canvasFollow(false);
   canvasFit(canvas.layout);
   canvasApply(false);
+});
+// Reset layout: the dragged nodes of the mission drawn back where the layout draws them, the tree fitted again
+$('canvas-reset').addEventListener('click', () => {
+  if (!canvas.places) return;
+  canvas.places.map = {};
+  storePlaces(canvas.places.mission, {});
+  canvas.planId = null;  // opens afresh: fitted
+  renderGraph();
 });
 // Follow, or a tap on the step chip in the band's bubble (the running step's number): follow on, the node centred
 function followNow() {
@@ -568,7 +702,20 @@ function renderGraph() {
   const toggle = (frame) => () => { storeBand(missionName, frame.key, !isOpen(frame)); renderGraph(); };
   const sheetScroll = box.querySelector('.pg-sheet')?.scrollTop ?? 0;  // the sheet is rebuilt every second: keep its place
   const layout = layoutGraph(tree, ctx);
+  // where the operator dragged this mission's nodes (kept while a drag goes; read again for another mission)
+  if (canvas.places?.mission !== missionName) canvas.places = { mission: missionName, map: storedPlaces(missionName) };
+  canvas.base = new Map([...[...layout.items].map(([k, it]) => [k, [it.x, it.y]]), ...layout.frames.map((f) => [f.node.key, [f.x, f.y]])]);
+  const inset = movePlaces(layout, tree, canvas.places.map);
+  if (canvas.planId === plan.plan_id) {  // the same drawing moved in (a box grown up to the margin): the camera follows
+    canvas.x -= (inset[0] - canvas.inset[0]) * canvas.scale;
+    canvas.y -= (inset[1] - canvas.inset[1]) * canvas.scale;
+  }
+  canvas.inset = inset;
   const drawn = drawGraph(layout, ctx);
+  if (canvas.moving) {  // the node being dragged (or held, on touch): raised over the rest
+    drawn.node.querySelector(`[data-step="${CSS.escape(canvas.moving)}"], [data-band="${CSS.escape(canvas.moving)}"]`)?.classList.add('moving');
+  }
+  $('canvas-reset').disabled = $('canvas-reset').dataset.list === 'true' || !Object.keys(canvas.places.map).length;
   canvas.wrap ||= canvasView();
   canvas.layer = div('pg-layer', drawn.node);
   canvas.layout = layout;
@@ -633,6 +780,8 @@ function setPlanView(choice) {
   show($('plan-graph'), choice === 'graph');
   $('canvas-fit').disabled = choice !== 'graph';  // the camera's tools: nothing to move under the list
   $('canvas-follow').disabled = choice !== 'graph';
+  $('canvas-reset').dataset.list = String(choice !== 'graph');  // disabled under the list (renderGraph: and with nothing moved)
+  $('canvas-reset').disabled = choice !== 'graph' || !Object.keys(canvas.places?.map || {}).length;
   renderGraph();
 }
 document.querySelectorAll('#plan-view button').forEach((b) => b.addEventListener('click', () => setPlanView(b.dataset.view)));

@@ -154,8 +154,9 @@
       </div>
     </section>
 
-    <!-- the mission under the band: the plan as a graph on a pan-and-zoom canvas or a list; the tools above it (the
-         legend at the left, graph-run.js renderGraph fills it) -->
+    <!-- the mission under the band: the plan as a graph on a pan-and-zoom canvas (its nodes dragged where the
+         operator wants them, remembered per mission) or a list; the tools above it (the legend at the left,
+         graph-run.js renderGraph fills it) -->
     <section id="canvas" class="canvas">
       <div class="canvas-tools">
         <div class="legend"></div>
@@ -164,6 +165,7 @@
         </div>
         <button id="canvas-fit" class="btn small" type="button">Fit</button>
         <button id="canvas-follow" class="btn small" type="button" aria-pressed="true">Follow</button>
+        <button id="canvas-reset" class="btn small" type="button" title="Put every node back where the layout draws it">Reset layout</button>
       </div>
       <div id="plan-graph" class="graph-box canvas-box"></div>
       <ol id="plan" class="steps" hidden><li class="muted">No plan yet</li></ol>
