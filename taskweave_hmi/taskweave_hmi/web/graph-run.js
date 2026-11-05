@@ -282,27 +282,30 @@ function planCard(i, ctx, phone) {
     ...row('status', statusText, live ? 'mono' : ''), ...(notes ? (step.notes || []).flatMap((note) => row('note', note)) : []));
   if (phone) {
     // the bottom sheet (a dialog, not modal: the strip and its Abort stay in reach above the scrim):
-    // the same rows as the side card, the notes as amber boxes, Close; a tap on the scrim, Escape or the chip close it
+    // the same rows as the side card, the notes as amber boxes, the ✕ at its top right; a tap on the scrim, Escape or
+    // the chip close it too
     const title = el('div', { class: 'pg-sheet-title', id: 'pg-sheet-title', text: `${i + 1} · ${step.instruction}` });
-    const close = el('button', { type: 'button', class: 'btn pg-sheet-close', 'data-sheet-close': '', text: 'Close' });
+    const close = el('button', { type: 'button', class: 'icon pg-sheet-close', 'data-sheet-close': '', 'aria-label': 'Close',
+      title: 'Close', text: '✕' });
     close.addEventListener('click', () => closeSheet(step.id));
     const scrim = div('pg-scrim');
     scrim.addEventListener('click', () => closeSheet(step.id));
     const sheet = el('section', { class: `pg-sheet state-${status}`, role: 'dialog', 'aria-labelledby': 'pg-sheet-title' },
-      div('pg-handle'), div('pg-sheet-row', tile, div('pg-sheet-text', eyebrow, title)), progress, rows(false),
-      ...(step.notes || []).map((note) => el('p', { class: 'pg-sheet-note', text: note })), close);
+      div('pg-handle'), div('pg-sheet-row', tile, div('pg-sheet-text', eyebrow, title), close), progress, rows(false),
+      ...(step.notes || []).map((note) => el('p', { class: 'pg-sheet-note', text: note })));
     sheet.addEventListener('keydown', (e) => { if (e.key === 'Tab') { e.preventDefault(); close.focus(); } });  // stays in
     return [scrim, sheet];
   }
-  // the laptop: a pop-up beside the step's chip (a non-modal dialog; Close, Escape, a click elsewhere or the chip
-  // again close it)
-  const close = el('button', { type: 'button', class: 'btn small pg-pop-close', 'data-sheet-close': '', text: 'Close' });
+  // the laptop: a pop-up beside the step's chip (a non-modal dialog; the ✕ at its top right, Escape, a click
+  // elsewhere or the chip again close it)
+  const close = el('button', { type: 'button', class: 'icon pg-pop-close', 'data-sheet-close': '', 'aria-label': 'Close',
+    title: 'Close', text: '✕' });
   close.addEventListener('click', () => closeSheet(step.id));
   const pop = el('aside', { class: `pg-card pg-pop state-${status}${live || start ? ' marked' : ''}`, role: 'dialog',
     'aria-labelledby': 'pg-pop-title' },
   div('pg-card-head', tile, div('pg-card-titles', eyebrow,
-    el('div', { class: 'pg-card-title', id: 'pg-pop-title', text: `${i + 1} · ${step.instruction}` }))),
-  progress, rows(true), el('div', { class: 'row pg-pop-foot' }, close));
+    el('div', { class: 'pg-card-title', id: 'pg-pop-title', text: `${i + 1} · ${step.instruction}` })), close),
+  progress, rows(true));
   pop.addEventListener('keydown', (e) => { if (e.key === 'Tab') { e.preventDefault(); close.focus(); } });  // stays in
   return pop;
 }
@@ -401,8 +404,9 @@ function placePop() {
 
 // The gestures on the viewport. One pointer: a move past PAN_PX pans (and captures the pointer; under it the pointer is
 // a click on its node, or on the ground: that closes the pop-up); two: a pinch zooms around their midpoint and pans with
-// it. After a pan or a pinch the click that follows is swallowed once. The wheel pans; with Ctrl (a trackpad's pinch
-// too) or Cmd it zooms around the pointer. Not on the pop-up or the sheet: they keep their own pointer and wheel.
+// it. After a pan or a pinch the click that follows is swallowed once. The wheel zooms around the pointer (a notch
+// about 15%; a trackpad's pinch, which comes with Ctrl, in finer steps); only a drag pans. Not on the pop-up or the
+// sheet: they keep their own pointer and wheel.
 const pointers = new Map();  // pointerId -> its last { x, y } in the viewport
 const gesture = { sx: 0, sy: 0, drag: false, swallow: false };
 const canvasPoint = (e) => { const r = canvas.wrap.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
@@ -464,13 +468,8 @@ function canvasWheel(e) {
   }
   e.preventDefault();
   const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? canvas.wrap.clientHeight : 1;  // lines or pages (Firefox) as px
-  if (e.ctrlKey || e.metaKey) {
-    const p = canvasPoint(e);
-    canvasZoom(Math.exp(-e.deltaY * unit / 300), p.x, p.y);
-  } else {
-    canvas.x -= e.deltaX * unit;
-    canvas.y -= e.deltaY * unit;
-  }
+  const p = canvasPoint(e);
+  canvasZoom(Math.exp(-e.deltaY * unit / (e.ctrlKey || e.metaKey ? 300 : 600)), p.x, p.y);
   canvasMoved();
 }
 // Tab onto a node or a title bar outside the viewport: centred (follow off, as after a pan), so the focus is in sight.

@@ -999,10 +999,10 @@ button.pg-band:hover { background: var(--surface-hover); }
 .pg-card.state-succeeded .pg-eyebrow { color: var(--done); }
 .pg-card.state-paused .pg-eyebrow, .pg-card.state-timeout .pg-eyebrow, .pg-card.state-canceled .pg-eyebrow { color: var(--warn); }
 .pg-card.state-pending:not(.marked) .pg-eyebrow { color: var(--text-muted); }
-/* the step pop-up (laptop): beside the picked node, over the graph */
+/* the step pop-up (laptop): beside the picked node, over the graph; the ✕ at its top right closes it */
 .pg-pop { position: absolute; z-index: 3; width: 320px; max-width: calc(100% - 8px); max-height: calc(100% - 8px); overflow: auto;
   margin: 0; box-shadow: var(--shadow-2); cursor: auto; }
-.pg-pop-foot { justify-content: flex-end; }
+.pg-pop-close, .pg-sheet-close { margin-left: auto; align-self: flex-start; font: 600 var(--fs-lg) var(--sans); }
 
 .legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px var(--sp-4); font-size: var(--fs-sm); color: var(--text-muted); }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
@@ -1021,7 +1021,7 @@ button.pg-band:hover { background: var(--surface-hover); }
 .pg-sheet .pg-rows { grid-template-columns: 96px minmax(0, 1fr); gap: var(--sp-2) var(--sp-3); font-size: 15px; }
 .pg-sheet-note { margin: 0; padding: var(--sp-3); border-radius: var(--r-m); font-size: var(--fs-s);
   background: color-mix(in srgb, var(--warn) 10%, var(--surface-card)); border-left: 4px solid var(--warn); }
-.pg-sheet-close { min-height: var(--tap); width: 100%; }
+.pg-sheet-close { width: var(--tap-min); height: var(--tap-min); margin-top: -4px; margin-right: -8px; }  /* the ✕ at the sheet's top right */
 /* slow in and out: the running chip's glow swells and fades. Only the number --breath is animated, so the glow is
    mixed per frame from the skill colour (interpolating the colours tinted the swell and the fade differently) */
 @property --breath { syntax: '<number>'; inherits: false; initial-value: 0; }
