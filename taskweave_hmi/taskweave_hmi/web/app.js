@@ -426,7 +426,8 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
   $('board-kind').textContent = words.kind;
   $('board-kind').className = colour ? `kind-${colour}` : '';
   $('board-instruction').textContent = words.name;
-  $('board-instruction').classList.toggle('bad', bad);
+  // the name in coral when failed; in the kind colour when no kind word stands in front of it to carry the colour
+  $('board-instruction').className = bad ? 'bad' : colour && !words.kind ? `kind-${colour}` : '';
   $('board-detail').textContent = words.detail;
   $('board-detail').title = words.detail;  // the whole of it, where one line cuts it
   $('board-next').textContent = words.next;
@@ -436,12 +437,12 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
   if (act) $('board-act').textContent = act[0];
   syncBoardAct();
   // the last error, as the bar shows it off the Run tab (not after a success). Rewritten only when it changed, so a
-  // screen reader announces it once; failed, the bubble's second line shows it, so this one is for screen readers
-  // only. No dismiss here: the Run tab is where the error stays until the next start (the bar's close button hides
+  // screen reader announces it once. Shown as line 3 only when aborted (its row has no line 3); failed, line 2 shows
+  // it, and running or paused, line 3 is what comes next: there it is for screen readers only. No dismiss here: the Run tab is where the error stays until the next start (the bar's close button hides
   // only the bar's copy); the button beside it is how to go on
   const error = s.last_error && s.state !== 'succeeded' ? s.last_error : '';
   show($('board-error'), !!error);
-  $('board-error').classList.toggle('sr-only', s.state === 'failed');
+  $('board-error').classList.toggle('sr-only', s.state !== 'aborted');
   if (error !== board.error) {
     board.error = error;
     $('board-error').textContent = error;

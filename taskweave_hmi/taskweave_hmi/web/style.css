@@ -251,6 +251,7 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
 #board-kind { flex: none; color: var(--k); }
 #board-kind:empty { display: none; }
 #board-instruction { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: inherit; }
+#board-instruction[class^="kind-"] { color: var(--k); }  /* no kind word in front: the name carries the kind colour */
 .bubble.state-paused #board-instruction { color: var(--warn); }
 #board-instruction.bad { color: var(--bad); }
 #board-detail { grid-area: detail; }
@@ -259,8 +260,6 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
 /* white-space: pre keeps the two spaces between a key and its value ("to  bin_1/place") */
 #board-detail, #board-next, #board-error { min-width: 0; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 #board-detail:empty, #board-next:empty { display: none; }
-/* an error shown (not failed: there it is line 2) takes line 3's place */
-.bubble:has(#board-error:not([hidden], .sr-only)) #board-next { display: none; }
 /* the controls (48px: gloves): idle, the mission picker and the bubble's button (Start, Resume, Retry: board-act;
    #btn-start is its wire); active, Pause and Abort */
 .bubble-controls { grid-area: controls; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
@@ -298,7 +297,9 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
   .band-robot .resources { gap: var(--sp-1); }
   .bubble { padding: var(--sp-1) var(--sp-2); column-gap: var(--sp-2); }
   .bubble::after { top: var(--sp-4); }
-  .bubble-name { font-size: var(--fs-md); }
+  /* the name gets the whole first line: the chips move to line 3's row, at its right */
+  .bubble, .bubble:has(#mission-start:not([hidden])) {
+    grid-template-areas: "name name" "detail detail" "next chips" "controls controls"; }
   /* the picker and the button share the row; long words are cut short */
   .bubble-controls > *, .bubble-controls .btn { flex: 1 1 0; min-width: 0; }
   .bubble-controls .btn { display: block; padding: 0 var(--sp-2); min-height: var(--tap-min); overflow: hidden; text-overflow: ellipsis; }
