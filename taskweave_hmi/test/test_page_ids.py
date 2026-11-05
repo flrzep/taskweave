@@ -4,12 +4,16 @@ import re
 from pathlib import Path
 
 WEB = Path(__file__).resolve().parents[1] / 'taskweave_hmi' / 'web'
-SCRIPTS = ['app.js', 'graph-run.js', 'editor.js', 'record.js', 'teach.js', 'robot.js', 'held.js']
+SCRIPTS = ['app.js', 'graph-run.js', 'editor.js', 'record.js', 'teach.js', 'robot.js', 'held.js',
+           'teach3d.js', 'teachtask.js']
 
 def page_ids() -> set[str]:
     return set(re.findall(r'\bid="([^"]+)"', (WEB / 'index.html').read_text(encoding='utf-8')))
 
-BUILT_AT_RUN_TIME = {'arm-new'}  # teach.js builds this box itself and then looks it up with $()
+BUILT_AT_RUN_TIME = {
+    'arm-new',  # teach.js builds this box itself and then looks it up with $()
+    'flow-at', 'flow-pad', 'flow-live', 'flow-captured',  # teachtask.js builds these and then looks them up with $()
+}
 
 def used_ids(name: str) -> set[str]:
     ids = set(re.findall(r"\$\('([\w-]+)'\)", (WEB / name).read_text(encoding='utf-8')))
