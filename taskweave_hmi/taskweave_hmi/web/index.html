@@ -83,61 +83,68 @@
   <!-- the window under the strip, no page scroll: the band at the top (the robot, its bubble, the 3D view as its
        window), the mission's canvas under it taking the rest -->
   <section id="view-run" class="view run">
-    <!-- the band: the robot stands at the left with the resource dots under its feet, says in a bubble what it does
-         (the kind word and the node's name, the main argument, what comes next) and offers the next move there
-         (Start, Resume, Retry, Run again; Pause and Abort while active); at the right the 3D view, the robot's window,
-         which Enlarge opens over the canvas. app.js renderBoard -->
+    <!-- the band: at the left the bubble over the stage, at the right the 3D view as the robot's window (16:10, it
+         sets the band's height), which Enlarge opens over the canvas. The bubble says what the robot does (the kind
+         word and the node's name, the main argument, what comes next; the resource dots, the step and the cycle as
+         chips) and offers the next move (Start, Resume, Retry, Run again; Pause and Abort while active). On the
+         stage the robot walks the mission along its floor, the phases (one bar per phase, the done part filled), and
+         stands where the run is. app.js renderBoard, renderPhases -->
     <section id="band" class="band" aria-label="Mission status">
-      <div class="band-robot">
-        <svg class="bot" viewBox="0 0 200 300" aria-hidden="true">
-          <ellipse class="bot-shadow" cx="100" cy="294" rx="50" ry="4.5"/>
-          <g class="bot-all">
-            <g class="bot-leg bot-leg-l"><path class="bot-limb" d="M88 236 Q82 256 86 274"/><ellipse class="b2" cx="82" cy="282" rx="14" ry="8"/></g>
-            <g class="bot-leg bot-leg-r"><path class="bot-limb" d="M112 236 Q118 256 114 274"/><ellipse class="b2" cx="118" cy="282" rx="14" ry="8"/></g>
-            <g class="bot-arm bot-arm-l"><path class="bot-limb" d="M62 182 Q40 198 44 222"/><circle class="b1" cx="44" cy="226" r="9"/></g>
-            <g class="bot-arm bot-arm-r"><path class="bot-limb" d="M138 182 Q160 198 156 222"/><circle class="b1" cx="156" cy="226" r="9"/></g>
-            <g class="bot-body">
-              <rect class="b1" x="70" y="166" width="60" height="62" rx="22"/>
-              <circle class="bot-light" cx="100" cy="192" r="9"/>
-              <path class="bot-vent" d="M89 213 H111"/>
-            </g>
-            <g class="bot-head">
-              <g class="bot-ant"><path class="bot-stalk" d="M100 60 C100 38 112 26 126 18"/><circle class="bot-light" cx="126" cy="18" r="8"/></g>
-              <rect class="b2" x="24" y="94" width="12" height="28" rx="6"/><rect class="b2" x="164" y="94" width="12" height="28" rx="6"/>
-              <rect class="b1" x="34" y="60" width="132" height="96" rx="32"/>
-              <path class="bot-gloss" d="M50 80 Q54 68 70 65"/>
-              <rect class="bi" x="48" y="80" width="104" height="52" rx="24"/>
-              <g class="bot-eyes"><rect class="be" x="73" y="91" width="17" height="30" rx="8.5"/><rect class="be" x="110" y="91" width="17" height="30" rx="8.5"/></g>
-              <path class="bot-x" d="M74 96l16 20M90 96l-16 20M110 96l16 20M126 96l-16 20"/>
-            </g>
-          </g>
-        </svg>
-        <!-- what the running step holds: lit while locked (app.js renderMission, from step.resources) -->
-        <span id="resources" class="resources" role="group" aria-label="What the step holds">
-          <i data-res="base" role="img" aria-label="base" title="base"></i><i data-res="hands" role="img" aria-label="hands" title="hands"></i><i data-res="torso" role="img" aria-label="torso" title="torso"></i>
-        </span>
-      </div>
-      <!-- the bubble (its state class: state-idle, state-running, ...): the step and cycle chips at the top right, the
-           kind word and the node's name, the main argument, what comes next; the controls at its right end -->
-      <div id="board" class="bubble state-idle">
-        <div class="bubble-chips"><span><span id="board-step"></span><span id="board-total" class="board-of"></span></span><span id="board-cycle"></span></div>
-        <div class="bubble-name"><span id="board-kind"></span><b id="board-instruction" aria-live="polite"></b></div>
-        <div id="board-detail" class="mono"></div>
-        <div id="board-next" class="muted"></div>
-        <div id="board-error" role="alert" hidden></div>
-        <span id="board-state" class="sr-only" aria-live="polite">idle</span>
-        <!-- idle, the mission picker; the bubble's button is the one way on (Start, Resume, Retry: board-act, #btn-start
-             is its wire); active, Pause and Abort (48px: gloves) -->
-        <div class="bubble-controls">
-          <div id="mission-start" class="mission-start">
-            <select id="mission-select" aria-label="Mission to run"></select>
-            <button id="btn-start" class="btn small primary" tabindex="-1" aria-hidden="true">Start</button>
+      <div class="band-left">
+        <!-- the bubble (its state class: state-idle, state-running, ...): the chips at the top right, the kind word
+             and the node's name, the main argument, what comes next; the controls at its right end; its tail points
+             down at the robot -->
+        <div id="board" class="bubble state-idle">
+          <div class="bubble-chips">
+            <!-- what the running step holds: lit while locked (app.js renderMission, from step.resources) -->
+            <span id="resources" class="resources" role="group" aria-label="What the step holds">
+              <i data-res="base" role="img" aria-label="base" title="base"></i><i data-res="hands" role="img" aria-label="hands" title="hands"></i><i data-res="torso" role="img" aria-label="torso" title="torso"></i>
+            </span>
+            <span><span id="board-step"></span><span id="board-total" class="board-of"></span></span><span id="board-cycle"></span></div>
+          <div class="bubble-name"><span id="board-kind"></span><b id="board-instruction" aria-live="polite"></b></div>
+          <div id="board-detail" class="mono"></div>
+          <div id="board-next" class="muted"></div>
+          <div id="board-error" role="alert" hidden></div>
+          <span id="board-state" class="sr-only" aria-live="polite">idle</span>
+          <!-- idle, the mission picker; the bubble's button is the one way on (Start, Resume, Retry: board-act, #btn-start
+               is its wire); active, Pause and Abort (48px: gloves) -->
+          <div class="bubble-controls">
+            <div id="mission-start" class="mission-start">
+              <select id="mission-select" aria-label="Mission to run"></select>
+              <button id="btn-start" class="btn small primary" tabindex="-1" aria-hidden="true">Start</button>
+            </div>
+            <button id="board-act" class="btn primary" type="button" hidden></button>
+            <div id="mission-controls" class="mission-controls" hidden>
+              <button id="btn-pause" class="btn" disabled>Pause</button>
+              <button id="btn-abort" class="btn danger" disabled>Abort</button>
+            </div>
           </div>
-          <button id="board-act" class="btn primary" type="button" hidden></button>
-          <div id="mission-controls" class="mission-controls" hidden>
-            <button id="btn-pause" class="btn" disabled>Pause</button>
-            <button id="btn-abort" class="btn danger" disabled>Abort</button>
-          </div>
+        </div>
+        <div class="band-stage">
+          <svg class="bot" viewBox="0 0 200 300" aria-hidden="true">
+            <ellipse class="bot-shadow" cx="100" cy="294" rx="50" ry="4.5"/>
+            <g class="bot-all">
+              <g class="bot-leg bot-leg-l"><path class="bot-limb" d="M88 236 Q82 256 86 274"/><ellipse class="b2" cx="82" cy="282" rx="14" ry="8"/></g>
+              <g class="bot-leg bot-leg-r"><path class="bot-limb" d="M112 236 Q118 256 114 274"/><ellipse class="b2" cx="118" cy="282" rx="14" ry="8"/></g>
+              <g class="bot-arm bot-arm-l"><path class="bot-limb" d="M62 182 Q40 198 44 222"/><circle class="b1" cx="44" cy="226" r="9"/></g>
+              <g class="bot-arm bot-arm-r"><path class="bot-limb" d="M138 182 Q160 198 156 222"/><circle class="b1" cx="156" cy="226" r="9"/></g>
+              <g class="bot-body">
+                <rect class="b1" x="70" y="166" width="60" height="62" rx="22"/>
+                <circle class="bot-light" cx="100" cy="192" r="9"/>
+                <path class="bot-vent" d="M89 213 H111"/>
+              </g>
+              <g class="bot-head">
+                <g class="bot-ant"><path class="bot-stalk" d="M100 60 C100 38 112 26 126 18"/><circle class="bot-light" cx="126" cy="18" r="8"/></g>
+                <rect class="b2" x="24" y="94" width="12" height="28" rx="6"/><rect class="b2" x="164" y="94" width="12" height="28" rx="6"/>
+                <rect class="b1" x="34" y="60" width="132" height="96" rx="32"/>
+                <path class="bot-gloss" d="M50 80 Q54 68 70 65"/>
+                <rect class="bi" x="48" y="80" width="104" height="52" rx="24"/>
+                <g class="bot-eyes"><rect class="be" x="73" y="91" width="17" height="30" rx="8.5"/><rect class="be" x="110" y="91" width="17" height="30" rx="8.5"/></g>
+                <path class="bot-x" d="M74 96l16 20M90 96l-16 20M110 96l16 20M126 96l-16 20"/>
+              </g>
+            </g>
+          </svg>
+          <ol id="board-phases" class="board-phases" aria-label="Phases"></ol>
         </div>
       </div>
       <div class="window">

@@ -41,7 +41,7 @@
   --rail: 92px;  /* the section rail; on a phone the bottom nav is --nav high */
   --nav: 60px;
   --strip: 40px;  /* the system strip */
-  --band: 200px;  /* the Run tab's band: the robot, its bubble, its window */
+  --band: 320px;  /* the Run tab's band's height (the window's 16:10 sets it; app.js writes the real one here) */
   /* a number field's ▲ ▼ (an image cannot take currentColor: the --text-muted value) */
   --spin-arrows: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='16' viewBox='0 0 10 16'%3E%3Cpath d='M5 1 9.5 6.5h-9zM5 15 .5 9.5h9z' fill='%239a9ec8'/%3E%3C/svg%3E");
 }
@@ -115,7 +115,7 @@ body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); align-i
                   letter-spacing: .08em; padding: 5px 8px; border-radius: var(--r-s); background: var(--fill); color: var(--ink); }
 .mission #state::before { display: none; }
 .strip-mission { flex: 1 1 auto; min-width: 0; font: 600 var(--fs-s) var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-body.on-run .strip-mission { display: none; }  /* the band names it */
+body.on-run .strip-mission, body.on-run .mission .progress { display: none; }  /* the band names it; its floor shows the progress */
 /* the mission's progress (steps done and the running step's share): a line along the strip's bottom edge, in the
    state colour */
 .mission .progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; border-radius: 0; background: none; }
@@ -141,27 +141,52 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
   .mission #state { min-width: 0; }
   .mission.active #robot { display: none; }  /* the link dot stays: the name gives way, the row keeps one line */
 }
-/* the band (Run tab, --band high): the robot at the left with the resource dots under its feet, its bubble beside it
-   (the tail toward the robot) and the 3D view at the right as its window. The robot's pose is the state: walking
-   while running, frozen mid-stride and sleepy-eyed when paused, looking about while planning, arms up when done,
-   slumped with crossed eyes when failed, flat eyes when aborted, blinking when idle; its lights, the bubble's edge and
-   the window's (while running) are the state colour. The bubble (#board) holds the state class, the band reads it. */
-.band { --state: var(--idle); --bot-h: 120px; --bot-w: calc(var(--bot-h) * 2 / 3);
+/* the band (Run tab): at the left the bubble over the stage, where the robot walks the mission on its floor (the
+   phases) and stands where the run is (--p, 0..1); at the right the 3D view as the robot's window, 16:10, which sets
+   the band's height (3 : 2 against the left half; never taller than 42% of the screen). The robot's pose is the
+   state: walking while running, frozen mid-stride and sleepy-eyed when paused, looking about while planning, arms up
+   when done, slumped with crossed eyes when failed, flat eyes when aborted, blinking when idle; its lights, the
+   bubble's edge and the window's (while running) are the state colour. The bubble (#board) holds the state class,
+   the band reads it. */
+.band { --state: var(--idle); --bot-h: 150px; --bot-w: calc(var(--bot-h) * 2 / 3); --p: 0;
         --bot: #6b7387; --bot-2: #545b6d; --bot-ink: #0d0f15; --bot-eye: #e6fbff;
-        flex: none; height: var(--band); display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
-        grid-template-rows: minmax(0, 1fr);
+        flex: none; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: stretch;
         gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); background: var(--surface-card); }
 .band:has(.bubble.state-running), .band:has(.bubble.state-planning) { --state: var(--run-fill); }
 .band:has(.bubble.state-paused) { --state: var(--warn); }
 .band:has(.bubble.state-succeeded) { --state: var(--done); }
 .band:has(.bubble.state-failed), .band:has(.bubble.state-aborted) { --state: var(--bad); }
 
-/* the robot, standing still at the left; under its feet what the step holds (base, hands, torso), lit while locked */
-.band-robot { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-1); min-height: 0; }
-.resources { display: flex; gap: var(--sp-2); }
+/* the left half: the bubble taking the room over the stage (its words centred in it) */
+.band-left { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; min-height: 0; }
+.band-left .bubble { flex: 1 1 auto; }
+/* the stage: the robot on its floor, walking to where the run is (left: --p of the way; the floor is the full width) */
+.band-stage { position: relative; flex: none; height: calc(var(--bot-h) + 30px); }
+.band-stage:has(.board-phases.single) { height: calc(var(--bot-h) + 12px); }
+.bot { position: absolute; bottom: 28px; height: var(--bot-h); width: var(--bot-w); overflow: visible;
+  left: calc(var(--p) * (100% - var(--bot-w))); transition: left 1.2s ease; }
+.band-stage:has(.board-phases.single) .bot { bottom: 10px; }
+/* the floor: one bar per phase, as wide as its steps, the done part filled; the current one in the state colour, a
+   failed one coral; the names under the bars (none with one phase) */
+.board-phases { position: absolute; inset: auto 0 0 0; display: flex; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.board-phases li { flex: var(--steps) 1 0; min-width: 0; display: grid; gap: var(--sp-1); }
+.board-phases .ph-bar { height: 8px; border-radius: var(--r-pill); overflow: hidden;
+  background: color-mix(in srgb, var(--text) 10%, var(--surface-card)); }
+.board-phases .ph-bar i { display: block; height: 100%; width: var(--done-part); background: var(--done); border-radius: inherit;
+  transition: width .6s ease; }
+.board-phases li.now .ph-bar i { background: var(--state); }
+.board-phases li.failed .ph-bar i { background: var(--bad); }
+.board-phases li.failed .ph-bar { box-shadow: inset 0 0 0 2px var(--bad); }  /* also when nothing was done */
+.board-phases li.failed .name { color: var(--bad); }
+.board-phases .name { display: flex; gap: var(--sp-2); font-size: var(--fs-s); color: var(--text-muted); min-width: 0; }
+.board-phases .name span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-phases .name b { flex: none; margin-left: auto; font: 600 var(--fs-s) var(--cond); color: var(--text); }
+.board-phases li.now .name { color: var(--text); font-weight: 600; }
+.board-phases.single .name { display: none; }
+/* what the step holds (base, hands, torso): dots among the bubble's chips, lit while locked */
+.resources { display: flex; align-items: center; gap: var(--sp-1); }
 .resources i { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--border-strong); }
 .resources i.on { background: var(--run-fill); border-color: var(--run-fill); }
-.bot { flex: none; height: var(--bot-h); width: var(--bot-w); overflow: visible; }
 .bot .b1 { fill: var(--bot); } .bot .b2 { fill: var(--bot-2); } .bot .bi { fill: var(--bot-ink); } .bot .be { fill: var(--bot-eye); }
 /* a comic figure: a big head, a small torso, and head, hands and feet floating apart from it on bendy limbs (round
    strokes that bend as they swing) and a long floppy antenna with the state light at its tip */
@@ -235,8 +260,8 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
 
 /* the bubble: the chips at the top right, line 1 the kind word (its kind colour) and the node's name, line 2 the main
    argument (mono), line 3 what comes next (muted); the controls at its right end (under the words below 1000px, and
-   with the picker). One line each (a multi-line text joined by app.js oneLine), so the band keeps its height while a
-   run goes (a phone's band grows for an ended run's controls). The tail on its left edge points at the robot */
+   with the picker). One line each (a multi-line text joined by app.js oneLine), so the bubble keeps its height while
+   a run goes. The tail on its bottom edge points down at the robot and walks with it */
 .bubble { position: relative; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas: "name chips" "detail controls" "next controls";
   align-content: center; align-items: center; gap: 2px var(--sp-4); padding: var(--sp-2) var(--sp-4); border-radius: var(--r-m);
@@ -244,15 +269,17 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
   border: 2px solid color-mix(in srgb, var(--state) 45%, var(--border)); transition: border-color .4s, background .4s; }
 /* the picker shown (no mission active): the controls take a row of their own under the words */
 .bubble:has(#mission-start:not([hidden])) { grid-template-areas: "name chips" "detail detail" "next next" "controls controls"; }
-.bubble::after { content: ""; position: absolute; right: 100%; top: var(--sp-6); width: 12px; height: 18px; margin-right: 2px;
-  background: color-mix(in srgb, var(--state) 45%, var(--border)); clip-path: polygon(100% 0, 100% 100%, 0 50%);
-  transition: background .4s; }
-.bubble-chips { grid-area: chips; display: flex; gap: var(--sp-2); justify-self: end; font: 600 var(--fs-sm)/1 var(--sans); }
-.bubble-chips > span { padding: 4px 8px; border-radius: var(--r-pill); background: var(--surface-field); white-space: nowrap; }
+.bubble::after { content: ""; position: absolute; top: 100%; width: 18px; height: 12px; margin-top: 2px;
+  left: clamp(18px, calc(var(--p) * (100% - var(--bot-w)) + var(--bot-w) / 2 - 9px), calc(100% - 36px));
+  background: color-mix(in srgb, var(--state) 45%, var(--border)); clip-path: polygon(0 0, 100% 0, 50% 100%);
+  transition: left 1.2s ease, background .4s; }
+.bubble-chips { grid-area: chips; display: flex; align-items: center; gap: var(--sp-2); justify-self: end; font: 600 var(--fs-sm)/1 var(--sans); }
+.bubble-chips > span:not(.resources) { padding: 4px 8px; border-radius: var(--r-pill); background: var(--surface-field); white-space: nowrap; }
 .bubble-chips > span:has(#board-step:empty), #board-cycle:empty { display: none; }
 .board-of { margin-left: 3px; color: var(--text-muted); }
 .bubble-name { grid-area: name; display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0;
-  font: 600 var(--fs-lg)/1.25 var(--sans); white-space: nowrap; }
+  font: 600 var(--fs-xl)/1.25 var(--sans); white-space: nowrap; }
+#board-detail { font-size: var(--fs-md); }
 #board-kind { flex: none; color: var(--k); }
 #board-kind:empty { display: none; }
 #board-instruction { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: inherit; }
@@ -275,10 +302,11 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
 .bubble.state-paused #btn-pause { display: none; }  /* the bubble's button says Resume */
 .bubble-controls .btn { min-height: var(--tap); padding: 0 var(--sp-5); white-space: nowrap; }
 
-/* the window: the 3D view framed in the band (an inset edge, the state light while running); Enlarge at its bottom
-   right opens it over the canvas, the same button or Escape closes it */
-.window { position: relative; min-width: 0; border-radius: var(--r-m); border: 1px solid var(--border);
-  box-shadow: inset 0 0 0 2px var(--surface-page); }
+/* the window: the 3D view framed in the band (an inset edge, the state light while running), 16:10 and never
+   taller than 42% of the screen (then wider than 16:10); Enlarge at its bottom right opens it over the canvas, the
+   same button or Escape closes it */
+.window { position: relative; min-width: 0; aspect-ratio: 16 / 10; max-height: 42dvh; align-self: start;
+  border-radius: var(--r-m); border: 1px solid var(--border); box-shadow: inset 0 0 0 2px var(--surface-page); }
 .bubble:is(.state-running, .state-paused, .state-planning) ~ .window { border-color: var(--state); }
 .window .viewer3d { aspect-ratio: auto; height: 100%; }
 .window.enlarged { position: fixed; inset: calc(var(--top-h, 40px) + var(--band)) 0 0 var(--rail); z-index: 5;
@@ -289,19 +317,21 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
 .window-enlarge svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .window .window-enlarge[aria-pressed="true"] { background: var(--brand); color: var(--on-brand); }
 @media (max-width: 1000px) {
-  :root { --band: 180px; }
-  .band { grid-template-columns: auto minmax(0, 3fr) minmax(0, 2fr); }
+  .band { --bot-h: 120px; }
+  .window { max-height: 36dvh; }
+  .bubble-name { font-size: var(--fs-lg); }
+  #board-detail { font-size: inherit; }
   .bubble { grid-template-areas: "name chips" "detail detail" "next next" "controls controls"; }
 }
-/* a phone: the robot 80px, the window a thumbnail at the bubble's right (a tap anywhere on it enlarges it: the button
+/* a phone: the robot 72px, the window a thumbnail at the band's right (a tap anywhere on it enlarges it: the button
    covers it), enlarged it fills the screen between the strip and the bottom nav */
 @media (max-width: 600px) {
-  :root { --band: 150px; }
-  .band { --bot-h: 80px; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3);
-          align-items: center; }
-  .band-robot .resources { gap: var(--sp-1); }
+  .band { --bot-h: 72px; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
+  .band-left { gap: var(--sp-2); }
+  .band-stage { min-height: calc(var(--bot-h) + 24px); }
+  .bot { bottom: 20px; }
+  .board-phases .name b { display: none; }
   .bubble { padding: var(--sp-1) var(--sp-2); column-gap: var(--sp-2); }
-  .bubble::after { top: var(--sp-4); }
   /* the name gets the whole first line: the chips move to line 3's row, at its right */
   .bubble, .bubble:has(#mission-start:not([hidden])) {
     grid-template-areas: "name name" "detail detail" "next chips" "controls controls"; }
@@ -311,12 +341,10 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
   .bubble-chips { font-size: var(--fs-xs); gap: var(--sp-1); }
   .bubble-chips > span { padding: 3px 6px; }
   #mission-select { min-height: var(--tap-min); }
-  /* ended (done, failed, aborted): the band grows so the picker takes its own row and the button the next, nothing
-     cut; running, paused and planning keep the fixed height */
-  .band:has(.bubble:is(.state-succeeded, .state-failed, .state-aborted)) { height: auto; min-height: var(--band); }
+  /* ended (done, failed, aborted): the picker takes its own row and the button the next, nothing cut */
   .bubble:is(.state-succeeded, .state-failed, .state-aborted) .bubble-controls { flex-direction: column; align-items: stretch; }
   .bubble:is(.state-succeeded, .state-failed, .state-aborted) .bubble-controls > * { flex: none; }
-  .window { width: 96px; height: 96px; }
+  .window { width: 96px; height: 96px; aspect-ratio: auto; max-height: none; }
   .window:not(.enlarged) .viewer3d-tools { display: none; }
   .window:not(.enlarged) .window-enlarge { inset: 0; width: auto; height: auto; background: none; }
   .window:not(.enlarged) .window-enlarge svg { display: none; }

@@ -176,6 +176,12 @@ function enlargeWindow(on) {
 }
 function closeWindowOnEscape(e) { if (e.key === 'Escape' && !state.snapshot?.manual) enlargeWindow(false); }
 $('window-enlarge').addEventListener('click', () => enlargeWindow($('window-enlarge').getAttribute('aria-pressed') !== 'true'));
+// the band's height (the window's 16:10 sets it) as --band, which the enlarged window starts under; the window's
+// 3D view drawn again at its new size
+new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty('--band', `${Math.round(entry.borderBoxSize?.[0]?.blockSize ?? entry.target.offsetHeight)}px`);
+  runViewer?.resize();
+}).observe($('band'));
 
 // ---------- live state ----------
 function connect() {
@@ -333,11 +339,13 @@ function syncBoardAct() {
     : !canStart();
 }
 // ---------- the band (Run tab) ----------
-// The robot stands at the band's left and its pose is the state: walking while a step runs, frozen mid-stride when
-// paused, looking about while planning, cheering when done, slumped with crossed eyes when failed (style.css .bot).
-// Beside it a bubble says the node it runs as the canvas draws it (the kind word in the kind colour, the name), the
-// main argument and what comes next, with the step and the cycle as chips; and the next move as one button: Start (or
-// Start at step N), Resume, Retry step N, Run again. The instruction sentence is the bubble's tooltip.
+// The robot walks the mission on the band's stage: its floor is the phases (one bar per top-level block, as wide as
+// its steps, the done part filled), it stands where the run is (--p, 0..1) and its pose is the state: walking while
+// a step runs, frozen mid-stride when paused, looking about while planning, cheering when done, slumped with crossed
+// eyes when failed (style.css .bot). Above it a bubble says the node it runs as the canvas draws it (the kind word in
+// the kind colour, the name), the main argument and what comes next, with the resources it holds, the step and the
+// cycle as chips; and the next move as one button: Start (or Start at step N), Resume, Retry step N, Run again. The
+// instruction sentence is the bubble's tooltip.
 const BOARD_WORDS = { idle: 'idle', planning: 'planning', running: 'running', paused: 'paused', succeeded: 'done',
   failed: 'failed', aborted: 'aborted' };
 // the error shown, the button's action and its kind ('start' or 'resume')
@@ -409,7 +417,7 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
     $('btn-start').click();
   };
   const startPicked = picked ? ['Start', start(null)] : null;
-  let count = '', of = '', act = null, colour = '', bad = false, tip = s.step?.instruction || '';
+  let count = '', of = '', act = null, colour = '', bad = false, tip = s.step?.instruction || '', progress = 0;
   let words = { kind: '', name: '', detail: '', next: '' };
   if (planning) {
     words.name = 'Planning'; words.detail = missionName;
@@ -418,20 +426,24 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
     words = bubbleWords(s, plan, mission, s.step_index);
     if (s.state === 'paused') words.next = 'paused';
     colour = typeof colourOf === 'function' ? colourOf(s.step) : 'other';
+    progress = total && at ? (at - 1 + Math.max(0, Math.min(1, s.step_progress || 0))) / total : 0;
   } else if (active) {  // between steps (or a replan): no step in the status
     count = at ? String(at) : '–'; of = total ? `/ ${total}` : '';
     words.name = s.state === 'paused' ? 'Paused' : 'Next step…';
     words.next = s.state === 'paused' ? 'paused' : '';
+    progress = total && at ? at / total : 0;
   } else if (s.state === 'succeeded' && s.plan_id) {
     count = String(total); of = `/ ${total}`;
     words = { kind: '', name: 'Done', detail: missionName, next: s.cycle > 1 ? `×${s.cycle}` : '' };
     act = same ? ['Run again', start(null)] : startPicked && [`Start ${picked}`, start(null)];
+    progress = 1;
   } else if ((s.state === 'failed' || s.state === 'aborted') && s.plan_id) {
     const steps = plan?.steps || [];
     const index = stoppedIndex(s, plan, outcomes);  // where it stopped
     const stopped = s.step || steps[index];
     tip ||= stopped?.instruction || '';
     count = index >= 0 ? String(index + 1) : '–'; of = total ? `/ ${total}` : '';
+    progress = total && index >= 0 ? index / total : 0;
     if (s.state === 'failed') {  // the rule that applies to the stopped step (graph-run.js)
       const rule = steps[index] && typeof rules === 'function' ? rules(plan, mission)[index] : null;
       words = { kind: '', name: stopped ? nodeName(stopped) : 'Failed', detail: s.last_error || '',
@@ -446,12 +458,16 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
   } else {  // idle: the picker and Start
     words.name = 'Which mission?';
     act = startIndex >= 0 ? [`Start at step ${startIndex + 1}`, start(state.startStep)] : startPicked;
+    progress = total && startIndex >= 0 ? startIndex / total : 0;
   }
   // a step picked on the canvas after a run ended (the stopped node's pop-up: start here): the button starts there
   if (ended && startIndex >= 0) {
     act = [`Start ${same ? '' : `${picked} `}at step ${startIndex + 1}`, start(state.startStep)];
+    progress = total ? startIndex / total : 0;
   }
   if (s.state === 'paused') act = ['Resume', () => $('btn-pause').click()];
+  $('band').style.setProperty('--p', Math.max(0, Math.min(1, progress)).toFixed(4));  // the robot walks there
+  renderPhases(s, plan, outcomes, active);
   $('board').title = tip;
   $('board-step').textContent = count;
   $('board-total').textContent = of;
@@ -480,6 +496,43 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
     $('board-error').textContent = oneLine(error);
     $('board-error').title = error;  // the whole of it, where one line cuts it
   }
+}
+
+// The phases of a plan, the robot's floor: one per top-level block of the mission's tree (graph-core.js treeFromPlan;
+// an include, with schema v2 a group, repeat or parallel), named as the canvas names it, with its steps; the
+// mission's own steps between blocks are one phase named after the mission. One phase (or none): one floor, no name
+function phasesOf(plan, mission) {
+  if (!plan?.steps.length || typeof treeFromPlan !== 'function') return [];
+  const phases = [];
+  treeFromPlan(plan, mission).children.forEach((node) => {
+    if (node.kind === 'step') {
+      const last = phases[phases.length - 1];
+      if (last?.own) last.steps.push(node.index);
+      else phases.push({ name: humanise(missionOf(plan)), steps: [node.index], own: true });
+      return;
+    }
+    phases.push({ name: flowName(node), steps: [...node.leaves] });
+  });
+  return phases;
+}
+function renderPhases(s, plan, outcomes, active) {
+  const list = $('board-phases');
+  const found = phasesOf(plan, typeof missionCache === 'object' ? missionCache[missionOf(plan)] : null);
+  const phases = found.length > 1 ? found : [{ name: '', steps: plan ? [...plan.steps.keys()] : [] }];
+  list.classList.toggle('single', phases.length < 2);
+  list.replaceChildren(...phases.map((phase) => {
+    const done = phase.steps.filter((i) => outcomes[plan.steps[i].id]?.event === 'step_finished').length;
+    const now = active && phase.steps.includes(s.step_index);
+    const failed = phase.steps.some((i) => NOT_DONE.includes(outcomes[plan.steps[i].id]?.outcome));
+    const item = el('li', { class: `${now ? 'now' : ''}${failed ? ' failed' : ''}`,
+      'aria-label': `${phase.name}: ${done} of ${phase.steps.length} steps done${now ? ', running' : ''}` },
+    el('div', { class: 'ph-bar' }, el('i')), el('div', { class: 'name' }, el('span', { text: phase.name }),
+      el('b', { text: `${done}/${phase.steps.length}` })));
+    item.style.setProperty('--steps', Math.max(1, phase.steps.length));
+    item.style.setProperty('--done-part', `${phase.steps.length ? (done / phase.steps.length) * 100 : 0}%`);
+    item.title = `${phase.name} · ${done}/${phase.steps.length}`;
+    return item;
+  }));
 }
 
 $('last-error-close').addEventListener('click', () => { missionUi.dismissed = $('last-error-text').textContent; show($('last-error'), false); });
