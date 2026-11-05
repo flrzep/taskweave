@@ -7,8 +7,8 @@
 // open unless closed to one stack node (remembered per mission); the box with the running step is always open. No ports, no
 // rule nodes, no words on wires but the loop's: a replan is a thin coral wire under the nodes. A step opens its details
 // (the instruction, the rule) in a pop-up beside it (a bottom sheet at 600 px and below). Uses $,
-// el, api, state, show, missionOf, shownPlan, pickStart, moveLabel, moveParts, carriesByArgs from app.js, skillIcon,
-// iconElement, moveKindOfArgs from icons.js and flowName, flowHead, flowField, stepFields, blockFields from graph-core.js.
+// el, api, state, show, missionOf, shownPlan, focusIndex, pickStart, moveLabel, moveParts, carriesByArgs from app.js,
+// skillIcon, iconElement, moveKindOfArgs from icons.js and flowName, flowHead, flowField, stepFields, blockFields from graph-core.js.
 
 // what moves: a move step's kind, else the skill (cell schema 3 names too)
 const KIND_COLOURS = { navigate: 'drive', straight: 'drive', hand: 'arm', posture: 'arm', joints: 'arm' };
@@ -331,14 +331,15 @@ function loopText(plan, mission) {
 // ---------- the canvas: the viewport, the layer it moves, the camera ----------
 // One viewport (.pg-canvas, built once, kept across rebuilds) holds the layer (.pg-layer: the drawn graph, rebuilt on
 // every status update) and the pop-up, which is never scaled. The camera is one transform on the layer: translate(x, y)
-// scale(scale), kept across rebuilds. Follow keeps the running (else the start) node centred; a pan or a zoom by the
-// operator turns it off, the Follow button on again. layout: the last drawn layout; planId: the plan last fitted;
-// focus: the item key of the node follow centres.
+// scale(scale), kept across rebuilds. Follow keeps the running (else the stopped, else the start) node centred; a pan
+// or a zoom by the operator turns it off, the Follow button on again. layout: the last drawn layout; planId: the plan
+// last fitted; focus: the item key of the node follow centres.
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 1.5;
 const FIRST_FIT_MIN = 0.6;  // a new plan opens fitted down to this; smaller, at scale 1 on the followed node
 const PAN_PX = 4;  // a pointer that moves less is a click on what is under it
-const canvas = { x: 0, y: 0, scale: 1, follow: true, layer: null, wrap: null, layout: null, planId: null, focus: null };
+const canvas = { x: 0, y: 0, scale: 1, follow: true, layer: null, wrap: null, layout: null, planId: null, focus: null,
+  refocusing: false };  // refocusing: a rebuild puts the keyboard focus back (not a Tab: the camera stays)
 const clampZoom = (s) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, s));
 
 // the whole tree in view: smaller than the viewport, centred on each axis; larger, from its top left
@@ -393,7 +394,9 @@ function placePop() {
     pop.style.left = `${Math.max(0, Math.min(x + scale * n.cx - POP_W / 2, w - POP_W))}px`;
     top = y + scale * (n.cy + n.nh / 2) + POP_GAP;
   }
-  pop.style.top = `${Math.max(0, Math.min(top, canvas.wrap.clientHeight - POP_MIN_H))}px`;
+  top = Math.max(0, Math.min(top, canvas.wrap.clientHeight - POP_MIN_H));
+  pop.style.top = `${top}px`;
+  pop.style.maxHeight = `${canvas.wrap.clientHeight - top - 8}px`;  // scrolls inside, never past the viewport's bottom
 }
 
 // The gestures on the viewport. One pointer: a move past PAN_PX pans (and captures the pointer; under it the pointer is
@@ -455,7 +458,10 @@ function canvasPointerUp(e) {
   }
 }
 function canvasWheel(e) {
-  if (offCanvas(e)) return;
+  if (offCanvas(e)) {
+    if (e.ctrlKey || e.metaKey) e.preventDefault();  // a pinch over the pop-up: not the browser's page zoom
+    return;
+  }
   e.preventDefault();
   if (e.ctrlKey || e.metaKey) {
     const p = canvasPoint(e);
@@ -466,6 +472,16 @@ function canvasWheel(e) {
   }
   canvasMoved();
 }
+// Tab onto a node or a title bar outside the viewport: centred (follow off, as after a pan), so the focus is in sight
+function canvasFocusIn(e) {
+  if (canvas.refocusing || offCanvas(e)) return;
+  const c = canvas.wrap.getBoundingClientRect();
+  const n = e.target.getBoundingClientRect();
+  if (n.left >= c.left && n.right <= c.right && n.top >= c.top && n.bottom <= c.bottom) return;
+  canvas.x += c.left + c.width / 2 - (n.left + n.width / 2);
+  canvas.y += c.top + c.height / 2 - (n.top + n.height / 2);
+  canvasMoved();
+}
 function canvasView() {
   const wrap = div('pg-canvas');
   wrap.addEventListener('pointerdown', canvasPointerDown);
@@ -473,6 +489,7 @@ function canvasView() {
   wrap.addEventListener('pointerup', canvasPointerUp);
   wrap.addEventListener('pointercancel', canvasPointerUp);
   wrap.addEventListener('wheel', canvasWheel, { passive: false });
+  wrap.addEventListener('focusin', canvasFocusIn);
   wrap.addEventListener('click', (e) => {  // the click a pan or a pinch ends with: not a click on a node
     if (!gesture.swallow) return;
     gesture.swallow = false;
@@ -560,16 +577,16 @@ function renderGraph() {
   if (!box.contains(canvas.wrap)) box.replaceChildren(canvas.wrap);
   key.replaceWith(legend(plan, events, drawn.replans > 0));
   // the camera as it was on the new layer; a new plan opens fitted (following when it runs; at scale 1 on its node
-  // when the fit would be tiny); a new running (else start) node is centred with a follow move while follow is on
+  // when the fit would be tiny); a new followed node is centred with a follow move while follow is on
   canvasApply(false);
-  const runningIdx = states.findIndex(isLive);  // the followed node: the running step's, else the start step's
-  const focus = layout.owner.get(runningIdx >= 0 ? plan.steps[runningIdx].id : ctx.start) ?? null;
+  // the followed node: the running step's, else the stopped one's, else the start step's (app.js focusIndex)
+  const focus = layout.owner.get(plan.steps[focusIndex(snap.status, plan, events, live)].id) ?? null;
   if (canvas.planId !== plan.plan_id && canvas.wrap.clientWidth) {
     canvas.planId = plan.plan_id;
     canvas.focus = focus;
     canvasFit(layout);
     const at = canvas.scale < FIRST_FIT_MIN && focusPoint();
-    if (at) {  // a tree that fits only as tiny chips: at full size on the running (else start) node, following it
+    if (at) {  // a tree that fits only as tiny chips: at full size on the followed node, following it
       canvas.scale = 1;
       canvasCentre(...at);
     }
@@ -586,7 +603,11 @@ function renderGraph() {
   }
   const sheet = box.querySelector('.pg-sheet');
   if (sheet) sheet.scrollTop = sheetScroll;
-  if (refocus) (box.querySelector(refocus) || box.querySelector('[data-step]'))?.focus({ preventScroll: true });
+  if (refocus) {
+    canvas.refocusing = true;
+    (box.querySelector(refocus) || box.querySelector('[data-step]'))?.focus({ preventScroll: true });
+    canvas.refocusing = false;
+  }
 }
 PHONE.addEventListener('change', () => renderGraph());
 // a new size of the canvas (a window resize, the band's breakpoint): drawn again; with follow on the followed node is
@@ -607,6 +628,8 @@ function setPlanView(choice) {
   document.querySelectorAll('#plan-view button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === choice)));
   show($('plan'), choice === 'list');
   show($('plan-graph'), choice === 'graph');
+  $('canvas-fit').disabled = choice !== 'graph';  // the camera's tools: nothing to move under the list
+  $('canvas-follow').disabled = choice !== 'graph';
   renderGraph();
 }
 document.querySelectorAll('#plan-view button').forEach((b) => b.addEventListener('click', () => setPlanView(b.dataset.view)));

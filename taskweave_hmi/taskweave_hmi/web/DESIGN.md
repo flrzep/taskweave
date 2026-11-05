@@ -160,7 +160,8 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   Reduced motion keeps the poses without the motion. Under its feet three dots (`#resources`: base, hands, torso), lit
   lime while the running step holds them.
 - **Bubble** (`.bubble`, `#board`; a 2px border in the state colour at 45%, its tail toward the robot): three lines,
-  each one line with an ellipsis, so the band never changes height. The text rule: the bubble reads by the node's name
+  each one line with an ellipsis (a multi-line error joined with ⏎, the whole of it the tooltip), so the band keeps
+  its height while a run goes. The text rule: the bubble reads by the node's name
   and colour, never by the instruction sentence (that is the bubble's tooltip and the node pop-up's text).
   Line 1, 20px 600: the node's name as the canvas draws it, the kind word in front in the kind colour when the name
   does not already say it; amber while paused, coral when failed; `Which mission?` while idle, `Planning` while the
@@ -170,12 +171,15 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   rule that applies to a failed step (`retry ×2`, `replan from Pick`), and on `Done` the cycles (`×3`). At the top
   right two small chips: the step count (`3/12`, a tap on it turns Follow on) and the cycle (`×2`). At its right end
   the controls, 48px: idle, the mission picker (`#mission-select`) and the one button on (`#board-act`: Start, Start at
-  step N, Resume, Retry step N, Run again; `#btn-start` stays in the page, hidden: the button is its wire); active,
-  Pause (Resume takes its place while paused) and Abort (`.danger`, two taps, armed together with the strip's). Up to
+  step N, Resume, Retry step N after a failure, Run again after a success or an abort, Start at step N when a node
+  was picked after the run ended; `#btn-start` stays in the page, hidden: the button is its wire); active,
+  Pause (Resume takes its place while paused; none while planning) and Abort (`.danger`, two taps, armed together with the strip's). Up to
   1000px the controls take a row under the words; on a phone the chips move to line 3's row and the picker and the
-  button share a row, their words cut short. The error, when line 2 shows something else, is for screen readers.
+  button share a row, their words cut short; after a run ended (done, failed, aborted) the phone's band grows so the
+  picker has a row and the button the next. After a reload the picker shows the last run's mission until the operator
+  picks one. The error, when line 2 shows something else, is for screen readers.
 - **Window** (`.window`): the 3D view (`#viewer3d-run`) framed as the robot's window: an inset border in the page
-  colour, the state's lime on its edge while the mission runs. A button at its bottom right (`#window-enlarge`,
+  colour, the state colour on its edge while the mission runs, is paused or is planned. A button at its bottom right (`#window-enlarge`,
   `aria-pressed`) opens it over the canvas, under the band; the same button or Escape closes it. On a phone the
   window is the thumbnail and a tap anywhere on it enlarges it to fill the screen between the strip and the bottom nav.
 - **Run canvas** (`.canvas`, under the band): a toolbar (the legend at the left; Graph / List, Fit and Follow at the
@@ -183,13 +187,13 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   same boxes, lanes and loop wire), in Run mode: no ports, no Fail terminals, no rule nodes. Pan: drag the ground (one
   finger on touch) or the wheel; zoom: Ctrl+wheel or a pinch, 0.4 to 1.5 around the pointer; the graph sits on one
   layer that takes one CSS transform, nodes keep their size in layout units, the pop-up is never scaled and follows its
-  node. **Follow** (a toolbar chip, `aria-pressed`, on at first) keeps the running node, else the start node, centred
+  node. **Follow** (a toolbar chip, `aria-pressed`, on at first) keeps the running node, else the node a failed or aborted run stopped at, else the start node, centred
   and moves there with a 300ms ease when the step changes (none with reduced motion); a pan or a zoom by the operator
   turns it off, and a tap on Follow or on the step chip in the bubble turns it on and recentres. **Fit** zooms the whole
   tree into view, from the top left when it is larger than the viewport, and turns Follow off. The first view of a plan
-  is a fit; when a fit would go under 0.6 (a tree that fits only as tiny chips) it opens at scale 1 on the running
-  node instead, following it. A resize keeps the camera, or recentres the followed node while Follow is on.
-  **List** shows the step list in place of the canvas, for screen readers and a long mission on a phone. Idle, the
+  is a fit; when a fit would go under 0.6 (a tree that fits only as tiny chips) it opens at scale 1 on that followed
+  node instead, following it. Tab onto a node outside the viewport centres it and turns Follow off. A resize keeps the camera, or recentres the followed node while Follow is on.
+  **List** shows the step list in place of the canvas (Fit and Follow disabled), for screen readers and a long mission on a phone. Idle, the
   canvas shows the picked mission's last plan, else its steps from its file, all pending.
 - **Speed override** (`.speed`): in the status bar, a small button "Speed 60 %" (the value in Montserrat 700
   20px; amber with "TEST" while test mode caps it; greyed out without the task handler; on a phone the value only).
@@ -380,7 +384,7 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   filled left to right to its share done; the box with the running step is always open, the others as the operator
   left them (`tw-plan-bands`), else the one with the failed or the start step. The canvas keeps the dotted grid; the
   colour is in the headers and the state, nothing else.
-  The Run tab (graph-run.js) draws the simplified flow on the canvas: nodes 160 × 48 (header 22; 132 × 44 on a phone), 36px apart,
+  The Run tab (graph-run.js) draws the simplified flow on the canvas: nodes 220 × 64 (header 24; 168 × 52 and header 22 on a phone), 64px apart (56 on a phone),
   no ports, no terminals, no rule nodes, headers with the name and the step's number at the right (mono 10px; a box's
   title bar keeps its kind word and a repeat's rule). The only field is the running node's main argument (none on a phone). State: the running node's
   whole body takes its colour (navy text) with a lime ring and the breathing glow; paused the same with an amber ring;

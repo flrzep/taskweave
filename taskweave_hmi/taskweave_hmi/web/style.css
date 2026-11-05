@@ -116,7 +116,8 @@ body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); align-i
 .mission #state::before { display: none; }
 .strip-mission { flex: 1 1 auto; min-width: 0; font: 600 var(--fs-s) var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 body.on-run .strip-mission { display: none; }  /* the band names it */
-/* the step's progress: a line along the strip's bottom edge, in the state colour */
+/* the mission's progress (steps done and the running step's share): a line along the strip's bottom edge, in the
+   state colour */
 .mission .progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; border-radius: 0; background: none; }
 .mission .progress #progress-bar { background: var(--state); }
 .sys { display: flex; align-items: center; gap: var(--sp-3); flex: none; }
@@ -231,7 +232,8 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
 
 /* the bubble: the chips at the top right, line 1 the kind word (its kind colour) and the node's name, line 2 the main
    argument (mono), line 3 what comes next (muted); the controls at its right end (under the words below 1000px, and
-   with the picker). One line each, so the band never changes height. The tail on its left edge points at the robot */
+   with the picker). One line each (a multi-line text joined by app.js oneLine), so the band keeps its height while a
+   run goes (a phone's band grows for an ended run's controls). The tail on its left edge points at the robot */
 .bubble { position: relative; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas: "name chips" "detail controls" "next controls";
   align-content: center; align-items: center; gap: 2px var(--sp-4); padding: var(--sp-2) var(--sp-4); border-radius: var(--r-m);
@@ -274,7 +276,7 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
    right opens it over the canvas, the same button or Escape closes it */
 .window { position: relative; min-width: 0; border-radius: var(--r-m); border: 1px solid var(--border);
   box-shadow: inset 0 0 0 2px var(--surface-page); }
-.bubble.state-running ~ .window { border-color: var(--run-fill); }
+.bubble:is(.state-running, .state-paused, .state-planning) ~ .window { border-color: var(--state); }
 .window .viewer3d { aspect-ratio: auto; height: 100%; }
 .window.enlarged { position: fixed; inset: calc(var(--top-h, 40px) + var(--band)) 0 0 var(--rail); z-index: 5;
   background: var(--viewer-bg); }
@@ -306,6 +308,11 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
   .bubble-chips { font-size: var(--fs-xs); gap: var(--sp-1); }
   .bubble-chips > span { padding: 3px 6px; }
   #mission-select { min-height: var(--tap-min); }
+  /* ended (done, failed, aborted): the band grows so the picker takes its own row and the button the next, nothing
+     cut; running, paused and planning keep the fixed height */
+  .band:has(.bubble:is(.state-succeeded, .state-failed, .state-aborted)) { height: auto; min-height: var(--band); }
+  .bubble:is(.state-succeeded, .state-failed, .state-aborted) .bubble-controls { flex-direction: column; align-items: stretch; }
+  .bubble:is(.state-succeeded, .state-failed, .state-aborted) .bubble-controls > * { flex: none; }
   .window { width: 96px; height: 96px; }
   .window:not(.enlarged) .viewer3d-tools { display: none; }
   .window:not(.enlarged) .window-enlarge { inset: 0; width: auto; height: auto; background: none; }
@@ -383,7 +390,9 @@ main { max-width: var(--content); margin: 0 auto; padding: var(--sp-4) var(--sp-
 @media (min-width: 601px) { .view { gap: var(--sp-4); } }
 /* the Run tab: the window under the strip, no page scroll; the band at the top, the canvas under it takes the rest */
 body.on-run main { max-width: none; padding: 0; }
-.run { display: flex; flex-direction: column; gap: 0; height: calc(100dvh - var(--top-h, 40px)); min-height: 0; }
+/* (the body's bottom padding is the safe area: subtracted, so the page does not scroll on iOS) */
+.run { display: flex; flex-direction: column; gap: 0; height: calc(100dvh - var(--top-h, 40px) - env(safe-area-inset-bottom, 0px));
+       min-height: 0; }
 /* the canvas: its tools (the legend at the left, List, Fit, Follow), then the viewport (graph-run.js) or the list */
 .canvas { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .canvas-tools { display: flex; gap: var(--sp-2); justify-content: flex-end; padding: var(--sp-2) var(--sp-3); }
@@ -392,7 +401,7 @@ body.on-run main { max-width: none; padding: 0; }
 .bubble-chips > span:has(#board-step) { cursor: pointer; }  /* a tap follows the running node (graph-run.js) */
 .canvas-box { flex: 1 1 auto; min-height: 0; display: block; }
 .canvas > .steps { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 var(--sp-4); }
-@media (max-width: 600px) { .run { height: calc(100dvh - var(--top-h, 40px) - var(--nav)); } }
+@media (max-width: 600px) { .run { height: calc(100dvh - var(--top-h, 40px) - var(--nav) - env(safe-area-inset-bottom, 0px)); } }
 
 /* cards */
 .card { background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--r-m); padding: var(--sp-4);

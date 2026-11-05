@@ -166,7 +166,7 @@ function startRunViewer() {
 }
 window.addEventListener('viewer3d-ready', startRunViewer);  // Run is the tab the page opens on
 // the band's window enlarged over the canvas: its button (on a phone it covers the thumbnail, so a tap on the window)
-// opens and closes it, Escape closes it
+// opens and closes it, Escape closes it (not while a manual skill runs: then Escape aborts that skill and nothing else)
 function enlargeWindow(on) {
   $('window-enlarge').closest('.window').classList.toggle('enlarged', on);
   $('window-enlarge').setAttribute('aria-pressed', String(on));
@@ -174,7 +174,7 @@ function enlargeWindow(on) {
   if (on) document.addEventListener('keydown', closeWindowOnEscape);
   else document.removeEventListener('keydown', closeWindowOnEscape);
 }
-function closeWindowOnEscape(e) { if (e.key === 'Escape') enlargeWindow(false); }
+function closeWindowOnEscape(e) { if (e.key === 'Escape' && !state.snapshot?.manual) enlargeWindow(false); }
 $('window-enlarge').addEventListener('click', () => enlargeWindow($('window-enlarge').getAttribute('aria-pressed') !== 'true'));
 
 // ---------- live state ----------
@@ -235,6 +235,7 @@ function renderRun() {
   const pad = snap.pad_mode || 'drive';  // the PS4 pad: drives the base, or jogs one arm's TCP
   $('pad-mode').textContent = pad === 'drive' ? 'pad: drive' : `pad: ${pad} arm`;
   $('pad-mode').className = `chip pad ${pad === 'drive' ? '' : 'jog'}`;
+  pickRunMission();
   const active = renderMission(s);
   updatePreviews();
   const { plan, live } = shownPlan();
@@ -277,11 +278,12 @@ function renderRun() {
 
 // ---------- mission bar ----------
 // In the sticky top bar, on every tab, one slim line. While a mission is active (running, planning, paused): the state
-// badge, the mission's name, a thin progress line of the step along the bar's bottom edge, and Abort (a glyph, two
+// badge, the mission's name, a thin line of the mission's progress along the bar's bottom edge, and Abort (a glyph, two
 // taps, shared with the band's). The step's words are on the Run tab. The picker, Start and Pause are in the Run
 // tab's bubble. Under the bar, Start's answer (while idle) and the last error: it follows the status as before (gone
 // on success, on the next failure a new one), and ✕ hides that error until another comes.
-const missionUi = { dismissed: null };
+// byHand: the operator chose in the picker; runPicked: the picker was set to the last run's mission (pickRunMission)
+const missionUi = { dismissed: null, byHand: false, runPicked: false };
 function renderMission(s) {
   const active = s.state === 'running' || s.state === 'paused';
   // the task handler prepares the plan: running, no step yet, step_status 'planning'
@@ -296,15 +298,21 @@ function renderMission(s) {
   const raw = active ? missionOf(state.snapshot?.plan) || (s.plan_id || '').replace(/-\d+$/, '') : '';
   $('strip-mission').textContent = typeof humanise === 'function' ? humanise(raw) : raw;
   show($('strip-mission'), active && !!raw);
-  show($('current'), active && !!s.step);
+  // the mission's progress: the steps done and the running step's share of the plan's steps (between steps too)
+  const steps = s.step_count || state.snapshot?.plan?.steps.length || 0;
+  show($('current'), active && steps > 0);
   const held = active && s.step ? s.step.resources || [] : [];  // the band's resource dots light up while locked
   document.querySelectorAll('#resources [data-res]').forEach((dot) => dot.classList.toggle('on', held.includes(dot.dataset.res)));
-  if (s.step) $('progress-bar').style.width = `${Math.max(0, Math.min(1, s.step_progress)) * 100}%`;
+  if (active && steps) {
+    const share = Math.max(0, s.step_index) + (s.step ? Math.max(0, Math.min(1, s.step_progress || 0)) : 0);
+    $('progress-bar').style.width = `${Math.min(1, share / steps) * 100}%`;
+  }
   if (active) message($('start-msg'), '');  // its answer has been seen: the bar shows the run now
   const error = s.last_error && s.state !== 'succeeded' ? s.last_error : '';
   $('last-error-text').textContent = error;
   show($('last-error'), !!error && error !== missionUi.dismissed);
   $('btn-pause').disabled = !active;
+  show($('btn-pause'), !planning);  // nothing to pause while the plan is prepared (Abort stays)
   $('btn-pause').textContent = s.state === 'paused' ? 'Resume' : 'Pause';
   $('btn-abort').disabled = !active;
   show($('strip-abort'), active);  // in reach on every tab while a mission runs or is paused
@@ -337,6 +345,26 @@ const board = { error: null, act: null, kind: null };
 $('board-act').addEventListener('click', () => board.act?.());
 // a step that ended without success (where a stopped run stopped)
 const NOT_DONE = ['FAILED', 'REJECTED', 'CANCELED', 'TIMEOUT'];
+// where a failed or aborted run stopped in its plan: the status's step, else the last step that finished without
+// success; -1 when it did not stop (or stopped before a step)
+function stoppedIndex(s, plan, outcomes) {
+  if (s.state !== 'failed' && s.state !== 'aborted') return -1;
+  if (s.step_index >= 0) return s.step_index;
+  const steps = plan?.steps || [];
+  return [...steps.keys()].reverse().find((i) => NOT_DONE.includes(outcomes[steps[i].id]?.outcome)) ?? -1;
+}
+// the step the canvas opens on and Follow (or the band's step chip) centres: the live step, else where a stopped run
+// stopped, else the picked start step, else the first. live: the plan is the run's (outcomes are its outcomes)
+function focusIndex(s, plan, outcomes, live) {
+  const running = (s.state === 'running' || s.state === 'paused') && s.plan_id === plan.plan_id;
+  if (running && s.step_index >= 0) return s.step_index;
+  const stopped = live ? stoppedIndex(s, plan, outcomes) : -1;
+  if (stopped >= 0 && stopped < plan.steps.length) return stopped;
+  const start = plan.steps.findIndex((step) => step.id === state.startStep);
+  return Math.max(0, start);
+}
+// a multi-line text on one line (the band's lines are one line each; the whole text is the tooltip)
+const oneLine = (text) => text.replace(/\s*\n\s*/g, ' ⏎ ');
 // graph-core.js and graph-run.js (the names, the rules) load after this file: draw once more when every script is there
 window.addEventListener('load', () => renderRun());
 // a step's name as the canvas draws it (graph-core.js flowName; its id until that file is there)
@@ -381,7 +409,7 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
     $('btn-start').click();
   };
   const startPicked = picked ? ['Start', start(null)] : null;
-  let count = '', of = '', act = null, colour = '', bad = false;
+  let count = '', of = '', act = null, colour = '', bad = false, tip = s.step?.instruction || '';
   let words = { kind: '', name: '', detail: '', next: '' };
   if (planning) {
     words.name = 'Planning'; words.detail = missionName;
@@ -399,28 +427,32 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
     words = { kind: '', name: 'Done', detail: missionName, next: s.cycle > 1 ? `×${s.cycle}` : '' };
     act = same ? ['Run again', start(null)] : startPicked && [`Start ${picked}`, start(null)];
   } else if ((s.state === 'failed' || s.state === 'aborted') && s.plan_id) {
-    // where it stopped: the status's step, else the last step that finished without success
     const steps = plan?.steps || [];
-    const last = [...steps.keys()].reverse().find((i) => NOT_DONE.includes(outcomes[steps[i].id]?.outcome));
-    const index = at ? at - 1 : last ?? -1;
+    const index = stoppedIndex(s, plan, outcomes);  // where it stopped
     const stopped = s.step || steps[index];
+    tip ||= stopped?.instruction || '';
     count = index >= 0 ? String(index + 1) : '–'; of = total ? `/ ${total}` : '';
     if (s.state === 'failed') {  // the rule that applies to the stopped step (graph-run.js)
       const rule = steps[index] && typeof rules === 'function' ? rules(plan, mission)[index] : null;
       words = { kind: '', name: stopped ? nodeName(stopped) : 'Failed', detail: s.last_error || '',
         next: rule ? failureText(rule) : '' };
       bad = true;
-    } else {
+      act = same && steps[index] ? [`Retry step ${index + 1}`, start(steps[index].id)] : null;
+    } else {  // an abort is a deliberate stop: from the beginning (Retry step N is in the stopped node's pop-up)
       words = { kind: '', name: 'Stopped', detail: stopped ? nodeName(stopped) : '', next: '' };
+      act = same ? ['Run again', start(null)] : null;
     }
-    act = same && index >= 0 ? [`Retry step ${index + 1}`, start(steps[index].id)]
-      : startPicked && [same ? 'Start' : `Start ${picked}`, start(null)];
+    act ||= startPicked && [same ? 'Start' : `Start ${picked}`, start(null)];
   } else {  // idle: the picker and Start
     words.name = 'Which mission?';
     act = startIndex >= 0 ? [`Start at step ${startIndex + 1}`, start(state.startStep)] : startPicked;
   }
+  // a step picked on the canvas after a run ended (the stopped node's pop-up: start here): the button starts there
+  if (ended && startIndex >= 0) {
+    act = [`Start ${same ? '' : `${picked} `}at step ${startIndex + 1}`, start(state.startStep)];
+  }
   if (s.state === 'paused') act = ['Resume', () => $('btn-pause').click()];
-  $('board').title = s.step?.instruction || '';
+  $('board').title = tip;
   $('board-step').textContent = count;
   $('board-total').textContent = of;
   $('board-kind').textContent = words.kind;
@@ -428,7 +460,7 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
   $('board-instruction').textContent = words.name;
   // the name in coral when failed; in the kind colour when no kind word stands in front of it to carry the colour
   $('board-instruction').className = bad ? 'bad' : colour && !words.kind ? `kind-${colour}` : '';
-  $('board-detail').textContent = words.detail;
+  $('board-detail').textContent = oneLine(words.detail);
   $('board-detail').title = words.detail;  // the whole of it, where one line cuts it
   $('board-next').textContent = words.next;
   board.act = act?.[1] || null;
@@ -445,7 +477,7 @@ function renderBoard(s, shown, shownOutcomes, startIndex) {
   $('board-error').classList.toggle('sr-only', s.state !== 'aborted');
   if (error !== board.error) {
     board.error = error;
-    $('board-error').textContent = error;
+    $('board-error').textContent = oneLine(error);
     $('board-error').title = error;  // the whole of it, where one line cuts it
   }
 }
@@ -486,7 +518,7 @@ $('btn-start').addEventListener('click', async () => {
   message($('start-msg'), ok ? `Started ${data.plan_id}${startStep ? ` at ${startStep}` : ''}`
     : (data.message || data.error || 'not started'), !ok);
 });
-$('mission-select').addEventListener('change', () => { state.startStep = null; renderRun(); });
+$('mission-select').addEventListener('change', () => { missionUi.byHand = true; state.startStep = null; renderRun(); });
 
 // ---------- speed override ----------
 // The task handler's global override (1-100 %), shown and set from the top bar on every tab. It is meant for a
@@ -627,6 +659,19 @@ document.addEventListener('keydown', (e) => {
 // run since the task handler started, the plan a start would run now. Clicking a step there makes the next start
 // begin at it (the first cycle only; later cycles run all steps).
 function missionOf(plan) { return plan ? plan.plan_id.replace(/-(\d+|preview)$/, '') : ''; }
+// After a (re)load the picker names the mission the last run ran (else the first one would draw its preview over the
+// run that ended), once, as soon as both the run and that mission's option are there; never after a pick by hand
+function pickRunMission() {
+  const s = state.snapshot?.status;
+  if (missionUi.byHand || missionUi.runPicked || !s?.plan_id) return false;
+  const name = missionOf(state.snapshot.plan) || s.plan_id.replace(/-\d+$/, '');
+  const select = $('mission-select');
+  if (![...select.options].some((option) => option.value === name)) return false;
+  missionUi.runPicked = true;
+  if (select.value === name) return false;
+  select.value = name;
+  return true;
+}
 function shownPlan() {
   const snap = state.snapshot;
   const s = snap.status;
@@ -661,6 +706,7 @@ async function loadMissions() {
   const block = (m) => Object.keys(m.params || {}).length > 0;  // takes parameters: only for other missions to include
   select.replaceChildren(...data.filter((m) => m.valid && !block(m)).map((m) => el('option', { value: m.name, text: `${m.name} — ${m.goal}` })));
   if (current) select.value = current;
+  if (pickRunMission() && state.snapshot) renderRun();
   $('mission-list').replaceChildren(...data.map((m) => {
     const item = el('li', { tabindex: '0', 'data-name': m.name, 'data-find': `${m.name} ${m.goal || ''}`.toLowerCase() },
       el('b', { text: m.name }),
