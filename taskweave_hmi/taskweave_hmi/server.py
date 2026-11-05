@@ -187,8 +187,9 @@ ACTIVE = ('running', 'paused')  # a run is under way (also planning: running wit
 AFTER_JUMP_S = 2.0  # the teach node's default after_jump_s: it refuses a teach this long after a sim clock jump
 START_TIMEOUT_S = 30.0  # start_mission answers once the plan is checked: seconds on a large cell (0.3.1 took minutes)
 # viewer3d-demo.html: the 3D viewer alone, full window, for testing it
-STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'teachtask.js', 'held.js', 'icons.js', 'graph.js', 'record.js',
-                'viewer3d.js', 'teach3d.js', 'style.css', 'viewer3d-demo.html')
+STATIC_FILES = ('app.js', 'robot.js', 'teach.js', 'teachtask.js', 'held.js', 'icons.js', 'graph-core.js',
+                'graph-run.js', 'editor.js', 'record.js', 'viewer3d.js', 'teach3d.js', 'style.css',
+                'viewer3d-demo.html')   # test_static_files.py keeps this in step with index.html
 VENDOR = WEB / 'vendor'  # the 3D view's libraries, served below /vendor/
 MANUAL_SKILL_TIMEOUT_S = 120.0  # work time (sim time x speed override), as the skill's own timeout
 DRIVE_TIMEOUT_S = 300.0  # a drive across the cell
