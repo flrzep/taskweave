@@ -131,23 +131,6 @@ const isLive = (st) => st === 'running' || st === 'paused';
 const isFailed = (st) => st === 'failed' || st === 'rejected';
 const isFinished = (st) => st !== 'pending' && !isLive(st);
 
-// The phases of a plan for the run board's floor (app.js renderPhases): the top-level frames of the mission tree and
-// each run of the mission's own steps between them. A band: {key, name, steps: [index]}.
-function bandsOf(plan, mission) {
-  const root = treeFromPlan(plan, mission);
-  const bands = [];
-  root.children.forEach((node) => {
-    if (node.kind === 'step') {
-      const last = bands[bands.length - 1];
-      if (last?.own) { last.steps.push(node.index); return; }
-      bands.push({ key: `own${node.index}`, name: missionOf(plan), steps: [node.index], own: true });
-      return;
-    }
-    bands.push({ key: node.key, name: node.name, steps: [...node.leaves], include: node.include || '' });
-  });
-  return bands;
-}
-
 function storedBands(mission) {
   try { return (JSON.parse(localStorage.getItem(BANDS_KEY) || '{}') || {})[mission] || {}; } catch (_) { return {}; }
 }

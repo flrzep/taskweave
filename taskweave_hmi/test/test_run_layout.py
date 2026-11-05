@@ -12,3 +12,12 @@ def test_strip_is_one_slim_line():
     assert re.search(r'--strip:\s*40px', CSS)
     assert {'strip-mission', 'strip-abort', 'current', 'progress-bar'} <= page_ids()
     assert not {'mission-run', 'step-instruction', 'step-detail', 'step-meta', 'goal', 'cycle'} & page_ids()
+
+def test_run_tab_is_a_band_over_a_canvas():
+    ids = page_ids()
+    assert {'band', 'canvas', 'board-kind', 'board-instruction', 'board-detail', 'board-next', 'board-act',
+            'mission-select', 'btn-start', 'btn-pause', 'btn-abort', 'resources', 'viewer3d-run', 'window-enlarge'} <= ids
+    assert not {'board-goal', 'board-phases', 'recent', 'recent-title'} & ids
+    run = PAGE[PAGE.index('id="view-run"'):PAGE.index('id="view-missions"')]
+    assert run.index('id="band"') < run.index('id="canvas"')
+    assert re.search(r'--band:\s*200px', CSS)

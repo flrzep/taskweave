@@ -29,7 +29,6 @@
   --sans: "Montserrat", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --cond: var(--sans);  /* one family: where a narrow face was used, Montserrat at the same weight */
   --fs-xs: 12px; --fs-sm: 13px; --fs-s: 14px; --fs-base: 16px; --fs-md: 18px; --fs-lg: 20px; --fs-xl: 24px; --fs-2xl: 30px;
-  --fs-4xl: 60px;  /* the Run tab's run board, read from a few metres */
 
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-12: 48px;
   /* two radii: controls and panels; pills for chips and bars */
@@ -42,6 +41,7 @@
   --rail: 92px;  /* the section rail; on a phone the bottom nav is --nav high */
   --nav: 60px;
   --strip: 40px;  /* the system strip */
+  --band: 200px;  /* the Run tab's band: the robot, its bubble, its window */
   /* a number field's ▲ ▼ (an image cannot take currentColor: the --text-muted value) */
   --spin-arrows: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='16' viewBox='0 0 10 16'%3E%3Cpath d='M5 1 9.5 6.5h-9zM5 15 .5 9.5h9z' fill='%239a9ec8'/%3E%3C/svg%3E");
 }
@@ -121,7 +121,7 @@ body.on-run .strip-mission { display: none; }  /* the band names it */
 .mission .progress #progress-bar { background: var(--state); }
 .sys { display: flex; align-items: center; gap: var(--sp-3); flex: none; }
 /* the strip's Abort: only while a mission is active, so it is in reach on every tab; two taps, shared with the
-   board's (solid red once armed). The stop glyph alone, a square at every width */
+   band's (solid red once armed). The stop glyph alone, a square at every width */
 .strip-abort { flex: none; width: var(--tap-s); padding: 0; }
 .strip-abort svg { width: 14px; height: 14px; flex: none; fill: currentColor; }
 .mission.active #start-msg { display: none; }  /* Start's answer is for idle; it can arrive after the run's status */
@@ -129,7 +129,7 @@ body.on-run .strip-mission { display: none; }  /* the band names it */
 .mission .error { display: flex; align-items: flex-start; gap: var(--sp-2); }
 #last-error-text { flex: 1; min-width: 0; align-self: center; }
 #last-error-close { width: 28px; height: 28px; border: 0; background: none; color: var(--text-muted); }
-body.on-run .mission .error { display: none; }  /* the board says it */
+body.on-run .mission .error { display: none; }  /* the bubble says it */
 @media (max-width: 1000px) { .sys .chip.pad:not(.jog) { display: none; } }  /* the pad mode only while it jogs an arm */
 @media (max-width: 600px) {
   .mission { padding: 0 var(--sp-3) 0; padding-top: env(safe-area-inset-top, 0px); }
@@ -137,63 +137,27 @@ body.on-run .mission .error { display: none; }  /* the board says it */
   .mission #state { min-width: 0; }
   .mission.active #robot { display: none; }  /* the link dot stays: the name gives way, the row keeps one line */
 }
-/* run board: a little robot walks the mission (Run tab). Its floor is the phases (the plan graph's bands, as wide as
-   their steps, the done part filled); it stands where the run is (--p from app.js) and its pose is the state: walking
+/* the band (Run tab, --band high): the robot at the left with the resource dots under its feet, its bubble beside it
+   (the tail toward the robot) and the 3D view at the right as its window. The robot's pose is the state: walking
    while running, frozen mid-stride and sleepy-eyed when paused, looking about while planning, arms up when done,
-   slumped with crossed eyes when failed, flat eyes when aborted, blinking when idle. Its chest light is the state
-   colour. Above it a bubble (its tail over the robot) says what it does and holds the next move as one button. On the
-   Run tab the bar above keeps only the badge and the controls, so the words are not shown twice. */
-.board { --state: var(--idle); --bot-h: 150px; --bot-w: calc(var(--bot-h) * 2 / 3); --p: 0;
-         --bot: #6b7387; --bot-2: #545b6d; --bot-ink: #0d0f15; --bot-eye: #e6fbff; gap: var(--sp-3); padding: var(--sp-4) var(--sp-6) var(--sp-4);
-         background: color-mix(in srgb, var(--state) 6%, var(--surface-card)); transition: background .4s; }
-.board.state-running, .board.state-planning { --state: var(--run-fill); }
-.board.state-paused { --state: var(--warn); }
-.board.state-succeeded { --state: var(--done); }
-.board.state-failed, .board.state-aborted { --state: var(--bad); }
-/* the head: the goal and the cycle; idle, the mission picker in the goal's place; active, Pause and Abort at the right
-   (48px: gloves). The bubble's button is the one way on (Start, Resume, Retry: board-act); #btn-start is its wire */
-.board-head { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; flex-wrap: wrap; }
-.board-goal { flex: 1 1 0; min-width: 120px; font: 600 var(--fs-lg)/1.25 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.board-cycle { flex: none; font: 700 var(--fs-lg)/1 var(--sans); color: var(--text-muted); }
-.board-head #mission-start { display: flex; flex: 1 1 240px; min-width: 0; }
-.board-head:has(#mission-start:not([hidden])) #board-goal { display: none; }
-#btn-start { display: none; }
-#mission-select { flex: 1; min-width: 0; min-height: var(--tap); font-weight: 600; }
-.board-head .mission-controls { display: flex; gap: var(--sp-2); margin-left: auto; }
-.board-head .mission-controls .btn { min-height: var(--tap); padding: 0 var(--sp-5); white-space: nowrap; }
+   slumped with crossed eyes when failed, flat eyes when aborted, blinking when idle; its lights, the bubble's edge and
+   the window's (while running) are the state colour. The bubble (#board) holds the state class, the band reads it. */
+.band { --state: var(--idle); --bot-h: 120px; --bot-w: calc(var(--bot-h) * 2 / 3);
+        --bot: #6b7387; --bot-2: #545b6d; --bot-ink: #0d0f15; --bot-eye: #e6fbff;
+        flex: none; height: var(--band); display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
+        gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); background: var(--surface-card); }
+.band:has(.bubble.state-running), .band:has(.bubble.state-planning) { --state: var(--run-fill); }
+.band:has(.bubble.state-paused) { --state: var(--warn); }
+.band:has(.bubble.state-succeeded) { --state: var(--done); }
+.band:has(.bubble.state-failed), .band:has(.bubble.state-aborted) { --state: var(--bad); }
 
-/* the bubble: the step count big, what the robot does, the next move; its tail points down at the robot */
-/* one height whatever it says (the count, two lines of instruction and one of detail; with an error one line and two):
-   the board does not jump from step to step */
-.board-say { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
-  height: 132px; box-sizing: border-box;
-  gap: var(--sp-2) var(--sp-5); padding: var(--sp-3) var(--sp-5); border-radius: var(--r-m);
-  background: var(--surface-card); border: 2px solid color-mix(in srgb, var(--state) 45%, var(--border));
-  transition: border-color .4s; }
-.board-say::after { content: ""; position: absolute; top: 100%; width: 18px; height: 12px; margin-top: 2px;
-  left: clamp(18px, calc(var(--p) * (100% - var(--bot-w)) + var(--bot-w) / 2 - 9px), calc(100% - 36px));
-  background: color-mix(in srgb, var(--state) 45%, var(--border)); clip-path: polygon(0 0, 100% 0, 50% 100%);
-  transition: left 1.2s ease, background .4s; }
-.board-count { display: flex; align-items: baseline; gap: var(--sp-1); white-space: nowrap; }
-#board-step { font: 700 var(--fs-4xl)/.9 var(--sans); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
-.board-of { font: 600 var(--fs-2xl)/1 var(--cond); color: var(--text-muted); }
-.board-instruction { font: 500 var(--fs-xl)/1.3 var(--sans); display: -webkit-box; -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2; overflow: hidden; }
-.board-instruction:empty { display: none; }
-.board-detail { margin-top: var(--sp-1); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.board-detail:empty { display: none; }
-.board-error { margin-top: var(--sp-1); color: var(--bad); font-weight: 600; overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.board-now { min-width: 0; overflow: hidden; }
-.board-now:has(.board-error:not([hidden])) .board-instruction { -webkit-line-clamp: 1; }  /* the error gets the room */
-.board-act { min-height: var(--tap); padding: 0 var(--sp-6); font-size: var(--fs-md); }
-
-/* the stage: the robot on its floor */
-.board-stage { position: relative; height: calc(var(--bot-h) + 30px); margin-top: var(--sp-2); }
-.board-stage:has(.board-phases.single) { height: calc(var(--bot-h) + 10px); }
-.bot { position: absolute; bottom: 28px; height: var(--bot-h); width: var(--bot-w); overflow: visible;
-  left: calc(var(--p) * (100% - var(--bot-w))); transition: left 1.2s ease; }
-.board-stage:has(.board-phases.single) .bot { bottom: 8px; }
+/* the robot, standing still at the left; under its feet what the step holds (base, hands, torso), lit while locked */
+.band-robot { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-1); min-height: 0; }
+.resources { display: flex; gap: var(--sp-2); }
+.resources i { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--border-strong); }
+.resources i.on { background: var(--run-fill); border-color: var(--run-fill); }
+.bot { flex: none; height: var(--bot-h); width: var(--bot-w); overflow: visible; }
 .bot .b1 { fill: var(--bot); } .bot .b2 { fill: var(--bot-2); } .bot .bi { fill: var(--bot-ink); } .bot .be { fill: var(--bot-eye); }
 /* a comic figure: a big head, a small torso, and head, hands and feet floating apart from it on bendy limbs (round
    strokes that bend as they swing) and a long floppy antenna with the state light at its tip */
@@ -211,41 +175,43 @@ body.on-run .mission .error { display: none; }  /* the board says it */
 .bot-body { transform-origin: 100px 228px; } .bot-head { transform-origin: 100px 156px; }
 .bot-ant { transform-origin: 100px 60px; } .bot-eyes { transform-origin: 100px 106px; }
 /* idle: floats a little, the antenna sways, a blink now and then */
-.state-idle .bot-head { animation: bot-float 3.2s ease-in-out infinite; }
-.state-idle .bot-ant { animation: bot-sway 3.2s ease-in-out -.6s infinite; }
-.state-idle .bot-eyes { animation: bot-blink 5s infinite; }
+.band:has(.bubble.state-idle) .bot-head { animation: bot-float 3.2s ease-in-out infinite; }
+.band:has(.bubble.state-idle) .bot-ant { animation: bot-sway 3.2s ease-in-out -.6s infinite; }
+.band:has(.bubble.state-idle) .bot-eyes { animation: bot-blink 5s infinite; }
 /* walking (running), and the same walk frozen mid-stride (paused): limbs swing and bend, the head lags the body, the
    antenna flops behind */
-.state-running .bot-leg-l, .state-paused .bot-leg-l { animation: bot-leg .8s ease-in-out infinite; }
-.state-running .bot-leg-r, .state-paused .bot-leg-r { animation: bot-leg .8s ease-in-out -.4s infinite; }
-.state-running .bot-leg-l .bot-limb, .state-paused .bot-leg-l .bot-limb { animation: bot-bend-leg-l .8s ease-in-out infinite; }
-.state-running .bot-leg-r .bot-limb, .state-paused .bot-leg-r .bot-limb { animation: bot-bend-leg-r .8s ease-in-out -.4s infinite; }
-.state-running .bot-arm-l, .state-paused .bot-arm-l { animation: bot-arm-l .8s ease-in-out -.4s infinite; }
-.state-running .bot-arm-r, .state-paused .bot-arm-r { animation: bot-arm-r .8s ease-in-out infinite; }
-.state-running .bot-arm-l .bot-limb, .state-paused .bot-arm-l .bot-limb { animation: bot-bend-arm-l .8s ease-in-out -.4s infinite; }
-.state-running .bot-arm-r .bot-limb, .state-paused .bot-arm-r .bot-limb { animation: bot-bend-arm-r .8s ease-in-out infinite; }
-.state-running .bot-all, .state-paused .bot-all { animation: bot-bob .4s ease-in-out infinite; }
-.state-running .bot-head, .state-paused .bot-head { animation: bot-bob .4s ease-in-out -.12s infinite; }
-.state-running .bot-ant, .state-paused .bot-ant { animation: bot-flop .8s ease-in-out -.2s infinite; }
-.state-running .bot-shadow { animation: bot-shadow .4s ease-in-out infinite; }
-.state-paused .bot *, .state-paused .bot-all { animation-play-state: paused; }
-.state-paused .bot-eyes { transform: scaleY(.3); }
+.band:has(.bubble:is(.state-running, .state-paused)) .bot-leg-l { animation: bot-leg .8s ease-in-out infinite; }
+.band:has(.bubble:is(.state-running, .state-paused)) .bot-leg-r { animation: bot-leg .8s ease-in-out -.4s infinite; }
+.band:has(.bubble:is(.state-running, .state-paused)) .bot-leg-l .bot-limb { animation: bot-bend-leg-l .8s ease-in-out infinite; }
+.band:has(.bubble:is(.state-running, .state-paused)) .bot-leg-r .bot-limb { animation: bot-bend-leg-r .8s ease-in-out -.4s infinite; }
+.band:has(.bubble:is(.state-running, .state-paused)) .bot-arm-l { animation: bot-arm-l .8s ease-in-out -.4s infinite; }
+.band:has(.bubble:is(.state-running, .state-paused)) .bot-arm-r { animation: bot-arm-r .8s ease-in-out infinite; }
+.band:has(.bubble:is(.state-running, .state-paused)) .bot-arm-l .bot-limb { animation: bot-bend-arm-l .8s ease-in-out -.4s infinite; }
+.band:has(.bubble:is(.state-running, .state-paused)) .bot-arm-r .bot-limb { animation: bot-bend-arm-r .8s ease-in-out infinite; }
+.band:has(.bubble:is(.state-running, .state-paused)) .bot-all { animation: bot-bob .4s ease-in-out infinite; }
+.band:has(.bubble:is(.state-running, .state-paused)) .bot-head { animation: bot-bob .4s ease-in-out -.12s infinite; }
+.band:has(.bubble:is(.state-running, .state-paused)) .bot-ant { animation: bot-flop .8s ease-in-out -.2s infinite; }
+.band:has(.bubble.state-running) .bot-shadow { animation: bot-shadow .4s ease-in-out infinite; }
+.band:has(.bubble.state-paused) .bot * { animation-play-state: paused; }
+.band:has(.bubble.state-paused) .bot-eyes { transform: scaleY(.3); }
 /* planning: looks about, the antenna wiggles, the light blinks */
-.state-planning .bot-eyes { animation: bot-look 1.6s ease-in-out infinite; }
-.state-planning .bot-ant { animation: bot-flop .5s ease-in-out infinite; }
-.state-planning .bot-light { animation: bot-light .8s steps(2) infinite; }
+.band:has(.bubble.state-planning) .bot-eyes { animation: bot-look 1.6s ease-in-out infinite; }
+.band:has(.bubble.state-planning) .bot-ant { animation: bot-flop .5s ease-in-out infinite; }
+.band:has(.bubble.state-planning) .bot-light { animation: bot-light .8s steps(2) infinite; }
 /* done: arms up, a few hops */
-.state-succeeded .bot-arm-l { transform: rotate(112deg); } .state-succeeded .bot-arm-r { transform: rotate(-112deg); }
-.state-succeeded .bot-all { animation: bot-hop .5s ease-out 3; }
-.state-succeeded .bot-ant { animation: bot-flop .5s ease-out 3; }
-.state-succeeded .bot-shadow { animation: bot-shadow .5s ease-out 3; }
+.band:has(.bubble.state-succeeded) .bot-arm-l { transform: rotate(112deg); }
+.band:has(.bubble.state-succeeded) .bot-arm-r { transform: rotate(-112deg); }
+.band:has(.bubble.state-succeeded) .bot-all { animation: bot-hop .5s ease-out 3; }
+.band:has(.bubble.state-succeeded) .bot-ant { animation: bot-flop .5s ease-out 3; }
+.band:has(.bubble.state-succeeded) .bot-shadow { animation: bot-shadow .5s ease-out 3; }
 /* failed: the head sinks and tips, crossed eyes, the antenna droops; aborted: flat eyes, the antenna half down */
-.state-failed .bot-head { transform: translate(6px, 12px) rotate(14deg); }
-.state-failed .bot-body { transform: translateY(4px); }
-.state-failed .bot-ant { transform: rotate(70deg); }
-.state-failed .bot-eyes { display: none; } .state-failed .bot-x { display: inline; }
-.state-aborted .bot-eyes { transform: scaleY(.15); }
-.state-aborted .bot-ant { transform: rotate(40deg); }
+.band:has(.bubble.state-failed) .bot-head { transform: translate(6px, 12px) rotate(14deg); }
+.band:has(.bubble.state-failed) .bot-body { transform: translateY(4px); }
+.band:has(.bubble.state-failed) .bot-ant { transform: rotate(70deg); }
+.band:has(.bubble.state-failed) .bot-eyes { display: none; }
+.band:has(.bubble.state-failed) .bot-x { display: inline; }
+.band:has(.bubble.state-aborted) .bot-eyes { transform: scaleY(.15); }
+.band:has(.bubble.state-aborted) .bot-ant { transform: rotate(40deg); }
 @keyframes bot-blink { 0%, 93%, 100% { transform: none; } 96% { transform: scaleY(.1); } }
 @keyframes bot-float { 0%, 100% { transform: none; } 50% { transform: translateY(-4px); } }
 @keyframes bot-sway { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(8deg); } }
@@ -263,36 +229,87 @@ body.on-run .mission .error { display: none; }  /* the board says it */
 @keyframes bot-hop { 0%, 100% { transform: none; } 40% { transform: translateY(-16px); } }
 @keyframes bot-shadow { 0%, 100% { transform: none; } 45% { transform: scaleX(.8); } }
 
-/* the floor: one bar per phase, as wide as its steps, the done part filled; the current one in the state colour */
-.board-phases { position: absolute; inset: auto 0 0 0; display: flex; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
-.board-phases li { flex: var(--steps) 1 0; min-width: 0; display: grid; gap: var(--sp-1); }
-.board-phases .ph-bar { height: 8px; border-radius: var(--r-pill); overflow: hidden;
-  background: color-mix(in srgb, var(--text) 10%, var(--surface-card)); }
-.board-phases .ph-bar i { display: block; height: 100%; width: var(--done-part); background: var(--done); border-radius: inherit;
-  transition: width .6s ease; }
-.board-phases li.now .ph-bar i { background: var(--state); }
-.board-phases li.failed .ph-bar i { background: var(--bad); }
-.board-phases li.failed .ph-bar { box-shadow: inset 0 0 0 2px var(--bad); }  /* also when nothing was done */
-.board-phases li.failed .name { color: var(--bad); }
-.board-phases .name { display: flex; gap: var(--sp-2); font-size: var(--fs-s); color: var(--text-muted); min-width: 0; }
-.board-phases .name span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.board-phases .name b { flex: none; margin-left: auto; font: 600 var(--fs-s) var(--cond); color: var(--text); }
-.board-phases li.now .name { color: var(--text); font-weight: 600; }
-.board-phases.single .name { display: none; }
-@media (max-width: 600px) {
-  .board { --bot-h: 96px; padding: var(--sp-3) var(--sp-4); }
-  .board-goal { font-size: var(--fs-md); }
-  .board-head .mission-controls { margin-left: 0; flex: 1 1 100%; }
-  .board-head .mission-controls .btn { flex: 1; padding: 0 var(--sp-3); }
-  .board-say { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; height: 200px;
-               padding: var(--sp-3) var(--sp-4); gap: var(--sp-2) var(--sp-3); }
-  .board-say:not(:has(.board-act:not([hidden]))) { grid-template-rows: minmax(0, 1fr); }
-  .board-act { grid-column: 1 / -1; }
-  #board-step { font-size: 44px; }  /* between --fs-2xl and --fs-4xl: the only use */
-  .board-of { font-size: var(--fs-xl); }
-  .board-instruction { font-size: var(--fs-lg); -webkit-line-clamp: 3; }
-  .board-phases .name b { display: none; }
+/* the bubble: the chips at the top right, line 1 the kind word (its kind colour) and the node's name, line 2 the main
+   argument (mono), line 3 what comes next (muted); the controls at its right end (under the words below 1000px, and
+   with the picker). One line each, so the band never changes height. The tail on its left edge points at the robot */
+.bubble { position: relative; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name chips" "detail controls" "next controls";
+  align-content: center; align-items: center; gap: 2px var(--sp-4); padding: var(--sp-2) var(--sp-4); border-radius: var(--r-m);
+  background: color-mix(in srgb, var(--state) 6%, var(--surface-card));
+  border: 2px solid color-mix(in srgb, var(--state) 45%, var(--border)); transition: border-color .4s, background .4s; }
+/* the picker shown (no mission active): the controls take a row of their own under the words */
+.bubble:has(#mission-start:not([hidden])) { grid-template-areas: "name chips" "detail detail" "next next" "controls controls"; }
+.bubble::after { content: ""; position: absolute; right: 100%; top: var(--sp-6); width: 12px; height: 18px; margin-right: 2px;
+  background: color-mix(in srgb, var(--state) 45%, var(--border)); clip-path: polygon(100% 0, 100% 100%, 0 50%);
+  transition: background .4s; }
+.bubble-chips { grid-area: chips; display: flex; gap: var(--sp-2); justify-self: end; font: 600 var(--fs-sm)/1 var(--sans); }
+.bubble-chips > span { padding: 4px 8px; border-radius: var(--r-pill); background: var(--surface-field); white-space: nowrap; }
+.bubble-chips > span:has(#board-step:empty), #board-cycle:empty { display: none; }
+.board-of { margin-left: 3px; color: var(--text-muted); }
+.bubble-name { grid-area: name; display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0;
+  font: 600 var(--fs-lg)/1.25 var(--sans); white-space: nowrap; }
+#board-kind { flex: none; color: var(--k); }
+#board-kind:empty { display: none; }
+#board-instruction { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: inherit; }
+.bubble.state-paused #board-instruction { color: var(--warn); }
+#board-instruction.bad { color: var(--bad); }
+#board-detail { grid-area: detail; }
+#board-next { grid-area: next; font-size: var(--fs-sm); }
+#board-error { grid-area: next; color: var(--bad); font-size: var(--fs-sm); font-weight: 600; }
+/* white-space: pre keeps the two spaces between a key and its value ("to  bin_1/place") */
+#board-detail, #board-next, #board-error { min-width: 0; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+#board-detail:empty, #board-next:empty { display: none; }
+/* an error shown (not failed: there it is line 2) takes line 3's place */
+.bubble:has(#board-error:not([hidden], .sr-only)) #board-next { display: none; }
+/* the controls (48px: gloves): idle, the mission picker and the bubble's button (Start, Resume, Retry: board-act;
+   #btn-start is its wire); active, Pause and Abort */
+.bubble-controls { grid-area: controls; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.bubble-controls #mission-start { display: flex; flex: 1; min-width: 0; }
+#btn-start { display: none; }
+#mission-select { flex: 1; min-width: 0; min-height: var(--tap); font-weight: 600; }
+.bubble-controls .mission-controls { display: flex; gap: var(--sp-2); }
+.bubble.state-paused #btn-pause { display: none; }  /* the bubble's button says Resume */
+.bubble-controls .btn { min-height: var(--tap); padding: 0 var(--sp-5); white-space: nowrap; }
+
+/* the window: the 3D view framed in the band (an inset edge, the state light while running); Enlarge at its bottom
+   right opens it over the canvas, the same button or Escape closes it */
+.window { position: relative; min-width: 0; border-radius: var(--r-m); border: 1px solid var(--border);
+  box-shadow: inset 0 0 0 2px var(--surface-page); }
+.bubble.state-running ~ .window { border-color: var(--run-fill); }
+.window .viewer3d { aspect-ratio: auto; height: 100%; }
+.window.enlarged { position: fixed; inset: calc(var(--top-h, 40px) + var(--band)) 0 0 var(--rail); z-index: 5;
+  background: var(--viewer-bg); }
+/* an .icon button, on the 3D view's glass like its tools */
+.window .window-enlarge { position: absolute; right: var(--sp-2); bottom: var(--sp-2); z-index: 2; padding: 0; border: 0;
+  background: var(--viewer-tools); }
+.window-enlarge svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.window .window-enlarge[aria-pressed="true"] { background: var(--brand); color: var(--on-brand); }
+@media (max-width: 1000px) {
+  :root { --band: 180px; }
+  .band { grid-template-columns: auto minmax(0, 3fr) minmax(0, 2fr); }
+  .bubble { grid-template-areas: "name chips" "detail detail" "next next" "controls controls"; }
 }
+/* a phone: the robot 80px, the window a thumbnail at the bubble's right (a tap anywhere on it enlarges it: the button
+   covers it), enlarged it fills the screen between the strip and the bottom nav */
+@media (max-width: 600px) {
+  :root { --band: 150px; }
+  .band { --bot-h: 80px; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3);
+          align-items: center; }
+  .band-robot .resources { gap: var(--sp-1); }
+  .bubble { padding: var(--sp-1) var(--sp-2); column-gap: var(--sp-2); }
+  .bubble::after { top: var(--sp-4); }
+  .bubble-name { font-size: var(--fs-md); }
+  /* the picker and the button share the row; long words are cut short */
+  .bubble-controls > *, .bubble-controls .btn { flex: 1 1 0; min-width: 0; }
+  .bubble-controls .btn { display: block; padding: 0 var(--sp-2); min-height: var(--tap-min); overflow: hidden; text-overflow: ellipsis; }
+  .bubble-chips { font-size: var(--fs-xs); gap: var(--sp-1); }
+  .bubble-chips > span { padding: 3px 6px; }
+  #mission-select { min-height: var(--tap-min); }
+  .window { width: 96px; height: 96px; }
+  .window:not(.enlarged) .viewer3d-tools { display: none; }
+  .window:not(.enlarged) .window-enlarge { inset: 0; width: auto; height: auto; background: none; }
+  .window:not(.enlarged) .window-enlarge svg { display: none; }
+  .window.enlarged { inset: var(--top-h, 40px) 0 calc(var(--nav) + env(safe-area-inset-bottom, 0px)) 0; width: auto; height: auto; }
 }
 
 @media (pointer: coarse), (max-width: 600px) {  /* the ✕ grows to a touch target into the message's padding */
@@ -352,39 +369,23 @@ body.on-run .mission .error { display: none; }  /* the board says it */
 @media (max-width: 600px) { .manual-text { white-space: normal; overflow-wrap: anywhere; } }  /* the target matters more than one line */
 
 main { max-width: var(--content); margin: 0 auto; padding: var(--sp-4) var(--sp-4) var(--sp-12); }
-/* the Run tab's workspace: one column (board, 3D view, plan, recent steps) up to 1179px; from 1180px two, 7 : 5, the
-   board over the plan at the left, the 3D view over the recent steps at the right, and the page as wide as 1600px */
-.run-side { display: contents; }
-#board { order: 1; } #viewer3d-run { order: 2; } .run-plan { order: 3; } .run-recent { order: 4; }
 @media (min-width: 1180px) {
-  body.on-run main { max-width: 1600px; padding: var(--sp-5) var(--sp-6) var(--sp-12); }
-  .run-grid { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); grid-template-areas: "board side" "plan side";
-              grid-template-rows: auto 1fr;  /* a taller side column stretches the plan's row, not the board's */
-              align-items: start; gap: var(--sp-5); }
-  #board { grid-area: board; } .run-plan { grid-area: plan; }
-  /* the side columns of Run and Robot: the 3D view stays in sight while the page scrolls, never taller than the window
-     (on a short screen the column scrolls on its own) */
-  .run-side, .robot-side { grid-area: side; display: grid; gap: var(--sp-5); min-width: 0; position: sticky;
-                           top: calc(var(--top-h, 76px) + var(--sp-5)); max-height: calc(100dvh - var(--top-h, 76px) - 2 * var(--sp-5));
-                           overflow-y: auto; overscroll-behavior: contain;
-                           padding: 6px; margin: -6px; }  /* room for focus rings (3px + 2px offset) inside the scroll box */
-  #viewer3d-run { aspect-ratio: 16 / 11; }
+  /* the Robot tab's side column: the 3D view stays in sight while the page scrolls, never taller than the window (on a
+     short screen the column scrolls on its own) */
+  .robot-side { grid-area: side; display: grid; gap: var(--sp-5); min-width: 0; position: sticky;
+                top: calc(var(--top-h, 76px) + var(--sp-5)); max-height: calc(100dvh - var(--top-h, 76px) - 2 * var(--sp-5));
+                overflow-y: auto; overscroll-behavior: contain;
+                padding: 6px; margin: -6px; }  /* room for focus rings (3px + 2px offset) inside the scroll box */
 }
-/* recent steps: the last finished ones of this run, newest first: a mark (a neutral check, ! red, ↻ amber for a retry),
-   the step's instruction and command, and when it ended (s since the run's clock started) */
-.recent { list-style: none; margin: 0; padding: 0; display: grid; }
-.recent li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: var(--sp-2) var(--sp-3); align-items: baseline;
-             padding: var(--sp-2) 0; border-top: 1px solid var(--border); font-size: var(--fs-s); }
-.recent li:first-child { border-top: 0; }
-.recent .mark { font-weight: 700; color: var(--done); text-align: center; }
-.recent .mark.bad { color: var(--bad); } .recent .mark.warn { color: var(--warn); }
-.recent .what { min-width: 0; overflow-wrap: anywhere; }
-.recent .what small { display: block; color: var(--text-muted); font-size: var(--fs-sm); }
-.recent time { font: var(--fs-sm) var(--mono); color: var(--text-muted); white-space: nowrap; }
-.recent .empty { display: block; color: var(--text-muted); border-top: 0; }
 .view { display: grid; gap: var(--sp-3); min-width: 0; }
 .view > *, .card > * { min-width: 0; }
 @media (min-width: 601px) { .view { gap: var(--sp-4); } }
+/* the Run tab: the window under the strip, no page scroll; the band at the top, the canvas under it takes the rest */
+body.on-run main { max-width: none; padding: 0; }
+.run { display: flex; flex-direction: column; gap: 0; height: calc(100dvh - var(--top-h, 40px)); min-height: 0; }
+.canvas { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; align-content: start; gap: var(--sp-3);
+          padding: var(--sp-3) var(--sp-4); }
+@media (max-width: 600px) { .run { height: calc(100dvh - var(--top-h, 40px) - var(--nav)); } }
 
 /* cards */
 .card { background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--r-m); padding: var(--sp-4);
@@ -1016,8 +1017,8 @@ button.pg-band:hover { background: var(--surface-hover); }
 @media (prefers-reduced-motion: reduce) {
   #progress-bar, .card.status, .card.status::before, .mission, .mission::before { transition: none; }
   .pg-chip.state-running, .pg-wire.now { animation: none; }
-  .bot, .bot g, .board-say::after { transition: none; }
-  .board .bot *, .board .bot-all { animation: none !important; }  /* the poses stay, without the motion */
+  .bot g, .bot-light, .bubble, .bubble::after { transition: none; }
+  .band .bot * { animation: none !important; }  /* the poses stay, without the motion */
 }
 
 /* ---- Program tab: the mission graph editor (editor.js). The head with the tools, the canvas (scrolls both ways) and

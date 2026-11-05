@@ -33,7 +33,7 @@
 <div class="top">
 <!-- the system strip, on every tab: one 40px line, left to right
        link dot + robot name | state badge | mission name (hidden on the Run tab: the band names it) | Abort (a glyph,
-       only while a mission is active; two taps, as the board's) | Speed | pad mode
+       only while a mission is active; two taps, the same control as the band's) | Speed | pad mode
      and along its bottom edge the mission's progress (#current). The step's words are not here: the Run tab's band
      says them. Under the strip, small: Start's answer and the last error -->
 <header id="mission" class="mission" role="group" aria-label="Robot and mission">
@@ -80,36 +80,15 @@
 
 <main>
   <!-- RUN -->
-  <!-- a workspace on a laptop (1180px and wider): the board and the plan at the left, the 3D view and the recent steps
-       at the right; narrower, one column: board, 3D view, plan, recent steps -->
-  <section id="view-run" class="view run-grid">
-    <!-- the run board: a robot walks the mission (its floor is the phases, it stands where the run is), says what it
-         does in a bubble and offers the next move there (Start, Resume, Retry, Run again); app.js renderBoard -->
-    <section id="board" class="card board state-idle" aria-label="Mission status">
-      <!-- the head: the goal and the cycle; idle, the mission picker instead of the goal; active, Pause and Abort -->
-      <div class="board-head">
-        <b id="board-goal" class="board-goal"></b>
-        <span id="board-cycle" class="board-cycle"></span>
-        <div id="mission-start" class="mission-start">
-          <select id="mission-select" aria-label="Mission to run"></select>
-          <button id="btn-start" class="btn small primary" tabindex="-1" aria-hidden="true">Start</button>
-        </div>
-        <div id="mission-controls" class="mission-controls" hidden>
-          <button id="btn-pause" class="btn" disabled>Pause</button>
-          <button id="btn-abort" class="btn danger" disabled>Abort</button>
-        </div>
-      </div>
-      <span id="board-state" class="sr-only" aria-live="polite">idle</span>
-      <div class="board-say">
-        <div class="board-count"><span id="board-step">–</span><span id="board-total" class="board-of"></span></div>
-        <div class="board-now">
-          <div id="board-instruction" class="board-instruction" aria-live="polite"></div>
-          <div id="board-detail" class="board-detail"></div>
-          <div id="board-error" class="board-error" role="alert" hidden></div>
-        </div>
-        <button id="board-act" class="btn primary board-act" type="button" hidden></button>
-      </div>
-      <div class="board-stage">
+  <!-- the window under the strip, no page scroll: the band at the top (the robot, its bubble, the 3D view as its
+       window), the mission's canvas under it taking the rest -->
+  <section id="view-run" class="view run">
+    <!-- the band: the robot stands at the left with the resource dots under its feet, says in a bubble what it does
+         (the kind word and the node's name, the main argument, what comes next) and offers the next move there
+         (Start, Resume, Retry, Run again; Pause and Abort while active); at the right the 3D view, the robot's window,
+         which Enlarge opens over the canvas. app.js renderBoard -->
+    <section id="band" class="band" aria-label="Mission status">
+      <div class="band-robot">
         <svg class="bot" viewBox="0 0 200 300" aria-hidden="true">
           <ellipse class="bot-shadow" cx="100" cy="294" rx="50" ry="4.5"/>
           <g class="bot-all">
@@ -133,26 +112,50 @@
             </g>
           </g>
         </svg>
-        <ol id="board-phases" class="board-phases" aria-label="Phases"></ol>
+        <!-- what the running step holds: lit while locked (app.js renderMission, from step.resources) -->
+        <span id="resources" class="resources" role="group" aria-label="What the step holds">
+          <i data-res="base" role="img" aria-label="base" title="base"></i><i data-res="hands" role="img" aria-label="hands" title="hands"></i><i data-res="torso" role="img" aria-label="torso" title="torso"></i>
+        </span>
+      </div>
+      <!-- the bubble (its state class: state-idle, state-running, ...): the step and cycle chips at the top right, the
+           kind word and the node's name, the main argument, what comes next; the controls at its right end -->
+      <div id="board" class="bubble state-idle">
+        <div class="bubble-chips"><span><span id="board-step"></span><span id="board-total" class="board-of"></span></span><span id="board-cycle"></span></div>
+        <div class="bubble-name"><span id="board-kind"></span><b id="board-instruction" aria-live="polite"></b></div>
+        <div id="board-detail" class="mono"></div>
+        <div id="board-next" class="muted"></div>
+        <div id="board-error" role="alert" hidden></div>
+        <span id="board-state" class="sr-only" aria-live="polite">idle</span>
+        <!-- idle, the mission picker; the bubble's button is the one way on (Start, Resume, Retry: board-act, #btn-start
+             is its wire); active, Pause and Abort (48px: gloves) -->
+        <div class="bubble-controls">
+          <div id="mission-start" class="mission-start">
+            <select id="mission-select" aria-label="Mission to run"></select>
+            <button id="btn-start" class="btn small primary" tabindex="-1" aria-hidden="true">Start</button>
+          </div>
+          <button id="board-act" class="btn primary" type="button" hidden></button>
+          <div id="mission-controls" class="mission-controls" hidden>
+            <button id="btn-pause" class="btn" disabled>Pause</button>
+            <button id="btn-abort" class="btn danger" disabled>Abort</button>
+          </div>
+        </div>
+      </div>
+      <div class="window">
+        <div id="viewer3d-run" class="viewer3d" role="region" aria-label="3D view: the robot live in its cell"></div>
+        <button id="window-enlarge" class="icon window-enlarge" type="button" aria-pressed="false" aria-label="Enlarge the 3D view" title="Enlarge (Esc closes)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>
       </div>
     </section>
 
-    <div class="run-side">
-      <div id="viewer3d-run" class="viewer3d" role="region" aria-label="3D view: the robot live in its cell"></div>
-      <section class="card run-recent" aria-labelledby="recent-title">
-        <h2 id="recent-title" class="label">Recent steps</h2>
-        <ol id="recent" class="recent" role="list"></ol>
-      </section>
-    </div>
-
-    <div class="card run-plan">
+    <!-- the mission under the band: the plan as a graph or a list -->
+    <section id="canvas" class="canvas">
       <div class="row between"><div class="label">Plan</div>
         <div id="plan-view" class="segmented" role="group" aria-label="Plan view">
           <button data-view="graph" aria-pressed="true">Graph</button><button data-view="list" aria-pressed="false">List</button>
         </div></div>
       <div id="plan-graph" class="graph-box"></div>
       <ol id="plan" class="steps" hidden><li class="muted">No plan yet</li></ol>
-    </div>
+    </section>
   </section>
 
   <!-- MISSIONS -->
