@@ -2,6 +2,7 @@
 a band over a canvas."""
 import re
 from pathlib import Path
+
 from test_page_ids import page_ids
 
 WEB = Path(__file__).resolve().parents[1] / 'taskweave_hmi' / 'web'
@@ -16,7 +17,8 @@ def test_strip_is_one_slim_line():
 def test_run_tab_is_a_band_over_a_canvas():
     ids = page_ids()
     assert {'band', 'canvas', 'board-kind', 'board-instruction', 'board-detail', 'board-next', 'board-act',
-            'mission-select', 'btn-start', 'btn-pause', 'btn-abort', 'resources', 'viewer3d-run', 'window-enlarge'} <= ids
+            'mission-select', 'btn-start', 'btn-pause', 'btn-abort', 'resources', 'viewer3d-run',
+            'window-enlarge'} <= ids
     assert not {'board-goal', 'board-phases', 'recent', 'recent-title'} & ids
     run = PAGE[PAGE.index('id="view-run"'):PAGE.index('id="view-missions"')]
     assert run.index('id="band"') < run.index('id="canvas"')
