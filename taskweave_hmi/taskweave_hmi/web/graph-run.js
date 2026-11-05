@@ -394,7 +394,8 @@ function renderGraph() {
     renderHead: (frame) => frameHead(frame, info.get(frame), true, toggle(frame), snap) };
   const toggle = (frame) => () => { storeBand(missionName, frame.key, !isOpen(frame)); renderGraph(); };
   const sheetScroll = box.querySelector('.pg-sheet')?.scrollTop ?? 0;  // the sheet is rebuilt every second: keep its place
-  const stripScroll = box.querySelector('.pg')?.scrollLeft ?? 0;  // and the strip its scroll
+  const oldStrip = box.querySelector('.pg');
+  const stripScroll = oldStrip?.scrollLeft ?? 0;  // and the strip its scroll
   const layout = layoutGraph(tree, ctx);
   const drawn = drawGraph(layout, ctx);
   const wrap = div('pg', drawn.node);
@@ -421,20 +422,23 @@ function renderGraph() {
   }
   box.replaceChildren(wrap, legend(plan, events, drawn.replans > 0));
   // the strip keeps its scroll. It centres the running (else the start) node when that step changes; a new width (a
-  // resize, a rotation) centres it again only while the user has not scrolled the strip since it was last set here
+  // resize, a rotation; not a scrollbar coming and going, under 24 px) centres it again only while the user has not
+  // scrolled the strip since it was last set here (a scroll event, or a position that differs at this rebuild: the
+  // event of a scroll just before it may not have fired yet)
+  if (oldStrip && view.setScroll !== undefined && Math.abs(stripScroll - view.setScroll) > 1) view.userScrolled = true;
   const setStrip = (x) => { wrap.scrollLeft = x; view.setScroll = wrap.scrollLeft; };  // as set here (clamped)
   setStrip(stripScroll);
   wrap.addEventListener('scroll', () => { if (Math.abs(wrap.scrollLeft - view.setScroll) > 1) view.userScrolled = true; }, { passive: true });
   const focusIdx = [states.findIndex(isLive), plan.steps.findIndex((s) => s.id === state.startStep)].find((i) => i >= 0) ?? -1;
   const focusKey = focusIdx >= 0 ? `${plan.plan_id}:${focusIdx}` : null;
-  const widthChanged = view.centredWidth !== wrap.clientWidth;
+  const widthChanged = view.centredWidth === undefined || Math.abs(view.centredWidth - wrap.clientWidth) >= 24;
   if (focusKey && (view.centred !== focusKey || (widthChanged && !view.userScrolled))) {
     const n = layout.items.get(layout.owner.get(plan.steps[focusIdx].id));
     if (n) setStrip(Math.max(0, n.cx - wrap.clientWidth / 2));
     view.centred = focusKey;
     view.userScrolled = false;
   }
-  view.centredWidth = wrap.clientWidth;
+  if (widthChanged) view.centredWidth = wrap.clientWidth;
   const sheet = box.querySelector('.pg-sheet');
   if (sheet) sheet.scrollTop = sheetScroll;
   const pop = box.querySelector('.pg-pop');

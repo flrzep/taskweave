@@ -694,6 +694,15 @@ function spotAfterSelection() {
   return { list: 'steps', index: (ed.mission.steps || []).length };
 }
 function paletteAtSelection() {
+  // a block's or lane's title bar has the focus: at the start inside it (an empty one gets its first step); an
+  // include's steps are its own mission's, not editable here
+  const head = document.activeElement?.closest?.('#ed-canvas .pg-band[data-path]');
+  if (head && !head.classList.contains('linked') && !head.classList.contains('include')) {
+    const path = head.dataset.path;
+    const block = nodeAt(ed.mission, path);
+    const list = block?.parallel ? (block.parallel.length ? `${path}/parallel/0/steps` : null) : `${path}/steps`;
+    if (list) { openPalette({ list, index: 0 }, head.offsetLeft + 16, head.offsetTop + head.offsetHeight + 8); return; }
+  }
   const spot = spotAfterSelection();
   const near = ed.spots?.find((s) => s.list === spot.list && s.index === spot.index);
   openPalette(spot, near ? near.x + 16 : 40, near ? near.y - 20 : 40);
@@ -763,6 +772,7 @@ function freshId(step, more = []) {
 }
 function openRuleMenu(node, port) {
   closeMenu();
+  ed.menuReturn = port.closest('.pg-node') || port;  // Escape gives the keyboard back to it
   const step = node.step;
   const menu = div('ed-menu');
   menu.setAttribute('role', 'menu');
@@ -792,7 +802,19 @@ function openRuleMenu(node, port) {
   ed.menu = menu;
   menu.querySelector('button')?.focus();
 }
-function closeMenu() { ed.menu?.remove(); ed.menu = null; }
+// the rule menu closes; a menu that was open spends a pending reveal (a resize while it was open must not scroll the
+// canvas back to Start at the next draw)
+function closeMenu() { if (ed.menu) { ed.menu.remove(); ed.reveal = false; } ed.menu = null; }
+// F on the focused (else the selected) step or include: its failure rule menu, at its fail port
+function ruleMenuFromKeyboard() {
+  const canvas = $('ed-canvas');
+  const path = document.activeElement?.closest?.('.pg-node[data-path]')?.dataset.path || (ed.selected.length === 1 ? ed.selected[0] : null);
+  const node = path && canvas.querySelector(`.pg-node[data-path="${CSS.escape(path)}"]`);
+  const port = node?.querySelector('.pg-port.fail');
+  if (!port) return false;
+  openRuleMenu({ path, step: nodeAt(ed.mission, path) }, port);
+  return true;
+}
 
 // ---------- drag a node (or a frame by its head) onto a wire to move it; a box on the canvas selects ----------
 function nodeDown(e, node) {
@@ -1188,10 +1210,19 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { if (typing) return; e.preventDefault(); redoEdit(); return; }
   if (typing) return;
   const onCanvas = $('ed-canvas').contains(e.target) || e.target === document.body;
-  if (e.key === 'Escape') { if (ed.palette || ed.menu) { closePalette(); closeMenu(); } else clearSelection(); return; }
+  if (e.key === 'Escape') {
+    if (ed.palette || ed.menu) {
+      const back = ed.menu ? ed.menuReturn : null;
+      closePalette();
+      closeMenu();
+      if (back?.isConnected) back.focus({ preventScroll: true });
+    } else clearSelection();
+    return;
+  }
   if (!onCanvas) return;
   if (e.key === 'Delete' || e.key === 'Backspace') { if (ed.selected.length) { e.preventDefault(); removeSelection(); } return; }
   if (e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); paletteAtSelection(); return; }
+  if (!e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'f') { if (ruleMenuFromKeyboard()) e.preventDefault(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelected(); return; }
   if ((e.ctrlKey || e.metaKey) && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); moveSelected(e.key === 'ArrowUp' ? -1 : 1); }
 });
@@ -1201,6 +1232,6 @@ let editorWidth = 0;
 new ResizeObserver(([entry]) => {
   const width = Math.round(entry.contentRect.width);
   // not while the palette or the rule menu is open: a redraw closes them (a menu that makes the canvas scroll changes
-  // its width); the next change of width draws it
-  if (width && width !== editorWidth) { editorWidth = width; ed.reveal = true; if (!ed.palette && !ed.menu) renderEditor(); }
+  // its width, and a pending reveal would scroll the canvas at an unrelated later draw); the next draw takes the width
+  if (width && width !== editorWidth && !ed.palette && !ed.menu) { editorWidth = width; ed.reveal = true; renderEditor(); }
 }).observe($('ed-canvas'));

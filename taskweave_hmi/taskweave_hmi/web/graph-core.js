@@ -267,7 +267,7 @@ function layoutGraph(root, ctx) {
   const rules = [];
   const lanes = [];
   if (M.rules && ctx.routeOf) {
-    // the rule row: a Fail terminal, a Retry or a Replan of itself under each node, in one row (moved right on overlap);
+    // the rule row: a Fail terminal, a Retry or a Replan of itself under each node (moved right on overlap);
     // a node in a parallel lane has it in its lane's own row, under its node, so no fail wire crosses another lane
     const rowItems = [];
     const jumps = [];
@@ -283,18 +283,27 @@ function layoutGraph(root, ctx) {
       rowItems.push({ kind: route.kind, item: it, field: route.field || '', w: size.w, h: size.h, want: it.cx - size.w / 2,
         lane: it.lane?.rowY != null ? it.lane : null });
     });
-    const rowY = flowBottom + M.rowGap;
+    // a terminal of the flow's own row sits under the lowest thing in its column (its node, its fail wire, itself),
+    // not under the whole flow: beside a tall parallel block its wire stays short
+    const columnBottom = (x0, x1) => {
+      let b = 0;
+      items.forEach((it) => { if (it.x < x1 && it.x + it.w > x0) b = Math.max(b, it.y + it.h); });
+      frames.forEach((f) => { if (f.x < x1 && f.x + f.w > x0) b = Math.max(b, f.y + f.h); });
+      return b;
+    };
     const edges = new Map();  // a row (a lane, or null: the flow's) -> its right edge so far
     rowItems.sort((a, b) => a.want - b.want).forEach((r) => {
       const edge = edges.has(r.lane) ? edges.get(r.lane) : -Infinity;
       r.x = Math.max(r.want, edge + 12);
-      r.y = r.lane ? r.lane.rowY : rowY;
+      const it = r.item;
+      r.y = r.lane ? r.lane.rowY
+        : columnBottom(Math.min(r.x, it.x) - 12, Math.max(r.x + r.w, it.x + it.w + 36) + 12) + M.rowGap;
       edges.set(r.lane, r.x + r.w);
       right = Math.max(right, r.x + r.w);
       rules.push(r);
     });
     const main = rowItems.filter((r) => !r.lane);
-    if (main.length) y = rowY + Math.max(...main.map((r) => r.h));
+    if (main.length) y = Math.max(flowBottom, ...main.map((r) => r.y + r.h));
     // the replan wires along the bottom, one lane each, a Replan node on the wire's middle
     jumps.forEach(({ it, target, route }, k) => {
       const ly = y + M.laneGap * (k + 0.75);

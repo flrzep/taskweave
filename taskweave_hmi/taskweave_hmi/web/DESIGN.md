@@ -228,14 +228,15 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   box with a tinted 24px title bar), its input fans to every lane's first node, every lane's end joins into the port
   on the box's right edge; an opened include is a box like a group with its steps at 70%, not editable.
   The failure routes run under the flow, from the fail port: abort (the mission default too) a Fail terminal
-  (120 × 40, `--flow-fail` header, its retries `retry ×2` as field) under its node, all terminals in one row so the
-  flow line stays straight (moved right where two would overlap; a node in a parallel lane has its terminal in a row
+  (120 × 40, `--flow-fail` header, its retries `retry ×2` as field) under its node, in a row under the lowest thing in its column (its
+  node, or a tall block beside it), so the flow line stays straight and the fail wire short (moved right where two
+  would overlap; a node in a parallel lane has its terminal in a row
   of its own lane, under its node, so no fail wire crosses another lane); retry a Retry rule node (100 × 36, `--flow-rule`,
   `×n`) under the node, its wire back into the node's input; skip a dashed coral wire into the next node's input;
   replan a coral wire back along the bottom (one lane each, under the terminals' row) into the input of the step it
   restarts from, a Replan rule node (`≤ n` when max_replans is set) on its middle; a replan without a target or to
   itself a Replan node under the node, like a retry. Terminals, rule nodes and "+" spots are not tab stops (the
-  keyboard has Shift+A and the step form's rules). A click on the fail port, a terminal or a rule node opens the rule
+  keyboard has Shift+A, F and the step form's rules). A click on the fail port, a terminal or a rule node opens the rule
   menu (`.ed-menu`: mission default, retry, replan, skip, abort; above the node when the graph has no room under it;
   the canvas is not redrawn while it or the palette is open); a drag from the fail port draws a coral wire to the
   step a replan restarts from (the target gets a dashed red outline; only a step node takes it, not a closed block or
@@ -247,7 +248,9 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   skills, the other missions and the blocks; ↑ ↓ walk the options, the active one marked with `aria-selected` and the
   hover tint, the focused one with the focus ring; Enter in the search takes the first) at that place; while a node is
   dragged they turn solid brand and the nearest lights up as the drop. Keys on the canvas: Shift+A adds after the
-  selection (Tab walks the nodes), Delete removes, Ctrl+D duplicates, Ctrl+↑ / ↓ move, Ctrl+Z / Ctrl+Y undo and redo,
+  selection (Tab walks the nodes; on a block's or lane's title bar it adds at the start inside it, so an empty group
+  or lane gets its first step; with nothing selected at the end of the mission), F opens the focused or selected
+  step's failure-rule menu at its fail port (Escape closes it and gives the focus back to the node), Delete removes, Ctrl+D duplicates, Ctrl+↑ / ↓ move, Ctrl+Z / Ctrl+Y undo and redo,
   Escape clears; shift-click extends a selection along one list, ctrl-click toggles, a drag on empty canvas draws a box;
   a node is dragged by its body, a block by its title bar. Every edit is an op on a path in the mission file (insert,
   remove, move, wrap, unwrap, set); Save sends the ops since the open to `/api/missions/<name>/edit`, which applies them
@@ -371,7 +374,7 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   lime, the one into the running node flowing lime, the way ahead dotted; a running box's outline lime, a failed one
   coral. A replan is a thin coral wire under the nodes into the step it replans from. The flow is a strip that scrolls
   across inside the card (`.pg`, not the page): it keeps its scroll on every update and centres the running node (else
-  the start step) when that step changes, or on a new width (a resize, a rotation) while the user has not scrolled it. Nodes and title bars are buttons in run order, each title bar before its steps.
+  the start step) when that step changes, or on a new width (a resize, a rotation; not a scrollbar's 10 px) while the user has not scrolled it. Nodes and title bars are buttons in run order, each title bar before its steps.
   The resources a step locks are in its pop-up and its tooltip, a box's in its title bar's tooltip. A click on a node
   opens its details in a 320px pop-up beside it (`.pg-pop`, right if it fits, else left, else under it; the strip
   scrolls it into sight once, when it opens; Close, Escape, a click elsewhere or the node again close it); at 600px and below a bottom
