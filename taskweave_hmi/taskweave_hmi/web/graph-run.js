@@ -472,9 +472,10 @@ function canvasWheel(e) {
   }
   canvasMoved();
 }
-// Tab onto a node or a title bar outside the viewport: centred (follow off, as after a pan), so the focus is in sight
+// Tab onto a node or a title bar outside the viewport: centred (follow off, as after a pan), so the focus is in sight.
+// Not the focus a press gives (a pointer is down: pointerdown filled the map first): that is a click on the node
 function canvasFocusIn(e) {
-  if (canvas.refocusing || offCanvas(e)) return;
+  if (canvas.refocusing || pointers.size || offCanvas(e)) return;
   const c = canvas.wrap.getBoundingClientRect();
   const n = e.target.getBoundingClientRect();
   if (n.left >= c.left && n.right <= c.right && n.top >= c.top && n.bottom <= c.bottom) return;
