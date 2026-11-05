@@ -22,7 +22,8 @@ function gsvg(tag, attrs = {}, text) {
 // flow line) and fail the y of its fail port, from its top; end: the Start and Done nodes; gapX between nodes (the
 // wire and its "+" spot); pad inside a box, boxHead and laneHead its title bar, gutter the room a repeat keeps at its
 // bottom for the return wire, tail the room at a box's right end for its "+" spot; terminal and rule: the Fail terminal
-// and the Retry / Replan nodes under the flow, rowGap above their row, laneGap between replan wires. fields: the node
+// and the Retry / Replan nodes under the flow, rowGap above their row (laneRowGap above a parallel lane's own row),
+// laneGap between replan wires. fields: the node
 // shows its fields; ports: the editor's ports; rules: the failure routes.
 const GRAPH_METRICS = {
   compact: { node: { w: 160, h: 48 }, head: 22, line: 35, end: { w: 72, h: 30 }, gapX: 36, gapY: 12, pad: 12, boxHead: 28,
@@ -33,11 +34,11 @@ const GRAPH_METRICS = {
     ports: false, rules: false, kindWord: false },
   editor: { node: { w: 220, h: 64 }, head: 24, line: 38, fail: 54, end: { w: 88, h: 36 }, gapX: 64, gapY: 14, pad: 16,
     boxHead: 28, laneHead: 24, boxMin: 220, gutter: 18, tail: 40, left: 24, right: 48, top: 24, bottom: 28, dot: 12,
-    terminal: { w: 120, h: 40 }, rule: { w: 100, h: 36 }, rowGap: 44, laneGap: 52, fields: true, ports: true, rules: true,
+    terminal: { w: 120, h: 40 }, rule: { w: 100, h: 36 }, rowGap: 44, laneRowGap: 22, laneGap: 52, fields: true, ports: true, rules: true,
     kindWord: true },
   editorPhone: { node: { w: 168, h: 52 }, head: 22, line: 33, fail: 45, end: { w: 72, h: 32 }, gapX: 56, gapY: 12, pad: 12,
     boxHead: 28, laneHead: 24, boxMin: 168, gutter: 16, tail: 40, left: 16, right: 40, top: 20, bottom: 24, dot: 12,
-    terminal: { w: 104, h: 36 }, rule: { w: 92, h: 34 }, rowGap: 40, laneGap: 48, fields: false, ports: true, rules: true,
+    terminal: { w: 104, h: 36 }, rule: { w: 92, h: 34 }, rowGap: 40, laneRowGap: 20, laneGap: 48, fields: false, ports: true, rules: true,
     kindWord: true },
 };
 const FRAME_KINDS = ['include', 'group', 'repeat', 'parallel', 'branch'];
@@ -183,10 +184,11 @@ function layoutGraph(root, ctx) {
   const frames = [];
   const owner = new Map();
 
+  const laneStack = [];  // the parallel lanes being placed, innermost last: a node's terminal goes in its lane's row
   const put = (key, rec) => { items.set(key, rec); return rec; };
   const nodeItem = (node, kind, size, line) => ({ w: size.w, h: size.h, line, place(x, y) {
     put(node.key, { node, kind, x, y, w: size.w, h: size.h, nw: size.w, nh: size.h, cx: x + size.w / 2, cy: y + size.h / 2,
-      line: y + line, inX: x, outX: x + size.w });
+      line: y + line, inX: x, outX: x + size.w, lane: laneStack[laneStack.length - 1] || null });
     owner.set(node.key, node.key);
     if (kind === 'stack') node.leaves.forEach((i) => owner.set(ctx.keyOf(i), node.key));
   } });
@@ -202,6 +204,15 @@ function layoutGraph(root, ctx) {
       sized.forEach((s) => { s.place(cx, y + line - s.line); cx += s.w + M.gapX; });
     } };
   };
+
+  // the editor's rule row: a node whose route puts a node under it (a Fail terminal, a Retry, a Replan of itself); a
+  // lane holds its own row under its nodes when one of its nodes (not those of a lane nested in it) has one
+  const rowRoute = (route, key) => !!route && (route.kind === 'abort' || route.kind === 'retry'
+    || (route.kind === 'replan' && (!route.to || route.to === key)));
+  const needsRow = (node, kind) => rowRoute(ctx.routeOf({ node, kind }), node.key);
+  const laneHasRow = (node) => (node.children || []).some((c) => (c.kind === 'step' ? needsRow(c, 'step')
+    : !ctx.isOpen(c) ? needsRow(c, 'stack') : c.kind === 'parallel' ? false : laneHasRow(c)));
+  const laneRowH = M.rules && ctx.routeOf ? (M.laneRowGap || 0) + Math.max(M.terminal.h, M.rule.h) : 0;
 
   function measure(node) {
     if (node.kind === 'step') return nodeItem(node, 'step', M.node, M.line);
@@ -228,12 +239,15 @@ function layoutGraph(root, ctx) {
     const kids = (node.children || []).map(measure);
     const r = kids.length ? row(kids) : null;
     const inner = r || { w: 2 * M.dot + 24, h: 2 * M.dot + 8, line: M.dot + 4 };
-    const bottom = M.pad + (node.kind === 'repeat' ? M.gutter : 0);
+    const laneRow = node.kind === 'branch' && laneRowH && laneHasRow(node) ? laneRowH : 0;
+    const bottom = M.pad + (node.kind === 'repeat' ? M.gutter : 0) + laneRow;
     const self = { w: Math.max(M.boxMin, M.pad + inner.w + M.pad + M.tail), h: head + M.pad + inner.h + bottom,
       line: head + M.pad + inner.line, place(x, y) {
         frames.push({ node, x, y, w: self.w, h: self.h, head, line: y + self.line });
+        if (node.kind === 'branch') laneStack.push({ rowY: laneRow ? y + head + M.pad + inner.h + M.laneRowGap : null });
         if (r) r.place(x + M.pad, y + head + M.pad);
         else { dotAt(`${node.key}:empty`, node, x + M.pad + M.dot, y + self.line); owner.set(node.key, `${node.key}:empty`); }
+        if (node.kind === 'branch') laneStack.pop();
         if (node.leaves.length) owner.set(node.key, owner.get(ctx.keyOf(node.leaves[0])));
       } };
     return self;
@@ -253,7 +267,8 @@ function layoutGraph(root, ctx) {
   const rules = [];
   const lanes = [];
   if (M.rules && ctx.routeOf) {
-    // the rule row: a Fail terminal, a Retry or a Replan of itself under each node, in one row (moved right on overlap)
+    // the rule row: a Fail terminal, a Retry or a Replan of itself under each node, in one row (moved right on overlap);
+    // a node in a parallel lane has it in its lane's own row, under its node, so no fail wire crosses another lane
     const rowItems = [];
     const jumps = [];
     items.forEach((it) => {
@@ -265,18 +280,21 @@ function layoutGraph(root, ctx) {
       if (route.kind === 'replan' && target && target !== it) { jumps.push({ it, target, route }); return; }
       if (route.kind === 'skip') return;
       const size = route.kind === 'abort' ? M.terminal : M.rule;
-      rowItems.push({ kind: route.kind, item: it, field: route.field || '', w: size.w, h: size.h, want: it.cx - size.w / 2 });
+      rowItems.push({ kind: route.kind, item: it, field: route.field || '', w: size.w, h: size.h, want: it.cx - size.w / 2,
+        lane: it.lane?.rowY != null ? it.lane : null });
     });
     const rowY = flowBottom + M.rowGap;
-    let edge = -Infinity;
+    const edges = new Map();  // a row (a lane, or null: the flow's) -> its right edge so far
     rowItems.sort((a, b) => a.want - b.want).forEach((r) => {
+      const edge = edges.has(r.lane) ? edges.get(r.lane) : -Infinity;
       r.x = Math.max(r.want, edge + 12);
-      r.y = rowY;
-      edge = r.x + r.w;
-      right = Math.max(right, edge);
+      r.y = r.lane ? r.lane.rowY : rowY;
+      edges.set(r.lane, r.x + r.w);
+      right = Math.max(right, r.x + r.w);
       rules.push(r);
     });
-    if (rowItems.length) y = rowY + Math.max(...rowItems.map((r) => r.h));
+    const main = rowItems.filter((r) => !r.lane);
+    if (main.length) y = rowY + Math.max(...main.map((r) => r.h));
     // the replan wires along the bottom, one lane each, a Replan node on the wire's middle
     jumps.forEach(({ it, target, route }, k) => {
       const ly = y + M.laneGap * (k + 0.75);

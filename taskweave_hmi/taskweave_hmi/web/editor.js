@@ -418,12 +418,13 @@ function headEl(frame) {
   head.addEventListener('pointerdown', (e) => { if (!lane && !frame.linked && !e.target.closest('button')) nodeDown(e, frame); });
   return head;
 }
-// a Fail terminal, a Retry or a Replan node: a click opens the rule menu of its step
+// a Fail terminal, a Retry or a Replan node: a click opens the rule menu of its step (not a tab stop: the keyboard has
+// the rule in the step form)
 function ruleEl(r) {
   const node = r.item.node;
   const name = { abort: 'Fail', retry: 'Retry', replan: 'Replan' }[r.kind];
   const button = el('button', { type: 'button', class: `fl-node fl-rule ${r.kind}${r.onWire ? ' on-wire' : ''} ${r.kind === 'abort' ? 'hd-fail' : 'hd-rule'}`,
-    'data-rule': node.path, title: `${node.name || flowName(node)}\non failure: ${ruleWords(node.step)}\nclick for the rule`,
+    'data-rule': node.path, tabindex: '-1', title: `${node.name || flowName(node)}\non failure: ${ruleWords(node.step)}\nclick for the rule`,
     'aria-label': `${name}: the failure rule of ${flowName(node)}` },
   flowHead(name, FLOW_KIND_WORDS[r.kind]), el('div', { class: 'fl-body' }, r.field ? flowField(r.field) : ''));
   button.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -606,7 +607,8 @@ function spotsOf(drawn, layout, root) {
 function addSpots(drawn, layout, root) {
   ed.spots = spotsOf(drawn, layout, root);
   ed.spots.forEach((spot) => {
-    const button = el('button', { type: 'button', class: 'ed-spot', text: '+', title: 'Add a step here', 'aria-label': 'Add a step here' });
+    // not a tab stop: Shift+A adds after the selection from the keyboard
+    const button = el('button', { type: 'button', class: 'ed-spot', text: '+', title: 'Add a step here', 'aria-label': 'Add a step here', tabindex: '-1' });
     button.style.left = `${spot.x}px`;
     button.style.top = `${spot.y}px`;
     button.addEventListener('click', (e) => { e.stopPropagation(); openPalette(spot, spot.x + 16, spot.y - 20); });
@@ -781,9 +783,12 @@ function openRuleMenu(node, port) {
   const graph = $('ed-canvas').querySelector('.pg-graph');
   const r = port.getBoundingClientRect();
   const g = graph.getBoundingClientRect();
-  menu.style.left = `${Math.min(r.right - g.left + 6, (ed.layout?.width || 600) - 230)}px`;
-  menu.style.top = `${r.top - g.top - 8}px`;
+  menu.style.left = `${Math.max(4, Math.min(r.right - g.left + 6, (ed.layout?.width || 600) - 236))}px`;
   graph.append(menu);
+  // under the port's top, or above the port when the graph has no room below (a Fail terminal at its bottom)
+  const below = r.top - g.top - 8;
+  const above = r.bottom - g.top - menu.offsetHeight;
+  menu.style.top = `${below + menu.offsetHeight <= graph.offsetHeight - 4 || above < 4 ? Math.max(4, below) : above}px`;
   ed.menu = menu;
   menu.querySelector('button')?.focus();
 }
@@ -1195,5 +1200,7 @@ PHONE.addEventListener('change', () => { if (!ed.palette) renderEditor(); });
 let editorWidth = 0;
 new ResizeObserver(([entry]) => {
   const width = Math.round(entry.contentRect.width);
-  if (width && width !== editorWidth) { editorWidth = width; ed.reveal = true; if (!ed.palette) renderEditor(); }
+  // not while the palette or the rule menu is open: a redraw closes them (a menu that makes the canvas scroll changes
+  // its width); the next change of width draws it
+  if (width && width !== editorWidth) { editorWidth = width; ed.reveal = true; if (!ed.palette && !ed.menu) renderEditor(); }
 }).observe($('ed-canvas'));

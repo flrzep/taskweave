@@ -184,6 +184,7 @@ function chipButton(step, i, ctx) {
       + `${start ? ' start-here' : view.selected === step.id ? ' selected' : ''}`,
     'aria-label': `Step ${i + 1}: ${step.instruction} (${status})` },
   flowHead(flowName(ctx.nodes[i] || { kind: 'step', step }), ''), el('div', { class: 'fl-body' }, field ? flowField(field) : ''));
+  chip.firstChild.append(el('span', { class: 'fl-num', 'aria-hidden': 'true', text: String(i + 1) }));  // the step's number
   const held = carrying(step, events[step.id]);
   chip.title = [`${i + 1}. ${step.instruction}`, `${stepTitle(step)} · ${mainArg(step)}`,
     held ? (held === true ? 'carries a held object' : `carrying ${held}`) : '',
@@ -419,24 +420,34 @@ function renderGraph() {
     drawn.node.append(pop);
   }
   box.replaceChildren(wrap, legend(plan, events, drawn.replans > 0));
-  // the strip keeps its scroll; it centres the running (else the start) node when that changes
-  wrap.scrollLeft = stripScroll;
+  // the strip keeps its scroll. It centres the running (else the start) node when that step changes; a new width (a
+  // resize, a rotation) centres it again only while the user has not scrolled the strip since it was last set here
+  const setStrip = (x) => { wrap.scrollLeft = x; view.setScroll = wrap.scrollLeft; };  // as set here (clamped)
+  setStrip(stripScroll);
+  wrap.addEventListener('scroll', () => { if (Math.abs(wrap.scrollLeft - view.setScroll) > 1) view.userScrolled = true; }, { passive: true });
   const focusIdx = [states.findIndex(isLive), plan.steps.findIndex((s) => s.id === state.startStep)].find((i) => i >= 0) ?? -1;
-  const focusKey = focusIdx >= 0 ? `${plan.plan_id}:${focusIdx}:${wrap.clientWidth}` : null;
-  if (focusKey && view.centred !== focusKey) {
+  const focusKey = focusIdx >= 0 ? `${plan.plan_id}:${focusIdx}` : null;
+  const widthChanged = view.centredWidth !== wrap.clientWidth;
+  if (focusKey && (view.centred !== focusKey || (widthChanged && !view.userScrolled))) {
     const n = layout.items.get(layout.owner.get(plan.steps[focusIdx].id));
-    if (n) wrap.scrollLeft = Math.max(0, n.cx - wrap.clientWidth / 2);
+    if (n) setStrip(Math.max(0, n.cx - wrap.clientWidth / 2));
     view.centred = focusKey;
+    view.userScrolled = false;
   }
+  view.centredWidth = wrap.clientWidth;
   const sheet = box.querySelector('.pg-sheet');
   if (sheet) sheet.scrollTop = sheetScroll;
   const pop = box.querySelector('.pg-pop');
   if (pop) {
     drawn.node.style.height = `${Math.max(drawn.node.offsetHeight, pop.offsetTop + pop.offsetHeight)}px`;
-    // the pop-up in sight: the strip scrolls it in when it opened outside
+    // the pop-up in sight: the strip scrolls it in once, when it opens outside (never on a rebuild: the user may
+    // scroll the strip away from it)
     const left = pop.offsetLeft - wrap.scrollLeft;
-    if (left < 0 || left + pop.offsetWidth > wrap.clientWidth) wrap.scrollLeft = Math.max(0, pop.offsetLeft + pop.offsetWidth / 2 - wrap.clientWidth / 2);
+    if (view.popShown !== view.selected && (left < 0 || left + pop.offsetWidth > wrap.clientWidth)) {
+      setStrip(Math.max(0, pop.offsetLeft + pop.offsetWidth / 2 - wrap.clientWidth / 2));
+    }
   }
+  view.popShown = pop ? view.selected : null;
   if (refocus) (box.querySelector(refocus) || box.querySelector('[data-step]'))?.focus({ preventScroll: true });
 }
 PHONE.addEventListener('change', () => renderGraph());

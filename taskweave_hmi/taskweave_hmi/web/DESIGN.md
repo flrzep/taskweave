@@ -229,12 +229,15 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   on the box's right edge; an opened include is a box like a group with its steps at 70%, not editable.
   The failure routes run under the flow, from the fail port: abort (the mission default too) a Fail terminal
   (120 × 40, `--flow-fail` header, its retries `retry ×2` as field) under its node, all terminals in one row so the
-  flow line stays straight (moved right where two would overlap); retry a Retry rule node (100 × 36, `--flow-rule`,
+  flow line stays straight (moved right where two would overlap; a node in a parallel lane has its terminal in a row
+  of its own lane, under its node, so no fail wire crosses another lane); retry a Retry rule node (100 × 36, `--flow-rule`,
   `×n`) under the node, its wire back into the node's input; skip a dashed coral wire into the next node's input;
   replan a coral wire back along the bottom (one lane each, under the terminals' row) into the input of the step it
   restarts from, a Replan rule node (`≤ n` when max_replans is set) on its middle; a replan without a target or to
-  itself a Replan node under the node, like a retry. A click on the fail port, a terminal or a rule node opens the rule
-  menu (`.ed-menu`: mission default, retry, replan, skip, abort); a drag from the fail port draws a coral wire to the
+  itself a Replan node under the node, like a retry. Terminals, rule nodes and "+" spots are not tab stops (the
+  keyboard has Shift+A and the step form's rules). A click on the fail port, a terminal or a rule node opens the rule
+  menu (`.ed-menu`: mission default, retry, replan, skip, abort; above the node when the graph has no room under it;
+  the canvas is not redrawn while it or the palette is open); a drag from the fail port draws a coral wire to the
   step a replan restarts from (the target gets a dashed red outline; only a step node takes it, not a closed block or
   an include, since replan_from names a step of the plan; a touch that turns into a scroll only cleans up). Linked
   nodes and closed blocks have no failure route; an open include box none either.
@@ -360,18 +363,18 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   left them (`tw-plan-bands`), else the one with the failed or the start step. The canvas keeps the dotted grid; the
   colour is in the headers and the state, nothing else.
   The Run tab (graph-run.js) draws the simplified flow: nodes 160 × 48 (header 22; 132 × 44 on a phone), 36px apart,
-  no ports, no terminals, no rule nodes, headers with the name only (a box's title bar keeps its kind word and a
-  repeat's rule). The only field is the running node's main argument (none on a phone). State: the running node's
+  no ports, no terminals, no rule nodes, headers with the name and the step's number at the right (mono 10px; a box's
+  title bar keeps its kind word and a repeat's rule). The only field is the running node's main argument (none on a phone). State: the running node's
   whole body takes its colour (navy text) with a lime ring and the breathing glow; paused the same with an amber ring;
-  done keeps its header, its body at 70%, a neutral tick on its corner; pending as drawn; failed a coral outline and a
+  done keeps its header, its body's ground dimmed toward the page (70%; the text keeps its colour), a neutral tick on its top left corner; pending as drawn; failed a coral outline and a
   ✕; timeout and canceled amber; skipped dashed; the picked start step a dashed brand outline. Wires: the run so far
   lime, the one into the running node flowing lime, the way ahead dotted; a running box's outline lime, a failed one
   coral. A replan is a thin coral wire under the nodes into the step it replans from. The flow is a strip that scrolls
   across inside the card (`.pg`, not the page): it keeps its scroll on every update and centres the running node (else
-  the start step) when that changes. Nodes and title bars are buttons in run order, each title bar before its steps.
+  the start step) when that step changes, or on a new width (a resize, a rotation) while the user has not scrolled it. Nodes and title bars are buttons in run order, each title bar before its steps.
   The resources a step locks are in its pop-up and its tooltip, a box's in its title bar's tooltip. A click on a node
   opens its details in a 320px pop-up beside it (`.pg-pop`, right if it fits, else left, else under it; the strip
-  scrolls it into sight; Close, Escape, a click elsewhere or the node again close it); at 600px and below a bottom
+  scrolls it into sight once, when it opens; Close, Escape, a click elsewhere or the node again close it); at 600px and below a bottom
   sheet (`.pg-sheet`). Under it only the replan key, when a replan wire is drawn: the nodes say what they do, the icons live in the pop-up. It reads `--g-*`
   tokens mapped onto the global ones. The Run graph is rebuilt on every status update only while the Run tab is shown;
   the tab's button draws it again when it comes back.
