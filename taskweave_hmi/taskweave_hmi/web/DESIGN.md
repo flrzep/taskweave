@@ -7,8 +7,8 @@ tokens, never raw values; the only exception is the black video background.
 ## Direction: a technical panel
 
 The P3 technical look of the reBot control page, made for a factory hall: a laptop at the cell, a phone in a gloved
-hand, a screen read from two metres. Nuke and Blender are the references for the plan graph and the editor: a dark
-canvas where the nodes carry the colour.
+hand, a screen read from two metres. A behaviour-flow editor is the reference for the plan graph and the editor: a
+dark canvas, a flow from left to right, nodes whose coloured header carries the colour.
 
 - **Navy ground, solid panels.** The page is P3 navy (`--surface-page`) with a faint blueprint grid and a blue glow
   at the top right; cards, the rail and the strip sit on it as solid panels with hairline borders. No shadows except
@@ -52,7 +52,10 @@ Contrast was measured with the WCAG formula against the panel (`--surface-card`)
 | `--bad` | `#ff7f6a` | failed, aborted, errors, near a joint limit, danger buttons (7.9:1) |
 | `--idle` | `#9a9ec8` | idle, pending |
 | `--on-fill` | `#03031c` | navy text on a solid state fill (7.9:1 and up on every fill) and the glyph on a solid skill colour: the running or paused node, the card's tile (6.3 to 10.9:1) |
-| `--kind-*` | drive `#7a8cff`, arm `#b394ff`, grip `#ff9a4d`, wait `#8a8ea8`, other `#2dd4bf` | skill colours in the plan graph, categorical only (6:1 and up) |
+| `--kind-*` | drive `#7a8cff`, arm `#b394ff`, grip `#ff9a4d`, wait `#8a8ea8`, other `#2dd4bf` | skill colours in the plan graph, categorical only (6:1 and up): an action node's header, `--on-fill` on it |
+| `--flow-rule` | `#c98a3a` | the header of a Retry or Replan rule node in the editor, `--on-fill` on it (5.9:1) |
+| `--flow-end` | `#1d7a4c` | the Start and Done nodes, white (`--on-brand`) on it (5.4:1) |
+| `--flow-fail` | `#8a1f2e` | a Fail terminal's header, white on it (9:1) |
 | `--viewer-bg`, `--viewer-line`, `--viewer-ink`, `--viewer-tools` | the ground's navy, a hairline, body text, the panel at 82% | the 3D view |
 | `--rail`, `--nav`, `--strip` | 92px, 60px, 52px | the section rail's width; the phone's bottom nav; the system strip |
 | `--spin-arrows` | ▲ ▼ in `#9a9ec8` | a number field's arrows (an SVG image: `--text-muted`'s value) |
@@ -90,7 +93,7 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
 
 - Radius: `--r-s` 4px (buttons, inputs, rows, messages, the state badge), `--r-m` 8px (cards, the 3D view, the
   Teach hero and job tiles), `--r-xs` 2px (bar markers), `--r-pill` (chips, progress, limit bars). The graph's
-  nodes keep their own 14px: they are the one rounded thing, by design.
+  nodes have their own 6px (a header strip and a body, like a node editor's); its boxes 8px.
 - Depth: `--shadow-1` is none (borders carry the edges); `--shadow-2` under what floats (pop-ups, the step sheet).
   The sticky top is the panel at 88% over a blur, so the page shows through it faintly.
 - Focus: a 3px ring in `--focus` (brand text at 60%), offset 2px; inset on segments.
@@ -188,47 +191,66 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   `details.card` opens from its whole title row.
 - **Status card** (`.card.status`): the andon panel of a recording (Record tab). A 10px rail and a solid badge
   (`.chip` inside it) in the state colour, a 5% tint on the card, the title as the headline.
-- **Program tab: the missions** (`.missions-md`; the tab is called Program, the things it lists are missions): up to 1179px the list or the open mission (← Missions back). From 1180px the list
+- **Program tab: the missions** (`.missions-md`; the tab is called Program, the things it lists are missions): up to 1599px the list or the open mission (← Missions back): the flow wants the width. From 1600px the list
   (300px, sticky under the top, its own scroll) beside the open mission, or a hint while none is open; the open one is
   marked (`.open`, `--brand-soft`, `aria-current`). A search field filters by name and goal ("No mission matches the
   search." when none does; cleared after a save); only the list scrolls. With unsaved edits the first tap on another
   mission or on New mission says "Unsaved changes in <name>: tap again to drop them" in the list's status line
   (`#mission-note`, amber, `role="status"`, 3 s); a second tap on the same one goes on. Focus goes to the back link
   when the list gives way to the editor, to the list's title when the editor closes.
-- **Program tab: the editor** (`.ed`, editor.js on graph-core.js): the open mission as its graph, one column top to
-  bottom. The head row: ← Missions (narrow screens), the name with "● Unsaved changes" in amber beside it, Undo, Redo,
-  Check, Save; under it the problems (red) and the save message (lime, with "Undo this save"). The work area:
-  the canvas (`.ed-canvas`, scrolls, a faint panel tint over the grid, 480px high at least, never taller than the
-  window) and the properties panel at its right (`.ed-panel`, 380px, sticky; under the canvas up to 1000px). The
-  panel shows the mission (name, goal, loop, defaults, + Add step, Delete) while nothing is selected, else the
-  selected step's form (the step card: "Step n" is its title, not a control, so no key folds it; an include step
-  gets a brand-soft banner "Linked: the steps of <mission> run here …" with Open to edit) or a block's form (schema
-  v2: instruction, id, a repeat's rule and max passes, a parallel's join, "run only when"), with the actions under
-  it: ↑ ↓, Duplicate, Group / Repeat / In parallel (only when the running core's schema has blocks), Unwrap, Remove.
-  A lane of a parallel block goes only with its block: Unwrap puts every lane's steps in the block's place (+ lane on
-  its head adds one).
-  Nodes (`.pg-node`) are 196 × 56 tiles: the skill's icon on a 36px tile in its colour (`--k`), the instruction in
-  two lines (muted italic "Describe this step" until it has one), the command and target in mono under it; a closed
-  frame is a tile with a dashed brand border (an include: solid, ⛓), its kind and size, and a chevron that opens it.
-  Ports sit on the edges: in on top, done at the bottom, and the failed port at the right, red, filled when the step
-  has its own rule; a click on it opens the rule menu (`.ed-menu`: mission default, retry, replan, skip, abort), a
-  drag draws a red wire to the step a replan restarts from (the target gets a dashed red outline; only a step tile
-  takes it, not a closed block or an include, since replan_from names a step of the plan; a touch that turns into a
-  scroll only cleans up). The selected node
-  has a 2px brand outline; a problem a Check or Save names is a red left bar and a red border on its node and on the
-  field in the panel. "+" spots (`.ed-spot`, 24px dashed rings, a 44px target) sit on every wire and at the end of
-  every open frame; one opens the palette (`.ed-palette`: a search over the skills, the other missions and the
-  blocks; ↑ ↓ walk the options, the active one marked with
-  `aria-selected` and the hover tint, the focused one with the focus ring; Enter in the search takes the first) at
-  that place; while a node is dragged they turn solid brand and the nearest lights up as the drop. A
-  frame head in the editor is a chevron button (closes it), the name (selects the block) and its words; a linked
-  one adds Open. Keys on the canvas: Shift+A adds after the selection (Tab keeps walking the page), Delete removes, Ctrl+D duplicates,
-  Ctrl+↑ / ↓ move, Ctrl+Z / Ctrl+Y undo and redo, Escape clears; shift-click extends a selection along one list,
-  ctrl-click toggles, a drag on empty canvas draws a box. Every edit is an op on a path in the mission file
-  (insert, remove, move, wrap, unwrap, set); Save sends the ops since the open to `/api/missions/<name>/edit`, which
-  applies them on the file's own tree (comments kept) and validates the whole; nothing is written when it refuses.
-  When the file changed since it was opened (a 409), "Reload from file" beside the problem opens it as it is saved
-  now and drops the edits here.
+- **Program tab: the editor** (`.ed`, editor.js on graph-core.js): the open mission as a flow from left to right. The
+  head row: ← Missions (narrow screens), the name with "● Unsaved changes" in amber beside it, Undo, Redo, Check, Save;
+  under it the problems (red) and the save message (lime, with "Undo this save"). The work area: the canvas
+  (`.ed-canvas`, scrolls both ways, not the page; a faint panel tint over the grid, 480px high at least, never taller
+  than the window; it opens at Start, or scrolled to the selection) and the properties panel at its right (`.ed-panel`,
+  380px, sticky; under the canvas up to 1000px). The panel shows the mission (name, goal, loop, defaults, + Add step,
+  Delete) while nothing is selected, else the selected step's form (the step card: "Step n" is its title, not a
+  control, so no key folds it; the instruction its first field; an include step gets a brand-soft banner "Linked: the
+  steps of <mission> run here …" with Open to edit) or a block's form (schema v2: instruction, id, a repeat's rule and
+  max passes, a parallel's join, "run only when"), with the actions under it: ↑ ↓, Duplicate, Group / Repeat / In
+  parallel (only when the running core's schema has blocks), Unwrap, Remove. A lane of a parallel block goes only with
+  its block: Unwrap puts every lane's steps in the block's place ("+" on its title bar adds one).
+  The canvas (the flow look, see Mission graph for the shared parts): a Start node at the left, the nodes 220 × 64
+  (168 × 52 on a phone) 64px apart (56 on a phone), Done at the right, or with a loop a dashed wire from the last node
+  back to Start along the bottom with its words (`forever`, `until x`, `×5`). A node (`.pg-node.fl-node`): the header
+  (24px) in its colour with the name (the step's id humanised, else its skill: `To shelf`, `Move`; an include's mission:
+  `Pick frame`) and the kind word (`Action`, `Mission`, `Group`, `Repeat`, `Parallel`, `Lane`), the body (40px) with at
+  most two fields in mono (the main argument: `to bin_1/place`, `hands all` + `action open`, `seconds 2`; an include's
+  `with` values; a closed block's `steps 4` and its rule; none on a phone). The instruction sentence is not on the
+  canvas: it is the node's tooltip and the panel's first field. Ports: in on the left edge, done and fail on the right
+  (10px dots on the flow line and 16px under it; their words `done`, `fail` inside the body at its right edge, 10px;
+  the fail port coral, filled when the step has its own rule, a 44px target). A closed block is a stack node (cards
+  behind it), a collapsed include a Mission node; the chevron in the header opens it and selects it. An open block is
+  a box (`.fl-box`: the field surface at 60%, 1px border, 8px radius, 16px padding) with a 28px title bar
+  (`.pg-band.fl-title`: a 4px strip in its colour, the name, which selects the block, the kind word, a repeat's rule,
+  "+" on a parallel block, the chevron at the right, which closes it and selects it); a repeat's return wire runs
+  from its right edge to its left along its bottom, no words; a parallel block holds its lanes as rows (each a thinner
+  box with a tinted 24px title bar), its input fans to every lane's first node, every lane's end joins into the port
+  on the box's right edge; an opened include is a box like a group with its steps at 70%, not editable.
+  The failure routes run under the flow, from the fail port: abort (the mission default too) a Fail terminal
+  (120 × 40, `--flow-fail` header, its retries `retry ×2` as field) under its node, all terminals in one row so the
+  flow line stays straight (moved right where two would overlap); retry a Retry rule node (100 × 36, `--flow-rule`,
+  `×n`) under the node, its wire back into the node's input; skip a dashed coral wire into the next node's input;
+  replan a coral wire back along the bottom (one lane each, under the terminals' row) into the input of the step it
+  restarts from, a Replan rule node (`≤ n` when max_replans is set) on its middle; a replan without a target or to
+  itself a Replan node under the node, like a retry. A click on the fail port, a terminal or a rule node opens the rule
+  menu (`.ed-menu`: mission default, retry, replan, skip, abort); a drag from the fail port draws a coral wire to the
+  step a replan restarts from (the target gets a dashed red outline; only a step node takes it, not a closed block or
+  an include, since replan_from names a step of the plan; a touch that turns into a scroll only cleans up). Linked
+  nodes and closed blocks have no failure route; an open include box none either.
+  The selected node has a 2px brand outline; a problem a Check or Save names is a red left bar on its body and a red
+  border, and a red field in the panel. "+" spots (`.ed-spot`, 24px dashed rings, a 44px target) sit on every wire's
+  middle and at the end of every open box, on its flow line; one opens the palette (`.ed-palette`: a search over the
+  skills, the other missions and the blocks; ↑ ↓ walk the options, the active one marked with `aria-selected` and the
+  hover tint, the focused one with the focus ring; Enter in the search takes the first) at that place; while a node is
+  dragged they turn solid brand and the nearest lights up as the drop. Keys on the canvas: Shift+A adds after the
+  selection (Tab walks the nodes), Delete removes, Ctrl+D duplicates, Ctrl+↑ / ↓ move, Ctrl+Z / Ctrl+Y undo and redo,
+  Escape clears; shift-click extends a selection along one list, ctrl-click toggles, a drag on empty canvas draws a box;
+  a node is dragged by its body, a block by its title bar. Every edit is an op on a path in the mission file (insert,
+  remove, move, wrap, unwrap, set); Save sends the ops since the open to `/api/missions/<name>/edit`, which applies them
+  on the file's own tree (comments kept) and validates the whole; nothing is written when it refuses. When the file
+  changed since it was opened (a 409), "Reload from file" beside the problem opens it as it is saved now and drops the
+  edits here.
   A structural edit (insert, remove, move, wrap, unwrap, duplicate) keeps every `replan_from` on the step it named:
   a place name `s<n>` (a top-level step without an id, numbered from 1) follows its step to its new number, or to a
   new id when the step went into a block; a `replan_from` whose step was removed is cleared with its `on_failure:
@@ -236,10 +258,8 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   the save message line says what changed in amber ("replan_from of 'carry' is s4 now (was s3).", "The replan
   target of 'd' was removed: on failure it does the mission default (abort) now."), as does a note on the step's
   form. The keyboard stays on the graph after Delete, a move, Undo and Redo: on the selection, else the node now
-  at the change (the next one, else the one before, else the frame that holds it). A graph wider than the canvas
-  (lanes side by side on a phone) scrolls the canvas, not the page, so the selected node (or, on opening, the first)
-  is in sight. The Run graph and the editor give their arrow heads their own ids (`pg-run-head-*`,
-  `pg-ed-head-*`).
+  at the change (the next one, else the one before, else the box that holds it), scrolled into sight. The Run graph
+  and the editor give their arrow heads their own ids (`pg-run-head-*`, `pg-ed-head-*`).
 - **Teach in 3D** (`.teach-grid`, teach3d.js): the cell view (4 : 3, at most half the screen high) above the lists up
   to 1179px; from 1180px 7 : 5, the lists at the left and the view (16 : 13, sticky, never taller than the window) at
   the right. Markers: locations (an arrow), stances (a fainter arrow in a ring labelled "<object> · <variant>", from `/api/scene` stances, Teach only; a
@@ -279,14 +299,14 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   `data.torso`): "Torso 0.35 m · planned change at this step (from 0.494)", "Torso 0.494 m · kept (plan)", "chosen per
   step (cut)" when the plan did not cover the hold, ", replanned: …" when the real state differed, and a certain
   infeasible plan's message in `--bad`. No row without a report.
-- **Step sheet** (phone, `.pg-sheet`): a tap on a step's chip (also the running one) opens a bottom sheet over a
+- **Step sheet** (phone, `.pg-sheet`): a tap on a step's node (also the running one) opens a bottom sheet over a
   scrim (`.pg-scrim`, 45% ink; under the status bar, so the strip's Abort stays in reach, and the bottom nav): a 44 × 5
   handle, the step's tile (52px) with its state and number over the instruction (20px, 600), the step's progress
   while it runs, the pop-up's rows (command, target, locks, on failure, status; 96px labels), each note in an amber
   box (`.pg-sheet-note`), and a full-width Close (48px). A non-modal dialog (`role="dialog"`, labelled by the title):
   focus goes to Close when it opens (idle too, where the tap also picks the start step: Close keeps it, a second tap
-  on the chip unpicks it), Tab stays on Close, and focus goes back to the chip when it closes (Close, the scrim,
-  Escape or the chip again). Escape does not close it while a manual skill runs: then it aborts the skill, as
+  on the node unpicks it), Tab stays on Close, and focus goes back to the node when it closes (Close, the scrim,
+  Escape or the node again). Escape does not close it while a manual skill runs: then it aborts the skill, as
   everywhere. Rebuilt every second, it keeps its scroll place. As high as the room between the status bar and the nav,
   at least 160px; it scrolls inside.
 - **Lists and rows**: mission rows (`.list li`) with a brand left rule (red when invalid); plan steps (`.steps`) with a
@@ -324,28 +344,37 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
 - **3D view** (`.viewer3d`): a full-width viewport card, 16:10 on a laptop and 4:3 at 600px and below, dark in both
   themes, 10px radius; a `canvas` child fills it. `.viewer3d-tools` is an overlay toolbar top right for icon buttons
   (`--tap-s` square, light icons; `aria-pressed="true"` in brand fill).
-- **Mission graph** (`.pg`, graph-core.js and graph-run.js): the plan as a node graph, laptop and phone alike. Steps
-  are 44px icon nodes (14px radius, skill colour `--k`: pastel when done or pending, solid with a navy glyph (`--on-fill`) and the breathing ring
-  while running, red when failed, amber timeout / canceled / skipped), their number and target under them, joined by
-  wires in run order: solid (`--text-muted`) where the run has been, flowing lime into the running step, dotted
-  ahead. The layout is automatic and the same on every draw (a structured program has one picture): a sequence
-  snakes across the box in rows, every other row running back, so a long mission stays in view; the editor lays
-  the same tree out as one column. Frames hold the groups: an include of the top mission or a nested one (a link
-  mark ⛓ in the head: shared with other missions), and with schema v2 a group, a repeat (its return wire up the
-  frame's left gutter, its rule and pass along it, in brand blue) and a parallel block (a split dot, one dashed lane
-  per branch side by side, a join dot; an empty frame keeps a muted dot, `.pg-dot-empty`). An open frame has a soft outline (20px radius; lime while it runs, red when
-  it failed) with its head pill on the top edge (chevron, name, done/total and its words: the usual failure rule, a
-  repeat's rule, a parallel's lanes and join); a closed frame is one stack node (cards, filled from below to its
-  share done), and the wires point at it. The frame with the running step is always open; the others as the
-  operator left them (`tw-plan-bands`), else the one with the failed or the start step. A dot points at the start
-  step; a dashed brand loop runs up the box's left gutter back to the first step when the mission repeats (its rule
-  along it), else a final ring follows the last step. A replan is a dashed red arrow to the step it replans from,
-  labelled; other rule exceptions are badges on the node's top edge. Nothing is dragged: the nodes and heads are
-  buttons in run order, each head before its steps. The resources a step locks are in its pop-up and its tooltip, a
-  frame's in its head's tooltip. A click on a step opens its details in a 320px pop-up beside it (`.pg-pop`, right
-  if it fits, else left, else under it; Close, Escape, a click elsewhere or the step again close it); at 600px and
-  below a bottom sheet (`.pg-sheet`). It reads `--g-*` tokens mapped onto the global ones. The Run graph is
-  rebuilt on every status update only while the Run tab is shown; the tab's button draws it again when it comes back.
+- **Mission graph** (`.pg`, graph-core.js and graph-run.js): the plan as a flow from left to right, laptop and phone
+  alike, the look of a behaviour-flow editor: a Start node at the left (`--flow-end`), the nodes, Done at the right
+  (`--flow-end`), or with a loop a dashed wire from the last node back to Start along the bottom, its words on its
+  middle (`forever`, `until x`, `×5`: the only words on a wire). The layout is automatic and the same on every draw (a
+  structured program has one picture): a sequence is a row of nodes on one flow line. A node (`.fl-node`) is a dark
+  body (`--surface-card`, 1px `--border`, 6px radius) with a header strip in its colour: an action by what moves
+  (`--kind-*`, navy text), an include and a group in `--brand` (white), a repeat and a parallel block in `--warn`
+  (their lanes a 60% tint), the name left (600, 14px) and the kind word right (11px, 80%; none where it says the name
+  again). The text rule: a node reads by its name and colour; the instruction sentence is its tooltip, the editor
+  panel's first field and the pop-up's text, never on the canvas; no counts in headers, no "click a step". Wires are
+  2px bezier S-curves between the ports (a long one between two levels runs level and bends before its end). Blocks
+  are boxes with a title bar (see the editor); a closed one is a stack node, cards behind it, done/total in its body
+  filled left to right to its share done; the box with the running step is always open, the others as the operator
+  left them (`tw-plan-bands`), else the one with the failed or the start step. The canvas keeps the dotted grid; the
+  colour is in the headers and the state, nothing else.
+  The Run tab (graph-run.js) draws the simplified flow: nodes 160 × 48 (header 22; 132 × 44 on a phone), 36px apart,
+  no ports, no terminals, no rule nodes, headers with the name only (a box's title bar keeps its kind word and a
+  repeat's rule). The only field is the running node's main argument (none on a phone). State: the running node's
+  whole body takes its colour (navy text) with a lime ring and the breathing glow; paused the same with an amber ring;
+  done keeps its header, its body at 70%, a neutral tick on its corner; pending as drawn; failed a coral outline and a
+  ✕; timeout and canceled amber; skipped dashed; the picked start step a dashed brand outline. Wires: the run so far
+  lime, the one into the running node flowing lime, the way ahead dotted; a running box's outline lime, a failed one
+  coral. A replan is a thin coral wire under the nodes into the step it replans from. The flow is a strip that scrolls
+  across inside the card (`.pg`, not the page): it keeps its scroll on every update and centres the running node (else
+  the start step) when that changes. Nodes and title bars are buttons in run order, each title bar before its steps.
+  The resources a step locks are in its pop-up and its tooltip, a box's in its title bar's tooltip. A click on a node
+  opens its details in a 320px pop-up beside it (`.pg-pop`, right if it fits, else left, else under it; the strip
+  scrolls it into sight; Close, Escape, a click elsewhere or the node again close it); at 600px and below a bottom
+  sheet (`.pg-sheet`). Under it only the replan key, when a replan wire is drawn: the nodes say what they do, the icons live in the pop-up. It reads `--g-*`
+  tokens mapped onto the global ones. The Run graph is rebuilt on every status update only while the Run tab is shown;
+  the tab's button draws it again when it comes back.
 
 ## Icons and imagery
 

@@ -2,16 +2,21 @@
 // taskweave HMI, Program tab: the mission graph editor on graph-core.js. The mission file is the model: the editor
 // keeps a working copy and every change is an op (insert, remove, move, wrap, unwrap, set) on a path in it, applied
 // here at once and sent to the server at Save (POST /api/missions/<name>/edit), which applies the same ops on the
-// file's own tree, so comments stay, validates and writes. Nodes are steps (an icon, the instruction, the command),
-// frames hold includes (linked, read-only here) and, with schema v2, groups, repeats and parallel lanes. The
-// interaction is a node editor's (Nuke, Blender): click selects, shift-click extends, a box selects several; the
-// properties panel at the right edits the selected step with the step form (app.js stepCard) or the mission; "+" on
-// a wire (or Shift+A) opens the palette of skills, missions and blocks; a node is dragged onto a wire to move it; the
-// failed port (the red dot at the right) is dragged to the step a replan restarts from, or clicked for its rule;
-// Delete removes, Ctrl+Z and Ctrl+Y undo and redo. A structural edit keeps every replan_from on the step it named.
+// file's own tree, so comments stay, validates and writes. The mission is drawn as a flow from left to right (the
+// look of a behaviour-flow editor): nodes with a coloured header (the name, the kind word), their main argument as
+// fields in mono, done and fail ports on the right edge; boxes with a title bar hold includes (linked, read-only here)
+// and, with schema v2, groups, repeats and parallel lanes; under the flow each step's failure route: a Fail terminal,
+// a Retry or Replan rule node, a skip wire, a replan wire along the bottom. The instruction sentence is the node's
+// tooltip and the panel's first field, not on the canvas. The interaction is a node editor's: click selects,
+// shift-click extends, a box selects several; the properties panel at the right edits the selected step with the step
+// form (app.js stepCard) or the mission; "+" on a wire (or Shift+A) opens the palette of skills, missions and blocks; a
+// node is dragged onto a wire to move it; the fail port (the coral dot at the right) is dragged to the step a replan
+// restarts from, or clicked (as is its terminal or rule node) for its rule; Delete removes, Ctrl+Z and Ctrl+Y undo and
+// redo. A structural edit keeps every replan_from on the step it named.
 // Uses $, el, api, state, show, message, markDirty, stepCard, markField, moveSummary, argsSummary, dropDirty,
 // clearDrop, openEditor, loadMissions, showEditor from app.js; iconElement, skillIcon from icons.js; div, colourOf,
-// iconOf, forgetMission from graph-run.js; GRAPH_METRICS, fillLeaves, layoutGraph, drawGraph, gsvg from graph-core.js.
+// iconOf, forgetMission, FRAME_HUES, PHONE from graph-run.js; GRAPH_METRICS, FLOW_KIND_WORDS, fillLeaves, layoutGraph,
+// drawGraph, gsvg, flowName, flowHead, flowField, stepFields, blockFields from graph-core.js.
 
 const BLOCK_KINDS = ['group', 'repeat', 'parallel'];
 const BLOCK_WORDS = { group: 'Group', repeat: 'Repeat', parallel: 'In parallel' };
@@ -245,7 +250,7 @@ function buildTree() {
   const leaves = [];
   const nodes = (steps, list, linked) => (steps || []).map((step, i) => {
     const path = joinPath(list, i);
-    const base = { key: path, path, step, linked };
+    const base = { key: path, path, step, linked, id: step?.id };
     if (step && step.include) {
       const inc = ed.includes[step.include];
       const open = ed.opened.has(path) && inc?.steps;
@@ -256,7 +261,7 @@ function buildTree() {
     if (kind === 'parallel') {
       return { ...base, kind, block: step, name: step.instruction || BLOCK_WORDS.parallel,
         branches: (step.parallel || []).map((lane, j) => ({ kind: 'branch', key: `${path}/parallel/${j}`, path: `${path}/parallel/${j}`,
-          lane, linked, name: lane.instruction || `lane ${j + 1}`, children: nodes(lane.steps, `${path}/parallel/${j}/steps`, linked) })) };
+          lane, linked, id: lane.id, n: j + 1, name: lane.instruction || `lane ${j + 1}`, children: nodes(lane.steps, `${path}/parallel/${j}/steps`, linked) })) };
     }
     if (kind) return { ...base, kind, block: step, name: step.instruction || BLOCK_WORDS[kind], children: nodes(step.steps, `${path}/steps`, linked) };
     const index = leaves.length;
@@ -289,16 +294,16 @@ function stepById(id) {
   return step ? all.find((n) => n.step === step) : undefined;
 }
 
-// the words of the mission's own loop wire and of a repeat frame
+// the words on the mission's own loop wire (the only words on a wire: forever, until x, ×5) and a repeat's tooltip
 function loopWords() {
   const m = ed.mission;
   if (!m.loop || m.loop === 'once') return '';
-  return [`↻ ${m.stop_when ? `until ${m.stop_when}` : 'forever'}`, m.max_cycles ? `max ${m.max_cycles}` : ''].filter(Boolean).join(' · ');
+  return m.stop_when ? `until ${m.stop_when}` : m.max_cycles ? `×${m.max_cycles}` : 'forever';
 }
 function repeatWords(frame) {
   const r = frame.block?.repeat || {};
   const rule = r.times ? `${r.times}×` : r.while ? `while ${r.while}` : r.until ? `until ${r.until}` : 'repeat';
-  return [`↻ ${rule}`, frame.block?.max_cycles ? `max ${frame.block.max_cycles}` : ''].filter(Boolean).join(' · ');
+  return [`repeat ${rule}`, frame.block?.max_cycles ? `max ${frame.block.max_cycles}` : ''].filter(Boolean).join(' · ');
 }
 // a step's failure rule in words, with the mission's defaults
 function ruleWords(step) {
@@ -308,43 +313,70 @@ function ruleWords(step) {
   return `${retries > 0 ? `↻${retries} then ` : ''}${on}${on === 'replan' && step.replan_from ? ` from ${step.replan_from}` : ''}`;
 }
 const commandWords = (step) => (step.include ? `mission ${step.include}` : step.skill || '');
+// a step's failure route on the canvas: abort a Fail terminal (retries as its field), retry a Retry node, skip a wire
+// to the next node, replan a wire to the step it restarts from (or a Replan node back into itself). Linked nodes and
+// closed blocks have none.
+function routeOf(it) {
+  const node = it.node;
+  if (node.linked || !node.step || (it.kind === 'stack' && node.kind !== 'include')) return null;
+  const step = node.step;
+  const d = ed.mission.defaults || {};
+  const on = step.on_failure || d.on_failure || 'abort';
+  const retries = step.retries ?? d.retries ?? 0;
+  if (on === 'skip') return { kind: 'skip' };
+  if (on === 'retry') return { kind: 'retry', field: retries > 0 ? ['', `×${retries}`] : null };
+  if (on === 'replan') {
+    const max = step.max_replans ?? d.max_replans;
+    return { kind: 'replan', to: step.replan_from ? stepById(step.replan_from)?.path : null, field: max ? ['', `≤ ${max}`] : null };
+  }
+  return { kind: 'abort', field: retries > 0 ? ['retry', `×${retries}`] : null };
+}
+const metrics = () => (PHONE.matches ? GRAPH_METRICS.editorPhone : GRAPH_METRICS.editor);
 const argWords = (step) => (step.include ? argsSummary(step.with) : step.skill === 'move' ? moveSummary(step.args) : argsSummary(step.args));
 
-// ---------- the nodes and frame heads ----------
+// ---------- the nodes, box title bars and rule nodes ----------
+// A node: the header in its colour (the name, the kind word), the fields in the body (none on a phone), the ports: in
+// at the left, done and (steps, includes) fail at the right with their words. A closed block is a stack node (cards
+// behind), a collapsed include a Mission node; both have a chevron in the header that opens them and selects them.
 function nodeEl(it) {
   const node = it.node;
   const step = node.step;
+  const M = metrics();
   const selected = ed.selected.includes(node.path);
   const bad = ed.marks.has(node.path);
   const frame = it.kind === 'stack';
-  const kind = frame ? node.kind : colourOf(step);
+  const name = flowName(node);
   const button = el('button', { type: 'button', 'data-path': node.path,
-    class: `pg-node${frame ? ` frame ${node.kind}` : ` kind-${kind}`}${selected ? ' selected' : ''}${node.linked ? ' linked' : ''}${bad ? ' has-problem' : ''}`,
-    'aria-pressed': String(selected) });
+    class: `pg-node fl-node${frame ? ` frame fl-stack ${node.kind} ${FRAME_HUES[node.kind] || 'hd-brand'}` : ` kind-${colourOf(step)}`}`
+      + `${selected ? ' selected' : ''}${node.linked ? ' linked' : ''}${bad ? ' has-problem' : ''}`,
+    'aria-pressed': String(selected), 'aria-label': `${name}: ${node.name || 'no instruction yet'}` });
+  const head = flowHead(name, FLOW_KIND_WORDS[node.kind]);
+  const fields = !M.fields ? [] : !frame || node.kind === 'include' ? stepFields(step)
+    : [['steps', String(node.leaves.length)], ...blockFields(node)].slice(0, 2);
+  const body = el('div', { class: 'fl-body' }, ...fields.map(flowField));
+  button.append(head, body);
   if (frame) {
     const count = node.kind === 'include' ? (node.inner ?? state.missions.find((m) => m.name === node.include)?.steps) : node.leaves.length;
-    button.append(div('pg-node-ico', el('span', { class: 'pg-glyph', text: BLOCK_GLYPH[node.kind] })),
-      div('pg-node-text', el('div', { class: `pg-node-title${node.name ? '' : ' empty'}`, text: node.name || 'Describe this block' }),
-        el('div', { class: 'pg-node-sub', text: node.kind === 'include' ? `mission ${node.include}${count != null ? ` · ${count} steps` : ''}`
-          : `${BLOCK_WORDS[node.kind].toLowerCase()} · ${count} steps` })));
-    button.title = node.kind === 'include' ? `${node.name}\nlinked: the mission ${node.include}, shared by the missions that include it\nclick to edit the call, the chevron shows its steps`
+    button.title = node.kind === 'include' ? `${node.name}\nlinked: the mission ${node.include}${count != null ? ` (${count} steps)` : ''}, shared by the missions that include it\non failure: ${ruleWords(step)}`
       : `${node.name}\n${BLOCK_WORDS[node.kind]} of ${count} steps · closed`;
     const chev = el('span', { class: 'pg-node-chev', role: 'button', tabindex: '-1', title: 'Show the steps inside', 'aria-label': 'Open' });
     chev.addEventListener('pointerdown', (e) => e.stopPropagation());
-    chev.addEventListener('click', (e) => { e.stopPropagation(); toggleFrame(node); });
-    button.append(chev);
+    chev.addEventListener('click', (e) => { e.stopPropagation(); chevron(node); });
+    head.append(chev);
   } else {
-    button.append(div('pg-node-ico', iconElement(iconOf(step))),
-      div('pg-node-text', el('div', { class: `pg-node-title${step.instruction ? '' : ' empty'}`, text: step.instruction || 'Describe this step' }),
-        el('div', { class: 'pg-node-sub', text: [commandWords(step), argWords(step)].filter(Boolean).join(' · ') })));
     button.title = `${step.instruction || 'no instruction yet'}\n${[commandWords(step), argWords(step)].filter(Boolean).join(' · ')}\non failure: ${ruleWords(step)}`;
   }
   if (bad) button.title += `\n${ed.marks.get(node.path).map((m) => m.text).join('\n')}`;
   if (!node.linked) {
-    const fail = el('span', { class: `pg-port fail${step.on_failure ? ' set' : ''}`, title: `on failure: ${ruleWords(step)}\nclick for the rule, drag to the step a replan restarts from`, 'aria-hidden': 'true' });
-    fail.addEventListener('pointerdown', (e) => failPortDown(e, node));
-    fail.addEventListener('click', (e) => e.stopPropagation());  // not a click on the node: the menu would close
-    button.append(el('span', { class: 'pg-port in', 'aria-hidden': 'true' }), el('span', { class: 'pg-port done', 'aria-hidden': 'true' }), fail);
+    const failing = !frame || node.kind === 'include';
+    button.append(el('span', { class: 'pg-port in', 'aria-hidden': 'true' }), el('span', { class: 'pg-port done', 'aria-hidden': 'true' }),
+      el('span', { class: 'fl-pw done', 'aria-hidden': 'true', text: 'done' }));
+    if (failing) {
+      const fail = el('span', { class: `pg-port fail${step.on_failure ? ' set' : ''}`, title: `on failure: ${ruleWords(step)}\nclick for the rule, drag to the step a replan restarts from`, 'aria-hidden': 'true' });
+      fail.addEventListener('pointerdown', (e) => failPortDown(e, node));
+      fail.addEventListener('click', (e) => e.stopPropagation());  // not a click on the node: the menu would close
+      button.append(fail, el('span', { class: 'fl-pw fail', 'aria-hidden': 'true', text: 'fail' }));
+    }
   }
   button.addEventListener('pointerdown', (e) => nodeDown(e, node));
   button.addEventListener('click', (e) => nodeClick(e, node));
@@ -352,35 +384,51 @@ function nodeEl(it) {
   button.addEventListener('dblclick', () => { if (frame) toggleFrame(node); });
   return button;
 }
+// a block's chevron: opens or closes it and selects it (a linked one: only opens or closes)
+function chevron(frame) {
+  if (!frame.linked && frame.kind !== 'branch') { ed.selected = [frame.path]; renderPanel(); }
+  toggleFrame(frame);
+}
+// An open box's title bar: a strip in its colour, the name (selects the block), the kind word, a repeat's rule, "+"
+// on a parallel block (adds a lane) and the chevron at the right (closes the box and selects it). A lane's bar has
+// only its name and kind word.
 function headEl(frame) {
   const lane = frame.kind === 'branch';
   const selected = ed.selected.includes(frame.path);
-  const head = div(`pg-band ${frame.kind}${selected ? ' selected' : ''}${frame.linked ? ' linked' : ''}`);
+  const name = flowName(frame);
+  const head = div(`pg-band fl-title ${FRAME_HUES[frame.kind] || 'hd-brand'} ${frame.kind}${selected ? ' selected' : ''}${frame.linked ? ' linked' : ''}`);
   head.dataset.path = frame.path;
-  if (!lane) {
-    const chev = el('button', { type: 'button', class: 'pg-band-btn pg-chev-btn', 'aria-expanded': 'true', 'aria-label': `Close ${frame.name}`, title: 'Close' },
-      el('span', { class: 'pg-chev', 'aria-hidden': 'true' }));
-    chev.addEventListener('click', (e) => { e.stopPropagation(); toggleFrame(frame); });
-    head.append(chev);
-  }
-  if (frame.kind === 'include') head.append(el('span', { class: 'pg-link', title: 'linked: shared with other missions', text: '⛓' }));
-  const name = el('button', { type: 'button', class: 'pg-band-btn pg-band-name', text: frame.name, title: frame.name });
-  name.addEventListener('click', (e) => { e.stopPropagation(); if (!frame.linked) select(lane ? pathParts(frame.path).slice(0, -2).join('/') : frame.path, e); });
-  const meta = frame.kind === 'include' ? `linked · ${frame.include}` : frame.kind === 'repeat' ? repeatWords(frame)
-    : frame.kind === 'parallel' ? `${frame.branches.length} lanes · join ${frame.block.join || 'all'}` : lane ? '' : `${frame.leaves.length} steps`;
-  head.append(name, el('span', { class: 'pg-band-meta', text: meta }));
-  if (frame.kind === 'include' && !frame.linked) {
-    const open = el('button', { type: 'button', class: 'pg-band-btn pg-band-open', text: 'Open', title: `Edit the mission ${frame.include}` });
-    open.addEventListener('click', (e) => { e.stopPropagation(); openIncluded(frame.include); });
-    head.append(open);
-  }
+  head.title = frame.kind === 'include' ? `${frame.name}\nlinked: the mission ${frame.include}, shared with other missions`
+    : frame.kind === 'repeat' ? `${frame.name}\n${repeatWords(frame)}` : frame.name;
+  const nameBtn = el('button', { type: 'button', class: 'pg-band-btn pg-band-name fl-name', text: name, 'aria-label': `${name}: ${frame.name}` });
+  nameBtn.addEventListener('click', (e) => { e.stopPropagation(); if (!frame.linked) select(lane ? pathParts(frame.path).slice(0, -2).join('/') : frame.path, e); });
+  const kind = FLOW_KIND_WORDS[frame.kind];  // the kind word, unless the name says it
+  head.append(nameBtn, kind !== name ? el('span', { class: 'fl-kind', text: kind }) : el('span', { class: 'fl-kind' }), ...blockFields(frame).map(flowField));
   if (frame.kind === 'parallel' && !frame.linked) {
-    const add = el('button', { type: 'button', class: 'pg-band-btn pg-band-open', text: '+ lane', title: 'Add a lane' });
+    const add = el('button', { type: 'button', class: 'pg-band-btn fl-add', text: '+', title: 'Add a lane', 'aria-label': 'Add a lane' });
     add.addEventListener('click', (e) => { e.stopPropagation(); commit([{ op: 'insert', at: `${frame.path}/parallel/${frame.branches.length}`, step: { steps: [] } }]); });
     head.append(add);
   }
+  if (!lane) {
+    const chev = el('button', { type: 'button', class: 'pg-band-btn pg-chev-btn', 'aria-expanded': 'true', 'aria-label': `Close ${name}`, title: 'Close' },
+      el('span', { class: 'pg-chev', 'aria-hidden': 'true' }));
+    chev.addEventListener('click', (e) => { e.stopPropagation(); chevron(frame); });
+    head.append(chev);
+  }
   head.addEventListener('pointerdown', (e) => { if (!lane && !frame.linked && !e.target.closest('button')) nodeDown(e, frame); });
   return head;
+}
+// a Fail terminal, a Retry or a Replan node: a click opens the rule menu of its step
+function ruleEl(r) {
+  const node = r.item.node;
+  const name = { abort: 'Fail', retry: 'Retry', replan: 'Replan' }[r.kind];
+  const button = el('button', { type: 'button', class: `fl-node fl-rule ${r.kind}${r.onWire ? ' on-wire' : ''} ${r.kind === 'abort' ? 'hd-fail' : 'hd-rule'}`,
+    'data-rule': node.path, title: `${node.name || flowName(node)}\non failure: ${ruleWords(node.step)}\nclick for the rule`,
+    'aria-label': `${name}: the failure rule of ${flowName(node)}` },
+  flowHead(name, FLOW_KIND_WORDS[r.kind]), el('div', { class: 'fl-body' }, r.field ? flowField(r.field) : ''));
+  button.addEventListener('pointerdown', (e) => e.stopPropagation());
+  button.addEventListener('click', (e) => { e.stopPropagation(); openRuleMenu(node, button); });
+  return button;
 }
 async function toggleFrame(frame) {
   if (frame.kind === 'include') {
@@ -472,11 +520,9 @@ function renderEditor() {
     if (focused) add.focus({ preventScroll: true });
     return;
   }
-  const replans = allSteps(root).filter((n) => n.step.on_failure === 'replan' && n.step.replan_from)
-    .map((n) => [n.path, stepById(n.step.replan_from)?.path]).filter(([, to]) => to);
-  const ctx = { metrics: GRAPH_METRICS.editor, width: Math.max(320, canvas.clientWidth - 2), isOpen: isOpenFrame,
-    keyOf: (i) => leaves[i], stateOf: () => 'succeeded', frameWord: () => '', renderItem: nodeEl, renderHead: headEl,
-    labelOf: () => '', replans, start: null, loop: loopWords(), repeatText: repeatWords, label: 'Mission graph editor', ids: 'pg-ed' };
+  const ctx = { metrics: metrics(), width: Math.max(320, canvas.clientWidth - 2), isOpen: isOpenFrame,
+    keyOf: (i) => leaves[i], frameWord: () => '', renderItem: nodeEl, renderHead: headEl, renderRule: ruleEl, routeOf,
+    loop: loopWords(), label: 'Mission graph editor', ids: 'pg-ed' };
   const layout = layoutGraph(root, ctx);
   const drawn = drawGraph(layout, ctx);
   addSpots(drawn, layout, root);
@@ -484,10 +530,11 @@ function renderEditor() {
   ed.layout = layout;
   ed.drawn = drawn;
   // the node to keep in sight (and on the keyboard): the selection, else the one nearest the last change, else the
-  // one that had the focus, else the first; a graph wider than the canvas (lanes on a phone) scrolls it in, the start of a mission to its first node
+  // one that had the focus, else the first; the flow is wider than the canvas: it scrolls across (a mission opens at Start)
   const target = canvas.querySelector('.pg-node.selected, .pg-band.selected .pg-band-name') || nearestNode(near)
     || nearestNode(had) || canvas.querySelector('.pg-node');
-  if (target && (focused || ed.selected.length || ed.reveal)) keepInView(canvas, target.closest('.pg-node, .pg-band'));
+  if (ed.reveal && !ed.selected.length && !focused) canvas.scrollLeft = 0;  // opened: from Start
+  else if (target && (focused || ed.selected.length || ed.reveal)) keepInView(canvas, target.closest('.pg-node, .pg-band'));
   ed.reveal = false;
   if (focused) target?.focus({ preventScroll: true });
 }
@@ -510,9 +557,9 @@ function keepInView(canvas, node) {
   const c = canvas.getBoundingClientRect();
   const n = node.getBoundingClientRect();
   const margin = 24;
-  if (n.left < c.left + margin || n.right > c.right - margin) {
-    canvas.scrollLeft += n.left + n.width / 2 - (c.left + canvas.clientWidth / 2);  // centred across
-  }
+  // across: the node's left edge in at the margin (the flow reads on to the right), or its right edge when that is out
+  if (n.left < c.left + margin || n.width > canvas.clientWidth - 2 * margin) canvas.scrollLeft += n.left - c.left - 3 * margin;
+  else if (n.right > c.left + canvas.clientWidth - margin) canvas.scrollLeft += n.right - (c.left + canvas.clientWidth) + 3 * margin;
   if (n.top < c.top + margin) canvas.scrollTop += n.top - c.top - margin;
   else if (n.bottom > c.top + canvas.clientHeight - margin) canvas.scrollTop += n.bottom - (c.top + canvas.clientHeight) + margin;
 }
@@ -544,14 +591,15 @@ function spotsOf(drawn, layout, root) {
     const s = slotOf(target);
     add(s.list, s.index, mid.x, mid.y);
   });
-  layout.frames.forEach((f) => {
+  const M = layout.metrics;
+  layout.frames.forEach((f) => {  // the end of every open box, on its flow line (an empty one: beside its dot)
     const node = f.node;
     if (node.linked || node.kind === 'include') return;
     if (node.kind === 'parallel') return;
     const list = `${node.path}/steps`;
     const n = (node.children || []).length;
-    if (!n) add(list, 0, f.x + f.w / 2, f.y + f.h / 2 + (node.kind === 'branch' ? 0 : 8));
-    else add(list, n, f.x + f.w / 2, f.y + f.h - GRAPH_METRICS.editor.pad / 2 - 2);
+    if (!n) add(list, 0, f.x + M.pad + M.dot + 30, f.line);
+    else add(list, n, f.x + f.w - M.pad / 2 - M.tail / 2, f.line);
   });
   return spots;
 }
@@ -728,7 +776,7 @@ function openRuleMenu(node, port) {
   };
   menu.append(el('div', { class: 'ed-menu-title', text: 'When this step fails' }),
     choice(`mission default (${ed.mission.defaults?.on_failure || 'abort'})`, ''), choice('retry', 'retry'),
-    choice(step.replan_from ? `replan from ${step.replan_from}` : 'replan from this step', 'replan', 'drag the red port onto another step to replan from it'),
+    choice(step.replan_from ? `replan from ${step.replan_from}` : 'replan from this step', 'replan', 'drag the fail port onto another step to replan from it'),
     choice('skip', 'skip'), choice('abort', 'abort'));
   const graph = $('ed-canvas').querySelector('.pg-graph');
   const r = port.getBoundingClientRect();
@@ -796,7 +844,7 @@ function nodeDown(e, node) {
   source.addEventListener('pointercancel', up);
 }
 function canvasDown(e) {
-  if (e.button !== 0 || e.target.closest('.pg-node, .pg-band, .ed-spot, .ed-palette, .ed-menu, .ed-first')) return;
+  if (e.button !== 0 || e.target.closest('.pg-node, .pg-band, .fl-rule, .ed-spot, .ed-palette, .ed-menu, .ed-first')) return;
   const canvas = $('ed-canvas');
   const graph = canvas.querySelector('.pg-graph');
   if (!graph) return;
@@ -824,7 +872,7 @@ function canvasDown(e) {
     box.remove();
     const hit = [];
     ed.layout.items.forEach((it) => {
-      if (it.kind === 'dot' || it.node.linked) return;
+      if ((it.kind !== 'step' && it.kind !== 'stack') || it.node.linked) return;
       const n = it.el?.getBoundingClientRect();
       if (!n) return;
       const cx = n.left + n.width / 2;
@@ -1027,7 +1075,7 @@ function editorOpen(name, mission, isNew, base = null) {
   ed.marks = new Map();
   ed.notes = new Map();
   ed.savedUndo = null;
-  ed.reveal = true;  // a graph wider than the canvas starts at its first node, not at its left margin
+  ed.reveal = true;  // the canvas opens at Start, or at the selection
   $('ed-canvas').scrollTo(0, 0);
   if (isNew) {
     ['goal', 'robot', 'params', 'facts', 'loop', 'max_cycles', 'stop_when', 'defaults'].forEach((key) => { if (mission[key] !== undefined) ed.ops.push({ op: 'set', at: '', key, value: clone(mission[key]) }); });
@@ -1142,7 +1190,8 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelected(); return; }
   if ((e.ctrlKey || e.metaKey) && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); moveSelected(e.key === 'ArrowUp' ? -1 : 1); }
 });
-// the layout follows the canvas width
+// the layout follows the canvas width, and the phone's node size
+PHONE.addEventListener('change', () => { if (!ed.palette) renderEditor(); });
 let editorWidth = 0;
 new ResizeObserver(([entry]) => {
   const width = Math.round(entry.contentRect.width);

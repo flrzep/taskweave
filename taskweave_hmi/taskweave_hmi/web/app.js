@@ -714,7 +714,7 @@ async function loadMissions() {
   markOpen();
   filterMissions();
 }
-// The open mission is marked in the list (beside the editor from 1180px). With unsaved edits open, another mission or
+// The open mission is marked in the list (beside the editor from 1600px). With unsaved edits open, another mission or
 // New mission asks first: the first tap says so in the list's status line ("tap again to drop them", 3 s), a second tap
 // on the same one goes on (dropDirty).
 function markOpen() {

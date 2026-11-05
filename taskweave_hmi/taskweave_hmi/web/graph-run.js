@@ -1,20 +1,19 @@
 'use strict';
-// taskweave HMI, Run tab: the running plan as a compact mission graph on graph-core.js. Steps are icon nodes with their
-// number and target under them, joined by wires in run order; frames hold groups (an include of the top mission, a
-// nested include, and with schema v2 groups, repeats and parallel lanes), each collapsible to one stack node, the open
-// ones remembered per mission; the frame with the running step is always open. Only exceptions are marked: the frame
-// head names the usual failure rule, a step whose rule differs gets a badge (↻2, skip), a replan is a dashed red arrow
-// to the step it replans from. A step opens its details in a pop-up beside it (a bottom sheet at 600 px and below).
-// Nodes are tinted by what moves (--kind-*: drive, arm, grip, wait, other) and show the step's icon (icons.js). Uses $,
-// el, api, state, show, missionOf, shownPlan, pickStart, moveLabel, moveParts, carriesByArgs from app.js and
-// skillIcon, iconElement, moveKindOfArgs from icons.js.
+// taskweave HMI, Run tab: the running plan as the simplified flow on graph-core.js: Start, the nodes left to right,
+// Done (or the loop back to Start), in a strip that scrolls across with the running node centred. Nodes are a header in
+// the colour of what moves (--kind-*: drive, arm, grip, wait, other) with the step's name, and a body; the running one
+// is filled with its colour, a lime ring and its main argument as the one field. Blocks (an include of the top mission,
+// a nested include, and with schema v2 groups, repeats and parallel lanes) are boxes with a title bar, each closable to
+// one stack node, the open ones remembered per mission; the box with the running step is always open. No ports, no
+// rule nodes, no words on wires but the loop's: a replan is a thin coral wire under the nodes. A step opens its details
+// (the instruction, the rule) in a pop-up beside it (a bottom sheet at 600 px and below). Uses $,
+// el, api, state, show, missionOf, shownPlan, pickStart, moveLabel, moveParts, carriesByArgs from app.js, skillIcon,
+// iconElement, moveKindOfArgs from icons.js and flowName, flowHead, flowField, stepFields, blockFields from graph-core.js.
 
 // what moves: a move step's kind, else the skill (cell schema 3 names too)
 const KIND_COLOURS = { navigate: 'drive', straight: 'drive', hand: 'arm', posture: 'arm', joints: 'arm' };
 const SKILL_COLOURS = { navigate_to: 'drive', drive_straight: 'drive', move_joints: 'arm', move_gripper: 'arm',
   move_object: 'arm', set_posture: 'arm', grip: 'grip', wait: 'wait' };
-const ICON_COLOURS = { navigate: 'drive', straight: 'drive', hand: 'arm', carry: 'arm', posture: 'arm', joints: 'arm',
-  'grip-close': 'grip', 'grip-open': 'grip', wait: 'wait', other: 'other' };
 const POP_W = 320;     // the step pop-up's width (style.css .pg-pop), the gap to its node, the least room it gets below
 const POP_GAP = 12;
 const POP_MIN_H = 260;
@@ -173,35 +172,27 @@ function frameInfo(frame, states, r, steps) {
   return { done, usual, rule: r[frame.leaves.find((i) => r[i].key === usual)] || { retries: 0, onFailure: 'abort' }, word, used };
 }
 
-// The badge of a step whose rule differs from its frame's (retries ↻2, or ↻0 for fewer than the frame's none; skip,
-// abort, retry; a replan to another step is its arrow). cls: 'fail' for failure-type badges, 'skip' muted.
-function badgeOf(rule, i, usual) {
-  const words = [];
-  if (rule.key !== usual && rule.retries !== Number(usual.split('|')[1])) words.push(`↻${Math.max(rule.retries, 0)}`);
-  if (!jumps(rule, i) && rule.key !== usual && rule.onFailure !== usual.split('|')[0]) words.push(rule.onFailure);
-  if (!words.length) return null;
-  return { text: words.join(' '), cls: words.length === 1 && rule.onFailure === 'skip' && rule.retries <= 0 ? 'skip' : 'fail' };
-}
-
+// a step's node: the header (its name), the body; running or paused filled with its colour, its main argument in it
 function chipButton(step, i, ctx) {
   const { states, r, events, pickable } = ctx;
   const status = states[i];
   const start = pickable && step.id === state.startStep;
+  const live = isLive(status);
+  const field = live && ctx.metrics.fields ? stepFields(step)[0] : null;
   const chip = el('button', { type: 'button', 'data-step': step.id,
-    class: `pg-chip kind-${colourOf(step)} state-${status}${WARN_STATES.includes(status) ? ' state-warn' : ''}`
+    class: `pg-chip fl-node kind-${colourOf(step)} state-${status}${WARN_STATES.includes(status) ? ' state-warn' : ''}`
       + `${start ? ' start-here' : view.selected === step.id ? ' selected' : ''}`,
-    'aria-label': `Step ${i + 1}: ${step.instruction} (${status})` }, iconElement(iconOf(step, events[step.id])));
+    'aria-label': `Step ${i + 1}: ${step.instruction} (${status})` },
+  flowHead(flowName(ctx.nodes[i] || { kind: 'step', step }), ''), el('div', { class: 'fl-body' }, field ? flowField(field) : ''));
   const held = carrying(step, events[step.id]);
   chip.title = [`${i + 1}. ${step.instruction}`, `${stepTitle(step)} · ${mainArg(step)}`,
     held ? (held === true ? 'carries a held object' : `carrying ${held}`) : '',
     step.resources?.length ? `uses ${step.resources.join(', ')}` : '', `on failure: ${failureText(r[i])}`,
     ...(step.notes || []).map((note) => `note: ${note}`)].filter(Boolean).join('\n');
   // the graph is rebuilt on every status update: breathe at the phase of a page-wide clock, so it runs on
-  if (isLive(status)) chip.style.animationDelay = `-${(performance.now() % BREATHE_MS) / 1000}s`;
+  if (live) chip.style.animationDelay = `-${(performance.now() % BREATHE_MS) / 1000}s`;
   if (status === 'succeeded') chip.append(el('span', { class: 'pg-dot ok' }));
   if (isFailed(status)) chip.append(el('span', { class: 'pg-dot bad', text: '✕' }));
-  const badge = badgeOf(r[i], i, ctx.usual[i]);
-  if (badge) chip.append(el('span', { class: `pg-badge ${badge.cls}`, text: badge.text }));
   chip.addEventListener('click', () => choose(step, pickable));
   return chip;
 }
@@ -239,43 +230,43 @@ document.addEventListener('pointerdown', (e) => {
   renderGraph();
 });
 
-const frameTitle = (frame, info) => `${frame.name}${frame.include && frame.include !== frame.name ? ` (${frame.include})` : ''}`
+// a box's tooltip: its instruction, done/total, state and usual rule, a repeat's rule and pass, what it uses
+const frameTitle = (frame, info, snap) => `${frame.name}${frame.include && frame.include !== frame.name ? ` (${frame.include})` : ''}`
   + `\n${info.done} of ${frame.leaves.length} done · ${info.word} · fails: ${ruleText(info.rule)}`
+  + `${frame.kind === 'repeat' ? `\n${repeatText(frame, snap)}` : ''}`
   + `${info.used.length ? `\nuses ${info.used.join(', ')}` : ''}`;
-// a frame's words beside its count: a repeat's rule and pass, a parallel's lanes and join
-function frameMeta(frame, info, snap) {
-  if (frame.kind === 'repeat') return repeatText(frame, snap);
-  if (frame.kind === 'parallel') return `${frame.branches.length} lanes · join ${frame.block?.join || 'all'}`;
-  if (frame.kind === 'branch') return '';
-  return `fails: ${ruleText(info.rule)}`;
-}
 function repeatText(frame, snap) {
   const r = frame.block?.repeat || {};
   const rule = r.times ? `${r.times}×` : r.while ? `while ${r.while}` : r.until ? `until ${r.until}` : 'repeat';
   const pass = snap?.status?.passes?.[frame.id];
-  return [`↻ ${rule}`, pass ? `pass ${pass}` : '', frame.block?.max_cycles ? `max ${frame.block.max_cycles}` : ''].filter(Boolean).join(' · ');
+  return [`repeat ${rule}`, pass ? `pass ${pass}` : '', frame.block?.max_cycles ? `max ${frame.block.max_cycles}` : ''].filter(Boolean).join(' · ');
 }
-// An open frame's head on its outline: chevron and name, done/total and its words; a click closes the frame. A
-// branch (a parallel lane) has only its name and count, and no chevron: it closes with its block.
+// An open box's title bar: a strip in its colour, the name, the kind word, a repeat's rule, and the chevron at the
+// right; a click closes the box. A lane (a parallel block's branch) has no chevron: it closes with its block.
+const FRAME_HUES = { include: 'hd-brand', group: 'hd-brand', repeat: 'hd-warn', parallel: 'hd-warn', branch: 'hd-lane' };
 function frameHead(frame, info, open, toggle, snap) {
   const lane = frame.kind === 'branch';
-  const head = el('button', { type: 'button', class: `pg-band ${frame.kind}${open ? ' open' : ''}`, 'data-band': frame.key,
-    'aria-expanded': String(open), title: frameTitle(frame, info) },
-  lane ? '' : el('span', { class: 'pg-chev', 'aria-hidden': 'true' }),
-  frame.kind === 'include' ? el('span', { class: 'pg-link', 'aria-label': 'linked: shared with other missions', title: 'shared' }, '⛓') : '',
-  el('span', { class: 'pg-band-name', text: frame.name }),
-  el('span', { class: 'pg-band-meta', text: [`${info.done}/${frame.leaves.length}`, frameMeta(frame, info, snap)].filter(Boolean).join(' · ') }));
-  if (!lane) head.addEventListener('click', toggle);
+  const head = el(lane ? 'div' : 'button', { class: `pg-band fl-title ${FRAME_HUES[frame.kind] || 'hd-brand'} ${frame.kind}${open ? ' open' : ''}`,
+    'data-band': frame.key, title: frameTitle(frame, info, snap) },
+  el('span', { class: 'fl-name', text: flowName(frame) }),
+  el('span', { class: 'fl-kind', text: FLOW_KIND_WORDS[frame.kind] === flowName(frame) ? '' : FLOW_KIND_WORDS[frame.kind] }),
+  ...blockFields(frame).map(flowField), lane ? '' : el('span', { class: 'pg-chev', 'aria-hidden': 'true' }));
+  if (!lane) {
+    head.type = 'button';
+    head.setAttribute('aria-expanded', String(open));
+    head.addEventListener('click', toggle);
+  }
   return head;
 }
-// a closed frame: one node, a stack of cards filled to its share done, its name under it; a click opens it
-function stackButton(frame, info, toggle) {
+// a closed block: one node with cards behind it, its header in the block's colour, done/total in its body filled to
+// its share done; a click opens it
+function stackButton(frame, info, toggle, snap) {
   const total = frame.leaves.length;
-  const node = el('button', { type: 'button', class: `pg-stack ${frame.kind} ${info.word}`, 'data-band': frame.key,
-    'aria-expanded': 'false', title: frameTitle(frame, info),
+  const node = el('button', { type: 'button', class: `pg-stack fl-node fl-stack ${FRAME_HUES[frame.kind] || 'hd-brand'} ${frame.kind} ${info.word}`,
+    'data-band': frame.key, 'aria-expanded': 'false', title: frameTitle(frame, info, snap),
     'aria-label': `${frame.name}: ${info.done} of ${total} done, ${info.word}`,
     style: `--done-share: ${Math.round((total ? info.done / total : 0) * 100)}%` },
-  el('span', { class: 'pg-stack-count', text: `${info.done}/${total}` }));
+  flowHead(flowName(frame), ''), el('div', { class: 'fl-body' }, el('span', { class: 'pg-stack-count', text: `${info.done}/${total}` })));
   node.addEventListener('click', toggle);
   return node;
 }
@@ -337,24 +328,19 @@ function closeSheet(id) {
   $('plan-graph').querySelector(`[data-step="${CSS.escape(id)}"]`)?.focus();
 }
 
+// under the plan: only the replan key, and only when a replan wire is drawn (the nodes say what they do; the
+// icons live in the pop-up)
 function legend(plan, events, anyReplan) {
-  const labels = { navigate: moveLabel('navigate'), straight: moveLabel('straight'), hand: moveLabel('hand'),
-    carry: 'carrying', posture: moveLabel('posture'), joints: moveLabel('joints'), 'grip-close': 'grip close',
-    'grip-open': 'grip open', wait: 'wait', other: 'other' };
-  const icons = [...new Set(plan.steps.map((step) => iconOf(step, events[step.id])))];
-  return div('legend',
-    ...icons.map((id) => el('span', { class: `legend-item kind-${ICON_COLOURS[id] || 'other'}` }, iconElement(id),
-      labels[id] || id)),
-    anyReplan ? el('span', { class: 'legend-item' }, el('i', { class: 'swatch-fail' }), 'replan') : '');
+  return div('legend', anyReplan ? el('span', { class: 'legend-item' }, el('i', { class: 'swatch-fail' }), 'replan') : '');
 }
 
-// the words along the mission's loop wire: "↻ until no_frames · cycle 1 · max 10"
-function loopText(plan, mission, snap) {
+// the words on the mission's loop wire, the only words on a wire: "forever", "until no_frames", "×5"
+function loopText(plan, mission) {
   const loop = plan.loop || mission?.loop || 'once';
   if (loop === 'once') return '';
-  const until = mission?.stop_when ? `until ${mission.stop_when}` : (loop === 'forever' ? 'forever' : loop);
-  const cycle = snap.status.plan_id === plan.plan_id && snap.status.cycle ? `cycle ${snap.status.cycle}` : '';
-  return [`↻ ${until}`, cycle, mission?.max_cycles ? `max ${mission.max_cycles}` : ''].filter(Boolean).join(' · ');
+  if (mission?.stop_when) return `until ${mission.stop_when}`;
+  if (mission?.max_cycles) return `×${mission.max_cycles}`;
+  return loop === 'forever' ? 'forever' : String(loop);
 }
 
 function renderGraph() {
@@ -382,11 +368,6 @@ function renderGraph() {
   const tree = treeFromPlan(plan, mission);
   const frames = framesOf(tree);
   const info = new Map(frames.map((f) => [f, frameInfo(f, states, r, plan.steps)]));
-  // a step's usual rule: its innermost frame's (the root's own steps: the whole plan's)
-  const usual = [];
-  const all = frameInfo({ leaves: plan.steps.map((_, i) => i) }, states, r, plan.steps).usual;
-  plan.steps.forEach((_, i) => { usual[i] = all; });
-  frames.forEach((f) => f.leaves.forEach((i) => { usual[i] = info.get(f).usual; }));
   // open: the frame with the running step always (the operator's choice does not hide it in a later cycle); else the
   // operator's choice, else the frame with the failed step (else the start step's, the first frame). A lane opens with
   // its block.
@@ -397,21 +378,22 @@ function renderGraph() {
     || (frame.key in stored ? stored[frame.key] : frame.leaves.includes(anchor));
   const events = live ? snap.outcomes : {};
   const pickable = snap.status.state !== 'running' && snap.status.state !== 'paused';
-  const ctx = { plan, states, r, events, snap, usual, pickable, metrics: PHONE.matches ? GRAPH_METRICS.phone : GRAPH_METRICS.compact,
-    width: box.clientWidth || 300, isOpen, keyOf: (i) => plan.steps[i].id, loop: loopText(plan, mission, snap),
+  const nodes = [];  // a step's tree node (its name), by its index
+  const walk = (n) => { if (n.kind === 'step') nodes[n.index] = n; childrenOf(n).forEach(walk); };
+  walk(tree);
+  const ctx = { plan, states, r, events, snap, pickable, nodes, metrics: PHONE.matches ? GRAPH_METRICS.phone : GRAPH_METRICS.compact,
+    width: box.clientWidth || 300, isOpen, keyOf: (i) => plan.steps[i].id, loop: loopText(plan, mission),
     label: `Plan ${plan.plan_id}: ${plan.steps.length} steps`, ids: 'pg-run',
     start: state.startStep && plan.steps.some((s) => s.id === state.startStep) ? state.startStep : plan.steps[0].id,
     replans: plan.steps.map((s, i) => (jumps(r[i], i) ? [s.id, plan.steps[r[i].replanTo].id] : null)).filter(Boolean),
     stateOf: (it) => (it.node.kind === 'step' ? states[it.node.index] : info.get(it.node)?.word === 'done' ? 'succeeded'
       : ['running', 'paused', 'failed'].includes(info.get(it.node)?.word) ? info.get(it.node).word : 'pending'),
     frameWord: (frame) => info.get(frame).word,
-    renderItem: (it) => (it.kind === 'stack' ? stackButton(it.node, info.get(it.node), toggle(it.node)) : chipButton(it.node.step, it.node.index, ctx)),
-    renderHead: (frame) => frameHead(frame, info.get(frame), true, toggle(frame), snap),
-    labelOf: (it) => (it.kind === 'stack' ? it.node.name
-      : [el('b', { text: String(it.node.index + 1) }), ` ${mainArg(it.node.step) || stepTitle(it.node.step)}`]),
-    repeatText: (frame) => repeatText(frame, snap) };
+    renderItem: (it) => (it.kind === 'stack' ? stackButton(it.node, info.get(it.node), toggle(it.node), snap) : chipButton(it.node.step, it.node.index, ctx)),
+    renderHead: (frame) => frameHead(frame, info.get(frame), true, toggle(frame), snap) };
   const toggle = (frame) => () => { storeBand(missionName, frame.key, !isOpen(frame)); renderGraph(); };
   const sheetScroll = box.querySelector('.pg-sheet')?.scrollTop ?? 0;  // the sheet is rebuilt every second: keep its place
+  const stripScroll = box.querySelector('.pg')?.scrollLeft ?? 0;  // and the strip its scroll
   const layout = layoutGraph(tree, ctx);
   const drawn = drawGraph(layout, ctx);
   const wrap = div('pg', drawn.node);
@@ -437,10 +419,24 @@ function renderGraph() {
     drawn.node.append(pop);
   }
   box.replaceChildren(wrap, legend(plan, events, drawn.replans > 0));
+  // the strip keeps its scroll; it centres the running (else the start) node when that changes
+  wrap.scrollLeft = stripScroll;
+  const focusIdx = [states.findIndex(isLive), plan.steps.findIndex((s) => s.id === state.startStep)].find((i) => i >= 0) ?? -1;
+  const focusKey = focusIdx >= 0 ? `${plan.plan_id}:${focusIdx}:${wrap.clientWidth}` : null;
+  if (focusKey && view.centred !== focusKey) {
+    const n = layout.items.get(layout.owner.get(plan.steps[focusIdx].id));
+    if (n) wrap.scrollLeft = Math.max(0, n.cx - wrap.clientWidth / 2);
+    view.centred = focusKey;
+  }
   const sheet = box.querySelector('.pg-sheet');
   if (sheet) sheet.scrollTop = sheetScroll;
   const pop = box.querySelector('.pg-pop');
-  if (pop) drawn.node.style.height = `${Math.max(drawn.node.offsetHeight, pop.offsetTop + pop.offsetHeight)}px`;
+  if (pop) {
+    drawn.node.style.height = `${Math.max(drawn.node.offsetHeight, pop.offsetTop + pop.offsetHeight)}px`;
+    // the pop-up in sight: the strip scrolls it in when it opened outside
+    const left = pop.offsetLeft - wrap.scrollLeft;
+    if (left < 0 || left + pop.offsetWidth > wrap.clientWidth) wrap.scrollLeft = Math.max(0, pop.offsetLeft + pop.offsetWidth / 2 - wrap.clientWidth / 2);
+  }
   if (refocus) (box.querySelector(refocus) || box.querySelector('[data-step]'))?.focus({ preventScroll: true });
 }
 PHONE.addEventListener('change', () => renderGraph());

@@ -2,11 +2,13 @@
 // taskweave HMI: the mission graph's core. One tree model of a mission (steps in groups, repeats, parallel lanes and
 // linked includes), one automatic layout (a structured program has one canonical picture: no stored positions) and one
 // drawing, used by the Run tab's compact view (graph-run.js) and the Program tab's editor (editor.js). The look is a
-// node editor's (Nuke, Blender): nodes carry the colour, frames hold groups, the flow runs top to bottom in the editor
-// and snakes across the box on the Run tab, where the room is scarce. Who draws what: the caller renders the nodes,
-// the stacks (a closed frame) and the frame heads through ctx hooks; this file places them and draws the wires, the
-// frames, the split and join of a parallel block, the loop of a repeat and of the mission, the replan arrows, the
-// start dot and the final ring. Uses el from app.js.
+// behaviour-flow editor's: the flow runs left to right from a Start node to a Done node, nodes have a coloured header
+// (the name, the kind word) and fields in mono, blocks are translucent boxes with a title bar, wires are bezier curves
+// between ports. The editor adds the failure routes under the flow: a Fail terminal per aborting step in one row, Retry
+// and Replan rule nodes, skip wires, replan wires along the bottom. Who draws what: the caller renders the nodes, the
+// stacks (a closed block), the box title bars and the rule nodes through ctx hooks; this file places them and draws the
+// boxes, the wires, the split and join of a parallel block, the loops of a repeat and of the mission, the replan wires
+// and the Start and Done nodes. Uses el from app.js.
 
 const GRAPH_SVG = 'http://www.w3.org/2000/svg';
 function gsvg(tag, attrs = {}, text) {
@@ -16,26 +18,90 @@ function gsvg(tag, attrs = {}, text) {
   return node;
 }
 
-// The room things take (px). A slot is a node with its label; a frame adds its head and padding; the gutter is the
-// room a repeat keeps at its left for the return wire; left is the box's own gutter (the start dot, the mission's
-// loop). column: one item per row (the editor); else the items of a sequence snake across the width.
+// The room things take (px). node: a node's size, head its header strip, line the y of its input and done ports (the
+// flow line) and fail the y of its fail port, from its top; end: the Start and Done nodes; gapX between nodes (the
+// wire and its "+" spot); pad inside a box, boxHead and laneHead its title bar, gutter the room a repeat keeps at its
+// bottom for the return wire, tail the room at a box's right end for its "+" spot; terminal and rule: the Fail terminal
+// and the Retry / Replan nodes under the flow, rowGap above their row, laneGap between replan wires. fields: the node
+// shows its fields; ports: the editor's ports; rules: the failure routes.
 const GRAPH_METRICS = {
-  compact: { slotW: 92, slotH: 84, node: 44, stack: 52, gapX: 10, gapY: 10, pad: 14, head: 30, left: 56, right: 12,
-    top: 16, bottom: 56, gutter: 22, dot: 14, column: false, label: true, frameRadius: 20 },
-  phone: { slotW: 74, slotH: 80, node: 44, stack: 52, gapX: 4, gapY: 8, pad: 10, head: 28, left: 36, right: 8,
-    top: 14, bottom: 52, gutter: 18, dot: 12, column: false, label: true, frameRadius: 18 },
-  editor: { slotW: 208, slotH: 60, node: { w: 196, h: 56 }, stack: { w: 196, h: 56 }, gapX: 24, gapY: 26, pad: 22,
-    head: 36, left: 64, right: 28, top: 24, bottom: 48, gutter: 30, dot: 16, column: true, label: false, frameRadius: 12 },
+  compact: { node: { w: 160, h: 48 }, head: 22, line: 35, end: { w: 72, h: 30 }, gapX: 36, gapY: 12, pad: 12, boxHead: 28,
+    laneHead: 24, boxMin: 160, gutter: 14, tail: 0, left: 16, right: 24, top: 14, bottom: 18, dot: 10, fields: true,
+    ports: false, rules: false, kindWord: false },
+  phone: { node: { w: 132, h: 44 }, head: 20, line: 32, end: { w: 64, h: 28 }, gapX: 28, gapY: 10, pad: 10, boxHead: 28,
+    laneHead: 24, boxMin: 132, gutter: 12, tail: 0, left: 12, right: 16, top: 12, bottom: 16, dot: 10, fields: false,
+    ports: false, rules: false, kindWord: false },
+  editor: { node: { w: 220, h: 64 }, head: 24, line: 38, fail: 54, end: { w: 88, h: 36 }, gapX: 64, gapY: 14, pad: 16,
+    boxHead: 28, laneHead: 24, boxMin: 220, gutter: 18, tail: 40, left: 24, right: 48, top: 24, bottom: 28, dot: 12,
+    terminal: { w: 120, h: 40 }, rule: { w: 100, h: 36 }, rowGap: 44, laneGap: 52, fields: true, ports: true, rules: true,
+    kindWord: true },
+  editorPhone: { node: { w: 168, h: 52 }, head: 22, line: 33, fail: 45, end: { w: 72, h: 32 }, gapX: 56, gapY: 12, pad: 12,
+    boxHead: 28, laneHead: 24, boxMin: 168, gutter: 16, tail: 40, left: 16, right: 40, top: 20, bottom: 24, dot: 12,
+    terminal: { w: 104, h: 36 }, rule: { w: 92, h: 34 }, rowGap: 40, laneGap: 48, fields: false, ports: true, rules: true,
+    kindWord: true },
 };
-const sizeOf = (size) => (typeof size === 'number' ? { w: size, h: size } : size);
 const FRAME_KINDS = ['include', 'group', 'repeat', 'parallel', 'branch'];
 const isFrame = (node) => FRAME_KINDS.includes(node.kind);
+
+// ---------- the words on the canvas (the text rule: a name, a kind word, at most two fields) ----------
+const FLOW_KIND_WORDS = { step: 'Action', include: 'Mission', group: 'Group', repeat: 'Repeat', parallel: 'Parallel',
+  branch: 'Lane', start: 'Start', end: 'End', abort: 'Fail', retry: 'Rule', replan: 'Rule' };
+// "to_shelf" -> "To shelf"
+const humanise = (s) => { const t = String(s ?? '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim(); return t ? t[0].toUpperCase() + t.slice(1) : ''; };
+// a step's own id: the plan's place ids (s3, s1_s7: core's names for a step without one) are none; an include's
+// prefix (s1_) goes
+function ownId(id) {
+  let s = String(id ?? '');
+  while (/^s\d+_/.test(s)) s = s.replace(/^s\d+_/, '');
+  return /^s\d+$/.test(s) ? '' : s;
+}
+// a node's name: a step's id, else what it does (stepTitle, graph-run.js: the kind of motion of a move from the plan or
+// its args, "navigate to", "grip open"; else the skill); an include's mission; a block's id, else its kind; a lane's id,
+// else Lane n
+function flowName(node) {
+  if (node.kind === 'step') {
+    const s = node.step || {};
+    const does = s.skill === 'grip' && s.args?.action ? `grip ${s.args.action}`   // the plan gives a grip no kind
+      : typeof stepTitle === 'function' ? stepTitle(s) : s.skill;
+    return humanise(ownId(s.id ?? node.id)) || humanise(does) || 'Step';
+  }
+  if (node.kind === 'include') return humanise(node.include) || 'Mission';
+  if (node.kind === 'branch') return humanise(ownId(node.id)) || `Lane ${node.n || 1}`;
+  return humanise(ownId(node.id)) || FLOW_KIND_WORDS[node.kind] || '';
+}
+const flowValue = (v) => (Array.isArray(v) ? `[${v.map(flowValue).join(', ')}]`
+  : v && typeof v === 'object' ? Object.entries(v).map(([k, x]) => `${k} ${flowValue(x)}`).join(' ') : String(v));
+// a step's fields: its main argument (to, hands + action, seconds, else the first), an include's with values (two)
+function stepFields(step) {
+  if (!step) return [];
+  if (step.include) return Object.entries(step.with || {}).slice(0, 2).map(([k, v]) => [k, flowValue(v)]);
+  const a = step.args || {};
+  if (a.to !== undefined) return [['to', flowValue(a.to)]];
+  if (a.action !== undefined) return [['hands', flowValue(a.hands ?? 'all')], ['action', flowValue(a.action)]];
+  if (a.seconds !== undefined) return [['seconds', flowValue(a.seconds)]];
+  const first = Object.entries(a)[0];
+  return first ? [[first[0], flowValue(first[1])]] : [];
+}
+// a block's field: a repeat's rule, a parallel's join when it is first
+function blockFields(node) {
+  const b = node.block || {};
+  if (node.kind === 'repeat') {
+    const r = b.repeat || {};
+    return r.times ? [['', `×${r.times}`]] : r.while ? [['while', String(r.while)]] : r.until ? [['until', String(r.until)]] : [];
+  }
+  if (node.kind === 'parallel' && b.join === 'first') return [['join', 'first']];
+  return [];
+}
+const flowField = ([k, v]) => el('span', { class: 'fl-field' }, k ? el('span', { class: 'fl-k', text: k }) : '', el('span', { class: 'fl-v', text: v }));
+// a node's header strip: the name, the kind word (none when it says the name again)
+const flowHead = (name, kind) => el('div', { class: 'fl-head' }, el('span', { class: 'fl-name', text: name }),
+  kind && kind !== name ? el('span', { class: 'fl-kind', text: kind }) : '');
 
 // ---------- the tree ----------
 // A node: {kind, key, name, children} for include | group | repeat | branch, {kind: 'parallel', branches: [branch]},
 // {kind: 'step', key: id, step, index, name} for a skill call (index: its place in plan.steps). The root is a group
-// without a frame ({kind: 'root'}); root.loop says the mission repeats. Every frame gets leaves: the indices of the
-// steps inside it, in order.
+// without a box ({kind: 'root'}); root.loop says the mission repeats. Every frame gets leaves: the indices of the
+// steps inside it, in order. name: the instruction (the tooltip, the pop-up); the canvas shows flowName.
 function treeFromPlan(plan, mission) {
   const root = plan.tree ? { kind: 'root', key: 'root', children: treeFromNodes(plan.tree, plan, '') }
     : treeFromFlat(plan, mission);
@@ -81,7 +147,7 @@ function treeFromNodes(nodes, plan, parentKey) {
     const key = `g:${n.origin?.path || `${parentKey}/${k}`}`;
     const node = { kind: n.kind, key, id: n.id, name: n.instruction || n.id, block: n, include: n.include || '' };
     if (n.kind === 'parallel') {
-      node.branches = (n.branches || []).map((b, j) => ({ kind: 'branch', key: `${key}/b${j}`, id: b.id,
+      node.branches = (n.branches || []).map((b, j) => ({ kind: 'branch', key: `${key}/b${j}`, id: b.id, n: j + 1,
         name: b.instruction || b.id, children: treeFromNodes(b.steps || [], plan, `${key}/b${j}`) }));
     } else node.children = treeFromNodes(n.steps || [], plan, key);
     return node;
@@ -102,105 +168,158 @@ function framesOf(root) {
 }
 
 // ---------- the layout ----------
-// ctx: {metrics, width, isOpen(frame) -> bool}. Places every node: items (key -> {node, kind: step | stack | dot,
-// x, y, w, h: its slot; cx, cy: the node's centre; nw, nh: the node's size}), frames (open: {node, x, y, w, h}), and
-// owner (a step's key -> the key of the item that shows it: itself, or the stack of its closed frame; a frame's own
-// key -> its stack, or the item of its first step while open).
+// ctx: {metrics, width, isOpen(frame) -> bool, keyOf(leaf index) -> step key, routeOf(item) -> the editor's failure
+// route {kind: abort | retry | skip | replan, field, to: a step key} or null, replans: [[from key, to key]] (the Run
+// view's replan wires)}. The flow runs left to right: a sequence is a row whose nodes share one flow line, a block is a
+// box around its row, a parallel block a box with its lanes as rows under each other. Places every node: items (key ->
+// {node, kind: step | stack | dot | start | end, x, y, w, h: its box; cx, cy: its centre; nw, nh: its size; line: the y
+// of its flow ports; inX, outX: the x of its input and output}), frames (open: {node, x, y, w, h, head, line}), owner
+// (a step's key -> the key of the item that shows it: itself, or the stack of its closed frame; a frame's own key -> its
+// stack, or the item of its first step while open), rules (the rule row and the Replan nodes: {kind, item, field, x, y,
+// w, h}), lanes (the replan wires: {from, to, y, rule}) and loopY (the mission's loop wire).
 function layoutGraph(root, ctx) {
   const M = ctx.metrics;
   const items = new Map();
   const frames = [];
   const owner = new Map();
-  const nodeSize = sizeOf(M.node);
-  const stackSize = sizeOf(M.stack);
 
-  const slot = (node, kind) => {
-    const { w: nw, h: nh } = kind === 'stack' ? stackSize : nodeSize;
-    return { w: M.slotW, h: M.slotH, place(x, y) {
-      const cy = M.label ? y + nh / 2 : y + M.slotH / 2;
-      items.set(node.key, { node, kind, x, y, w: M.slotW, h: M.slotH, cx: x + M.slotW / 2, cy, nw, nh });
-      owner.set(node.key, node.key);
-      if (kind === 'stack') node.leaves.forEach((i) => owner.set(ctx.keyOf(i), node.key));
+  const put = (key, rec) => { items.set(key, rec); return rec; };
+  const nodeItem = (node, kind, size, line) => ({ w: size.w, h: size.h, line, place(x, y) {
+    put(node.key, { node, kind, x, y, w: size.w, h: size.h, nw: size.w, nh: size.h, cx: x + size.w / 2, cy: y + size.h / 2,
+      line: y + line, inX: x, outX: x + size.w });
+    owner.set(node.key, node.key);
+    if (kind === 'stack') node.leaves.forEach((i) => owner.set(ctx.keyOf(i), node.key));
+  } });
+  const dotAt = (key, node, x, y) => put(key, { node, kind: 'dot', x: x - M.dot / 2, y: y - M.dot / 2, w: M.dot, h: M.dot,
+    nw: M.dot, nh: M.dot, cx: x, cy: y, line: y, inX: x, outX: x });
+  // a row of placed things on one flow line
+  const row = (sized) => {
+    const line = Math.max(0, ...sized.map((s) => s.line));
+    const below = Math.max(0, ...sized.map((s) => s.h - s.line));
+    const w = sized.reduce((t, s) => t + s.w, 0) + Math.max(0, sized.length - 1) * M.gapX;
+    return { w, h: line + below, line, place(x, y) {
+      let cx = x;
+      sized.forEach((s) => { s.place(cx, y + line - s.line); cx += s.w + M.gapX; });
     } };
   };
-  const dotItem = (key, node, x, y) => items.set(key, { node, kind: 'dot', x: x - M.dot / 2, y: y - M.dot / 2, w: M.dot, h: M.dot,
-    cx: x, cy: y, nw: M.dot, nh: M.dot });
 
-  function measure(node, maxW) {
-    if (node.kind === 'step') return slot(node, 'step');
-    const open = node.kind === 'root' || ctx.isOpen(node);
-    if (!open) return slot(node, 'stack');
-    const padX = node.kind === 'root' ? 0 : M.pad;
-    const head = node.kind === 'root' ? 0 : M.head;
-    const foot = node.kind === 'root' ? 0 : M.pad;
-    if (node.kind === 'parallel') {
-      const n = Math.max(1, node.branches.length);
-      const laneW = Math.max(M.slotW + 2 * M.pad, (maxW - 2 * padX - (n - 1) * M.gapX) / n);
-      const lanes = node.branches.map((b) => measure(b, laneW));
-      const w = Math.max(M.slotW, lanes.reduce((t, l) => t + l.w, 0) + (n - 1) * M.gapX) + 2 * padX;
-      const h = head + M.dot + M.gapY + Math.max(0, ...lanes.map((l) => l.h)) + M.gapY + M.dot + foot;
-      return { w, h, place(x, y) {
-        frames.push({ node, x, y, w, h });
-        dotItem(`${node.key}:split`, node, x + w / 2, y + head + M.dot / 2);
-        let lx = x + padX + (w - 2 * padX - (lanes.reduce((t, l) => t + l.w, 0) + (n - 1) * M.gapX)) / 2;
-        lanes.forEach((l) => { l.place(lx, y + head + M.dot + M.gapY); lx += l.w + M.gapX; });
-        dotItem(`${node.key}:join`, node, x + w / 2, y + h - foot - M.dot / 2);
-        owner.set(node.key, `${node.key}:split`);
-      } };
+  function measure(node) {
+    if (node.kind === 'step') return nodeItem(node, 'step', M.node, M.line);
+    if (!ctx.isOpen(node)) return nodeItem(node, 'stack', M.node, M.line);
+    const head = node.kind === 'branch' ? M.laneHead : M.boxHead;
+    if (node.kind === 'parallel') {  // lanes as rows; the split on the box's left edge, the join on its right
+      const lanes = node.branches.map(measure);
+      const fan = M.gapX * 0.75;  // room for the fan wires and their "+" spots
+      const laneW = Math.max(M.boxMin, ...lanes.map((l) => l.w));
+      lanes.forEach((l) => { l.w = laneW; });
+      const body = lanes.length ? lanes.reduce((t, l) => t + l.h, 0) + (lanes.length - 1) * M.gapY : 2 * M.dot;
+      const self = { w: laneW + 2 * (M.pad + fan), h: head + M.pad + body + M.pad,
+        line: head + M.pad + (lanes.length ? lanes[0].line : M.dot), place(x, y) {
+          frames.push({ node, x, y, w: self.w, h: self.h, head, line: y + self.line });
+          dotAt(`${node.key}:split`, node, x, y + self.line);
+          let ly = y + head + M.pad;
+          lanes.forEach((l) => { l.place(x + M.pad + fan, ly); ly += l.h + M.gapY; });
+          dotAt(`${node.key}:join`, node, x + self.w, y + self.line);
+          owner.set(node.key, `${node.key}:split`);
+        } };
+      return self;
     }
-    const gutter = node.kind === 'repeat' || (node.kind === 'root' && root.loop) ? M.gutter : 0;
-    const inner = Math.max(M.slotW, maxW - 2 * padX - gutter);
-    const sized = node.children.map((c) => measure(c, inner));
-    const rows = [];
-    let row = null;
-    sized.forEach((s) => {
-      if (M.column || !row || row.w + M.gapX + s.w > inner) { row = { items: [], w: 0, h: 0 }; rows.push(row); }
-      row.items.push(s);
-      row.w += (row.items.length > 1 ? M.gapX : 0) + s.w;
-      row.h = Math.max(row.h, s.h);
-    });
-    const empty = node.kind !== 'root' && !sized.length;  // an empty block keeps a dot, so the wires and the editor's "+" reach it
-    const body = empty ? M.dot + 2 * M.gapY : rows.reduce((t, r) => t + r.h, 0) + Math.max(0, rows.length - 1) * M.gapY;
-    const w = Math.max(M.slotW, ...rows.map((r) => r.w)) + 2 * padX + gutter;
-    const h = head + body + foot;
-    return { w, h, place(x, y) {
-      if (node.kind !== 'root') frames.push({ node, x, y, w, h });
-      if (empty) { dotItem(`${node.key}:empty`, node, x + w / 2, y + head + M.gapY + M.dot / 2); owner.set(node.key, `${node.key}:empty`); }
-      let cy = y + head;
-      rows.forEach((r, ri) => {
-        const list = !M.column && ri % 2 ? [...r.items].reverse() : r.items;  // a snake: every other row runs back
-        const room = w - 2 * padX - gutter;  // the frame's own inner width
-        let cx = x + padX + gutter + (M.column ? (room - r.w) / 2 : ri % 2 ? room - r.w : 0);
-        list.forEach((s) => { s.place(cx, cy + (r.h - s.h) / 2); cx += s.w + M.gapX; });
-        cy += r.h + M.gapY;
-      });
-      if (node.kind !== 'root' && node.leaves.length) owner.set(node.key, owner.get(ctx.keyOf(node.leaves[0])));
-    } };
+    // a box around a row (an empty one keeps a dot, so the wires and the editor's "+" reach it)
+    const kids = (node.children || []).map(measure);
+    const r = kids.length ? row(kids) : null;
+    const inner = r || { w: 2 * M.dot + 24, h: 2 * M.dot + 8, line: M.dot + 4 };
+    const bottom = M.pad + (node.kind === 'repeat' ? M.gutter : 0);
+    const self = { w: Math.max(M.boxMin, M.pad + inner.w + M.pad + M.tail), h: head + M.pad + inner.h + bottom,
+      line: head + M.pad + inner.line, place(x, y) {
+        frames.push({ node, x, y, w: self.w, h: self.h, head, line: y + self.line });
+        if (r) r.place(x + M.pad, y + head + M.pad);
+        else { dotAt(`${node.key}:empty`, node, x + M.pad + M.dot, y + self.line); owner.set(node.key, `${node.key}:empty`); }
+        if (node.leaves.length) owner.set(node.key, owner.get(ctx.keyOf(node.leaves[0])));
+      } };
+    return self;
   }
-  const sized = measure(root, Math.max(M.slotW + M.gutter, ctx.width - M.left - M.right));
-  sized.place(M.left, M.top);
-  let bottom = M.top;
-  items.forEach((it) => { bottom = Math.max(bottom, it.y + it.h); });
-  frames.forEach((f) => { bottom = Math.max(bottom, f.y + f.h); });
-  return { root, items, frames, owner, width: Math.max(ctx.width, sized.w + M.left + M.right), height: bottom + M.bottom, metrics: M };
+  // the root: Start, the mission's own row, Done (unless the mission repeats: then the loop wire back to Start)
+  const start = { kind: 'start', key: '@start' };
+  const end = { kind: 'end', key: '@end' };
+  const parts = [nodeItem(start, 'start', M.end, M.end.h / 2), ...root.children.map(measure)];
+  if (!root.loop) parts.push(nodeItem(end, 'end', M.end, M.end.h / 2));
+  row(parts).place(M.left, M.top);
+
+  let flowBottom = M.top;
+  let right = 0;
+  items.forEach((it) => { flowBottom = Math.max(flowBottom, it.y + it.h); right = Math.max(right, it.x + it.w); });
+  frames.forEach((f) => { flowBottom = Math.max(flowBottom, f.y + f.h); right = Math.max(right, f.x + f.w); });
+  let y = flowBottom;
+  const rules = [];
+  const lanes = [];
+  if (M.rules && ctx.routeOf) {
+    // the rule row: a Fail terminal, a Retry or a Replan of itself under each node, in one row (moved right on overlap)
+    const rowItems = [];
+    const jumps = [];
+    items.forEach((it) => {
+      if (it.kind !== 'step' && it.kind !== 'stack') return;
+      const route = ctx.routeOf(it);
+      if (!route) return;
+      it.route = route;
+      const target = route.kind === 'replan' && route.to ? items.get(owner.get(route.to)) : null;
+      if (route.kind === 'replan' && target && target !== it) { jumps.push({ it, target, route }); return; }
+      if (route.kind === 'skip') return;
+      const size = route.kind === 'abort' ? M.terminal : M.rule;
+      rowItems.push({ kind: route.kind, item: it, field: route.field || '', w: size.w, h: size.h, want: it.cx - size.w / 2 });
+    });
+    const rowY = flowBottom + M.rowGap;
+    let edge = -Infinity;
+    rowItems.sort((a, b) => a.want - b.want).forEach((r) => {
+      r.x = Math.max(r.want, edge + 12);
+      r.y = rowY;
+      edge = r.x + r.w;
+      right = Math.max(right, edge);
+      rules.push(r);
+    });
+    if (rowItems.length) y = rowY + Math.max(...rowItems.map((r) => r.h));
+    // the replan wires along the bottom, one lane each, a Replan node on the wire's middle
+    jumps.forEach(({ it, target, route }, k) => {
+      const ly = y + M.laneGap * (k + 0.75);
+      const a = it.outX + 18;
+      const b = target.inX - 18;
+      const rule = { kind: 'replan', item: it, field: route.field || '', w: M.rule.w, h: M.rule.h, onWire: true };
+      rule.x = (a + b) / 2 - rule.w / 2;
+      rule.y = ly - rule.h / 2;
+      rules.push(rule);
+      lanes.push({ from: it, to: target, y: ly, rule });
+    });
+    if (jumps.length) y += M.laneGap * (jumps.length + 0.25);
+  } else {
+    (ctx.replans || []).forEach(([fromKey, toKey]) => {
+      const a = items.get(owner.get(fromKey));
+      const b = items.get(owner.get(toKey));
+      if (!a || !b || a === b) return;
+      lanes.push({ from: a, to: b, y: y + 14 + lanes.length * 10 });
+    });
+    if (lanes.length) y = lanes[lanes.length - 1].y + 4;
+  }
+  const loopY = root.loop ? y + 26 : null;
+  if (loopY !== null) y = loopY + 10;
+  return { root, items, frames, owner, rules, lanes, loopY, metrics: M,
+    width: Math.max(ctx.width, right + M.right), height: y + M.bottom };
 }
 
 // ---------- the drawing ----------
-// where the line from an item's centre toward (tx, ty) leaves its node, gap px outside it
-function graphRim(n, tx, ty, gap) {
-  const dx = tx - n.cx;
-  const dy = ty - n.cy;
-  const s = Math.min((n.nw / 2 + gap) / Math.abs(dx || 1e-9), (n.nh / 2 + gap) / Math.abs(dy || 1e-9), 1);
-  return { x: n.cx + dx * s, y: n.cy + dy * s };
-}
-// a wire from item a to item b, bowed sideways by bend px: its path and its middle (for a label)
-function graphWire(a, b, bend) {
-  const d = Math.hypot(b.cx - a.cx, b.cy - a.cy) || 1;
-  const mx = (a.cx + b.cx) / 2 - ((b.cy - a.cy) / d) * bend;
-  const my = (a.cy + b.cy) / 2 + ((b.cx - a.cx) / d) * bend;
-  const p = graphRim(a, mx, my, 3);
-  const q = graphRim(b, mx, my, 5);
-  return { d: `M${p.x},${p.y} Q${mx},${my} ${q.x},${q.y}`, mid: { x: (p.x + 2 * mx + q.x) / 4, y: (p.y + 2 * my + q.y) / 4 } };
+// a bezier S-curve from (x1, y1) to (x2, y2), leaving and arriving level; a long one between two levels runs level
+// and bends only before its end (a lane's join), so it does not cut across the nodes between
+const graphCurve = (x1, y1, x2, y2) => {
+  if (x2 - x1 > 200 && Math.abs(y2 - y1) > 4) {
+    const bx = x2 - 120;
+    return `M${x1},${y1} L${bx},${y1} C${bx + 60},${y1} ${x2 - 60},${y2} ${x2},${y2}`;
+  }
+  const dx = Math.max(24, Math.abs(x2 - x1) / 2);
+  return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
+};
+// a wire from item a's output to item b's input: its path and its middle (for a "+" spot)
+function graphWire(a, b) {
+  const long = b.inX - a.outX > 200 && Math.abs(b.line - a.line) > 4;  // level, then the bend (graphCurve)
+  return { d: graphCurve(a.outX, a.line, b.inX, b.line),
+    mid: long ? { x: (a.outX + b.inX - 120) / 2, y: a.line } : { x: (a.outX + b.inX) / 2, y: (a.line + b.line) / 2 } };
 }
 // a polyline with its corners rounded (radius px)
 function graphRounded(points, radius) {
@@ -218,81 +337,83 @@ function graphRounded(points, radius) {
   const [lx, ly] = points[points.length - 1];
   return `${d} L${lx},${ly}`;
 }
-// an arrow head; ids: the drawing's own prefix, so two graphs on one page do not point at each other's markers
+// an arrow head for the wires that run back (loops, replans, retries); ids: the drawing's own prefix, so two graphs on
+// one page do not point at each other's markers
 const graphMarker = (ids, name) => {
   const m = gsvg('marker', { id: `${ids}-head-${name}`, class: `pg-head ${name}`, viewBox: '0 0 10 10', refX: 8, refY: 5,
-    markerWidth: 9, markerHeight: 9, markerUnits: 'userSpaceOnUse', orient: 'auto-start-reverse' });
+    markerWidth: 8, markerHeight: 8, markerUnits: 'userSpaceOnUse', orient: 'auto-start-reverse' });
   m.append(gsvg('path', { d: 'M0,1 L9,5 L0,9 z' }));
   return m;
 };
 
 // Draws a layout into a new .pg-graph. ctx hooks: renderItem(item) -> the node's element (a step or a stack),
-// renderHead(frame) -> the frame's head element, labelOf(item) -> the label text under a compact node (or ''),
-// stateOf(item) -> 'running' | 'paused' | 'pending' | a finished outcome (for the wires), frameWord(frame) -> its
-// state word (for the outline), replans: [[from step key, to step key]], start: the start step's key, loop: the
-// mission loop's words ('' when it does not repeat), repeatText(frame) -> a repeat frame's words, ids: the prefix of
-// the drawing's element ids (its arrow heads; one per graph on the page).
-// Returns {node, items, height, replans: how many replan arrows were drawn, flow: the wires in run order as
-// {a, b, mid} (the items joined and the wire's middle; a null a: from the start, a null b: to the end), so the
-// editor can put its "+" on them}.
+// renderHead(frame, f) -> a box's title bar, renderRule(rule) -> a Fail terminal, Retry or Replan node (the editor),
+// stateOf(item) -> 'running' | 'paused' | 'pending' | a finished outcome (the Run view's wires; none: the editor's
+// plain wires), frameWord(frame) -> its state word (for the box outline), loop: the mission loop's words ('' when it
+// does not repeat), ids: the prefix of the drawing's element ids (its arrow heads; one per graph on the page).
+// Returns {node, items, height, replans: how many replan wires were drawn, flow: the wires in run order as {a, b, mid}
+// (the items joined and the wire's middle; a null a: from Start, a null b: to Done), so the editor can put its "+" on
+// them}.
 function drawGraph(layout, ctx) {
-  const { items, frames, owner, metrics: M } = layout;
+  const { items, frames, metrics: M } = layout;
   const width = layout.width;
   const height = layout.height;
-  const graph = el('div', { class: 'pg-graph', role: 'group', 'aria-label': ctx.label || 'Mission graph' });
+  const graph = el('div', { class: `pg-graph fl${M.ports ? ' fl-ports' : ''}`, role: 'group', 'aria-label': ctx.label || 'Mission graph' });
   const back = gsvg('svg', { class: 'pg-lines', 'aria-hidden': 'true' });
   const wires = gsvg('svg', { class: 'pg-lines', 'aria-hidden': 'true' });
   const notes = gsvg('svg', { class: 'pg-lines', 'aria-hidden': 'true' });
   [back, wires, notes].forEach((s) => { s.setAttribute('width', width); s.setAttribute('height', height); });
-  graph.style.cssText = `width: ${width}px; height: ${height}px`;
+  graph.style.cssText = `width: ${width}px; height: ${height}px; --fl-line: ${M.line}px; --fl-fail: ${M.fail || 0}px; --fl-head: ${M.head}px`;
   graph.append(back, wires);
   const ids = ctx.ids || 'pg';
   const arrow = (name) => `url(#${ids}-head-${name})`;
   const defs = gsvg('defs');
-  ['done', 'now', 'todo', 'fail', 'loop'].forEach((name) => defs.append(graphMarker(ids, name)));
+  ['back', 'fail', 'loop', 'now'].forEach((name) => defs.append(graphMarker(ids, name)));
   wires.append(defs);
+  const place = (node, x, y, w, h) => {
+    node.style.left = `${x}px`;
+    node.style.top = `${y}px`;
+    node.style.width = `${w}px`;
+    node.style.height = `${h}px`;
+    graph.append(node);
+    return node;
+  };
 
-  // the frames: an outline with its head on the top edge (a branch: a fainter lane with its name)
+  // the boxes: a translucent box with its title bar (a lane: a thinner one)
   frames.forEach((f) => {
     const word = ctx.frameWord ? ctx.frameWord(f.node) : '';
-    back.append(gsvg('rect', { class: `pg-outline ${f.node.kind} ${word}`, x: f.x, y: f.y, width: f.w, height: f.h, rx: M.frameRadius }));
+    back.append(gsvg('rect', { class: `fl-box ${f.node.kind} ${word}`, x: f.x + 0.5, y: f.y + 0.5, width: f.w - 1, height: f.h - 1, rx: 8 }));
     const head = ctx.renderHead(f.node, f);
-    if (head) {
-      head.style.left = `${f.x + 10}px`;
-      head.style.top = `${f.y - 13}px`;
-      head.style.maxWidth = `${f.w - 20}px`;
-      graph.append(head);
-    }
+    if (head) place(head, f.x, f.y, f.w, f.head);
   });
-  // the items: the caller's node elements, the label under them, the dots (a parallel's split and join, the one in an
-  // empty frame), each classed by its own key's end: pg-dot-split, pg-dot-join, pg-dot-empty
+  // the items: the caller's nodes, the Start and Done nodes, the dots (a parallel's split and join, an empty box's),
+  // each dot classed by its own key's end: pg-dot-split, pg-dot-join, pg-dot-empty
   items.forEach((it, key) => {
     if (it.kind === 'dot') {
-      wires.append(gsvg('circle', { class: `pg-dot-${key.slice(key.lastIndexOf(':') + 1)} ${ctx.stateOf(it)}`,
+      wires.append(gsvg('circle', { class: `pg-dot-${key.slice(key.lastIndexOf(':') + 1)} ${ctx.stateOf ? ctx.stateOf(it) : ''}`,
         cx: it.cx, cy: it.cy, r: M.dot / 2 - 1 }));
       return;
     }
-    const node = ctx.renderItem(it);
-    node.style.left = `${it.cx - it.nw / 2}px`;
-    node.style.top = `${it.cy - it.nh / 2}px`;
-    graph.append(node);
-    it.el = node;
-    const text = M.label ? ctx.labelOf(it) : '';
-    if (text) {
-      const label = el('span', { class: `pg-label${ctx.stateOf(it) === 'running' || ctx.stateOf(it) === 'paused' ? ' now' : ''}`,
-        'aria-hidden': 'true' }, ...(Array.isArray(text) ? text : [text]));
-      label.style.left = `${it.x + 2}px`;
-      label.style.width = `${it.w - 4}px`;
-      label.style.top = `${it.cy + it.nh / 2 + 3}px`;
-      graph.append(label);
-    }
+    const node = it.kind === 'start' || it.kind === 'end'
+      ? el('div', { class: `fl-node fl-end ${it.kind}`, role: 'img', 'aria-label': it.kind === 'start' ? 'Start' : 'Done' },
+        flowHead(it.kind === 'start' ? 'Start' : 'Done', M.kindWord ? FLOW_KIND_WORDS[it.kind] : ''))
+      : ctx.renderItem(it);
+    if (M.ports && it.kind === 'start') node.append(el('span', { class: 'pg-port done', 'aria-hidden': 'true' }));
+    if (M.ports && it.kind === 'end') node.append(el('span', { class: 'pg-port in', 'aria-hidden': 'true' }));
+    it.el = place(node, it.x, it.y, it.w, it.h);
   });
 
   // the flow: entry and exit items of every node, then a wire from each item to the next in run order
   const live = (st) => st === 'running' || st === 'paused';
-  const cls = (target) => { const st = ctx.stateOf(target); return live(st) ? 'now' : st !== 'pending' ? 'done' : 'todo'; };
+  const finished = (it) => { const st = ctx.stateOf(it); return st !== 'pending' && !live(st); };
+  const cls = (a, b) => {
+    if (!ctx.stateOf) return '';
+    if (b.kind === 'end') return finished(a) ? 'done' : 'todo';
+    const st = ctx.stateOf(b);
+    return live(st) ? 'now' : st !== 'pending' ? 'done' : 'todo';
+  };
   const entry = (node) => {
-    if (node.kind === 'step' || (isFrame(node) && !ctx.isOpen(node))) return items.get(owner.get(node.kind === 'step' ? node.key : ctx.keyOf(node.leaves[0])) || node.key);
+    if (node.kind === 'step' || (isFrame(node) && !ctx.isOpen(node))) return items.get(layout.owner.get(node.kind === 'step' ? node.key : ctx.keyOf(node.leaves[0])) || node.key);
     if (node.kind === 'parallel') return items.get(`${node.key}:split`);
     for (const c of node.children || []) { const e = entry(c); if (e) return e; }
     return items.get(`${node.key}:empty`) || null;
@@ -306,43 +427,34 @@ function drawGraph(layout, ctx) {
   };
   const seen = new Set();
   const flow = [];
+  const next = new Map();  // an item -> the item its done wire leads to (a skip's fail wire goes there too)
   const flowing = (path) => {  // the graph is rebuilt every second: a flowing wire runs at the phase of a page-wide clock
     if (path.classList.contains('now')) path.style.animationDelay = `-${(performance.now() % 700) / 1000}s`;
     return path;
   };
-  const join = (a, b, bend) => {
+  const join = (a, b) => {
     if (!a || !b || a === b || seen.has(`${a.node.key}>${b.node.key}`)) return;
     seen.add(`${a.node.key}>${b.node.key}`);
-    const c = cls(b);
-    const w = graphWire(a, b, bend);
-    flow.push({ a, b, mid: w.mid });
-    wires.append(flowing(gsvg('path', { class: `pg-wire ${c}`, d: w.d, 'marker-end': arrow(c) })));
+    if (!next.has(a)) next.set(a, b);
+    const w = graphWire(a, b);
+    flow.push({ a: a.kind === 'start' ? null : a, b: b.kind === 'end' ? null : b, mid: w.mid });
+    wires.append(flowing(gsvg('path', { class: `pg-wire ${cls(a, b)}`, d: w.d })));
   };
   const wireSequence = (node, frame) => {
     const list = node.children || [];
     list.forEach((c, k) => {
-      if (k) join(exit(list[k - 1]), entry(c), M.column ? 0 : Math.min(22, k % 2 ? 14 : -14));
+      if (k) join(exit(list[k - 1]), entry(c));
       wireNode(c);
     });
-    if ((node.kind === 'repeat' || (node.kind === 'root' && ctx.loop)) && list.length) {  // the return wire up the gutter
+    if (node.kind === 'repeat' && list.length && frame) {  // the return wire along the box's bottom, no words
       const from = exit(list[list.length - 1]);
       const to = entry(list[0]);
       if (!from || !to) return;
-      const gx = node.kind === 'root' ? Math.max(10, M.left / 2 - 2) : frame.x + M.gutter / 2 + 2;
-      const low = node.kind === 'root' ? height - M.bottom / 2 - 4 : frame.y + frame.h - M.pad / 2;
-      const blocked = [...items.values()].some((n) => n !== from && n.cx < from.cx && n.cy > from.cy - n.nh && n.cy < from.cy + n.nh);
-      const way = blocked ? [[from.cx, from.cy + from.nh / 2 + (M.label ? 20 : 4)], [from.cx, low], [gx, low]]
-        : [[from.cx - from.nw / 2 - 3, from.cy], [gx, from.cy]];
-      const done = node.leaves ? node.leaves.every((i) => { const st = ctx.stateOf(items.get(owner.get(ctx.keyOf(i)))); return st !== 'pending' && !live(st); })
-        : false;
-      wires.append(flowing(gsvg('path', { class: `pg-wire loop${done ? ' now' : ''}`, 'marker-end': arrow('loop'),
-        d: graphRounded([...way, [gx, to.cy], [to.cx - to.nw / 2 - 5, to.cy]], 16) })));
-      const text = node.kind === 'root' ? ctx.loop : (ctx.repeatText ? ctx.repeatText(node) : '');
-      const from_y = way[way.length - 1][1];
-      const mid = (from_y + to.cy) / 2;
-      if (text) notes.append(text.length * 7 < Math.abs(from_y - to.cy) - 24
-        ? gsvg('text', { class: 'pg-wire-label loop', x: gx - 4, y: mid, 'text-anchor': 'middle', transform: `rotate(-90 ${gx - 4} ${mid})` }, text)
-        : gsvg('text', { class: 'pg-wire-label loop', x: gx + 8, y: low + 14 }, text));
+      const rx = frame.x + frame.w - 8;
+      const lx = frame.x + 8;
+      const low = frame.y + frame.h - M.gutter / 2 - 3;
+      wires.append(gsvg('path', { class: 'pg-wire loop', 'marker-end': arrow('loop'),
+        d: graphRounded([[from.outX, from.line], [rx, from.line], [rx, low], [lx, low], [lx, to.line], [to.inX - 2, to.line]], 10) }));
     }
   };
   const wireNode = (node) => {
@@ -352,48 +464,60 @@ function drawGraph(layout, ctx) {
     if (node.kind === 'parallel') {
       const split = items.get(`${node.key}:split`);
       const joinDot = items.get(`${node.key}:join`);
-      node.branches.forEach((b) => { join(split, entry(b), 0); wireNode(b); join(exit(b), joinDot, 0); });
+      node.branches.forEach((b) => { join(split, entry(b)); wireNode(b); join(exit(b), joinDot); });
       return;
     }
     wireSequence(node, frame);
   };
+  const first = items.get('@start');
+  const last = items.get('@end');
+  join(first, entry(layout.root));
   wireNode(layout.root);
+  const tail = exit(layout.root);
+  if (last) join(tail || first, last);
+  // the mission's loop: from the last node back to Start along the bottom, its words on the wire's middle
+  if (layout.loopY !== null && tail) {
+    const x = tail.outX + 22;
+    flow.push({ a: tail, b: null, mid: { x, y: tail.line } });
+    wires.append(gsvg('path', { class: 'pg-wire loop', 'marker-end': arrow('loop'),
+      d: graphRounded([[tail.outX, tail.line], [x, tail.line], [x, layout.loopY], [first.cx, layout.loopY], [first.cx, first.y + first.h + 3]], 14) }));
+    if (ctx.loop) notes.append(gsvg('text', { class: 'pg-wire-label loop', x: (x + first.cx) / 2, y: layout.loopY + 4, 'text-anchor': 'middle' }, ctx.loop));
+  }
 
-  // the replan arrows: dashed, labelled, to the step the plan restarts from
-  let drawnReplans = 0;
-  (ctx.replans || []).forEach(([fromKey, toKey]) => {
-    const a = items.get(owner.get(fromKey));
-    const b = items.get(owner.get(toKey));
-    if (!a || !b || a === b) return;
-    drawnReplans += 1;
-    // bowed sideways, clear of the nodes: wide ones (the editor's column) need the bow outside their edge
-    const w = graphWire(a, b, Math.max(M.column ? a.nw / 2 + 56 : 0, Math.min(70, 26 + Math.hypot(b.cx - a.cx, b.cy - a.cy) * 0.25)));
-    wires.append(gsvg('path', { class: 'pg-wire fail', d: w.d, 'marker-end': arrow('fail') }));
-    notes.append(gsvg('text', { class: 'pg-wire-label fail', x: w.mid.x, y: w.mid.y + 4, 'text-anchor': 'middle' }, 'replan'));
+  // the failure routes (the editor): a fail wire from the fail port to the terminal, the rule node and back, the next
+  // node (skip), or along the bottom to the step a replan starts from
+  const failAt = (it) => [it.x + it.w, it.y + M.fail];
+  layout.rules.forEach((r) => {
+    const node = ctx.renderRule(r);
+    if (node) r.el = place(node, r.x, r.y, r.w, r.h);
+    if (r.kind === 'replan' && layout.lanes.some((l) => l.rule === r)) return;
+    const [fx, fy] = failAt(r.item);
+    const tx = r.x + r.w / 2;
+    wires.append(gsvg('path', { class: 'pg-wire fail', d: `M${fx},${fy} C${fx + 36},${fy} ${tx},${r.y - 36} ${tx},${r.y}` }));
+    if (r.kind !== 'abort') {  // a retry, a replan of itself: back into the node's input
+      const my = r.y + r.h / 2;
+      const it = r.item;
+      wires.append(gsvg('path', { class: 'pg-wire fail back', 'marker-end': arrow('fail'),
+        d: `M${r.x},${my} C${r.x - 40},${my} ${it.inX - 40},${it.line} ${it.inX - 2},${it.line}` }));
+    }
   });
-  // the start: a dot beside the start step, where nothing is; the end: a final ring after the last step (unless the
-  // mission repeats: then the loop wire)
-  const first = items.get(owner.get(ctx.start)) || entry(layout.root);
-  if (first) {
-    const free = ([dx, dy]) => [...items.values()].every((n) => n === first || Math.hypot(n.cx - first.cx - dx, n.cy - first.cy - dy) > 40);
-    const [sx, sy] = (M.column ? [[0, -56], [-70, -20], [70, -20]] : [[-58, -28], [-58, 26], [0, -64], [58, -30], [0, 64]]).find(free) || [-58, -28];
-    const dot = { cx: first.cx + sx, cy: first.cy + sy, nw: 12, nh: 12 };
-    const w = graphWire(dot, first, 0);
-    flow.unshift({ a: null, b: first, mid: w.mid });
-    wires.append(gsvg('circle', { class: 'pg-init', cx: dot.cx, cy: dot.cy, r: 6 }),
-      gsvg('path', { class: 'pg-wire done', d: w.d, 'marker-end': arrow('done') }));
-  }
-  const last = exit(layout.root);
-  if (last && ctx.loop) flow.push({ a: last, b: null, mid: { x: last.cx, y: last.cy + last.nh / 2 + 22 } });  // the end, under the last node
-  if (last && !ctx.loop) {
-    const free = ([dx, dy]) => [...items.values()].every((n) => n === last || Math.hypot(n.cx - last.cx - dx, n.cy - last.cy - dy) > 40);
-    const [ex, ey] = (M.column ? [[0, 56], [66, 0], [-66, 0]] : [[62, 0], [0, 66], [-62, 0], [0, -66]]).find(free) || [0, 66];
-    const ring = { cx: last.cx + ex, cy: last.cy + ey, nw: 18, nh: 18 };
-    const w = graphWire(last, ring, 0);
-    flow.push({ a: last, b: null, mid: w.mid });
-    wires.append(gsvg('path', { class: 'pg-wire todo', d: w.d, 'marker-end': arrow('todo') }),
-      gsvg('circle', { class: 'pg-final', cx: ring.cx, cy: ring.cy, r: 9 }), gsvg('circle', { class: 'pg-final-dot', cx: ring.cx, cy: ring.cy, r: 5 }));
-  }
+  items.forEach((it) => {
+    if (it.route?.kind !== 'skip') return;
+    const to = next.get(it);
+    if (!to) return;
+    const [fx, fy] = failAt(it);
+    wires.append(gsvg('path', { class: 'pg-wire fail skip', d: graphCurve(fx, fy, to.inX, to.line) }));
+  });
+  layout.lanes.forEach(({ from, to, y, rule }) => {
+    if (rule) {  // the editor: from the fail port, along the lane, into the target's input
+      const [fx, fy] = failAt(from);
+      wires.append(gsvg('path', { class: 'pg-wire fail', 'marker-end': arrow('fail'),
+        d: graphRounded([[fx, fy], [fx + 18, fy], [fx + 18, y], [to.inX - 18, y], [to.inX - 18, to.line], [to.inX - 2, to.line]], 12) }));
+    } else {  // the Run view: thin, under the nodes, into the target from below
+      wires.append(gsvg('path', { class: 'pg-wire fail thin', 'marker-end': arrow('fail'),
+        d: graphRounded([[from.cx, from.y + from.h], [from.cx, y], [to.cx, y], [to.cx, to.y + to.h + 2]], 8) }));
+    }
+  });
   graph.append(notes);
-  return { node: graph, items, height, replans: drawnReplans, flow };
+  return { node: graph, items, height, replans: layout.lanes.length, flow };
 }

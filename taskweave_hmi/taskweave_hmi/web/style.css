@@ -20,6 +20,8 @@
   --run: #dbff55; --ok: #dbff55; --warn: #ffc95c; --bad: #ff7f6a; --done: #c5c9e6; --idle: #9a9ec8; --on-fill: #03031c;
   /* skills in the plan graph: categorical, not states */
   --kind-drive: #7a8cff; --kind-arm: #b394ff; --kind-grip: #ff9a4d; --kind-wait: #8a8ea8; --kind-other: #2dd4bf;
+  /* the flow's own headers: retry and replan rule nodes, Start and Done, a Fail terminal (white text on the last two) */
+  --flow-rule: #c98a3a; --flow-end: #1d7a4c; --flow-fail: #8a1f2e;
   /* the 3D view: the ground's navy, like a viewport */
   --viewer-bg: #03031c; --viewer-line: #1c1d5a; --viewer-ink: #e9ebf5; --viewer-tools: rgb(7 7 46 / 82%);
 
@@ -591,11 +593,12 @@ details.card[open] > summary.label { margin-bottom: 0; border-radius: var(--r-m)
                 padding: 6px; margin: -6px; }
   #viewer3d-teach { aspect-ratio: 16 / 13; max-height: none; }
 }
-/* Program: the list or the editor up to 1179px (.editing hides the list); from 1180px the list (300px, sticky) beside
-   the open mission or a hint, the page as wide as the window, no back button */
+/* Program: the list or the editor up to 1599px (.editing hides the list: the flow wants the width); from 1600px the
+   list (300px, sticky) beside the open mission or a hint, the page as wide as the window, no back button */
 .editor-empty { display: none; }
 .missions-md.editing #mission-list-card { display: none; }
-@media (min-width: 1180px) {
+body[data-view="missions"]:has(.missions-md.editing) main { max-width: none; padding: var(--sp-5) var(--sp-6) var(--sp-12); }  /* the flow runs across: the open mission takes the window */
+@media (min-width: 1600px) {
   body[data-view="missions"] main { max-width: none; padding: var(--sp-5) var(--sp-6) var(--sp-12); }
   .missions-md { grid-template-columns: 300px minmax(0, 1fr); align-items: start; gap: var(--sp-5); }
   .missions-md #mission-list-card, .missions-md.editing #mission-list-card { display: flex; }
@@ -833,114 +836,135 @@ li.empty { list-style: none; padding: 6px 2px; }
 .viewer3d-tools svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.75; }
 @media (max-width: 600px) { .viewer3d { aspect-ratio: 4 / 3; } }
 
-/* mission graph (graph-core.js, graph-run.js): steps are 44 px icon nodes joined by wires in run order, snaking
-   across the box; frames (groups, includes, repeats, parallel lanes) are outlines with their head on the edge (closed:
-   a stack node); a pop-up for a picked step (a bottom sheet at 600px and below). Nodes take their skill colour (--k, from --kind-*) and show state by fill, ring and corner dot; arrows show
-   the way travelled (solid), the step running (flowing lime) and the way ahead (dotted). The graph's own colours are
-   the --g-* tokens. */
-.graph-box { display: grid; gap: var(--sp-3); container: plan / inline-size;
-  --g-fail: var(--bad); --g-warn: var(--warn); --g-bad: var(--bad); --g-card: var(--surface-card); }
+/* mission graph (graph-core.js, graph-run.js): the flow look. The flow runs left to right from Start to Done (or the
+   loop back to Start); nodes are a dark body with a header strip in their colour (--hd: the skill's --k, the brand for
+   a mission or a group, amber for a repeat or a parallel block, --flow-* for Start, Done, Fail and the rule nodes) with
+   the name and the kind word, fields in mono in the body; blocks are translucent boxes with a title bar (closed: a
+   stack node, cards behind it); wires are bezier curves. On the Run tab the state is in colour: the running node
+   filled with its colour and a lime ring, the run so far a lime wire, the way ahead dotted. The graph's own colours
+   are the --g-* tokens. */
+.graph-box { display: grid; gap: var(--sp-3); container: plan / inline-size; }
+.graph-box, .ed-canvas { --g-fail: var(--bad); --g-warn: var(--warn); --g-bad: var(--bad); --g-card: var(--surface-card); }
 @media (max-width: 600px) { .graph-box { container-type: normal; } }  /* no containment: the sheet is fixed to the screen */
 .kind-drive { --k: var(--kind-drive); } .kind-arm { --k: var(--kind-arm); } .kind-grip { --k: var(--kind-grip); }
 .kind-wait { --k: var(--kind-wait); } .kind-other { --k: var(--kind-other); }
-.pg { display: block; }
+/* the Run tab's strip: the flow scrolls across, not the page */
+.pg { display: block; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; padding-bottom: 2px; }
 .pg.with-sheet { padding-bottom: 60vh; }  /* the sheet covers the bottom of the page: the plan scrolls clear of it */
 .pg-graph { position: relative; flex: none; user-select: none; }
-.pg-outline { fill: color-mix(in srgb, var(--surface-field) 55%, transparent); stroke: var(--border); stroke-width: 1.25; }
-.pg-outline.running, .pg-outline.paused { stroke: var(--run-fill); stroke-width: 2; }
-.pg-outline.failed { stroke: color-mix(in srgb, var(--g-bad) 60%, transparent); }
-/* a repeat and a parallel block are structure, in the brand's blue; a lane (one branch) is a dashed outline inside */
-.pg-outline.repeat, .pg-outline.parallel { stroke: color-mix(in srgb, var(--brand-text) 45%, var(--border)); }
-.pg-outline.branch { fill: none; stroke-dasharray: 3 5; stroke-linecap: round; }
-.pg-dot-split, .pg-dot-join { fill: var(--text-muted); }
-.pg-dot-empty { fill: var(--border-strong); }  /* the dot in an empty frame */
-.pg-dot-split.running, .pg-dot-join.running, .pg-dot-split.paused, .pg-dot-join.paused { fill: var(--run-fill); }
-.pg-band.branch { cursor: default; } .pg-band.branch:hover { background: var(--g-card); }
-.pg-band.repeat, .pg-band.parallel { border-color: color-mix(in srgb, var(--brand-text) 45%, var(--border)); }
-.pg-link { font-size: 11px; line-height: 1; color: var(--brand-text); }
-.pg-wire { fill: none; stroke: var(--text-muted); stroke-width: 1.75; }
-.pg-wire.todo { stroke: var(--border-strong); stroke-dasharray: 1 5; stroke-linecap: round; stroke-width: 2; }
-.pg-wire.now { stroke: var(--run-fill); stroke-width: 2.5; stroke-dasharray: 7 5;
-  animation: wire-flow .7s linear infinite; }  /* the phase: graph-core.js flowing() */
-.pg-wire.fail { stroke: var(--g-fail); stroke-dasharray: 5 4; }
-.pg-wire.loop { stroke: var(--brand-text); stroke-dasharray: 6 5; stroke-width: 1.5; }
-.pg-head path { fill: var(--text-muted); } .pg-head.todo path { fill: var(--border-strong); }
-.pg-head.now path { fill: var(--run-fill); } .pg-head.fail path { fill: var(--g-fail); } .pg-head.loop path { fill: var(--brand-text); }
-.pg-wire-label { font: 600 11.5px var(--sans); paint-order: stroke; stroke: var(--g-card); stroke-width: 4px;
-  stroke-linejoin: round; }
-.pg-wire-label.fail { fill: var(--g-fail); } .pg-wire-label.loop { fill: var(--brand-text); }
-.pg-init { fill: var(--text); }
-.pg-final { fill: none; stroke: var(--text); stroke-width: 1.5; } .pg-final-dot { fill: var(--text); }
-@keyframes wire-flow { to { stroke-dashoffset: -12; } }
-/* a node's number and target under it */
-.pg-label { position: absolute; text-align: center; font: 11px/1.3 var(--sans); color: var(--text-muted); white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
-.pg-label b { font: 600 12px var(--cond); color: var(--text); }
-.pg-label.now, .pg-label.now b { color: var(--run); font-weight: 700; }
-/* a closed phase: a stack of cards, filled from below to its share done, done/total on it */
-.pg-stack { position: absolute; width: 52px; height: 52px; padding: 0; display: grid; place-items: center; cursor: pointer;
-  border-radius: 14px; border: 1.5px solid var(--border-strong); color: var(--text); font: 700 13px var(--cond);
-  background: linear-gradient(to top, color-mix(in srgb, var(--done) 16%, var(--g-card)) var(--done-share),
-    var(--g-card) var(--done-share));
-  box-shadow: 4px -4px 0 -1.5px var(--g-card), 4px -4px 0 0 var(--border-strong),
-    8px -8px 0 -1.5px var(--g-card), 8px -8px 0 0 var(--border); }
-.pg-stack.running, .pg-stack.paused { border-color: var(--run-fill); border-width: 2px; }
-.pg-stack.failed { border-color: var(--g-bad); color: var(--g-bad); }
-.pg-stack:hover { border-width: 2px; }
-.pg-stack:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .pg-lines { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
 
-/* chips: pending faded, succeeded tinted with a green dot, running solid with a brand ring (breathing), failed red */
-.pg-chip { position: absolute; width: 44px; height: 44px; padding: 0; display: grid; place-items: center; cursor: pointer;
-  border-radius: 14px; border: 1.5px solid var(--k); background: color-mix(in srgb, var(--k) 8%, var(--g-card));
-  color: var(--k); transition: background-color .3s, border-color .3s; }
-.pg-chip .icon { width: 22px; height: 22px; pointer-events: none; }
-/* filled pastel, no outline (done stronger, pending lighter); running, paused, failed and warn keep theirs */
-.pg-graph .pg-chip:not(.state-running, .state-paused, .state-failed, .state-rejected, .state-warn) {
-  border-color: transparent; background: color-mix(in srgb, var(--k) 22%, var(--g-card)); }
-.pg-graph .pg-chip.state-pending { background: color-mix(in srgb, var(--k) 11%, var(--g-card)); }
-.pg-graph .pg-chip:not(.state-running, .state-paused, .state-failed, .state-rejected, .state-warn):hover {
-  border-width: 1.5px; border-color: color-mix(in srgb, var(--k) 60%, transparent); }
-.pg-chip:hover { border-width: 2px; }
+/* the boxes and their title bars: a 4px strip in the block's colour, the name, the kind word, a field, the chevron */
+.fl-box { fill: color-mix(in srgb, var(--surface-field) 60%, transparent); stroke: var(--border); stroke-width: 1; }
+.fl-box.branch { fill: color-mix(in srgb, var(--surface-card) 55%, transparent); }
+.fl-box.running { stroke: var(--run-fill); stroke-width: 2; }
+.fl-box.paused { stroke: var(--g-warn); stroke-width: 2; }
+.fl-box.failed { stroke: color-mix(in srgb, var(--g-bad) 60%, transparent); }
+.hd-brand { --hd: var(--brand); --hd-ink: var(--on-brand); }
+.hd-warn { --hd: var(--warn); --hd-ink: var(--on-fill); }
+.hd-lane { --hd: color-mix(in srgb, var(--warn) 60%, var(--surface-card)); --hd-ink: var(--on-fill); }
+.pg-band { position: absolute; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; margin: 0;
+  padding: 0 var(--sp-1) 0 14px; border: 0; border-bottom: 1px solid var(--border); border-radius: 8px 8px 0 0;
+  background: color-mix(in srgb, var(--surface-card) 75%, transparent); color: var(--text); font: 600 13px/1 var(--sans);
+  text-align: left; }
+.pg-band::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: 8px 0 0 0; background: var(--hd); }
+.pg-band.branch { background: color-mix(in srgb, var(--hd) 16%, var(--surface-card)); font-size: var(--fs-xs); }
+button.pg-band { cursor: pointer; }
+button.pg-band:hover { background: var(--surface-hover); }
+.pg-band:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.pg-band .fl-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; }
+.pg-band .fl-kind { flex: none; margin-right: auto; font: 500 11px/1 var(--sans); color: var(--text-muted); }
+.pg-band .fl-field { flex: 0 1 auto; }
+.pg-chev { flex: none; width: 24px; height: 24px; display: grid; place-items: center; color: var(--text-muted); }
+.pg-chev::before { content: ""; width: 6px; height: 6px; border: solid currentColor; border-width: 0 2px 2px 0;
+  transform: translateY(-2px) rotate(45deg); transition: transform .15s; }
+.pg-band.open .pg-chev::before, .pg-chev-btn .pg-chev::before { transform: translateY(1px) rotate(-135deg); }  /* open: points up, closes */
+
+/* nodes: a dark body, the header strip in --hd with the name (left) and the kind word (right), fields in mono */
+.fl-node { position: absolute; display: grid; grid-template-rows: var(--fl-head) minmax(0, 1fr); padding: 0; margin: 0;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--surface-card); color: var(--text);
+  font: 14px var(--sans); text-align: left; --hd: var(--k, var(--brand)); --hd-ink: var(--on-fill); }
+.fl-node.hd-brand { --hd: var(--brand); --hd-ink: var(--on-brand); }
+.fl-node.hd-warn { --hd: var(--warn); --hd-ink: var(--on-fill); }
+.fl-node.hd-rule { --hd: var(--flow-rule); --hd-ink: var(--on-fill); }
+.fl-node.hd-fail { --hd: var(--flow-fail); --hd-ink: var(--on-brand); }
+.fl-end { --hd: var(--flow-end); --hd-ink: var(--on-brand); grid-template-rows: minmax(0, 1fr); border-color: transparent; }
+.fl-head { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 var(--sp-2); border-radius: 5px 5px 0 0;
+  background: var(--hd); color: var(--hd-ink); }
+.fl-end .fl-head { justify-content: center; border-radius: 5px; }
+.fl-name { flex: 1 1 auto; min-width: 0; font: 600 14px/1.1 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-kind { flex: none; font: 600 11px/1 var(--sans); opacity: .8; }
+.fl-body { position: relative; display: grid; align-content: center; gap: 3px; min-width: 0; padding: 4px var(--sp-2); border-radius: 0 0 5px 5px; }
+.fl-ports .fl-node .fl-body { padding-right: 40px; }  /* room for the port words */
+.fl-field { display: flex; gap: 6px; min-width: 0; font: 11px/1.25 var(--mono); white-space: nowrap; }
+.fl-k { flex: none; color: var(--text-muted); }
+.fl-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.pg-band .fl-field .fl-v { color: var(--text); }
+/* the rule nodes and the Fail terminal: a smaller header, the field centred */
+.fl-rule { grid-template-rows: 20px minmax(0, 1fr); cursor: pointer; }
+.fl-rule .fl-name { font-size: var(--fs-xs); }
+.fl-rule .fl-body { padding: 2px var(--sp-2); justify-items: center; }
+.fl-rule:hover { border-color: var(--hd); }
+.fl-rule:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+@media (pointer: coarse), (max-width: 600px) { .fl-rule::after { content: ""; position: absolute; inset: -6px; } }  /* a 44px target */
+/* a closed block: cards behind it; on the Run tab its body fills left to right to its share done */
+.fl-stack { box-shadow: 4px -4px 0 -1px var(--surface-card), 4px -4px 0 0 var(--border-strong),
+  8px -8px 0 -1px var(--surface-card), 8px -8px 0 0 var(--border); }
+.pg-stack { cursor: pointer; }
+.pg-stack .fl-body { justify-items: start; background: linear-gradient(to right, color-mix(in srgb, var(--done) 16%, var(--surface-card)) var(--done-share),
+  var(--surface-card) var(--done-share)); }
+.pg-stack-count { font: 700 13px var(--mono); color: var(--text); }
+.pg-stack.running { border-color: var(--run-fill); box-shadow: 0 0 0 1px var(--run-fill), 4px -4px 0 -1px var(--surface-card), 4px -4px 0 0 var(--border-strong); }
+.pg-stack.paused { border-color: var(--g-warn); }
+.pg-stack.failed { border-color: var(--g-bad); }
+.pg-stack:hover { border-color: var(--border-strong); }
+.pg-stack:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+/* the wires: 2px muted; on the Run tab the run so far lime, the running one flowing, the way ahead dotted; fail
+   wires coral at 70% (skip dashed, the Run tab's replan thin); the loops dashed */
+.pg-wire { fill: none; stroke: var(--text-muted); stroke-width: 2; }
+.pg-wire.done { stroke: var(--run-fill); }
+.pg-wire.todo { stroke: var(--border-strong); stroke-dasharray: 1 5; stroke-linecap: round; }
+.pg-wire.now { stroke: var(--run-fill); stroke-width: 2.5; stroke-dasharray: 7 5;
+  animation: wire-flow .7s linear infinite; }  /* the phase: graph-core.js flowing() */
+.pg-wire.fail { stroke: color-mix(in srgb, var(--g-fail) 70%, transparent); }
+.pg-wire.fail.skip { stroke-dasharray: 5 4; }
+.pg-wire.fail.thin { stroke: var(--g-fail); stroke-width: 1.25; stroke-dasharray: 4 3; }
+.pg-wire.loop { stroke: var(--text-muted); stroke-dasharray: 6 5; stroke-width: 1.5; }
+.pg-head path { fill: var(--text-muted); } .pg-head.now path { fill: var(--run-fill); } .pg-head.fail path { fill: var(--g-fail); }
+.pg-wire-label { font: 600 var(--fs-xs) var(--sans); paint-order: stroke; stroke: var(--surface-page); stroke-width: 5px;
+  stroke-linejoin: round; }
+.pg-wire-label.loop { fill: var(--text-muted); }
+@keyframes wire-flow { to { stroke-dashoffset: -12; } }
+/* a parallel block's split and join (ports on the box's edges), an empty box's dot */
+.pg-dot-split, .pg-dot-join { fill: var(--surface-card); stroke: var(--text-muted); stroke-width: 1.5; }
+.pg-dot-split.running, .pg-dot-join.running, .pg-dot-split.paused, .pg-dot-join.paused { fill: var(--run-fill); stroke: var(--run-fill); }
+.pg-dot-empty { fill: var(--border-strong); }
+
+/* the Run tab's nodes: pending as drawn; done the body dimmed and a tick; running filled with its colour, a lime ring,
+   breathing; paused the same with an amber ring; failed a coral outline; timeout, canceled amber; skipped dashed */
+.pg-chip { cursor: pointer; transition: background-color .3s, border-color .3s; }
+.pg-chip:hover { border-color: var(--border-strong); }
 .pg-chip:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-.pg-chip.state-pending { background: var(--g-card); border-color: color-mix(in srgb, var(--k) 40%, transparent);
-  color: color-mix(in srgb, var(--k) 50%, transparent); }
+.pg-chip:not(.state-pending, .state-running, .state-paused) .fl-body { opacity: .7; }
 .pg-chip.state-running, .pg-chip.state-paused { background: var(--k); border-color: var(--k); color: var(--on-fill);
   --ring: var(--run); animation: node-breathe 2.8s ease-in-out infinite;  /* period = BREATHE_MS in graph-run.js */
   box-shadow: 0 0 0 2px var(--g-card), 0 0 0 4px var(--ring),
     0 0 calc(10px * var(--breath)) calc(4px * var(--breath)) color-mix(in srgb, var(--k) 45%, transparent); }
+.pg-chip.state-running .fl-k, .pg-chip.state-paused .fl-k { color: var(--on-fill); opacity: .75; }
+.pg-chip.state-running .fl-v, .pg-chip.state-paused .fl-v { color: var(--on-fill); font-weight: 600; }
 .pg-chip.state-paused { --ring: var(--g-warn); animation: none; }
-.pg-chip.state-failed, .pg-chip.state-rejected { background: color-mix(in srgb, var(--g-bad) 7%, var(--g-card));
-  border-color: var(--g-bad); color: var(--g-bad); }
-.pg-chip.state-warn { background: color-mix(in srgb, var(--g-warn) 7%, var(--g-card)); border-color: var(--g-warn); }
-.pg-chip.selected, .pg-chip.start-here { outline: 2px dashed var(--brand-text); outline-offset: 2px; }
-.pg-dot { position: absolute; top: -4px; right: -4px; width: 8px; height: 8px; border-radius: 50%;
+.pg-chip.state-failed, .pg-chip.state-rejected { border-color: var(--g-bad); box-shadow: 0 0 0 1px var(--g-bad); }
+.pg-chip.state-warn { border-color: var(--g-warn); }
+.pg-chip.state-skipped { border-style: dashed; border-color: var(--border-strong); }
+.pg-chip.selected, .pg-chip.start-here { outline: 2px dashed var(--brand-text); outline-offset: 3px; }
+.pg-dot { position: absolute; top: -5px; right: -5px; width: 8px; height: 8px; border-radius: 50%;
   box-shadow: 0 0 0 2px var(--g-card); }
-.pg-dot.ok { top: -5px; right: -5px; width: 12px; height: 12px; display: grid; place-items: center; background: var(--done);
-  color: var(--g-card); }
+.pg-dot.ok { width: 12px; height: 12px; display: grid; place-items: center; background: var(--done); color: var(--g-card); }
 .pg-dot.ok::before { content: ""; width: 5px; height: 3px; border: solid currentColor; border-width: 0 0 1.5px 1.5px;
   transform: translateY(-1px) rotate(-45deg); }
-.pg-dot.bad { top: -5px; right: -5px; width: 11px; height: 11px; display: grid; place-items: center;
+.pg-dot.bad { width: 12px; height: 12px; display: grid; place-items: center;
   background: var(--g-bad); color: var(--on-fill); font: 700 8px/1 var(--sans); }
-.pg-badge { position: absolute; top: -7px; left: 50%; transform: translateX(-50%); height: 14px; padding: 0 4px;
-  border-radius: var(--r-pill); font: 700 9.5px/12px var(--sans); white-space: nowrap; pointer-events: none;
-  color: var(--g-bad); background: color-mix(in srgb, var(--g-bad) 11%, var(--g-card));
-  border: 1px solid color-mix(in srgb, var(--g-bad) 55%, transparent); }
-.pg-badge.skip { color: var(--text-muted); background: var(--surface-field); border-color: var(--border); }
-
-/* an open phase's header: a pill on its outline's top edge (a nested include's smaller, over its first step) */
-.pg-band { position: absolute; display: flex; align-items: center; gap: 6px; height: 26px; min-width: 0;
-  padding: 0 var(--sp-3) 0 8px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--g-card);
-  color: var(--text); cursor: pointer; font: 600 var(--fs-s)/1 var(--sans); text-align: left; }
-.pg-band:hover { background: var(--surface-hover); }
-.pg-band:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-.pg-chev { flex: none; width: 12px; height: 12px; display: grid; place-items: center; color: var(--text-muted);
-  transition: transform .15s; }
-.pg-chev::before { content: ""; width: 6px; height: 6px; border: solid currentColor; border-width: 0 2px 2px 0;
-  transform: translateX(-1px) rotate(-45deg); }
-.pg-band.open .pg-chev { transform: rotate(90deg); }
-.pg-band-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pg-band-meta { flex: none; font: 600 var(--fs-xs) var(--sans); color: var(--text-muted); white-space: nowrap; }
 
 /* the side card: the running or selected step */
 .pg-card { min-width: 0; display: grid; gap: var(--sp-3); padding: var(--sp-4);
@@ -1011,9 +1035,9 @@ li.empty { list-style: none; padding: 6px 2px; }
   .board .bot *, .board .bot-all { animation: none !important; }  /* the poses stay, without the motion */
 }
 
-/* ---- Program tab: the mission graph editor (editor.js). The head with the tools, the canvas (scrolls) and the
-   properties panel at its right (380px; under it up to 1000px). Nodes are 196 x 56 tiles: the skill's icon in its
-   colour, the instruction, the command in mono, ports on the edges (the red one at the right is the failed port).
+/* ---- Program tab: the mission graph editor (editor.js). The head with the tools, the canvas (scrolls both ways) and
+   the properties panel at its right (380px; under it up to 1000px). The flow look: nodes with a coloured header and
+   fields, ports on the edges (the coral one at the right is the fail port), the failure routes under the flow.
    "+" spots sit on the wires; while a node is dragged they are its drop targets. ---- */
 .ed { display: grid; gap: var(--sp-3); min-width: 0; }
 .ed-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
@@ -1046,50 +1070,51 @@ li.empty { list-style: none; padding: 6px 2px; }
 .ed-undo-save, .ed-reload { margin-left: var(--sp-2); min-height: var(--tap-s); }
 /* the step form in the panel: "Step n" is its title; the graph moves, copies and removes steps */
 .ed-card { border: 0; padding: 0; background: none; }
-/* nodes */
-.pg-node { position: absolute; width: 196px; height: 56px; padding: 0 14px 0 8px; display: flex; align-items: center; gap: 10px;
-  text-align: left; cursor: grab; border-radius: var(--r-m); border: 1.5px solid color-mix(in srgb, var(--k) 45%, var(--border));
-  background: color-mix(in srgb, var(--k) 9%, var(--surface-card)); color: var(--text); font: var(--fs-s) var(--sans); touch-action: none; }
-.pg-node.frame { --k: var(--brand-text); border-style: dashed; }
-.pg-node.frame.include { border-style: solid; }
-.pg-node:hover { border-color: var(--k); }
+/* nodes in the editor: 220 x 64 (168 x 52 on a phone), the header with the name and the kind word, the main argument
+   as fields, the ports on the edges: in at the left, done and fail at the right with their words */
+.pg-node { cursor: grab; touch-action: none; }
+.pg-node:hover { border-color: var(--border-strong); }
 .pg-node:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-.pg-node.selected { outline: 2px solid var(--brand-text); outline-offset: 3px; border-color: var(--brand-text); }
-.pg-node.linked { opacity: .55; cursor: default; }
-.pg-node.has-problem { border-color: var(--bad); box-shadow: inset 4px 0 0 var(--bad); }
+.pg-node.selected { outline: 2px solid var(--brand-text); outline-offset: 2px; }
+.pg-node.selected:focus-visible { outline: 3px solid var(--brand-text); }
+.pg-node.linked { opacity: .7; cursor: default; }
+.pg-node.has-problem { border-color: var(--bad); }
+.pg-node.has-problem .fl-body { box-shadow: inset 4px 0 0 var(--bad); }
 .pg-node.ed-target { outline: 2px dashed var(--bad); outline-offset: 3px; }
-.pg-node-ico { flex: none; width: 36px; height: 36px; border-radius: var(--r-s); display: grid; place-items: center;
-  background: color-mix(in srgb, var(--k) 22%, var(--surface-card)); color: var(--k); }
-.pg-node-ico .icon { width: 20px; height: 20px; }
-.pg-glyph { font-size: 18px; line-height: 1; }
-.pg-node-text { min-width: 0; display: grid; gap: 2px; }
-.pg-node-title { font-weight: 600; font-size: 13px; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical; overflow-wrap: anywhere; }
-.pg-node-title.empty { color: var(--text-muted); font-weight: 500; font-style: italic; }
-.pg-node-sub { font: 11px var(--mono); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* a closed frame's chevron: opens it (a double-click or Enter does too) */
-.pg-node-chev { position: absolute; right: 10px; top: 50%; width: 32px; height: 32px; margin-top: -16px; display: grid; place-items: center;
-  border-radius: var(--r-s); color: var(--text-muted); cursor: pointer; }
-.pg-node-chev::before { content: ""; width: 7px; height: 7px; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(45deg); }
-.pg-node-chev:hover { background: var(--surface-hover); color: var(--brand-text); }
-.pg-node.frame { padding-right: 40px; }
-.pg-port { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: var(--surface-card); border: 1.5px solid var(--border-strong); }
-.pg-port.in { top: -6px; left: 50%; transform: translateX(-50%); }
-.pg-port.done { bottom: -6px; left: 50%; transform: translateX(-50%); }
-.pg-port.fail { right: -7px; top: 50%; transform: translateY(-50%); width: 12px; height: 12px; border-color: var(--bad); cursor: crosshair; }
+.ed-canvas .fl-stack.include { box-shadow: none; }  /* a collapsed include is one Mission node, no cards */
+/* the chevron in a closed block's header: opens it and selects it (a double-click or Enter opens it too) */
+.pg-node-chev { position: relative; flex: none; width: 20px; height: 20px; margin-right: -4px; display: grid; place-items: center;
+  border-radius: var(--r-s); color: inherit; cursor: pointer; }
+.pg-node-chev::before { content: ""; width: 6px; height: 6px; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(45deg); }
+.pg-node-chev::after { content: ""; position: absolute; inset: -12px; }  /* a 44px target */
+.pg-node-chev:hover { background: color-mix(in srgb, var(--hd-ink) 18%, transparent); }
+.pg-port { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: var(--surface-card);
+  border: 1.5px solid var(--border-strong); transform: translate(-50%, -50%); }
+.pg-port.in { left: 0; top: var(--fl-line); }
+.pg-port.done { left: 100%; top: var(--fl-line); border-color: var(--text-muted); }
+.fl-end .pg-port { top: 50%; }
+.pg-port.fail { left: 100%; top: var(--fl-fail); border-color: var(--bad); cursor: crosshair; }
 .pg-port.fail.set { background: var(--bad); }
-.pg-port.fail::after { content: ""; position: absolute; inset: -16px; }  /* a 44px target */
+.pg-port.fail::after { content: ""; position: absolute; inset: -17px; }  /* a 44px target */
 .pg-node:hover .pg-port.fail, .pg-node.selected .pg-port.fail { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 30%, transparent); }
-/* frame heads in the editor: a chevron button, the name (selects the block), its words, Open on a linked mission */
-.ed-canvas .pg-band { cursor: default; touch-action: none; }  /* a frame is dragged by its head, on touch too */
-.ed-canvas .pg-band:hover { background: var(--surface-card); }
+.fl-pw { position: absolute; right: 9px; transform: translateY(-50%); font: 500 10px/1 var(--sans); color: var(--text-muted); pointer-events: none; }
+.fl-pw.done { top: var(--fl-line); }
+.fl-pw.fail { top: var(--fl-fail); color: var(--bad); }
+/* a rule node's input on its top edge (a Replan on its wire takes the wire) */
+.fl-ports .fl-rule:not(.on-wire)::before { content: ""; position: absolute; left: 50%; top: 0; width: 10px; height: 10px; border-radius: 50%;
+  transform: translate(-50%, -50%); background: var(--surface-card); border: 1.5px solid var(--bad); }
+/* box title bars in the editor: the name selects the block, "+" adds a lane, the chevron closes the box */
+.ed-canvas .pg-band { cursor: default; touch-action: none; }  /* a block is dragged by its title bar, on touch too */
 .pg-band.selected { outline: 2px solid var(--brand-text); outline-offset: 2px; }
 .pg-band.linked { opacity: .7; }
-.pg-band-btn { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; min-width: 0; }
-.pg-chev-btn { display: grid; place-items: center; width: 20px; height: 20px; flex: none; }
-.pg-band-name.pg-band-btn { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.pg-band-btn { position: relative; background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; min-width: 0; }
+.pg-band-btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: var(--r-s); }
+.pg-band-name.pg-band-btn { align-self: stretch; text-align: left; }
 .pg-band-name.pg-band-btn:hover { color: var(--brand-text); }
-.pg-band-open { flex: none; color: var(--brand-text); font-weight: 600; font-size: var(--fs-xs); padding: 0 4px; }
+.pg-chev-btn, .fl-add { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--r-s); }
+.pg-chev-btn:hover, .fl-add:hover { background: var(--surface-hover); color: var(--brand-text); }
+.pg-chev-btn::after, .fl-add::after { content: ""; position: absolute; inset: -10px; }  /* a 44px target */
+.fl-add { color: var(--text-muted); font: 700 16px/1 var(--sans); }
 /* the "+" spots */
 .ed-spot { position: absolute; z-index: 2; width: 24px; height: 24px; margin: -12px 0 0 -12px; padding: 0; border-radius: 50%; display: grid;
   place-items: center; border: 1.5px dashed var(--border-strong); background: var(--surface-page); color: var(--text-muted);
