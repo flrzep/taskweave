@@ -384,8 +384,12 @@ main { max-width: var(--content); margin: 0 auto; padding: var(--sp-4) var(--sp-
 /* the Run tab: the window under the strip, no page scroll; the band at the top, the canvas under it takes the rest */
 body.on-run main { max-width: none; padding: 0; }
 .run { display: flex; flex-direction: column; gap: 0; height: calc(100dvh - var(--top-h, 40px)); min-height: 0; }
-.canvas { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; align-content: start; gap: var(--sp-3);
-          padding: var(--sp-3) var(--sp-4); }
+/* the canvas: its tools (the legend at the left, List, Fit, Follow), then the viewport (graph-run.js) or the list */
+.canvas { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.canvas-tools { display: flex; gap: var(--sp-2); justify-content: flex-end; padding: var(--sp-2) var(--sp-3); }
+.canvas-tools .legend { margin-right: auto; }
+.canvas-box { flex: 1 1 auto; min-height: 0; display: block; }
+.canvas > .steps { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 var(--sp-4); }
 @media (max-width: 600px) { .run { height: calc(100dvh - var(--top-h, 40px) - var(--nav)); } }
 
 /* cards */
@@ -833,9 +837,15 @@ li.empty { list-style: none; padding: 6px 2px; }
 @media (max-width: 600px) { .graph-box { container-type: normal; } }  /* no containment: the sheet is fixed to the screen */
 .kind-drive { --k: var(--kind-drive); } .kind-arm { --k: var(--kind-arm); } .kind-grip { --k: var(--kind-grip); }
 .kind-wait { --k: var(--kind-wait); } .kind-other { --k: var(--kind-other); }
-/* the Run tab's strip: the flow scrolls across, not the page */
-.pg { display: block; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; padding-bottom: 2px; }
-.pg.with-sheet { padding-bottom: 60vh; }  /* the sheet covers the bottom of the page: the plan scrolls clear of it */
+/* the Run tab's canvas: a viewport on the ground's grid, the flow on a layer it pans and zooms with one transform (a
+   follow move eases, not under reduced motion) */
+/* clip, not hidden: a focused node never scrolls the viewport, only the camera moves the layer */
+.pg-canvas { position: relative; width: 100%; height: 100%; overflow: clip; touch-action: none; cursor: grab;
+  background: color-mix(in srgb, var(--surface-card) 35%, transparent); }
+.pg-canvas.dragging { cursor: grabbing; }
+.pg-layer { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+.pg-layer.animate { transition: transform .3s ease; }
+@media (prefers-reduced-motion: reduce) { .pg-layer.animate { transition: none; } }
 .pg-graph { position: relative; flex: none; user-select: none; }
 .pg-lines { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
 
@@ -976,7 +986,8 @@ button.pg-band:hover { background: var(--surface-hover); }
 .pg-card.state-paused .pg-eyebrow, .pg-card.state-timeout .pg-eyebrow, .pg-card.state-canceled .pg-eyebrow { color: var(--warn); }
 .pg-card.state-pending:not(.marked) .pg-eyebrow { color: var(--text-muted); }
 /* the step pop-up (laptop): beside the picked node, over the graph */
-.pg-pop { position: absolute; z-index: 3; width: 320px; max-width: calc(100% - 8px); margin: 0; box-shadow: var(--shadow-2); }
+.pg-pop { position: absolute; z-index: 3; width: 320px; max-width: calc(100% - 8px); max-height: calc(100% - 8px); overflow: auto;
+  margin: 0; box-shadow: var(--shadow-2); cursor: auto; }
 .pg-pop-foot { justify-content: flex-end; }
 
 .legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px var(--sp-4); font-size: var(--fs-sm); color: var(--text-muted); }

@@ -21,3 +21,11 @@ def test_run_tab_is_a_band_over_a_canvas():
     run = PAGE[PAGE.index('id="view-run"'):PAGE.index('id="view-missions"')]
     assert run.index('id="band"') < run.index('id="canvas"')
     assert re.search(r'--band:\s*200px', CSS)
+
+def test_canvas_has_its_tools_and_metrics():
+    assert {'canvas-fit', 'canvas-follow', 'plan-view', 'plan-graph', 'plan'} <= page_ids()
+    core = (WEB / 'graph-core.js').read_text(encoding='utf-8')
+    assert re.search(r'\bcanvas:\s*\{[^}]*ports: false', core, re.S) and 'canvasPhone:' in core
+    run = (WEB / 'graph-run.js').read_text(encoding='utf-8')
+    assert 'pg-layer' in run and 'scrollLeft' not in run   # the strip and its scroll are gone
+    assert '.pg-layer' in CSS and 'transform-origin: 0 0' in CSS

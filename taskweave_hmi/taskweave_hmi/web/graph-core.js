@@ -40,6 +40,13 @@ const GRAPH_METRICS = {
     boxHead: 28, laneHead: 24, boxMin: 168, gutter: 16, tail: 40, left: 16, right: 40, top: 20, bottom: 24, dot: 12,
     terminal: { w: 104, h: 36 }, rule: { w: 92, h: 34 }, rowGap: 40, laneRowGap: 20, laneGap: 48, fields: false, ports: true, rules: true,
     kindWord: true },
+  // the Run tab's canvas: the editor's sizes, drawn in Run mode (no ports, no failure routes)
+  canvas: { fields: true, ports: false, rules: false, kindWord: false, node: { w: 220, h: 64 }, head: 24, line: 38,
+    fail: 54, end: { w: 88, h: 36 }, gapX: 64, gapY: 14, pad: 16, boxHead: 28, laneHead: 24, boxMin: 220, gutter: 18,
+    tail: 0, left: 24, right: 48, top: 24, bottom: 28, dot: 12, laneRowGap: 22 },
+  canvasPhone: { fields: false, ports: false, rules: false, kindWord: false, node: { w: 168, h: 52 }, head: 22, line: 33,
+    fail: 45, end: { w: 72, h: 32 }, gapX: 56, gapY: 12, pad: 12, boxHead: 28, laneHead: 24, boxMin: 168, gutter: 16,
+    tail: 0, left: 16, right: 40, top: 20, bottom: 24, dot: 12, laneRowGap: 20 },
 };
 const FRAME_KINDS = ['include', 'group', 'repeat', 'parallel', 'branch'];
 const isFrame = (node) => FRAME_KINDS.includes(node.kind);

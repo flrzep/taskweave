@@ -147,13 +147,18 @@
       </div>
     </section>
 
-    <!-- the mission under the band: the plan as a graph or a list -->
+    <!-- the mission under the band: the plan as a graph on a pan-and-zoom canvas or a list; the tools above it (the
+         legend at the left, graph-run.js renderGraph fills it) -->
     <section id="canvas" class="canvas">
-      <div class="row between"><div class="label">Plan</div>
+      <div class="canvas-tools">
+        <div class="legend"></div>
         <div id="plan-view" class="segmented" role="group" aria-label="Plan view">
           <button data-view="graph" aria-pressed="true">Graph</button><button data-view="list" aria-pressed="false">List</button>
-        </div></div>
-      <div id="plan-graph" class="graph-box"></div>
+        </div>
+        <button id="canvas-fit" class="btn small" type="button">Fit</button>
+        <button id="canvas-follow" class="btn small" type="button" aria-pressed="true">Follow</button>
+      </div>
+      <div id="plan-graph" class="graph-box canvas-box"></div>
       <ol id="plan" class="steps" hidden><li class="muted">No plan yet</li></ol>
     </section>
   </section>

@@ -1,10 +1,10 @@
 'use strict';
 // taskweave HMI, Run tab: the running plan as the simplified flow on graph-core.js: Start, the nodes left to right,
-// Done (or the loop back to Start), in a strip that scrolls across with the running node centred. Nodes are a header in
-// the colour of what moves (--kind-*: drive, arm, grip, wait, other) with the step's name, and a body; the running one
-// is filled with its colour, a lime ring and its main argument as the one field. Blocks (an include of the top mission,
-// a nested include, and with schema v2 groups, repeats and parallel lanes) are boxes with a title bar, each closable to
-// one stack node, the open ones remembered per mission; the box with the running step is always open. No ports, no
+// Done (or the loop back to Start), the whole tree on a canvas that pans and zooms and follows the running node. Nodes
+// are a header in the colour of what moves (--kind-*: drive, arm, grip, wait, other) with the step's name, and a body;
+// the running one is filled with its colour, a lime ring and its main argument as the one field. Blocks (an include of
+// the top mission, a nested include, and with schema v2 groups, repeats and parallel lanes) are boxes with a title bar,
+// open unless closed to one stack node (remembered per mission); the box with the running step is always open. No ports, no
 // rule nodes, no words on wires but the loop's: a replan is a thin coral wire under the nodes. A step opens its details
 // (the instruction, the rule) in a pop-up beside it (a bottom sheet at 600 px and below). Uses $,
 // el, api, state, show, missionOf, shownPlan, pickStart, moveLabel, moveParts, carriesByArgs from app.js, skillIcon,
@@ -207,9 +207,10 @@ document.addEventListener('keydown', (e) => {
     || e.target.closest?.('textarea, select, input, [contenteditable]')) return;
   closeSheet(view.selected);
 });
-// a click outside the pop-up (laptop) closes it; a node's own click opens or closes as above
+// a click outside the canvas closes the pop-up (laptop; a tap on the canvas's ground closes it too, canvasPointerUp);
+// a node's own click opens or closes as above
 document.addEventListener('pointerdown', (e) => {
-  if (PHONE.matches || !view.selected || e.target.closest?.('.pg-pop, .pg-chip, .pg-band, .pg-stack')) return;
+  if (PHONE.matches || !view.selected || e.target.closest?.('.pg-canvas')) return;
   view.selected = null;
   renderGraph();
 });
@@ -327,14 +328,182 @@ function loopText(plan, mission) {
   return loop === 'forever' ? 'forever' : String(loop);
 }
 
+// ---------- the canvas: the viewport, the layer it moves, the camera ----------
+// One viewport (.pg-canvas, built once, kept across rebuilds) holds the layer (.pg-layer: the drawn graph, rebuilt on
+// every status update) and the pop-up, which is never scaled. The camera is one transform on the layer: translate(x, y)
+// scale(scale), kept across rebuilds. Follow keeps the running (else the start) node centred; a pan or a zoom by the
+// operator turns it off, the Follow button on again. layout: the last drawn layout; planId: the plan last fitted;
+// focus: the item key of the node follow centres.
+const ZOOM_MIN = 0.4;
+const ZOOM_MAX = 1.5;
+const PAN_PX = 4;  // a pointer that moves less is a click on what is under it
+const canvas = { x: 0, y: 0, scale: 1, follow: true, layer: null, wrap: null, layout: null, planId: null, focus: null };
+const clampZoom = (s) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, s));
+
+// the whole tree in view: smaller than the viewport, centred on each axis; larger, from its top left
+function canvasFit(layout) {
+  const w = canvas.wrap.clientWidth;
+  const h = canvas.wrap.clientHeight;
+  canvas.scale = clampZoom(Math.min(w / layout.width, h / layout.height, 1));
+  canvas.x = Math.max(0, (w - layout.width * canvas.scale) / 2);
+  canvas.y = Math.max(0, (h - layout.height * canvas.scale) / 2);
+}
+// layout point (x, y) at the viewport's centre, at the current scale
+function canvasCentre(x, y) {
+  canvas.x = canvas.wrap.clientWidth / 2 - canvas.scale * x;
+  canvas.y = canvas.wrap.clientHeight / 2 - canvas.scale * y;
+}
+// the camera onto the layer; animate: the 300ms ease of a follow move (style.css drops it under reduced motion)
+function canvasApply(animate) {
+  if (!canvas.layer) return;
+  canvas.layer.classList.toggle('animate', animate);
+  canvas.layer.style.transform = `translate(${canvas.x}px, ${canvas.y}px) scale(${canvas.scale})`;
+  placePop();
+}
+// zoom by factor around viewport point (px, py): that point stays where it is
+function canvasZoom(factor, px, py) {
+  const scale = clampZoom(canvas.scale * factor);
+  canvas.x = px - (px - canvas.x) * (scale / canvas.scale);
+  canvas.y = py - (py - canvas.y) * (scale / canvas.scale);
+  canvas.scale = scale;
+}
+function canvasFollow(on) {
+  canvas.follow = on;
+  $('canvas-follow').setAttribute('aria-pressed', String(on));
+}
+// the followed node's centre in layout coordinates, or null
+function focusPoint() {
+  const n = canvas.layout?.items.get(canvas.focus);
+  return n ? [n.cx, n.cy] : null;
+}
+// the laptop's pop-up beside its node's place on screen: right of it if it fits in the viewport, else left, else under
+function placePop() {
+  const pop = canvas.wrap?.querySelector('.pg-pop');
+  const n = pop && canvas.layout?.items.get(canvas.layout.owner.get(view.selected));
+  if (!n) return;
+  const { x, y, scale } = canvas;
+  const w = canvas.wrap.clientWidth;
+  const right = x + scale * (n.cx + n.nw / 2) + POP_GAP;
+  const left = x + scale * (n.cx - n.nw / 2) - POP_GAP - POP_W;
+  let top = y + scale * (n.cy - n.nh / 2) - 8;
+  if (right + POP_W <= w) pop.style.left = `${right}px`;
+  else if (left >= 0) pop.style.left = `${left}px`;
+  else {
+    pop.style.left = `${Math.max(0, Math.min(x + scale * n.cx - POP_W / 2, w - POP_W))}px`;
+    top = y + scale * (n.cy + n.nh / 2) + POP_GAP;
+  }
+  pop.style.top = `${Math.max(0, Math.min(top, canvas.wrap.clientHeight - POP_MIN_H))}px`;
+}
+
+// The gestures on the viewport. One pointer: a move past PAN_PX pans (and captures the pointer; under it the pointer is
+// a click on its node, or on the ground: that closes the pop-up); two: a pinch zooms around their midpoint and pans with
+// it. After a pan or a pinch the click that follows is swallowed once. The wheel pans; with Ctrl (a trackpad's pinch
+// too) or Cmd it zooms around the pointer. Not on the pop-up or the sheet: they keep their own pointer and wheel.
+const pointers = new Map();  // pointerId -> its last { x, y } in the viewport
+const gesture = { sx: 0, sy: 0, drag: false, swallow: false };
+const canvasPoint = (e) => { const r = canvas.wrap.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+const offCanvas = (e) => e.target.closest?.('.pg-pop, .pg-sheet, .pg-scrim');
+function canvasMoved() {
+  canvasFollow(false);
+  canvasApply(false);
+}
+function canvasPointerDown(e) {
+  if (offCanvas(e) || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  gesture.swallow = false;
+  const p = canvasPoint(e);
+  pointers.set(e.pointerId, p);
+  if (pointers.size === 1) Object.assign(gesture, { sx: p.x, sy: p.y, drag: false });
+  else {  // a second finger: a pinch, both pointers held by the viewport
+    gesture.drag = true;
+    pointers.forEach((_, id) => canvas.wrap.setPointerCapture(id));
+  }
+}
+function canvasPointerMove(e) {
+  const last = pointers.get(e.pointerId);
+  if (!last) return;
+  const p = canvasPoint(e);
+  if (pointers.size > 1) {
+    const other = [...pointers].find(([id]) => id !== e.pointerId)[1];
+    const mid = (a) => ({ x: (a.x + other.x) / 2, y: (a.y + other.y) / 2 });
+    const [m0, m1] = [mid(last), mid(p)];
+    const d0 = Math.hypot(last.x - other.x, last.y - other.y);
+    if (d0 > 0) canvasZoom(Math.hypot(p.x - other.x, p.y - other.y) / d0, m0.x, m0.y);
+    canvas.x += m1.x - m0.x;
+    canvas.y += m1.y - m0.y;
+  } else {
+    if (!gesture.drag) {
+      if (Math.hypot(p.x - gesture.sx, p.y - gesture.sy) < PAN_PX) return;
+      gesture.drag = true;
+      canvas.wrap.setPointerCapture(e.pointerId);
+      canvas.wrap.classList.add('dragging');
+    }
+    canvas.x += p.x - last.x;
+    canvas.y += p.y - last.y;
+  }
+  pointers.set(e.pointerId, p);
+  canvasMoved();
+}
+function canvasPointerUp(e) {
+  if (!pointers.delete(e.pointerId) || pointers.size) return;
+  canvas.wrap.classList.remove('dragging');
+  if (gesture.drag) gesture.swallow = true;
+  else if (e.type === 'pointerup' && view.selected && !PHONE.matches
+    && !e.target.closest?.('.pg-chip, .pg-band, .pg-stack')) {  // a tap on the ground
+    view.selected = null;
+    renderGraph();
+  }
+}
+function canvasWheel(e) {
+  if (offCanvas(e)) return;
+  e.preventDefault();
+  if (e.ctrlKey || e.metaKey) {
+    const p = canvasPoint(e);
+    canvasZoom(Math.exp(-e.deltaY / 300), p.x, p.y);
+  } else {
+    canvas.x -= e.deltaX;
+    canvas.y -= e.deltaY;
+  }
+  canvasMoved();
+}
+function canvasView() {
+  const wrap = div('pg-canvas');
+  wrap.addEventListener('pointerdown', canvasPointerDown);
+  wrap.addEventListener('pointermove', canvasPointerMove);
+  wrap.addEventListener('pointerup', canvasPointerUp);
+  wrap.addEventListener('pointercancel', canvasPointerUp);
+  wrap.addEventListener('wheel', canvasWheel, { passive: false });
+  wrap.addEventListener('click', (e) => {  // the click a pan or a pinch ends with: not a click on a node
+    if (!gesture.swallow) return;
+    gesture.swallow = false;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+  return wrap;
+}
+$('canvas-fit').addEventListener('click', () => {
+  if (!canvas.layout) return;
+  canvasFollow(false);
+  canvasFit(canvas.layout);
+  canvasApply(false);
+});
+$('canvas-follow').addEventListener('click', () => {
+  canvasFollow(true);
+  const at = focusPoint();
+  if (!at) return;
+  canvasCentre(...at);
+  canvasApply(true);
+});
+
 function renderGraph() {
   const box = $('plan-graph');
   const snap = state.snapshot;
   // not while the Run tab is hidden: the tab's button draws it again when the tab comes back (app.js)
   if (!box || box.hidden || $('view-run').hidden || !snap) return;
+  const key = $('canvas').querySelector('.canvas-tools .legend');
   const { plan, live } = shownPlan();  // app.js: the live plan, or a preview to pick a start step in
   if (!plan || !plan.steps.length) {
     box.replaceChildren(el('p', { class: 'muted', text: plan?.message || 'No plan yet' }));
+    key.replaceWith(legend(plan, {}, false));
     return;
   }
   const active = document.activeElement;  // rebuilt on every update: keep the keyboard focus on its chip or head
@@ -353,20 +522,17 @@ function renderGraph() {
   const frames = framesOf(tree);
   const info = new Map(frames.map((f) => [f, frameInfo(f, states, r, plan.steps)]));
   // open: the frame with the running step always (the operator's choice does not hide it in a later cycle); else the
-  // operator's choice, else the frame with the failed step (else the start step's, the first frame). A lane opens with
-  // its block.
-  const anchor = [states.findIndex(isLive), states.findIndex(isFailed),
-    plan.steps.findIndex((s) => s.id === state.startStep), 0].find((i) => i >= 0);
+  // operator's choice, else open (an open tree is the canvas's point). A lane opens with its block.
   const stored = storedBands(missionName);
-  const isOpen = (frame) => frame.kind === 'branch' || frame.leaves.some((i) => isLive(states[i]))
-    || (frame.key in stored ? stored[frame.key] : frame.leaves.includes(anchor));
+  const isOpen = (frame) => frame.kind === 'branch' || frame.leaves.some((i) => isLive(states[i])) || (stored[frame.key] ?? true);
   const events = live ? snap.outcomes : {};
   const pickable = snap.status.state !== 'running' && snap.status.state !== 'paused';
   const nodes = [];  // a step's tree node (its name), by its index
   const walk = (n) => { if (n.kind === 'step') nodes[n.index] = n; childrenOf(n).forEach(walk); };
   walk(tree);
-  const ctx = { plan, states, r, events, snap, pickable, nodes, metrics: PHONE.matches ? GRAPH_METRICS.phone : GRAPH_METRICS.compact,
-    width: box.clientWidth || 300, isOpen, keyOf: (i) => plan.steps[i].id, loop: loopText(plan, mission),
+  // width 0: the layout takes its own width (nothing stretched to the box), the camera moves it
+  const ctx = { plan, states, r, events, snap, pickable, nodes, metrics: PHONE.matches ? GRAPH_METRICS.canvasPhone : GRAPH_METRICS.canvas,
+    width: 0, isOpen, keyOf: (i) => plan.steps[i].id, loop: loopText(plan, mission),
     label: `Plan ${plan.plan_id}: ${plan.steps.length} steps`, ids: 'pg-run',
     start: state.startStep && plan.steps.some((s) => s.id === state.startStep) ? state.startStep : plan.steps[0].id,
     replans: plan.steps.map((s, i) => (jumps(r[i], i) ? [s.id, plan.steps[r[i].replanTo].id] : null)).filter(Boolean),
@@ -377,72 +543,58 @@ function renderGraph() {
     renderHead: (frame) => frameHead(frame, info.get(frame), true, toggle(frame), snap) };
   const toggle = (frame) => () => { storeBand(missionName, frame.key, !isOpen(frame)); renderGraph(); };
   const sheetScroll = box.querySelector('.pg-sheet')?.scrollTop ?? 0;  // the sheet is rebuilt every second: keep its place
-  const oldStrip = box.querySelector('.pg');
-  const stripScroll = oldStrip?.scrollLeft ?? 0;  // and the strip its scroll
   const layout = layoutGraph(tree, ctx);
   const drawn = drawGraph(layout, ctx);
-  const wrap = div('pg', drawn.node);
-  // the picked step's details: on a phone the bottom sheet; on a laptop a pop-up beside its node (right if it fits,
-  // else left, else under it; the graph grows to hold it)
+  canvas.wrap ||= canvasView();
+  canvas.layer = div('pg-layer', drawn.node);
+  canvas.layout = layout;
+  // the picked step's details: on a phone the bottom sheet; on a laptop a pop-up beside its node (placePop)
   const picked = view.selected ? plan.steps.findIndex((s) => s.id === view.selected) : -1;
   if (picked < 0) view.selected = null;
-  if (picked >= 0 && PHONE.matches) {
-    wrap.classList.add('with-sheet');
-    wrap.append(...planCard(picked, ctx, true));
-  } else if (picked >= 0) {
-    const n = layout.items.get(layout.owner.get(plan.steps[picked].id));
-    const pop = planCard(picked, ctx, false);
-    const right = n.cx + n.nw / 2 + POP_GAP;
-    const left = n.cx - n.nw / 2 - POP_GAP - POP_W;
-    if (right + POP_W <= layout.width) pop.style.left = `${right}px`;
-    else if (left >= 0) pop.style.left = `${left}px`;
-    else {
-      pop.style.left = `${Math.max(0, Math.min(n.cx - POP_W / 2, layout.width - POP_W))}px`;
-      pop.style.top = `${n.cy + n.nh / 2 + 22 + POP_GAP}px`;
-    }
-    pop.style.top ||= `${Math.max(0, Math.min(n.cy - n.nh / 2 - 8, layout.height - POP_MIN_H))}px`;
-    drawn.node.append(pop);
-  }
-  box.replaceChildren(wrap, legend(plan, events, drawn.replans > 0));
-  // the strip keeps its scroll. It centres the running (else the start) node when that step changes; a new width (a
-  // resize, a rotation; not a scrollbar coming and going, under 24 px) centres it again only while the user has not
-  // scrolled the strip since it was last set here (a scroll event, or a position that differs at this rebuild: the
-  // event of a scroll just before it may not have fired yet)
-  if (oldStrip && view.setScroll !== undefined && Math.abs(stripScroll - view.setScroll) > 1) view.userScrolled = true;
-  const setStrip = (x) => { wrap.scrollLeft = x; view.setScroll = wrap.scrollLeft; };  // as set here (clamped)
-  setStrip(stripScroll);
-  wrap.addEventListener('scroll', () => { if (Math.abs(wrap.scrollLeft - view.setScroll) > 1) view.userScrolled = true; }, { passive: true });
+  const card = picked < 0 ? [] : [planCard(picked, ctx, PHONE.matches)].flat();
+  canvas.wrap.replaceChildren(canvas.layer, ...card);
+  if (!box.contains(canvas.wrap)) box.replaceChildren(canvas.wrap);
+  key.replaceWith(legend(plan, events, drawn.replans > 0));
+  // the camera as it was on the new layer; a new plan opens fitted (following when it runs); a new running (else
+  // start) node is centred with a follow move while follow is on
+  canvasApply(false);
   const focusIdx = [states.findIndex(isLive), plan.steps.findIndex((s) => s.id === state.startStep)].find((i) => i >= 0) ?? -1;
-  const focusKey = focusIdx >= 0 ? `${plan.plan_id}:${focusIdx}` : null;
-  const widthChanged = view.centredWidth === undefined || Math.abs(view.centredWidth - wrap.clientWidth) >= 24;
-  if (focusKey && (view.centred !== focusKey || (widthChanged && !view.userScrolled))) {
-    const n = layout.items.get(layout.owner.get(plan.steps[focusIdx].id));
-    if (n) setStrip(Math.max(0, n.cx - wrap.clientWidth / 2));
-    view.centred = focusKey;
-    view.userScrolled = false;
+  const focus = focusIdx >= 0 ? layout.owner.get(plan.steps[focusIdx].id) : null;
+  if (canvas.planId !== plan.plan_id && canvas.wrap.clientWidth) {
+    canvas.planId = plan.plan_id;
+    canvas.focus = focus;
+    canvasFit(layout);
+    canvasFollow(states.some(isLive));
+    const at = canvas.follow && focusPoint();  // a tree too long to fit at the least zoom: the running node in view
+    const sx = at && canvas.x + canvas.scale * at[0];
+    const sy = at && canvas.y + canvas.scale * at[1];
+    if (at && (sx < 0 || sx > canvas.wrap.clientWidth || sy < 0 || sy > canvas.wrap.clientHeight)) canvasCentre(...at);
+    canvasApply(false);
+  } else if (focus !== canvas.focus) {
+    canvas.focus = focus;
+    const at = canvas.follow && focusPoint();
+    if (at) {
+      void canvas.layer.offsetWidth;  // the layer is new: its present place first, so the move eases from there
+      canvasCentre(...at);
+      canvasApply(true);
+    }
   }
-  if (widthChanged) view.centredWidth = wrap.clientWidth;
   const sheet = box.querySelector('.pg-sheet');
   if (sheet) sheet.scrollTop = sheetScroll;
-  const pop = box.querySelector('.pg-pop');
-  if (pop) {
-    drawn.node.style.height = `${Math.max(drawn.node.offsetHeight, pop.offsetTop + pop.offsetHeight)}px`;
-    // the pop-up in sight: the strip scrolls it in once, when it opens outside (never on a rebuild: the user may
-    // scroll the strip away from it)
-    const left = pop.offsetLeft - wrap.scrollLeft;
-    if (view.popShown !== view.selected && (left < 0 || left + pop.offsetWidth > wrap.clientWidth)) {
-      setStrip(Math.max(0, pop.offsetLeft + pop.offsetWidth / 2 - wrap.clientWidth / 2));
-    }
-  }
-  view.popShown = pop ? view.selected : null;
   if (refocus) (box.querySelector(refocus) || box.querySelector('[data-step]'))?.focus({ preventScroll: true });
 }
 PHONE.addEventListener('change', () => renderGraph());
-// the layout follows the box's width: drawn again when it changes (a window resize, the Run grid's breakpoint)
-let graphWidth = 0;
+// a new size of the canvas (a window resize, the band's breakpoint): drawn again; with follow on the followed node is
+// centred again, else the camera stays
+let canvasSize = '';
 new ResizeObserver(([entry]) => {
-  const width = Math.round(entry.contentRect.width);
-  if (width && width !== graphWidth) { graphWidth = width; renderGraph(); }
+  const { width, height } = entry.contentRect;
+  const size = `${Math.round(width)}x${Math.round(height)}`;
+  if (!width || size === canvasSize) return;
+  canvasSize = size;
+  const at = canvas.follow && canvas.wrap && focusPoint();
+  if (at) canvasCentre(...at);
+  renderGraph();
 }).observe($('plan-graph'));
 
 function setPlanView(choice) {
