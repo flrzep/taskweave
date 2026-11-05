@@ -18,16 +18,16 @@ dark canvas, a flow from left to right, nodes whose coloured header carries the 
 - **Colour means state, like a stack light.** Lime runs (also planning, a manual skill, a healthy link, a save);
   amber paused or to look at; coral stopped on a fault or near a limit; grey idle; finished as planned is neutral,
   not green, so lime means one thing: it runs. Never used for decoration.
-- **Andon status.** The state is a solid badge in the state colour, in the strip on every tab and on the Run board;
-  the running step's progress is a lime line along the strip's bottom edge. Paused differs from running by its word
-  and amber, and the board's robot freezes mid-stride.
+- **Andon status.** The state is a solid badge in the state colour, in the strip on every tab and in the Run band;
+  the running mission's progress is a lime line along the strip's bottom edge. Paused differs from running by its
+  word and amber, and the band's robot freezes mid-stride.
 - **Big, flat, legible.** Montserrat with tabular figures, 16px body, 48px main buttons, 44px minimum touch
   targets, borders at 3:1 on fields and buttons, two radii (4px controls, 8px panels), no gradients on components.
 
 ## Colour
 
 Contrast was measured with the WCAG formula against the panel (`--surface-card`) unless noted. Text is at least
-4.5:1; the state badges and the board's headline are large text.
+4.5:1; the state badges and the bubble's name are large text.
 
 | Token | Value | Role |
 | --- | --- | --- |
@@ -47,7 +47,7 @@ Contrast was measured with the WCAG formula against the panel (`--surface-card`)
 | `--on-brand` | `#ffffff` | text on `--brand` |
 | `--logo` | `#ffffff` | the P3 logo |
 | `--run-fill`, `--run`, `--ok` | `#dbff55` | lime: running, planning, a manual skill, the live link, a save; as a fill with `--on-run` (`#141a00`) on it, as text and rings 17:1 |
-| `--done` | `#c5c9e6` | succeeded and done steps and phases: neutral, not green (12:1) |
+| `--done` | `#c5c9e6` | succeeded and done steps: neutral, not green (12:1) |
 | `--warn` | `#ffc95c` | paused, jog mode, canceled, a save that asks first (12.8:1) |
 | `--bad` | `#ff7f6a` | failed, aborted, errors, near a joint limit, danger buttons (7.9:1) |
 | `--idle` | `#9a9ec8` | idle, pending |
@@ -57,10 +57,12 @@ Contrast was measured with the WCAG formula against the panel (`--surface-card`)
 | `--flow-end` | `#1d7a4c` | the Start and Done nodes, white (`--on-brand`) on it (5.4:1) |
 | `--flow-fail` | `#8a1f2e` | a Fail terminal's header, white on it (9:1) |
 | `--viewer-bg`, `--viewer-line`, `--viewer-ink`, `--viewer-tools` | the ground's navy, a hairline, body text, the panel at 82% | the 3D view |
-| `--rail`, `--nav`, `--strip` | 92px, 60px, 52px | the section rail's width; the phone's bottom nav; the system strip |
+| `--rail`, `--nav` | 92px, 60px | the section rail's width; the phone's bottom nav |
+| `--strip` | 40px | the system strip: one line on every tab |
+| `--band` | 200px (180px up to 1000px, 150px on a phone) | the Run band's height: the robot, its bubble, its window |
 | `--spin-arrows` | ▲ ▼ in `#9a9ec8` | a number field's arrows (an SVG image: `--text-muted`'s value) |
 
-Tints are mixed from the state colour with `color-mix()`: chips 11%, messages 9%, the board and status card 5 to 6%.
+Tints are mixed from the state colour with `color-mix()`: chips 11%, messages 9%, the bubble and status card 5 to 6%.
 
 ## Typography
 
@@ -76,10 +78,9 @@ internet). `font-variant-numeric: tabular-nums` throughout, so live values do no
 | `--fs-s` | 14px | field labels, chips, small buttons, help text, the strip's words (the rail's section names are 13px) |
 | `--fs-base` | 16px / 1.5 | body, inputs, buttons, card titles (`.label`, 600) |
 | `--fs-md` | 18px | brand name, record stats |
-| `--fs-lg` | 20px / 1.35 | current step instruction, the board's goal |
-| `--fs-xl` | 24px / 1.2 | `h2`, the board's instruction |
-| `--fs-2xl` | 30px / 1.12 | speed value, recording headline (26px on a phone), the board's "/ N" (`--fs-xl` on a phone) |
-| `--fs-4xl` | 60px | the run board's step number (a 44px literal on a phone, its only use) |
+| `--fs-lg` | 20px / 1.35 | current step instruction, the bubble's name |
+| `--fs-xl` | 24px / 1.2 | `h2`, readout values |
+| `--fs-2xl` | 30px / 1.12 | speed value, recording headline (26px on a phone) |
 
 Weights: 400 body, 500 instruction, 600 titles and buttons, 700 badges, big figures and the brand name.
 
@@ -100,7 +101,7 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
 
 ## Touch targets
 
-`--tap` 48px for main buttons, Pause and Abort on the board, `--tap-min` 44px for inputs, selects and summaries,
+`--tap` 48px for main buttons, Pause and Abort in the bubble, `--tap-min` 44px for inputs, selects and summaries,
 `--tap-s` 36px for small and icon buttons on a laptop, raised to 44px on touch screens and at 600px and below.
 
 ## Components
@@ -128,54 +129,68 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   Log. The page beside it, the sticky top (`.top`: the system strip, manual skill strip) over the views. At 600px
   and below the rail is a bottom nav (60px, fixed, the selected section with a 3px brand rule on top) without the
   mark; the step sheet sits above it.
-- **System strip** (`.mission`, `#mission`, the one bar on every tab, 52px): the link dot and the robot's name
-  (`.strip-robot`), the state as a solid badge (`#state`, uppercase 13px, 700; `planning` while the task handler
-  prepares the plan), and while a mission is active (`.mission.active`) the goal with plan id and cycle, "step
-  n/N" in monospace and the step's instruction, one line each with an ellipsis, with skill, status, seconds and
-  attempt in muted monospace; the step's progress is a 3px line along the strip's bottom edge in the state colour.
-  Beside the badge, only while a mission runs or is paused, **Abort** (`#strip-abort`, a small `.danger` with a stop
-  square): Abort is in reach on every tab while a mission is active. Two taps, one control with the board's Abort
-  (a first tap on either arms both: solid red, "Tap again", 3 s; a second tap on either aborts). At the right the
-  resources the step holds (`.resources`: base, hands, torso as monospace chips, lime while locked, from
-  `step.resources`), Speed and the pad mode (only while it jogs an arm up to 1000px). The rest of mission control
-  lives on the Run board (the picker, Start, Pause), and on the Run tab (`body.on-run`) the strip shows no mission
-  words and no error either, since the board says them. Under the strip, small: Start's
-  answer (`.msg`, idle only) and the last error (`.error` with a ✕ that hides that error until another one or the
-  next start). On a phone: dot and name, badge, speed in one row (while a mission is active the name gives
-  way to Abort, the stop square alone at 44 × 44 with its label, so the row stays one line), the step n/N and
-  instruction on a second row; the resources and the goal are not shown. A pad press's answer is a toast for a while (`.pad-notice`, fixed outside
-  the top, taps pass through: bottom left of the page on a laptop, clear of the 3D view's tools; just under the top
-  on a phone, clear of the step sheet and the Save bar), so the strip keeps its height. On a phone the error text,
+- **System strip** (`.mission`, `#mission`, the one bar on every tab, 40px, one line): the link dot and the robot's
+  name (`.strip-robot`), the state as a solid badge (`#state`, uppercase 13px, 700; `planning` while the task handler
+  prepares the plan), and while a mission is active (`.mission.active`) the mission's name, humanised, one line with
+  an ellipsis (`.strip-mission`; not on the Run tab, `body.on-run`, where the band names it). The mission's progress is
+  a 3px line along the strip's bottom edge in the state colour. Beside it, only while a mission runs or is paused,
+  **Abort** (`#strip-abort`, a small `.danger` with the stop square alone): Abort is in reach on every tab. Two taps,
+  one control with the bubble's Abort (a first tap on either arms both: solid red, "Tap again", 3 s; a second tap on
+  either aborts). At the right Speed and the pad mode (only while it jogs an arm, up to 1000px). Not in the strip: the
+  step, its words, the resources it holds, the cycle; the band has them. Mission control (the picker, Start, Pause,
+  Resume) lives on the Run tab. Under the strip, small: Start's answer (`.msg`, idle only) and the last error (`.error`
+  with a ✕ that hides that error until another one or the next start); on the Run tab the bubble says the error. On a
+  phone: dot, badge, speed in one row (while a mission is active the robot's name gives way, so the row stays one
+  line); Abort is the stop square alone at 44 × 44. A pad press's answer is a toast for a while (`.pad-notice`, fixed
+  outside the top, taps pass through: bottom left of the page on a laptop, clear of the 3D view's tools; just under the
+  top on a phone, clear of the step sheet and the Save bar), so the strip keeps its height. On a phone the error text,
   the speed message and the manual skill's text scroll in their own boxes (the error's ✕ stays), so the strip's and
   the manual skill's Abort stay in sight.
-- **Run workspace** (`.run-grid`, Run tab): up to 1179px one column, board, 3D view, plan, recent steps. From 1180px
-  two columns, 7 : 5 with 20px gaps and the page up to 1600px wide: the board over the plan at the left, the 3D view
-  (16 : 11) over the recent steps at the right, sticky under the top (`--top-h`, the top's measured height) and never
-  taller than the window (it scrolls on its own on a short screen).
-- **Recent steps** (`.recent`): the last six finished steps of this run (after `status.run_from_seq`: the bridge arms
-  a run when the state turns running and starts it at its first step event, so a restart of the same mission is a new
-  run and a start refused while planning is none; "Preparing the plan." while a new run plans), newest first, one row
-  each: a mark (✓ in `--done`, ↻ in `--warn` for a step tried again, ! in `--warn` when canceled, else in `--bad`; its
-  meaning as hidden text), the instruction with the command and message in muted 13px under it, and the time on the
-  run's clock in muted monospace.
-- **Run board** (`.board`, Run tab): a little robot walks the mission. Its floor is the phases (the plan graph's
-  bands as 8px bars, as wide as their steps, the done part filled, the current one in the state colour, names and
-  done/total under them; one unnamed floor for a plan without phases). It stands where the run is (`--p`: done steps
-  plus the step's progress, over the total; at the chosen start step while idle) and moves there in 1.2 s. Its pose is
-  the state: blinking when idle, walking (legs, arms, a bob, its shadow) while running, frozen mid-stride with sleepy
-  eyes when paused, looking about with a blinking light while planning, arms up and three hops when done, slumped with
-  crossed red eyes when failed, flat eyes when aborted; its antenna tip and chest light are the state colour. A small
-  comic figure (the user's direction): a big head with a dark visor (`--bot-ink`) and light eyes, a small torso, and
-  head, hands and feet floating apart from it on bendy limbs (round strokes whose curve changes as they swing, CSS `d`)
-  and a long floppy antenna that lags the walk; two greys (`--bot`, `--bot-2`). Above it a bubble of one fixed height (132px, 200px on a phone: the lines clip, the board does not jump from
-  step to step; an error takes the room of the second instruction line) (2px border in the state colour at 45%, its tail over the robot) says what it does: the
-  step number at 60px with "/ N" (or "26 steps" while idle), the instruction at 24px (two lines, three on a phone),
-  the command, status, seconds and attempt, the error in red; and the next move as one button: Start / Start at step
-  N, Resume, Retry step N (the step it stopped at), Run again (Start <mission> when another one is picked). No
-  "press Start in the bar above" lines: the button is the instruction. The head above holds the mission's goal and the cycle (↻ 2); idle, the mission picker (`#mission-select`,
-  48px) takes the goal's place; active, Pause / Resume and Abort (`.danger`, two taps, armed together with the
-  strip's; 48px, full width on a phone) sit at its right. `#btn-start` stays in the page, hidden: the bubble's button is its wire. Reduced motion keeps the poses without the motion. On the Run tab the strip shows no mission words (`body.on-run`), so they are not shown twice, and its error
-  hides (the board shows it).
+- **Run page** (`#view-run`, Run tab): the window under the strip with no page scroll. The band (`.band`, `--band`
+  high) at the top, the canvas under it taking the rest.
+- **Run band** (`.band`): full width, the panel surface (`--surface-card`) with a hairline under it; three columns,
+  the robot, the bubble, the window. 200px on a desktop; from 1000px down 180px, the bubble 3 : 2 against the window;
+  on a phone 150px with the robot at 80px and the window a 96px thumbnail. The robot is a little comic figure (the
+  user's direction): a big head with a dark visor (`--bot-ink`) and light eyes, a small torso, and head, hands and feet
+  floating apart from it on bendy limbs (round strokes whose curve changes as they swing, CSS `d`) and a long floppy
+  antenna that lags the walk; two greys (`--bot`, `--bot-2`); its antenna tip and chest light are the state colour.
+  It stands still at the left, 120px high, and its pose is the state: blinking when idle, walking (legs, arms, a bob,
+  its shadow) while running, frozen mid-stride with sleepy eyes when paused, looking about with a blinking light
+  while planning, arms up and three hops when done, slumped with crossed red eyes when failed, flat eyes when aborted.
+  Reduced motion keeps the poses without the motion. Under its feet three dots (`#resources`: base, hands, torso), lit
+  lime while the running step holds them.
+- **Bubble** (`.bubble`, `#board`; a 2px border in the state colour at 45%, its tail toward the robot): three lines,
+  each one line with an ellipsis, so the band never changes height. The text rule: the bubble reads by the node's name
+  and colour, never by the instruction sentence (that is the bubble's tooltip and the node pop-up's text).
+  Line 1, 20px 600: the node's name as the canvas draws it, the kind word in front in the kind colour when the name
+  does not already say it; amber while paused, coral when failed; `Which mission?` while idle, `Planning` while the
+  plan is made, `Done` and `Stopped` at the end. Line 2, mono: the main argument (`to  bin_1/place`, the two spaces
+  kept), the error on a failure, the mission's name on `Planning` and `Done`, the node it stopped at on `Stopped`.
+  Line 3, muted 13px: what comes next (`next  Grip close`, `then done`, `then again` before a loop), `paused`, or the
+  rule that applies to a failed step (`retry ×2`, `replan from Pick`), and on `Done` the cycles (`×3`). At the top
+  right two small chips: the step count (`3/12`, a tap on it turns Follow on) and the cycle (`×2`). At its right end
+  the controls, 48px: idle, the mission picker (`#mission-select`) and the one button on (`#board-act`: Start, Start at
+  step N, Resume, Retry step N, Run again; `#btn-start` stays in the page, hidden: the button is its wire); active,
+  Pause (Resume takes its place while paused) and Abort (`.danger`, two taps, armed together with the strip's). Up to
+  1000px the controls take a row under the words; on a phone the chips move to line 3's row and the picker and the
+  button share a row, their words cut short. The error, when line 2 shows something else, is for screen readers.
+- **Window** (`.window`): the 3D view (`#viewer3d-run`) framed as the robot's window: an inset border in the page
+  colour, the state's lime on its edge while the mission runs. A button at its bottom right (`#window-enlarge`,
+  `aria-pressed`) opens it over the canvas, under the band; the same button or Escape closes it. On a phone the
+  window is the thumbnail and a tap anywhere on it enlarges it to fill the screen between the strip and the bottom nav.
+- **Run canvas** (`.canvas`, under the band): a toolbar (the legend at the left; Graph / List, Fit and Follow at the
+  right) over a viewport on the dotted grid, drawn by graph-run.js. The mission as the Program tab lays it out (the
+  same boxes, lanes and loop wire), in Run mode: no ports, no Fail terminals, no rule nodes. Pan: drag the ground (one
+  finger on touch) or the wheel; zoom: Ctrl+wheel or a pinch, 0.4 to 1.5 around the pointer; the graph sits on one
+  layer that takes one CSS transform, nodes keep their size in layout units, the pop-up is never scaled and follows its
+  node. **Follow** (a toolbar chip, `aria-pressed`, on at first) keeps the running node, else the start node, centred
+  and moves there with a 300ms ease when the step changes (none with reduced motion); a pan or a zoom by the operator
+  turns it off, and a tap on Follow or on the step chip in the bubble turns it on and recentres. **Fit** zooms the whole
+  tree into view, from the top left when it is larger than the viewport, and turns Follow off. The first view of a plan
+  is a fit; when a fit would go under 0.6 (a tree that fits only as tiny chips) it opens at scale 1 on the running
+  node instead, following it. A resize keeps the camera, or recentres the followed node while Follow is on.
+  **List** shows the step list in place of the canvas, for screen readers and a long mission on a phone. Idle, the
+  canvas shows the picked mission's last plan, else its steps from its file, all pending.
 - **Speed override** (`.speed`): in the status bar, a small button "Speed 60 %" (the value in Montserrat 700
   20px; amber with "TEST" while test mode caps it; greyed out without the task handler; on a phone the value only).
   It opens a panel under the bar (`aria-expanded`, focus to its first control; a click elsewhere or Escape closes
@@ -365,20 +380,21 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   filled left to right to its share done; the box with the running step is always open, the others as the operator
   left them (`tw-plan-bands`), else the one with the failed or the start step. The canvas keeps the dotted grid; the
   colour is in the headers and the state, nothing else.
-  The Run tab (graph-run.js) draws the simplified flow: nodes 160 × 48 (header 22; 132 × 44 on a phone), 36px apart,
+  The Run tab (graph-run.js) draws the simplified flow on the canvas: nodes 160 × 48 (header 22; 132 × 44 on a phone), 36px apart,
   no ports, no terminals, no rule nodes, headers with the name and the step's number at the right (mono 10px; a box's
   title bar keeps its kind word and a repeat's rule). The only field is the running node's main argument (none on a phone). State: the running node's
   whole body takes its colour (navy text) with a lime ring and the breathing glow; paused the same with an amber ring;
   done keeps its header, its body's ground dimmed toward the page (70%; the text keeps its colour), a neutral tick on its top left corner; pending as drawn; failed a coral outline and a
   ✕; timeout and canceled amber; skipped dashed; the picked start step a dashed brand outline. Wires: the run so far
   lime, the one into the running node flowing lime, the way ahead dotted; a running box's outline lime, a failed one
-  coral. A replan is a thin coral wire under the nodes into the step it replans from. The flow is a strip that scrolls
-  across inside the card (`.pg`, not the page): it keeps its scroll on every update and centres the running node (else
-  the start step) when that step changes, or on a new width (a resize, a rotation; not a scrollbar's 10 px) while the user has not scrolled it. Nodes and title bars are buttons in run order, each title bar before its steps.
+  coral. A replan is a thin coral wire under the nodes into the step it replans from. Blocks are open: a box's chevron
+  closes it to a stack node (remembered per mission), for a mission too wide to read; the box with the running step
+  stays open. Nodes and title bars are buttons in run order, each title bar before its steps.
   The resources a step locks are in its pop-up and its tooltip, a box's in its title bar's tooltip. A click on a node
-  opens its details in a 320px pop-up beside it (`.pg-pop`, right if it fits, else left, else under it; the strip
-  scrolls it into sight once, when it opens; Close, Escape, a click elsewhere or the node again close it); at 600px and below a bottom
-  sheet (`.pg-sheet`). Under it only the replan key, when a replan wire is drawn: the nodes say what they do, the icons live in the pop-up. It reads `--g-*`
+  opens its details in a 320px pop-up beside it (`.pg-pop`, right if it fits, else left, else under it, in the
+  viewport's coordinates so it follows its node under pan and zoom; Close, Escape, a tap on the ground or the node
+  again close it); at 600px and below a bottom
+  sheet (`.pg-sheet`). Under the canvas only the replan key, when a replan wire is drawn: the nodes say what they do, the icons live in the pop-up. It reads `--g-*`
   tokens mapped onto the global ones. The Run graph is rebuilt on every status update only while the Run tab is shown;
   the tab's button draws it again when it comes back.
 
@@ -386,5 +402,5 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
 
 The P3 logo inline at the top of the rail (takes `--logo`). The rail's sections, the plan graph's skills
 (`icons.js`) and the Teach jobs are inline SVG line icons with a 2px stroke in `currentColor`; the 3D view toolbar
-expects the same at 1.75px. The editor panel's ↑ ↓ and the marks ✓ ! ↻ are still Unicode. No photos; one illustration, the run
-board's robot (inline SVG in index.html, flat greys and the state colour).
+expects the same at 1.75px. The editor panel's ↑ ↓ and the marks ✓ ! ↻ are still Unicode. No photos; one illustration, the Run
+band's robot (inline SVG in index.html, flat greys and the state colour).
