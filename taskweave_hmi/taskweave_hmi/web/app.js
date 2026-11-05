@@ -307,8 +307,12 @@ function renderMission(s) {
   // the mission's progress: the steps done and the running step's share of the plan's steps (between steps too)
   const steps = s.step_count || state.snapshot?.plan?.steps.length || 0;
   show($('current'), active && steps > 0);
-  const held = active && s.step ? s.step.resources || [] : [];  // the band's resource dots light up while locked
-  document.querySelectorAll('#resources [data-res]').forEach((dot) => dot.classList.toggle('on', held.includes(dot.dataset.res)));
+  const held = active && s.step ? s.step.resources || [] : [];  // the bubble's resource dots light up while locked
+  document.querySelectorAll('#resources [data-res]').forEach((dot) => {
+    const on = held.includes(dot.dataset.res);
+    dot.classList.toggle('on', on);
+    dot.setAttribute('aria-label', on ? `${dot.dataset.res}, held` : dot.dataset.res);
+  });
   if (active && steps) {
     const share = Math.max(0, s.step_index) + (s.step ? Math.max(0, Math.min(1, s.step_progress || 0)) : 0);
     $('progress-bar').style.width = `${Math.min(1, share / steps) * 100}%`;
@@ -525,7 +529,7 @@ function renderPhases(s, plan, outcomes, active) {
     const now = active && phase.steps.includes(s.step_index);
     const failed = phase.steps.some((i) => NOT_DONE.includes(outcomes[plan.steps[i].id]?.outcome));
     const item = el('li', { class: `${now ? 'now' : ''}${failed ? ' failed' : ''}`,
-      'aria-label': `${phase.name}: ${done} of ${phase.steps.length} steps done${now ? ', running' : ''}` },
+      'aria-label': `${phase.name}: ${done} of ${phase.steps.length} steps done${now ? ', running' : failed ? ', failed' : ''}` },
     el('div', { class: 'ph-bar' }, el('i')), el('div', { class: 'name' }, el('span', { text: phase.name }),
       el('b', { text: `${done}/${phase.steps.length}` })));
     item.style.setProperty('--steps', Math.max(1, phase.steps.length));

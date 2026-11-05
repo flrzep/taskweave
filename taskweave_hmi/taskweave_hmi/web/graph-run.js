@@ -631,7 +631,7 @@ $('canvas-fit').addEventListener('click', () => {
   canvasFit(canvas.layout);
   canvasApply(false);
 });
-// Reset layout: the dragged nodes of the mission drawn back where the layout draws them, the tree fitted again
+// Tidy up: the dragged nodes of the mission drawn back where the layout draws them, the tree fitted again
 $('canvas-reset').addEventListener('click', () => {
   if (!canvas.places) return;
   canvas.places.map = {};

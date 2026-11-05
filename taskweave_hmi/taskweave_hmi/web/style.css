@@ -170,8 +170,7 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
    failed one coral; the names under the bars (none with one phase) */
 .board-phases { position: absolute; inset: auto 0 0 0; display: flex; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
 .board-phases li { flex: var(--steps) 1 0; min-width: 0; display: grid; gap: var(--sp-1); }
-.board-phases .ph-bar { height: 8px; border-radius: var(--r-pill); overflow: hidden;
-  background: color-mix(in srgb, var(--text) 10%, var(--surface-card)); }
+.board-phases .ph-bar { height: 8px; border-radius: var(--r-pill); overflow: hidden; background: var(--border-strong); }  /* the track at 3:1 */
 .board-phases .ph-bar i { display: block; height: 100%; width: var(--done-part); background: var(--done); border-radius: inherit;
   transition: width .6s ease; }
 .board-phases li.now .ph-bar i { background: var(--state); }
@@ -306,7 +305,7 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
    taller than 42% of the screen (then wider than 16:10); Enlarge at its bottom right opens it over the canvas, the
    same button or Escape closes it */
 .window { position: relative; min-width: 0; aspect-ratio: 16 / 10; max-height: 42dvh; align-self: start;
-  border-radius: var(--r-m); border: 1px solid var(--border); box-shadow: inset 0 0 0 2px var(--surface-page); }
+  border-radius: var(--r-m); border: 1px solid var(--border-strong); box-shadow: inset 0 0 0 2px var(--surface-page); }
 .bubble:is(.state-running, .state-paused, .state-planning) ~ .window { border-color: var(--state); }
 .window .viewer3d { aspect-ratio: auto; height: 100%; }
 .window.enlarged { position: fixed; inset: calc(var(--top-h, 40px) + var(--band)) 0 0 var(--rail); z-index: 5;
@@ -319,6 +318,7 @@ body.on-run .mission .error { display: none; }  /* the bubble says it */
 @media (max-width: 1000px) {
   .band { --bot-h: 120px; }
   .window { max-height: 36dvh; }
+  .window:not(.enlarged) .viewer3d-tools { display: none; }  /* too narrow for the view's buttons: they are there enlarged */
   .bubble-name { font-size: var(--fs-lg); }
   #board-detail { font-size: inherit; }
   .bubble { grid-template-areas: "name chips" "detail detail" "next next" "controls controls"; }
@@ -427,6 +427,8 @@ body.on-run main { max-width: none; padding: 0; }
 /* the canvas: its tools (the legend at the left, List, Fit, Follow), then the viewport (graph-run.js) or the list */
 .canvas { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .canvas-tools { display: flex; gap: var(--sp-2); justify-content: flex-end; padding: var(--sp-2) var(--sp-3); }
+.canvas-tools .btn { white-space: nowrap; }  /* one line each; on a phone the four fit at 375px with the tighter gap */
+@media (max-width: 600px) { .canvas-tools { gap: var(--sp-1); padding: var(--sp-2); } }
 .canvas-tools .legend { margin-right: auto; }
 .canvas-tools .btn[aria-pressed="true"] { background: var(--brand); color: var(--on-brand); }  /* Follow on */
 .bubble-chips > span:has(#board-step) { cursor: pointer; }  /* a tap follows the running node (graph-run.js) */
@@ -1073,6 +1075,7 @@ button.pg-band:hover { background: var(--surface-hover); }
 }
 @media (prefers-reduced-motion: reduce) {
   #progress-bar, .card.status, .card.status::before, .mission, .mission::before { transition: none; }
+  .bot, .bubble::after, .board-phases .ph-bar i { transition: none; }  /* the robot and its tail jump to the run's place */
   .pg-chip.state-running, .pg-wire.now { animation: none; }
   .bot g, .bot-light, .bubble, .bubble::after { transition: none; }
   .band .bot * { animation: none !important; }  /* the poses stay, without the motion */

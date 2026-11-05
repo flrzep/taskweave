@@ -153,8 +153,9 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   (about 340px on a 1400px laptop; never taller than 42% of the screen, 36% up to 1000px); on a phone the window is
   a 96px thumbnail at the right and the band is as high as the bubble and the stage. The stage (`.band-stage`) is
   the robot on its floor: the floor is the phases (`#board-phases`: one bar per top-level block of the mission, as
-  wide as its steps, the done part filled lime, the current one in the state colour, a failed one coral; the names
-  and `done/total` under the bars, none with one phase), and the robot stands over where the run is (`--p`, 0 to 1
+  wide as its steps, the track `--border-strong`, the done part filled lime, the current one in the state colour, a
+  failed one coral; the names and `done/total` under the bars, none with one phase; each bar's label says done of
+  total, running or failed), and the robot stands over where the run is (`--p`, 0 to 1
   across the floor; it walks there with a 1.2s ease) and the bubble's tail points down at it. The robot is a little
   comic figure (the user's direction): a big head with a dark visor (`--bot-ink`) and light eyes, a small torso, and
   head, hands and feet floating apart from it on bendy limbs (round strokes whose curve changes as they swing, CSS
@@ -174,7 +175,7 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   kept), the error on a failure, the mission's name on `Planning` and `Done`, the node it stopped at on `Stopped`.
   Line 3, muted 13px: what comes next (`next  Grip close`, `then done`, `then again` before a loop), `paused`, or the
   rule that applies to a failed step (`retry ×2`, `replan from Pick`), and on `Done` the cycles (`×3`). At the top
-  right three dots (`#resources`: base, hands, torso, lit lime while the running step holds them) and two small
+  right three dots (`#resources`: base, hands, torso, lit lime and labelled "held" while the running step holds them) and two small
   chips: the step count (`3/12`, a tap on it turns Follow on) and the cycle (`×2`). At its right end
   the controls, 48px: idle, the mission picker (`#mission-select`) and the one button on (`#board-act`: Start, Start at
   step N, Resume, Retry step N after a failure, Run again after a success or an abort, Start at step N when a node
@@ -185,12 +186,13 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   row and the button the next. After a reload the picker shows the last run's mission until the operator
   picks one. The error, when line 2 shows something else, is for screen readers.
 - **Window** (`.window`): the 3D view (`#viewer3d-run`) framed as the robot's window, 16:10 (wider when its
-  height is capped): an inset border in the page colour, the state colour on its edge while the mission runs, is
-  paused or is planned. A button at its bottom right (`#window-enlarge`,
+  height is capped): a `--border-strong` frame with an inset border in the page colour, the state colour on its
+  edge while the mission runs, is paused or is planned; up to 1000px the view's own buttons are hidden in the
+  window (they are there enlarged). A button at its bottom right (`#window-enlarge`,
   `aria-pressed`) opens it over the canvas, under the band; the same button or Escape closes it. On a phone the
   window is the thumbnail and a tap anywhere on it enlarges it to fill the screen between the strip and the bottom nav.
-- **Run canvas** (`.canvas`, under the band): a toolbar (the legend at the left; Graph / List, Fit, Follow and Reset
-  layout at the right) over a viewport on the dotted grid, drawn by graph-run.js. The mission as the Program tab
+- **Run canvas** (`.canvas`, under the band): a toolbar (the legend at the left; Graph / List, Fit, Follow and Tidy
+  up at the right) over a viewport on the dotted grid, drawn by graph-run.js. The mission as the Program tab
   lays it out (the same boxes, lanes and loop wire), in Run mode: no ports, no Fail terminals, no rule nodes. Pan:
   drag the ground (one finger on touch); zoom: the wheel (a notch about 15%), Ctrl+wheel in finer steps or a pinch,
   0.4 to 1.5 around the pointer; the graph sits on one layer that takes one CSS transform, nodes keep their size in
@@ -199,14 +201,14 @@ Card padding 16; gap inside cards 12; gap between cards 12 on a phone, 16 from 6
   after a 350ms hold (the node rises; a finger that moves before the hold pans). The wires follow; a box grows
   around a child dragged out of it; nothing goes past the drawing's top left margin. The places are remembered per
   mission in this browser (`tw-plan-places`, offsets from the auto layout in layout units, so they survive a new
-  plan of the same mission); **Reset layout** (lit only while something is moved) puts them back and fits the tree.
+  plan of the same mission); **Tidy up** (`#canvas-reset`, lit only while something is moved) puts them back and fits the tree.
   The Program tab keeps its own layout. **Follow** (a toolbar chip, `aria-pressed`, on at first) keeps the running node, else the node a failed or aborted run stopped at, else the start node, centred
   and moves there with a 300ms ease when the step changes (none with reduced motion); a pan or a zoom by the operator
   turns it off, and a tap on Follow or on the step chip in the bubble turns it on and recentres. **Fit** zooms the whole
   tree into view, from the top left when it is larger than the viewport, and turns Follow off. The first view of a plan
   is a fit; when a fit would go under 0.6 (a tree that fits only as tiny chips) it opens at scale 1 on that followed
   node instead, following it. Tab onto a node outside the viewport centres it and turns Follow off. A resize keeps the camera, or recentres the followed node while Follow is on.
-  **List** shows the step list in place of the canvas (Fit, Follow and Reset layout disabled), for screen readers and a long mission on a phone. Idle, the
+  **List** shows the step list in place of the canvas (Fit, Follow and Tidy up disabled), for screen readers and a long mission on a phone. Idle, the
   canvas shows the picked mission's last plan, else its steps from its file, all pending.
 - **Speed override** (`.speed`): in the status bar, a small button "Speed 60 %" (the value in Montserrat 700
   20px; amber with "TEST" while test mode caps it; greyed out without the task handler; on a phone the value only).
