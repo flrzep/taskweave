@@ -49,8 +49,8 @@ const FLOW_KIND_WORDS = { step: 'Action', include: 'Mission', group: 'Group', re
   branch: 'Lane', start: 'Start', end: 'End', abort: 'Fail', retry: 'Rule', replan: 'Rule' };
 // "to_shelf" -> "To shelf"
 const humanise = (s) => { const t = String(s ?? '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim(); return t ? t[0].toUpperCase() + t.slice(1) : ''; };
-// a step's own id: the plan's place ids (s3, s1_s7: core's names for a step without one) are none; an include's
-// prefix (s1_) goes
+// a step's own id: the plan's place ids (s3, s2_s7: core's names for a step without one) are none; an include's
+// prefix (s2_) goes
 function ownId(id) {
   let s = String(id ?? '');
   while (/^s\d+_/.test(s)) s = s.replace(/^s\d+_/, '');
