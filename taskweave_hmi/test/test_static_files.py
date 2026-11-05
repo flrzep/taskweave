@@ -1,6 +1,7 @@
 """The server serves only the files it names (STATIC_FILES, server.py); every script and stylesheet index.html loads
 must be among them, or the page is served without it (the mock serves any file, so only this test sees it)."""
 
+import ast
 import re
 from pathlib import Path
 
@@ -9,10 +10,13 @@ SERVER = Path(__file__).resolve().parents[1] / 'taskweave_hmi' / 'server.py'
 
 
 def static_files() -> set[str]:
-    """STATIC_FILES as written in server.py, read as text: the module needs rclpy."""
+    """STATIC_FILES as written in server.py, read as text (the module needs rclpy): the tuple up to its first
+    closing bracket, evaluated, so a name mentioned elsewhere in the file never counts."""
     text = SERVER.read_text(encoding='utf-8')
-    tuple_text = re.search(r'STATIC_FILES = \((.*?)\)\n', text, re.S).group(1)
-    return set(re.findall(r"'([^']+)'", tuple_text))
+    tuple_text = re.search(r'STATIC_FILES = \((.*?)\)', text, re.S).group(1)
+    names = ast.literal_eval(f'({tuple_text})')
+    assert all(isinstance(name, str) for name in names) and len(set(names)) == len(names), names
+    return set(names)
 
 
 def test_every_script_and_stylesheet_of_the_page_is_served():
