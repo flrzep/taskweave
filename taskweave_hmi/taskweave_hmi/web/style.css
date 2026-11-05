@@ -388,6 +388,8 @@ body.on-run main { max-width: none; padding: 0; }
 .canvas { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .canvas-tools { display: flex; gap: var(--sp-2); justify-content: flex-end; padding: var(--sp-2) var(--sp-3); }
 .canvas-tools .legend { margin-right: auto; }
+.canvas-tools .btn[aria-pressed="true"] { background: var(--brand); color: var(--on-brand); }  /* Follow on */
+.bubble-chips > span:has(#board-step) { cursor: pointer; }  /* a tap follows the running node (graph-run.js) */
 .canvas-box { flex: 1 1 auto; min-height: 0; display: block; }
 .canvas > .steps { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 var(--sp-4); }
 @media (max-width: 600px) { .run { height: calc(100dvh - var(--top-h, 40px) - var(--nav)); } }

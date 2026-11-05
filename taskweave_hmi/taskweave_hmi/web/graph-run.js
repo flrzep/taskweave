@@ -336,6 +336,7 @@ function loopText(plan, mission) {
 // focus: the item key of the node follow centres.
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 1.5;
+const FIRST_FIT_MIN = 0.6;  // a new plan opens fitted down to this; smaller, at scale 1 on the followed node
 const PAN_PX = 4;  // a pointer that moves less is a click on what is under it
 const canvas = { x: 0, y: 0, scale: 1, follow: true, layer: null, wrap: null, layout: null, planId: null, focus: null };
 const clampZoom = (s) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, s));
@@ -408,8 +409,8 @@ function canvasMoved() {
   canvasApply(false);
 }
 function canvasPointerDown(e) {
+  gesture.swallow = false;  // first: a touch pan ends without a click, and the next tap (the pop-up's too) is real
   if (offCanvas(e) || (e.pointerType === 'mouse' && e.button !== 0)) return;
-  gesture.swallow = false;
   const p = canvasPoint(e);
   pointers.set(e.pointerId, p);
   if (pointers.size === 1) Object.assign(gesture, { sx: p.x, sy: p.y, drag: false });
@@ -486,13 +487,16 @@ $('canvas-fit').addEventListener('click', () => {
   canvasFit(canvas.layout);
   canvasApply(false);
 });
-$('canvas-follow').addEventListener('click', () => {
+// Follow, or a tap on the step chip in the band's bubble (the running step's number): follow on, the node centred
+function followNow() {
   canvasFollow(true);
   const at = focusPoint();
   if (!at) return;
   canvasCentre(...at);
   canvasApply(true);
-});
+}
+$('canvas-follow').addEventListener('click', followNow);
+$('board-step').parentElement.addEventListener('click', followNow);
 
 function renderGraph() {
   const box = $('plan-graph');
@@ -555,20 +559,21 @@ function renderGraph() {
   canvas.wrap.replaceChildren(canvas.layer, ...card);
   if (!box.contains(canvas.wrap)) box.replaceChildren(canvas.wrap);
   key.replaceWith(legend(plan, events, drawn.replans > 0));
-  // the camera as it was on the new layer; a new plan opens fitted (following when it runs); a new running (else
-  // start) node is centred with a follow move while follow is on
+  // the camera as it was on the new layer; a new plan opens fitted (following when it runs; at scale 1 on its node
+  // when the fit would be tiny); a new running (else start) node is centred with a follow move while follow is on
   canvasApply(false);
-  const focusIdx = [states.findIndex(isLive), plan.steps.findIndex((s) => s.id === state.startStep)].find((i) => i >= 0) ?? -1;
-  const focus = focusIdx >= 0 ? layout.owner.get(plan.steps[focusIdx].id) : null;
+  const runningIdx = states.findIndex(isLive);  // the followed node: the running step's, else the start step's
+  const focus = layout.owner.get(runningIdx >= 0 ? plan.steps[runningIdx].id : ctx.start) ?? null;
   if (canvas.planId !== plan.plan_id && canvas.wrap.clientWidth) {
     canvas.planId = plan.plan_id;
     canvas.focus = focus;
     canvasFit(layout);
-    canvasFollow(states.some(isLive));
-    const at = canvas.follow && focusPoint();  // a tree too long to fit at the least zoom: the running node in view
-    const sx = at && canvas.x + canvas.scale * at[0];
-    const sy = at && canvas.y + canvas.scale * at[1];
-    if (at && (sx < 0 || sx > canvas.wrap.clientWidth || sy < 0 || sy > canvas.wrap.clientHeight)) canvasCentre(...at);
+    const at = canvas.scale < FIRST_FIT_MIN && focusPoint();
+    if (at) {  // a tree that fits only as tiny chips: at full size on the running (else start) node, following it
+      canvas.scale = 1;
+      canvasCentre(...at);
+    }
+    canvasFollow(Boolean(at) || states.some(isLive));
     canvasApply(false);
   } else if (focus !== canvas.focus) {
     canvas.focus = focus;
