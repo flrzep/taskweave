@@ -307,11 +307,11 @@ function renderRecent(snap) {
 }
 
 // ---------- mission bar ----------
-// In the sticky top bar, on every tab. While a mission is active (running, planning, paused): the state badge, the
-// goal, "step n/N" with the step's instruction (one line, ellipsis), a thin progress bar of the step, and Abort (two
-// taps, shared with the board's). The picker, Start and Pause are on the Run tab's board. Under the bar, Start's
-// answer (while idle) and the last error: it follows the status as before (gone on success, on the next failure a
-// new one), and ✕ hides that error until another comes.
+// In the sticky top bar, on every tab, one slim line. While a mission is active (running, planning, paused): the state
+// badge, the mission's name, a thin progress line of the step along the bar's bottom edge, and Abort (a glyph, two
+// taps, shared with the board's). The step's words are on the Run tab. The picker, Start and Pause are on the Run
+// tab's board. Under the bar, Start's answer (while idle) and the last error: it follows the status as before (gone
+// on success, on the next failure a new one), and ✕ hides that error until another comes.
 const missionUi = { dismissed: null };
 function renderMission(s) {
   const active = s.state === 'running' || s.state === 'paused';
@@ -320,26 +320,15 @@ function renderMission(s) {
   $('state').textContent = planning ? 'planning' : s.state;
   $('state').className = `chip ${s.state}`;
   $('mission').classList.toggle('active', active);
-  show($('mission-run'), active);
   show($('mission-controls'), active);
   show($('mission-start'), !active);
-  $('goal').textContent = s.goal || 'No mission running';
-  $('goal').title = $('goal').textContent;
-  $('cycle').textContent = s.plan_id ? `${s.plan_id} · cycle ${s.cycle}` : '';
+  // the mission's name: from the plan when one is loaded, else from the run's plan id (its -NNNN counter off);
+  // humanise is in graph-core.js, which loads after this file
+  const raw = active ? missionOf(state.snapshot?.plan) || (s.plan_id || '').replace(/-\d+$/, '') : '';
+  $('strip-mission').textContent = typeof humanise === 'function' ? humanise(raw) : raw;
+  show($('strip-mission'), active && !!raw);
   show($('current'), active && !!s.step);
-  const held = active && s.step ? s.step.resources || [] : [];  // the strip's resource chips light up while locked
-  document.querySelectorAll('#resources [data-res]').forEach((chip) => chip.classList.toggle('on', held.includes(chip.dataset.res)));
-  if (planning) {
-    $('step-meta').textContent = ''; $('step-detail').textContent = '';  // in the instruction's place: a phone shows it
-    $('step-instruction').textContent = `planning ${s.step_count} step${s.step_count === 1 ? '' : 's'}…`;
-  } else if (s.step) {
-    $('step-meta').textContent = `step ${s.step_index + 1}/${s.step_count}`;
-    $('step-instruction').textContent = s.step.instruction;
-    $('progress-bar').style.width = `${Math.max(0, Math.min(1, s.step_progress)) * 100}%`;
-    $('step-detail').textContent = `${s.step.skill} · ${s.step_status || ''} · ${s.step_elapsed_s.toFixed(1)} s`
-      + `${s.attempt > 1 ? ` · attempt ${s.attempt}` : ''}`;
-  }
-  $('step-instruction').title = $('step-instruction').textContent;  // all of it, where the bar cuts it
+  if (s.step) $('progress-bar').style.width = `${Math.max(0, Math.min(1, s.step_progress)) * 100}%`;
   if (active) message($('start-msg'), '');  // its answer has been seen: the bar shows the run now
   const error = s.last_error && s.state !== 'succeeded' ? s.last_error : '';
   $('last-error-text').textContent = error;
@@ -497,14 +486,13 @@ $('btn-pause').addEventListener('click', async () => {
   await api('POST', state.snapshot?.status.state === 'paused' ? '/api/resume' : '/api/pause');
 });
 // Abort, two taps (no browser dialogs): the board's and the strip's are one control, so a first tap on either arms
-// both and a second tap on either aborts. The strip's says it with its word (an icon alone on a phone) and its label.
+// both and a second tap on either aborts. The strip's is a glyph; it says the second tap with its label.
 let abortArmed = null;
 function showAbortArmed(armed) {
   $('btn-abort').classList.toggle('confirm', armed);
   $('btn-abort').textContent = armed ? 'Tap again to abort' : 'Abort';
   const strip = $('strip-abort');
   strip.classList.toggle('confirm', armed);
-  strip.querySelector('.strip-abort-word').textContent = armed ? 'Tap again' : 'Abort';
   strip.setAttribute('aria-label', armed ? 'Tap again to abort the mission' : 'Abort the mission');
 }
 async function abortPress() {

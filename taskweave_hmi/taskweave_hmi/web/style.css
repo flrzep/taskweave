@@ -41,7 +41,7 @@
   --content: 760px;
   --rail: 92px;  /* the section rail; on a phone the bottom nav is --nav high */
   --nav: 60px;
-  --strip: 52px;  /* the system strip */
+  --strip: 40px;  /* the system strip */
   /* a number field's ▲ ▼ (an image cannot take currentColor: the --text-muted value) */
   --spin-arrows: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='16' viewBox='0 0 10 16'%3E%3Cpath d='M5 1 9.5 6.5h-9zM5 15 .5 9.5h9z' fill='%239a9ec8'/%3E%3C/svg%3E");
 }
@@ -99,60 +99,43 @@ body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); align-i
   .tabs button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
-/* the system strip (#mission): one thin bar on every tab. The link dot with the robot's name, the state badge, the
-   mission while one is active (goal, step n/N, the instruction on one line; the step's progress as a line along the
-   strip's bottom edge), the resources the step holds (base, hands, torso: lit while locked), Speed and the pad mode.
-   Mission control (the picker, Start, Pause, Abort) is on the Run tab's board, and on the Run tab the strip keeps no
-   mission words either (the board says them). Under the strip, small: Start's answer and the last error */
-.mission { --state: var(--idle); position: relative; display: grid; gap: var(--sp-2); min-height: var(--strip); align-content: center;
-           padding: calc(var(--sp-2) + env(safe-area-inset-top, 0px)) var(--sp-5) var(--sp-2);
-           border-bottom: 1px solid var(--border); }
+/* the system strip (#mission): one 40px line on every tab. The link dot with the robot's name, the state badge, the
+   mission's name while one is active (hidden on the Run tab: the band names it), Abort (a glyph), Speed and the pad
+   mode; the mission's progress is a line along the strip's bottom edge. Under the strip, small: Start's answer and
+   the last error */
+.mission { --state: var(--idle); position: relative; display: grid; align-content: center; min-height: var(--strip);
+           padding: 0 var(--sp-4); border-bottom: 1px solid var(--border); }
 .mission:has(#state.running) { --state: var(--run-fill); }
 .mission:has(#state.paused) { --state: var(--warn); }
 .mission:has(#state.succeeded) { --state: var(--done); }
 .mission:has(#state.failed), .mission:has(#state.aborted) { --state: var(--bad); }
-.mission-row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; min-height: var(--tap-s); }
+.mission-row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; min-height: var(--strip); }
 .strip-robot { display: flex; align-items: center; gap: var(--sp-2); flex: none; font: 600 var(--fs-s) var(--sans); white-space: nowrap; }
 .mission #state { flex: none; justify-content: center; min-width: 9ch; font: 700 var(--fs-sm)/1 var(--sans); text-transform: uppercase;
-                  letter-spacing: .08em; padding: 7px 10px; border-radius: var(--r-s); background: var(--fill); color: var(--ink); }
+                  letter-spacing: .08em; padding: 5px 8px; border-radius: var(--r-s); background: var(--fill); color: var(--ink); }
 .mission #state::before { display: none; }
-.mission-run { display: flex; align-items: baseline; gap: var(--sp-3); flex: 1 1 auto; min-width: 0; overflow: hidden; }  /* its words give way, never the chips */
-@media (max-width: 1000px) { #step-detail { display: none; } }  /* skill, status and seconds: the board has them */
-.mission-goal { display: contents; }
-.mission-goal b { flex: none; max-width: 24ch; font: 600 var(--fs-s) var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mission-goal .mono { flex: none; white-space: nowrap; }
-.mission-meta { flex: none; font: 600 var(--fs-sm) var(--mono); white-space: nowrap; }
-.mission-step { flex: 1 1 auto; display: flex; align-items: baseline; gap: var(--sp-3); min-width: 0; }
-#step-instruction { flex: 0 1 auto; min-width: 0; font-size: var(--fs-s); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#step-detail { flex: none; margin-left: auto; white-space: nowrap; }
+.strip-mission { flex: 1 1 auto; min-width: 0; font: 600 var(--fs-s) var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.on-run .strip-mission { display: none; }  /* the band names it */
 /* the step's progress: a line along the strip's bottom edge, in the state colour */
 .mission .progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; border-radius: 0; background: none; }
 .mission .progress #progress-bar { background: var(--state); }
-.resources { display: flex; gap: var(--sp-1); margin-left: auto; flex: none; }
-.resources span { font: 600 var(--fs-xs)/1 var(--mono); letter-spacing: .04em; padding: 6px 8px; border-radius: var(--r-s);
-                  border: 1px solid var(--border); color: var(--text-muted); transition: background .2s, color .2s; }
-.resources span.on { color: var(--on-run); background: var(--run-fill); border-color: var(--run-fill); }
 .sys { display: flex; align-items: center; gap: var(--sp-3); flex: none; }
 /* the strip's Abort: only while a mission is active, so it is in reach on every tab; two taps, shared with the
-   board's (solid red with "Tap again" once armed). On a phone the stop icon alone, a 44px square */
-.strip-abort { flex: none; gap: var(--sp-1); }
+   board's (solid red once armed). The stop glyph alone, a square at every width */
+.strip-abort { flex: none; width: var(--tap-s); padding: 0; }
 .strip-abort svg { width: 14px; height: 14px; flex: none; fill: currentColor; }
 .mission.active #start-msg { display: none; }  /* Start's answer is for idle; it can arrive after the run's status */
 .mission .msg, .mission .error { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); }
 .mission .error { display: flex; align-items: flex-start; gap: var(--sp-2); }
 #last-error-text { flex: 1; min-width: 0; align-self: center; }
 #last-error-close { width: 28px; height: 28px; border: 0; background: none; color: var(--text-muted); }
-body.on-run .mission-run, body.on-run .mission .error { display: none; }  /* the board says it */
+body.on-run .mission .error { display: none; }  /* the board says it */
 @media (max-width: 1000px) { .sys .chip.pad:not(.jog) { display: none; } }  /* the pad mode only while it jogs an arm */
 @media (max-width: 600px) {
-  .mission { padding: calc(var(--sp-2) + env(safe-area-inset-top, 0px)) var(--sp-3) var(--sp-2); }
-  .mission-row { flex-wrap: wrap; gap: var(--sp-2); }
-  .mission-run { order: 9; flex-basis: 100%; }  /* the step on its own row */
-  .mission-goal b, #step-detail, .resources { display: none; }
+  .mission { padding: 0 var(--sp-3) 0; padding-top: env(safe-area-inset-top, 0px); }
+  .mission-row { gap: var(--sp-2); }
   .mission #state { min-width: 0; }
-  .strip-abort { width: var(--tap-s); padding: 0; }
-  .strip-abort-word { display: none; }
-  .mission.active #robot { display: none; }  /* the link dot stays: Abort takes the name's room, the row keeps one line */
+  .mission.active #robot { display: none; }  /* the link dot stays: the name gives way, the row keeps one line */
 }
 /* run board: a little robot walks the mission (Run tab). Its floor is the phases (the plan graph's bands, as wide as
    their steps, the done part filled); it stands where the run is (--p from app.js) and its pose is the state: walking
