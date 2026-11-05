@@ -123,8 +123,11 @@ body.on-run .strip-mission { display: none; }  /* the band names it */
 .sys { display: flex; align-items: center; gap: var(--sp-3); flex: none; }
 /* the strip's Abort: only while a mission is active, so it is in reach on every tab; two taps, shared with the
    band's (solid red once armed). The stop glyph alone, a square at every width */
-.strip-abort { flex: none; width: var(--tap-s); padding: 0; }
+.strip-abort { flex: none; min-width: var(--tap-s); padding: 0; gap: var(--sp-1); }
 .strip-abort svg { width: 14px; height: 14px; flex: none; fill: currentColor; }
+/* armed: solid red (.confirm) and the prompt for the second tap beside the glyph, at every width */
+.strip-abort.confirm { padding: 0 var(--sp-3); }
+.strip-abort-word { font: 700 var(--fs-sm)/1 var(--sans); white-space: nowrap; }
 .mission.active #start-msg { display: none; }  /* Start's answer is for idle; it can arrive after the run's status */
 .mission .msg, .mission .error { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); }
 .mission .error { display: flex; align-items: flex-start; gap: var(--sp-2); }

@@ -463,12 +463,13 @@ function canvasWheel(e) {
     return;
   }
   e.preventDefault();
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? canvas.wrap.clientHeight : 1;  // lines or pages (Firefox) as px
   if (e.ctrlKey || e.metaKey) {
     const p = canvasPoint(e);
-    canvasZoom(Math.exp(-e.deltaY / 300), p.x, p.y);
+    canvasZoom(Math.exp(-e.deltaY * unit / 300), p.x, p.y);
   } else {
-    canvas.x -= e.deltaX;
-    canvas.y -= e.deltaY;
+    canvas.x -= e.deltaX * unit;
+    canvas.y -= e.deltaY * unit;
   }
   canvasMoved();
 }
@@ -507,6 +508,7 @@ $('canvas-fit').addEventListener('click', () => {
 });
 // Follow, or a tap on the step chip in the band's bubble (the running step's number): follow on, the node centred
 function followNow() {
+  if ($('canvas-follow').disabled) return;  // the List view: nothing to follow
   canvasFollow(true);
   const at = focusPoint();
   if (!at) return;
@@ -526,6 +528,7 @@ function renderGraph() {
   if (!plan || !plan.steps.length) {
     box.replaceChildren(el('p', { class: 'muted', text: plan?.message || 'No plan yet' }));
     key.replaceWith(legend(plan, {}, false));
+    canvas.layer = canvas.layout = canvas.planId = null;  // the next plan with steps (the same id re-read) opens afresh
     return;
   }
   const active = document.activeElement;  // rebuilt on every update: keep the keyboard focus on its chip or head
@@ -610,7 +613,7 @@ function renderGraph() {
     canvas.refocusing = false;
   }
 }
-PHONE.addEventListener('change', () => renderGraph());
+PHONE.addEventListener('change', () => { canvas.planId = null; renderGraph(); });  // other metrics: the plan opens afresh (fit or full size)
 // a new size of the canvas (a window resize, the band's breakpoint): drawn again; with follow on the followed node is
 // centred again, else the camera stays
 let canvasSize = '';

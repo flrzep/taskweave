@@ -496,6 +496,7 @@ function showAbortArmed(armed) {
   $('btn-abort').textContent = armed ? 'Tap again to abort' : 'Abort';
   const strip = $('strip-abort');
   strip.classList.toggle('confirm', armed);
+  strip.querySelector('.strip-abort-word').hidden = !armed;  // the glyph alone until armed, then the prompt beside it
   strip.setAttribute('aria-label', armed ? 'Tap again to abort the mission' : 'Abort the mission');
 }
 async function abortPress() {
@@ -515,6 +516,7 @@ $('btn-start').addEventListener('click', async () => {
   const startStep = state.startStep;
   const { ok, data } = await api('POST', '/api/start', startStep ? { mission, start_step: startStep } : { mission });
   if (ok) { state.startStep = null; missionUi.dismissed = null; }
+  else if (startStep) { state.startStep = null; renderRun(); }  // a refused start at a step: the button offers the retry again, not "Start at step N"
   message($('start-msg'), ok ? `Started ${data.plan_id}${startStep ? ` at ${startStep}` : ''}`
     : (data.message || data.error || 'not started'), !ok);
 });
