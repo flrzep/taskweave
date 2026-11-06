@@ -15,7 +15,9 @@ in here.
   one row per node, not everything in one line. (The old graph's resource lanes, in that form.)
 - **Names**: a node's header says just what it is, `Move`, `Grip`, `Wait`; the exact description (the instruction
   sentence) sits below it. The same for every kind.
-- **Run**: the band's height adjustable by a drag; a trackpad's two-finger drag pans the canvas.
+- **Run**: the 3D window floats on top of the node graph with the mission picker beside it; the current state goes
+  back to the header, with the robot as a small stationary animation in its corner; the progress bar is a simple
+  one without the robot; a trackpad's two-finger drag pans the canvas.
 
 ## 2. The node (both tabs)
 
@@ -95,13 +97,36 @@ Every step belongs to one **row** by what it moves, the kind colour's own order 
 - **Settings on the node** as section 2: a click in a control edits it and does not select or drag the node; a
   click on the header or the sentence selects it; a press on them past the threshold drags it.
 
-## 5. Run: the band's height and the trackpad
+## 5. Run: the window over the graph, the state in the header, the trackpad
 
-- **The band splitter.** A grab handle along the band's bottom edge (`.band-grip`, the full width, 8px high, a
-  44px hit area; `aria-label="Resize the band"`, a slider role with the height as its value, arrow keys 16px).
-  Dragging it sets the band's height between 200px and 60% of the window; the window fills its column at that
-  height (no 16:10 then). The height is remembered in the browser (`tw-band-height`); a double tap or Enter on the
-  handle puts the 16:10 default back. On a phone there is no handle.
+The band goes. The Run page is the strip, a slim progress bar under it, and the canvas taking the whole rest of the
+window, with two things floating over the canvas at its top right.
+
+- **The header (the strip, every tab).** At the left, before the connection dot, the **robot** as a 24px
+  stationary figure (today's `.bot` SVG at that size, no walk across a floor: its poses and lights are the state,
+  idle blinking, running marching on the spot, paused frozen, planning looking about, done arms up, failed slumped
+  with crossed eyes, aborted flat eyes). Then the robot's name, the **state badge**, and on the Run tab the
+  **current step** as one line: the kind word in its colour, the sentence with an ellipsis, the step chip `16/26`
+  and the cycle `×2`; the strip's Abort, the speed and the pad mode as today. The other tabs keep the mission's
+  name there as today. The bubble's words move here (app.js `bubbleWords`: line 1 and the chips); the next step
+  and the argument go: the canvas shows them.
+- **The progress bar** (`#progress`, 6px, under the strip's bottom edge, full width): one segment per phase as the
+  floor's bars were (as wide as its steps, the done part filled lime, the current one in the state colour, a failed
+  one coral, a 2px gap between segments), no names, no robot; the segment's tooltip and `aria-label` say the
+  phase, done of total and running or failed. Its row is 6px high; the strip above it is 36px.
+- **The window** (`.window`, the 3D view) floats over the canvas at its top right, 12px in from the edges, 320px
+  wide at 16:10 (a `--shadow-2`, the `--border-strong` frame, the state colour on its edge while running). A grip
+  at its bottom left corner resizes it between 240px and half the window's width (stored `tw-window-width`); the
+  Enlarge button opens it over the whole canvas as today, Escape closes. A phone shows it as a 96px thumbnail at
+  the top right over the canvas.
+- **The mission dock** (`.mission-dock`) floats beside the window, at its left, on the same top edge: the picker
+  (`#mission-select`), the one button on (`#board-act`: Start, Start at step N, Resume, Retry step N, Run again)
+  and, while a mission is active, Pause and Abort (`#mission-controls`), in a row on the panel surface with a
+  hairline and `--shadow-2`; the dock is as wide as its content, at most 480px; the picker 220px. The Start's
+  answer and the last error show under the strip as on the other tabs (`body.on-run .mission .error` shown
+  again). On a phone the dock sits under the progress bar, full width, over the canvas.
+- **The canvas** fills the window under the progress bar; Fit keeps the tree out from under the window and the
+  dock (the fit's room is the viewport minus the dock row's 72px at the top). Follow centres as today.
 - **The wheel.** A notch of a mouse wheel zooms around the pointer as today; a trackpad's two-finger scroll pans.
   The rule, per wheel event: with Ctrl or Cmd, zoom (a pinch); else when `deltaMode` is 0 and the event has a
   sideways part or a vertical part under 40 in magnitude or not a whole number, pan by `(deltaX, deltaY)`; else
@@ -111,9 +136,9 @@ Every step belongs to one **row** by what it moves, the kind colour's own order 
 
 | Width | Program | Run |
 |---|---|---|
-| ≥ 1000px | the canvas the full window under the head row, the panel floating at the right | as today, plus the splitter |
-| 600 to 1000px | the same; the panel 320px | as today |
-| ≤ 600px (phone) | the canvas 60vh with the panel sheet under it as today; nodes 200 wide, the sentence only | no splitter |
+| ≥ 1000px | the canvas the full window under the head row, the panel floating at the right | the strip with the robot and the step, the progress bar, the canvas with the window and the dock floating at the top right |
+| 600 to 1000px | the same; the panel 320px | the same; the window 240px |
+| ≤ 600px (phone) | the canvas 60vh with the panel sheet under it as today; nodes 200 wide, the sentence only | the step line under the strip in its own row, the window a thumbnail, the dock full width under the bar |
 
 Touch targets 44px, the node's controls 32px high on a laptop (44 on touch), the sentence 13px, settings 12px mono.
 
@@ -127,13 +152,16 @@ Touch targets 44px, the node's controls 32px high on a laptop (44 on touch), the
   hooks (the editor adds the spot snapping to the drag's move and drop).
 - `editor.js`: the viewport instead of the scrolling box; the drag goes through graph-canvas with spot snapping;
   the node's settings controls and their `set` ops; the floating panel and its collapse.
-- `app.js`: the band splitter (`--band` set by the operator overrides the window's height); `GRAPH_METRICS` rows.
+- `index.html`, `app.js`: the band goes; the strip gets the robot and the step line (`#strip-step`), the progress
+  bar its segments (`renderPhases` draws into `#progress`), the window and the dock float over the canvas
+  (`#window-grip`, `tw-window-width`); `renderBoard` fills the strip's line and the dock; `GRAPH_METRICS` rows.
 - `style.css`: the node's sentence and settings rows, the controls in a node, the Program viewport and the floating
-  panel, the band grip.
-- `DESIGN.md`: the node anatomy, the layout rows, the Program tab, the band.
+  panel, the strip's robot and step line, the progress segments, the floating window and dock.
+- `DESIGN.md`: the node anatomy, the layout rows, the Program tab, the Run page and the strip.
 - Tests: `test_page_ids.py` and `test_static_files.py` as today (the new script in `STATIC_FILES`);
-  `test_run_layout.py` gains the grip and the shared store; a new `test_graph_rows.py` reads graph-core.js as text
-  for the row order and the pure height rule; `test_global_names.py` for the new script. Mock scenarios as today.
+  `test_run_layout.py` rewritten for the strip, the bar, the window and the dock; a new `test_graph_rows.py` reads
+  graph-core.js as text for the row order and the pure height rule; `test_global_names.py` for the new script.
+  Mock scenarios as today.
 
 ## 8. The technical look (a redesign check, both tabs and the strip)
 
@@ -164,7 +192,7 @@ keeps the 44px targets; a mouse gets the dense scale.
 - **Colour.** The kind colours stay on the header strips only; bodies are the card surface. The lime run fill on
   the running node stays (it is the andon). Muted text `--text-muted` for every secondary line; no coloured text
   except the state words and errors.
-- **The robot.** Stays; 120px on a desktop (the band is the operator's to size).
+- **The robot.** Stays, as the 24px figure in the strip's corner (section 5).
 
 The result should read as a control surface, not a toy: small, even type, aligned on a 4px grid, with the colour
 reserved for state and kind. Contrast stays at 4.5:1 for text and 3:1 for the tracks and frames (the review of
