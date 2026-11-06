@@ -503,11 +503,11 @@ function liftNode() {
   gesture.node.lifted = true;
   canvas.moving = gesture.node.key;  // kept raised across rebuilds (renderGraph)
   if (gesture.node.touch) {  // the held node rises in place (no rebuild under the finger) and the viewport takes the
-    nodeEl(gesture.node.key)?.classList.add('moving');  // pointer: a rebuild by a status update cannot lose the drag
+    canvasNodeEl(gesture.node.key)?.classList.add('moving');  // pointer: a rebuild by a status update cannot lose the drag
     try { canvas.wrap.setPointerCapture(gesture.node.pointerId); } catch (_) { /* the finger is already up */ }
   }
 }
-const nodeEl = (key) => canvas.layer?.querySelector(`[data-step="${CSS.escape(key)}"], [data-band="${CSS.escape(key)}"]`);
+const canvasNodeEl = (key) => canvas.layer?.querySelector(`[data-step="${CSS.escape(key)}"], [data-band="${CSS.escape(key)}"]`);
 function canvasPointerDown(e) {
   gesture.swallow = false;  // first: a touch pan ends without a click, and the next tap (the pop-up's too) is real
   if (offCanvas(e) || (e.pointerType === 'mouse' && e.button !== 0)) return;
