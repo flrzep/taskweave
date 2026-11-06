@@ -144,7 +144,11 @@ function storeBand(mission, key, open) {
   } catch (_) { /* private mode: the choice lasts until the page reloads */ }
 }
 function storedPlaces(mission) {
-  try { return (JSON.parse(localStorage.getItem(PLACES_KEY) || '{}') || {})[mission] || {}; } catch (_) { return {}; }
+  let stored;
+  try { stored = (JSON.parse(localStorage.getItem(PLACES_KEY) || '{}') || {})[mission]; } catch (_) { return {}; }
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {};
+  const ok = (d) => Array.isArray(d) && d.length === 2 && d.every(Number.isFinite);  // anything else is left behind
+  return Object.fromEntries(Object.entries(stored).filter(([, d]) => ok(d)));
 }
 function storePlaces(mission, places) {
   try {
@@ -178,7 +182,7 @@ function movePlaces(layout, tree, places) {
     [Infinity, Infinity, -Infinity, -Infinity]);
   const all = [...layout.items.values(), ...layout.frames];
   const bottomBefore = extent(all)[3];
-  all.forEach((rec) => shift(rec, moveOf(rec.node)));
+  all.forEach((rec) => { shift(rec, moveOf(rec.node)); rec.ox = rec.x; rec.oy = rec.y; });  // ox, oy: before a box grows
   // a box around what it holds: innermost first, so a grown inner box grows the outer one
   [...layout.frames].reverse().forEach((f) => {
     const inside = all.filter((r) => r !== f && above.get(r.node.key)?.includes(f.node.key));
@@ -198,8 +202,11 @@ function movePlaces(layout, tree, places) {
   const grown = Math.max(0, bottom + inY - bottomBefore);
   layout.lanes.forEach((l) => { l.y += grown; });
   if (layout.loopY !== null) layout.loopY += grown;
+  let low = bottom + inY;  // the drawing ends under the lowest node, replan wire or loop wire
+  layout.lanes.forEach((l) => { low = Math.max(low, l.y + 4); });
+  if (layout.loopY !== null) low = Math.max(low, layout.loopY + 10);
   layout.width = Math.max(layout.width, right + inX + M.right);
-  layout.height += grown;
+  layout.height = low + M.bottom;
   return [inX, inY];
 }
 
@@ -494,9 +501,13 @@ function liftNode() {
   gesture.hold = null;
   if (!gesture.node) return;
   gesture.node.lifted = true;
-  canvas.moving = gesture.node.key;  // drawn raised (renderGraph) from the hold on; a mouse shows it with the move
-  if (gesture.node.touch) renderGraph();
+  canvas.moving = gesture.node.key;  // kept raised across rebuilds (renderGraph)
+  if (gesture.node.touch) {  // the held node rises in place (no rebuild under the finger) and the viewport takes the
+    nodeEl(gesture.node.key)?.classList.add('moving');  // pointer: a rebuild by a status update cannot lose the drag
+    try { canvas.wrap.setPointerCapture(gesture.node.pointerId); } catch (_) { /* the finger is already up */ }
+  }
 }
+const nodeEl = (key) => canvas.layer?.querySelector(`[data-step="${CSS.escape(key)}"], [data-band="${CSS.escape(key)}"]`);
 function canvasPointerDown(e) {
   gesture.swallow = false;  // first: a touch pan ends without a click, and the next tap (the pop-up's too) is real
   if (offCanvas(e) || (e.pointerType === 'mouse' && e.button !== 0)) return;
@@ -508,12 +519,14 @@ function canvasPointerDown(e) {
     clearTimeout(gesture.hold);
     const key = canvas.places && nodeKeyAt(e);
     if (key) {
-      gesture.node = { key, from: canvas.places.map[key] || [0, 0], lifted: false, touch: e.pointerType === 'touch' };
+      gesture.node = { key, from: canvas.places.map[key] || [0, 0], lifted: false, touch: e.pointerType === 'touch',
+        pointerId: e.pointerId };
       if (e.pointerType === 'touch') gesture.hold = setTimeout(liftNode, HOLD_MS);
       else liftNode();
     }
-  } else {  // a second finger: a pinch, both pointers held by the viewport
+  } else {  // a second finger: a pinch, both pointers held by the viewport (a node being dragged is set down first)
     clearTimeout(gesture.hold);
+    if (gesture.drag === 'node') dropNode();
     gesture.node = null;
     gesture.drag = 'pan';
     pointers.forEach((_, id) => canvas.wrap.setPointerCapture(id));
@@ -536,8 +549,9 @@ function canvasPointerMove(e) {
       if (Math.hypot(p.x - gesture.sx, p.y - gesture.sy) < PAN_PX) return;
       clearTimeout(gesture.hold);  // a finger that moves before the hold pans
       gesture.drag = gesture.node?.lifted ? 'node' : 'pan';
-      canvas.wrap.setPointerCapture(e.pointerId);
+      if (gesture.drag === 'node') canvasFollow(false);  // the camera stays under the drag
       canvas.wrap.classList.add('dragging');
+      try { canvas.wrap.setPointerCapture(e.pointerId); } catch (_) { /* the pointer is already up */ }
     }
     if (gesture.drag === 'node') {
       pointers.set(e.pointerId, p);
@@ -554,27 +568,34 @@ function canvasPointerMove(e) {
 // past the drawing's top left margin; drawn again at most once a frame
 let dragFrame = 0;
 function dragNode(p) {
+  if (!canvas.layout || !canvas.places) return;  // the plan went while the drag goes
   const { key, from } = gesture.node;
   const M = canvas.layout.metrics;
-  const base = canvas.base.get(key) || [M.left, M.top];
+  // the floor: where the node sits with no offset of its own (its ancestors' kept), from the last drawing
+  const rec = canvas.layout.items.get(key) || canvas.layout.frames.find((f) => f.node.key === key);
+  const own = canvas.places.map[key] || [0, 0];
+  const floor = rec ? [(rec.ox ?? rec.x) - own[0], (rec.oy ?? rec.y) - own[1]] : [M.left, M.top];
   const dx = from[0] + (p.x - gesture.sx) / canvas.scale;
   const dy = from[1] + (p.y - gesture.sy) / canvas.scale;
-  canvas.places.map[key] = [Math.max(dx, M.left - base[0]), Math.max(dy, M.top - base[1])];
+  canvas.places.map[key] = [Math.max(dx, M.left - floor[0]), Math.max(dy, M.top - floor[1])];
   if (!dragFrame) dragFrame = requestAnimationFrame(() => { dragFrame = 0; renderGraph(); });
+}
+// the dragged node set down: its offset stored (none when it is back where it was drawn), drawn again
+function dropNode() {
+  const map = canvas.places.map;
+  if (map[gesture.node.key]?.every((d) => Math.abs(d) < 1)) delete map[gesture.node.key];
+  storePlaces(canvas.places.mission, map);
+  canvas.moving = null;
+  renderGraph();
 }
 function canvasPointerUp(e) {
   clearTimeout(gesture.hold);
   if (!pointers.delete(e.pointerId) || pointers.size) return;
   canvas.wrap.classList.remove('dragging');
-  const moved = gesture.drag === 'node';
   if (canvas.moving) {
-    canvas.moving = null;
-    if (moved) {
-      const map = canvas.places.map;
-      if (map[gesture.node.key]?.every((d) => Math.abs(d) < 1)) delete map[gesture.node.key];  // back where it was drawn
-      storePlaces(canvas.places.mission, map);
-      renderGraph();  // set down, the offset as stored
-    } else {  // a press that did not drag: the node is let go without a rebuild, so its click still lands on it
+    if (gesture.drag === 'node') dropNode();
+    else {  // a press that did not drag: the node is let go without a rebuild, so its click still lands on it
+      canvas.moving = null;
       canvas.layer?.querySelector('.moving')?.classList.remove('moving');
     }
   }
@@ -705,6 +726,14 @@ function renderGraph() {
   // where the operator dragged this mission's nodes (kept while a drag goes; read again for another mission)
   if (canvas.places?.mission !== missionName) canvas.places = { mission: missionName, map: storedPlaces(missionName) };
   canvas.base = new Map([...[...layout.items].map(([k, it]) => [k, [it.x, it.y]]), ...layout.frames.map((f) => [f.node.key, [f.x, f.y]])]);
+  // a key the plan no longer has (an edit moved a flat plan's frame keys, or it was never a node) is dropped, so no
+  // offset lands on another node and the store does not grow; a step inside a closed box keeps its offset
+  const known = new Set([...canvas.base.keys(), ...plan.steps.map((s) => s.id), ...frames.map((f) => f.key)]);
+  const stale = Object.keys(canvas.places.map).filter((k) => !known.has(k));
+  if (stale.length) {
+    stale.forEach((k) => delete canvas.places.map[k]);
+    storePlaces(missionName, canvas.places.map);
+  }
   const inset = movePlaces(layout, tree, canvas.places.map);
   if (canvas.planId === plan.plan_id) {  // the same drawing moved in (a box grown up to the margin): the camera follows
     canvas.x -= (inset[0] - canvas.inset[0]) * canvas.scale;

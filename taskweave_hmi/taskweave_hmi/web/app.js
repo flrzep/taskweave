@@ -168,6 +168,8 @@ window.addEventListener('viewer3d-ready', startRunViewer);  // Run is the tab th
 // the band's window enlarged over the canvas: its button (on a phone it covers the thumbnail, so a tap on the window)
 // opens and closes it, Escape closes it (not while a manual skill runs: then Escape aborts that skill and nothing else)
 function enlargeWindow(on) {
+  // enlarged, the window leaves the band's grid: the band keeps the height it had, so the canvas does not jump
+  $('band').style.minHeight = on ? `${$('band').offsetHeight}px` : '';
   $('window-enlarge').closest('.window').classList.toggle('enlarged', on);
   $('window-enlarge').setAttribute('aria-pressed', String(on));
   runViewer?.resize();
@@ -179,7 +181,9 @@ $('window-enlarge').addEventListener('click', () => enlargeWindow($('window-enla
 // the band's height (the window's 16:10 sets it) as --band, which the enlarged window starts under; the window's
 // 3D view drawn again at its new size
 new ResizeObserver(([entry]) => {
-  document.documentElement.style.setProperty('--band', `${Math.round(entry.borderBoxSize?.[0]?.blockSize ?? entry.target.offsetHeight)}px`);
+  const height = Math.round(entry.borderBoxSize?.[0]?.blockSize ?? entry.target.offsetHeight);
+  if (!height) return;  // the Run tab is hidden
+  document.documentElement.style.setProperty('--band', `${height}px`);
   runViewer?.resize();
 }).observe($('band'));
 
@@ -525,11 +529,12 @@ function renderPhases(s, plan, outcomes, active) {
   const phases = found.length > 1 ? found : [{ name: '', steps: plan ? [...plan.steps.keys()] : [] }];
   list.classList.toggle('single', phases.length < 2);
   list.replaceChildren(...phases.map((phase) => {
-    const done = phase.steps.filter((i) => outcomes[plan.steps[i].id]?.event === 'step_finished').length;
+    const ids = phase.steps.filter((i) => i >= 0).map((i) => plan.steps[i]?.id);  // -1: a tree step not in the plan
+    const done = ids.filter((id) => outcomes[id]?.event === 'step_finished').length;
     const now = active && phase.steps.includes(s.step_index);
-    const failed = phase.steps.some((i) => NOT_DONE.includes(outcomes[plan.steps[i].id]?.outcome));
+    const failed = ids.some((id) => NOT_DONE.includes(outcomes[id]?.outcome));
     const item = el('li', { class: `${now ? 'now' : ''}${failed ? ' failed' : ''}`,
-      'aria-label': `${phase.name}: ${done} of ${phase.steps.length} steps done${now ? ', running' : failed ? ', failed' : ''}` },
+      'aria-label': `${phase.name ? `${phase.name}: ` : ''}${done} of ${phase.steps.length} steps done${now ? ', running' : failed ? ', failed' : ''}` },
     el('div', { class: 'ph-bar' }, el('i')), el('div', { class: 'name' }, el('span', { text: phase.name }),
       el('b', { text: `${done}/${phase.steps.length}` })));
     item.style.setProperty('--steps', Math.max(1, phase.steps.length));
