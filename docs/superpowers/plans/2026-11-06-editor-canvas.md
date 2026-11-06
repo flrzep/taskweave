@@ -67,11 +67,6 @@ def test_density_follows_the_pointer():
     coarse = re.search(r'@media \(pointer: coarse\)[^{]*\{(.*?)\n\}', CSS, re.S).group(1)
     assert '--tap-s: 44px' in coarse and '--tap-min: 44px' in coarse
     assert re.search(r'--row-gap:\s*24px', root)
-
-def test_the_bubble_is_a_quiet_panel():
-    bubble = re.search(r'\n\.bubble \{[^}]*\}', CSS, re.S).group(0)
-    assert 'border: 1px solid' in bubble and 'border-left: 2px solid var(--state)' in bubble
-    assert 'color-mix(in srgb, var(--state) 6%' not in bubble   # no tint of the whole bubble
 ```
 
 - [ ] **Step 2: Run it to see it fail**
@@ -81,14 +76,14 @@ Expected: FAIL on `test_type_scale` (`--fs-xs: 12px` today).
 
 - [ ] **Step 3: Change the tokens and the density rules in `style.css`**
 
-The scale and radii as the Global Constraints say; `--tap-s: 32px`, `--tap: 40px`; a new `@media (pointer: coarse) { :root { --tap-s: 44px; --tap: 48px; --tap-min: 44px; } }` right after `:root`; `--strip: 36px`; `--row-gap: 24px` (16px inside the existing `max-width: 600px` root rule). The state badge `#state`: `--fs-xs` 700 uppercase, padding `2px 6px`, a pill. `.bubble`: `border: 1px solid var(--border-strong); border-left: 2px solid var(--state); background: var(--surface-card)`; `.bubble-name` `--fs-xl` (`--fs-lg` up to 1000px). `.canvas-tools`, `.ed-head`: 36px high rows with `--sp-2` gaps. `.ed-panel .field`: labels `--fs-xs`, fields 8px apart; sections separated by a hairline and `--sp-4`. Node and box radius `--r-m`; buttons `--r-s`. Keep every colour token.
+The scale and radii as the Global Constraints say; `--tap-s: 32px`, `--tap: 40px`; a new `@media (pointer: coarse) { :root { --tap-s: 44px; --tap: 48px; --tap-min: 44px; } }` right after `:root`; `--strip: 36px`; `--row-gap: 24px` (16px inside the existing `max-width: 600px` root rule). The state badge `#state`: `--fs-xs` 700 uppercase, padding `2px 6px`, a pill. The band and its bubble are left as they are (Task 7 removes them). `.canvas-tools`, `.ed-head`: 36px high rows with `--sp-2` gaps. `.ed-panel .field`: labels `--fs-xs`, fields 8px apart; sections separated by a hairline and `--sp-4`. Node and box radius `--r-m`; buttons `--r-s`. Keep every colour token.
 
 - [ ] **Step 4: Run the test and the existing suites**
 
 Run: `cd taskweave_hmi && python -m pytest test/test_look.py test/test_run_layout.py test/test_page_ids.py test/test_static_files.py -q`
 Expected: all pass (test_run_layout's 44px phone assertions still hold under `(pointer: coarse)`, which the phone also is; adjust its `--strip: 40px` assertion to 36px).
 
-- [ ] **Step 5: Look at the mock** at 1400px and 375px, scenarios `running` and `idle`: the strip 36px, the badge a small tag, the bubble a quiet panel with the state as its left bar, buttons 32px on a mouse. Fix what reads wrong.
+- [ ] **Step 5: Look at the mock** at 1400px and 375px, scenarios `running` and `idle`: the strip 36px, the badge a small tag, buttons 32px on a mouse, the type even and small. Fix what reads wrong.
 
 - [ ] **Step 6: Rewrite DESIGN.md's Colour, Typography, Spacing, Shape and Touch targets sections** to the new values (keep the direction text).
 
@@ -96,7 +91,7 @@ Expected: all pass (test_run_layout's 44px phone assertions still hold under `(p
 
 ```bash
 git add taskweave_hmi/taskweave_hmi/web/style.css taskweave_hmi/taskweave_hmi/web/DESIGN.md taskweave_hmi/test/test_look.py taskweave_hmi/test/test_run_layout.py
-git commit -m "HMI look: the small even type scale, density by pointer, 4px shapes, the bubble a quiet panel"
+git commit -m "HMI look: the small even type scale, density by pointer, 4px shapes"
 ```
 
 ### Task 2: The node: kind word, sentence, settings rows, data-driven height, kind icon
