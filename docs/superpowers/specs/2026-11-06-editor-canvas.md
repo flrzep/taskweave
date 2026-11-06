@@ -135,7 +135,42 @@ Touch targets 44px, the node's controls 32px high on a laptop (44 on touch), the
   `test_run_layout.py` gains the grip and the shared store; a new `test_graph_rows.py` reads graph-core.js as text
   for the row order and the pure height rule; `test_global_names.py` for the new script. Mock scenarios as today.
 
-## 8. Out of scope
+## 8. The technical look (a redesign check, both tabs and the strip)
+
+The user's read of the HMI today: large type and little space between things make it look child-friendly; the
+reference is the professional tools (Blender, Cinema 4D): dense, quiet, small type with room to breathe, icons for
+depth. The direction in DESIGN.md (dark technical panel, Montserrat + JetBrains Mono, lime signals) stays; the scale
+and the density change. Density follows the **input**, not the width: a coarse pointer (a touch screen, gloves)
+keeps the 44px targets; a mouse gets the dense scale.
+
+- **Type scale.** `--fs-xs` 11, `--fs-sm` 12, `--fs-s` 13, `--fs-base` 14, `--fs-md` 15, `--fs-lg` 17, `--fs-xl` 20,
+  `--fs-2xl` 24. Body and controls 13px; the bubble's name 20px (17 up to 1000px); the state badge 11px 700
+  uppercase as a small tag, not a block; node headers 12px 600, the sentence 12px, the settings 11px mono; the phase
+  names 12px; the strip's robot name 12px. Nothing under 11px.
+- **Spacing.** Controls 32px high on a fine pointer (`--tap-s`), 44 on a coarse one; the strip 36px; the canvas
+  toolbar and the editor's head row 36px; the bubble's padding `--sp-3`; the panel's fields 8px apart with 11px
+  labels; the band's bubble and stage gap `--sp-2`. More air between groups, less inside them: the sections of the
+  panel separated by a hairline and 16px, their rows by 6px.
+- **Shape and surface.** Radius 4px on nodes, boxes, buttons and the window (`--r-m` 4, `--r-s` 3); pills only on
+  the state tag and the chips; the bubble a 1px border, not 2px; the state colour as a 2px left bar on the bubble
+  and as the badge, not as a tint of the whole bubble; the band and the canvas toolbar separated by hairlines
+  (`--border`) on the panel surface, no card shadows but under what floats.
+- **Icons.** The kind icon (icons.js `skillIcon`, 14px) at the left of every node header before the kind word, on
+  both tabs; the toolbar buttons as icon buttons with tooltips and a word only where the icon is not standard: Fit
+  (a frame), Follow (a crosshair, lit when on), Tidy up (a grid with an arrow), Graph / List (an icon each), the
+  3D window's Enlarge as today; the panel's sections with a small icon in their heading (mission, step, block,
+  rule); the rail's icons as today, 20px, with 11px words. The state badge gets no icon (its colour and word are
+  the signal).
+- **Colour.** The kind colours stay on the header strips only; bodies are the card surface. The lime run fill on
+  the running node stays (it is the andon). Muted text `--text-muted` for every secondary line; no coloured text
+  except the state words and errors.
+- **The robot.** Stays; 120px on a desktop (the band is the operator's to size).
+
+The result should read as a control surface, not a toy: small, even type, aligned on a 4px grid, with the colour
+reserved for state and kind. Contrast stays at 4.5:1 for text and 3:1 for the tracks and frames (the review of
+6 Nov). DESIGN.md is rewritten where these rules change it (tokens, type, spacing, shape, components).
+
+## 9. Out of scope
 
 Parallel as wiring and detached branches (a spec with core), positions stored in the mission file, a minimap, the
 Teach, Robot and Log tabs, the planner.
