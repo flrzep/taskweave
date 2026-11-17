@@ -106,7 +106,7 @@ class RosRig:
     the garbage collector otherwise."""
 
     SINGLETONS = (('taskweave_core.speed', 'SpeedOverride'), ('taskweave_skills.joints', 'JointInterface'),
-                  ('taskweave_skills.hold', 'HoldState'))
+                  ('taskweave_skills.hold', 'HoldState'), ('taskweave_skills.planned_path', 'PlannedPath'))
 
     def __init__(self):
         self.nodes = []
