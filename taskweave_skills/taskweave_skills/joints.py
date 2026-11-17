@@ -355,12 +355,14 @@ class _PoseMotion(_JointSkill):
 
     def setup(self, node, config, robot, params):
         super().setup(node, config, robot, params)
-        self.ik = self.planner = None
+        self.ik = self.planner = self.planned = None
         if robot.data.get('ik'):
             from taskweave_core.config.limits import joint_limits
 
             from .ik import IkClient
+            from .planned_path import PlannedPath
             self.ik = IkClient(node, robot, limits=joint_limits(config, robot.name))
+            self.planned = PlannedPath.for_node(node, self.ik.frame)   # the TCP path of each move, for viewers
             from taskweave_core.config.limits import urdf_path
             urdf = urdf_path(config, robot.name)  # cell pack override, else the robot pack
             if urdf.is_file():  # straight lines on the URDF chains, away from joint limits (cartesian.linear_path)
@@ -380,7 +382,32 @@ class _PoseMotion(_JointSkill):
             failure = self._drift(goal, path, label)
             if failure is not None:
                 return failure, None
-        return super()._move(ctx, goal, label, stall_ok, path)
+        shown = self._show_path(goal, path)
+        try:
+            return super()._move(ctx, goal, label, stall_ok, path)
+        finally:
+            if shown:
+                self.planned.clear()
+
+    def _show_path(self, goal: dict, path) -> bool:
+        """Publish the TCP path of the move to ``goal`` for viewers (planned_path); True if one is shown. A viewer
+        aid: whatever goes wrong here, the move runs."""
+        from .planned_path import sample_states, tool_points
+
+        chains = getattr(self.ik, 'chains', None)
+        if not chains or self.planned is None:
+            return False
+        try:
+            start = self._start()
+            if start is None:
+                return False
+            points = tool_points(sample_states(start, goal, path, ease=smoothstep), self._tcp_fk, sorted(chains))
+            if points:
+                self.planned.show(points)
+            return bool(points)
+        except Exception as error:  # noqa: BLE001
+            self.node.get_logger().warning(f'{self.name}: the planned tool path is not shown ({error})', once=True)
+            return False
 
     def _drift(self, goal: dict, path, label: str):
         """A FAILED result if on the way to ``goal`` (a planned ``path``, else the straight joint move) the distances
