@@ -14,7 +14,9 @@ DESCRIBE_ROBOT = f'{NAMESPACE}/describe_robot'
 OPERATOR_MODE = f'{NAMESPACE}/operator_mode'  # pad mode: drive or a tool name (std_msgs/String, latched)
 HOLDING = f'{NAMESPACE}/holding'  # what the hands hold (String, latched, JSON; see taskweave_skills.hold)
 JOG_STATE = f'{NAMESPACE}/jog/state'  # pad jog of held objects (String, latched, JSON {tool: {object, hands}})
-OPERATOR_NOTICE = f'{NAMESPACE}/operator_notice'  # what a pad press did, for the HMI (String, JSON {text, ok})
+PLANNED_PATH = f'{NAMESPACE}/planned_path'  # /<hand>: the TCP path of the arm move now running (nav_msgs/Path,
+#                                             latched, base frame; no poses = none; taskweave_skills.planned_path)
+OPERATOR_NOTICE =f'{NAMESPACE}/operator_notice'  # what a pad press did, for the HMI (String, JSON {text, ok})
 TEACH_TARGET = f'{NAMESPACE}/teach_target'  # the arm position open in the HMI (String, latched; JSON, '' = none)
 TEACH_REQUEST = f'{NAMESPACE}/teach_request'  # pad teach press for the HMI's target (String, JSON {tools})
 SPEED_OVERRIDE = f'{NAMESPACE}/speed_override'  # global speed override (SpeedOverride, latched)
